@@ -16,7 +16,7 @@ Infrastructure deployment tool for managing Cloudflare CDN and DNS configuration
 
 ```bash
 git clone https://github.com/dylan-sutton-chavez/edge-python_infrastructure.git
-cd tiny-python_infrastructure
+cd edge-python_infrastructure
 cargo build --release
 ```
 
