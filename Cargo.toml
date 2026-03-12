@@ -20,9 +20,8 @@ name = "integration_test"
 path = "tests/integration_test.rs"
 
 [dependencies]
-# Google Cloud
-google-cloud-run-v2 = "1.0"
-google-cloud-compute-v1 = "2.0"
+# Cloudflare SIG V-4 Support.
+cloudflare-r2-rs = "0.7"
 
 # HTTP & Async
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }

@@ -4,12 +4,13 @@ Infrastructure deployment tool for managing Cloudflare CDN and DNS configuration
 
 ## Features
 
-**Cloudflare DNS Management**: Automated CNAME record creation with proxy support.
+1. **Cloudflare DNS Management**: Automated CNAME record creation with proxy support.
+2. **Cloudflare CDN Management**: CDN bucket creation, file upload and cache refresh.
 
 ## Prerequisites
 
-Rust 2024 edition or later.
-Cloudflare API token with DNS edit permissions.
+- Rust 2024 edition or later.
+- Cloudflare API token with DNS edit permissions.
 
 ## Usage
 
@@ -22,6 +23,9 @@ cargo build --release
 ## Project Tree
 
 ```bash
+├───.github
+│   └───workflows
+│       └── main.yml
 ├── Cargo.toml
 ├── README.md
 ├── src

@@ -19,3 +19,11 @@ jobs:
       
       - name: Run tests
         run: cargo test
+
+      - name: Install cargo-shear
+        run: cargo install cargo-shear
+
+      - name: Unused code
+        run: |
+          cargo shear
+          cargo clippy

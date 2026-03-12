@@ -1,5 +1,5 @@
 /*
-Access point to run all tests.
+Initialization point for integration tests.
 */
 
 mod cloudflare_test;
