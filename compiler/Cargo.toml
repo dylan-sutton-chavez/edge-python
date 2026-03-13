@@ -1,0 +1,29 @@
+[package]
+name = "edge-python-compiler"
+version = "0.1.0"
+edition = "2024"
+description = "Rust compiler weighing less than 100 KB, based on adaptive bytecode interpretation to achieve speeds close to native Rust."
+repository = "https://github.com/dylan-sutton-chavez/edge-python/compiler/"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+
+[lib]
+name = "deployment"
+path = "src/lib.rs"
+
+[[bin]]
+name = "compiler"
+path = "src/main.rs"
+
+[[test]]
+name = "integration_test"
+path = "tests/integration_test.rs"
+
+[dependencies]
+# Utilities
+serde_json = "1"
+log = "0.4"
+simple_logger = "5.0"
+
+[dev-dependencies]
+mockito = "1"
