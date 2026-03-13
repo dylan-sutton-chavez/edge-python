@@ -7,28 +7,33 @@ on:
     branches: [ main ]
 
 jobs:
+
   compiler:
-    runs-on: ubuntu-latest
+    runs-on: &ubuntu ubuntu-latest
 
     defaults:
       run:
         working-directory: compiler
 
     steps:
-      - name: Development
-        run: # Configurating development pipeline stage.
+      - uses: &checkout actions/checkout@v5
+      - uses: &rust dtolnay/rust-toolchain@stable
+      - uses: &cache Swatinem/rust-cache@v2
+
+      - name: Compiler
+        run: echo "Compiler :)."
 
   deployment:
-    runs-on: ubuntu-latest
+    runs-on: *ubuntu
 
     defaults:
       run:
         working-directory: deployment
       
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: *checkout
+      - uses: *rust
+      - uses: *cache
 
       - name: Build
         run: cargo build
