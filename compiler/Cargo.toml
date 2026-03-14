@@ -6,9 +6,10 @@ description = "Rust compiler weighing less than 100 KB, based on adaptive byteco
 repository = "https://github.com/dylan-sutton-chavez/edge-python/compiler/"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
+autotests = false
 
 [lib]
-name = "deployment"
+name = "compiler"
 path = "src/lib.rs"
 
 [[bin]]
@@ -21,11 +22,11 @@ path = "tests/integration_test.rs"
 
 [dependencies]
 # Compiler
-Logos = "0.16"
+logos = "0.16"
 
 # Utilities
 log = "0.4"
 simple_logger = "5.0"
 
 [dev-dependencies]
-mockito = "1"
+serde_json = "1"

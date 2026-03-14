@@ -6,6 +6,7 @@ description = "Infrastructure deployment tool for managing Cloudflare CDN and DN
 repository = "https://github.com/dylan-sutton-chavez/edge-python/deployment/"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
+autotests = false
 
 [lib]
 name = "deployment"

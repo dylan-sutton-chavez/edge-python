@@ -1,0 +1,62 @@
+[
+  ["1 + 1", ["Int", "Plus", "Int", "Endmarker"]],
+  ["x = 5", ["Name", "Equal", "Int", "Endmarker"]],
+  ["x == 5", ["Name", "EqEqual", "Int", "Endmarker"]],
+  ["x != 5", ["Name", "NotEqual", "Int", "Endmarker"]],
+  ["x += 1", ["Name", "PlusEqual", "Int", "Endmarker"]],
+  ["x -= 1", ["Name", "MinEqual", "Int", "Endmarker"]],
+  ["x *= 2", ["Name", "StarEqual", "Int", "Endmarker"]],
+  ["x /= 2", ["Name", "SlashEqual", "Int", "Endmarker"]],
+  ["x **= 2", ["Name", "DoubleStarEqual", "Int", "Endmarker"]],
+  ["x //= 2", ["Name", "DoubleSlashEqual", "Int", "Endmarker"]],
+  ["x >>= 2", ["Name", "RightShiftEqual", "Int", "Endmarker"]],
+  ["x <<= 2", ["Name", "LeftShiftEqual", "Int", "Endmarker"]],
+  ["x -> y", ["Name", "Rarrow", "Name", "Endmarker"]],
+  ["x := 5", ["Name", "ColonEqual", "Int", "Endmarker"]],
+  ["x ** 2", ["Name", "DoubleStar", "Int", "Endmarker"]],
+  ["x // 2", ["Name", "DoubleSlash", "Int", "Endmarker"]],
+  ["x >> 2", ["Name", "RightShift", "Int", "Endmarker"]],
+  ["x << 2", ["Name", "LeftShift", "Int", "Endmarker"]],
+  ["x >= 2", ["Name", "GreaterEqual", "Int", "Endmarker"]],
+  ["x <= 2", ["Name", "LessEqual", "Int", "Endmarker"]],
+
+  ["42", ["Int", "Endmarker"]],
+  ["0xFF", ["Int", "Endmarker"]],
+  ["0b1010", ["Int", "Endmarker"]],
+  ["0o77", ["Int", "Endmarker"]],
+  ["3.14", ["Float", "Endmarker"]],
+  ["1e-5", ["Float", "Endmarker"]],
+  ["3j", ["Complex", "Endmarker"]],
+  ["2.5J", ["Complex", "Endmarker"]],
+
+  ["\"hello\"", ["String", "Endmarker"]],
+  ["'hello'", ["String", "Endmarker"]],
+  ["b\"bytes\"", ["String", "Endmarker"]],
+  ["r\"raw\"", ["String", "Endmarker"]],
+  ["\"\"\"triple\"\"\"", ["String", "Endmarker"]],
+
+  ["f\"hello\"", ["FstringStart", "FstringEnd", "Endmarker"]],
+  ["f\"hello {x}\"", ["FstringStart", "FstringMiddle", "FstringEnd", "Endmarker"]],
+  ["f\"\"\"multi\nline\"\"\"", ["FstringStart", "FstringEnd", "Endmarker"]],
+
+  ["# comment", ["Comment", "Endmarker"]],
+  ["x = 1 # comment", ["Name", "Equal", "Int", "Comment", "Endmarker"]],
+
+  ["if x:\n    pass\n", ["If", "Name", "Colon", "Newline", "Indent", "Pass", "Newline", "Dedent", "Endmarker"]],
+  ["while True:\n    break\n", ["While", "True", "Colon", "Newline", "Indent", "Break", "Newline", "Dedent", "Endmarker"]],
+  ["for x in y:\n    pass\n", ["For", "Name", "In", "Name", "Colon", "Newline", "Indent", "Pass", "Newline", "Dedent", "Endmarker"]],
+  ["def f():\n    pass\n", ["Def", "Name", "Lpar", "Rpar", "Colon", "Newline", "Indent", "Pass", "Newline", "Dedent", "Endmarker"]],
+  ["class A:\n    pass\n", ["Class", "Name", "Colon", "Newline", "Indent", "Pass", "Newline", "Dedent", "Endmarker"]],
+
+  ["def f():\n    if True:\n        pass\n", ["Def", "Name", "Lpar", "Rpar", "Colon", "Newline", "Indent", "If", "True", "Colon", "Newline", "Indent", "Pass", "Newline", "Dedent", "Dedent", "Endmarker"]],
+
+  ["(\n)\n", ["Lpar", "Nl", "Rpar", "Newline", "Endmarker"]],
+  ["[\n1,\n2\n]\n", ["Lsqb", "Nl", "Int", "Comma", "Nl", "Int", "Nl", "Rsqb", "Newline", "Endmarker"]],
+
+  ["match = 5", ["Name", "Equal", "Int", "Endmarker"]],
+  ["case = True", ["Name", "Equal", "True", "Endmarker"]],
+  ["type = None", ["Name", "Equal", "None", "Endmarker"]],
+  ["match x:\n    case _:\n        pass\n", ["Match", "Name", "Colon", "Newline", "Indent", "Case", "Underscore", "Colon", "Newline", "Indent", "Pass", "Newline", "Dedent", "Dedent", "Endmarker"]],
+
+  ["if True:\n\tpass\n", ["If", "True", "Colon", "Newline", "Indent", "Pass", "Newline", "Dedent", "Endmarker"]]
+]

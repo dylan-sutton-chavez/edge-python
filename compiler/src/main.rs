@@ -16,8 +16,6 @@ fn initialize_logger () {
 
 }
 
-mod lexer;
-
 fn main() {
 
     /*
@@ -25,7 +23,5 @@ fn main() {
     */
 
     initialize_logger();
-
-    lexer::Nothing;
 
 }

@@ -20,8 +20,19 @@ jobs:
       - uses: &rust dtolnay/rust-toolchain@stable
       - uses: &cache Swatinem/rust-cache@v2
 
-      - name: Compiler
-        run: echo "Compiler :)."
+      - name: Build
+        run: cargo build
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Install cargo-shear
+        run: cargo install cargo-shear
+
+      - name: Unused code
+        run: |
+          cargo shear
+          cargo clippy
 
   deployment:
     runs-on: *ubuntu
