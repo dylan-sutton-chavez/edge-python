@@ -17,7 +17,7 @@
 
     Output:
         ````bash
-        2026-03-17T03:37:08.083Z INFO  [compiler] ["Name 0 [0-4]", "Colon 0 [4-5]", "Name 0 [6-9]", "Equal 0 [10-11]", "String 0 [12-19]", "Newline 0 [19-20]", "Name 1 [20-25]", "Lpar 1 [25-26]", "FstringStart 1 [26-27]", "FstringEnd 1 [26-28]", "Name 1 [35-36]", "Lbrace 1 [37-38]", "Name 1 [38-42]", "Rbrace 1 [42-43]", "Dot 1 [43-44]", "Endmarker 1 [43-44]"]
+        2026-03-17T03:50:42.560Z INFO  [compiler] ["Name 0 [0-4]", "Colon 0 [4-5]", "Name 0 [6-9]", "Equal 0 [10-11]", "String 0 [12-19]", "Newline 0 [19-20]", "Name 1 [20-25]", "Lpar 1 [25-26]", "FstringStart 1 [26-27]", "FstringMiddle 1 [26-28]", "FstringEnd 1 [26-28]", "Rpar 1 [47-48]", "Endmarker 1 [47-48]"]
         ```
 */
 
