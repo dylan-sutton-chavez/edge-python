@@ -8,7 +8,7 @@
             pub mod lexer;
         }
 
-        let tokens: Vec<String> = modules::lexer::lexer("name: str = 'Dylan'\nprint(f'Hey, I'm {name}.')")
+        let tokens: Vec<String> = modules::lexer::lexer("name: str = 'Dylan'\nprint(f'Hey, I am: {name}.')")
             .map(|t| format!("{:?} {} [{}-{}]", t.kind, t.line, t.start, t.end,)) // Transforms each Token into a `String`.
             .collect(); // Combine them all into one vector.
 
@@ -48,7 +48,7 @@ pub struct LexerState {
 pub struct Token {
 
     /* 
-    Structure: kind (token type) and line, start and end for indexes of the kind.
+    Structure: kind (token type): line, start and end for indexes of the kind.
     */
 
     pub kind: TokenType,
