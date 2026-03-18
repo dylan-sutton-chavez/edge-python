@@ -12,8 +12,8 @@
         "group": "Implementation",
         "pages": [
           "implementation/design",
-          "implementation/reference",
-          "implementation/lexical"
+          "implementation/lexical",
+          "implementation/syntax"
         ]
       }
     ]
