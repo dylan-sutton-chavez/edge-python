@@ -1,5 +1,5 @@
 ---
-title: "lexical"
+title: "Lexical"
 description: "Formal specification of Edge Python lexical grammar: token definitions, indentation model, encoding rules, and lexer safety limits."
 ---
 
