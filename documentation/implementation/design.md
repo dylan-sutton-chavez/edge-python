@@ -1,35 +1,68 @@
 ---
 title: "Design"
-description: "Explanation of edge python design"
+description: "Explanation of the compiler architectural design."
 ---
 
 ## Overview
 
-Introducing edge python, a Rust compiler weighing less than 100 KB, based on adaptive bytecode interpretation to achieve speeds close to native Rust.
+Edge Python is a Rust based bytecode interpreter weighing less than 70 KB, implementing adaptive instruction specialization to achieve performance approaching compiled native code.
 
-## Terms
+## Concepts
 
-- bytes: the compiler reads source as raw bytes, minimizing copies into strings.
-- spans: instead of extracting substrings, the lexer marks where each token starts and ends in the original buffer.
-- tokens: the parser consumes spanned markers: kind, start, end. Structure and position emerge from offsets alone.
-- bytecode: the parser emits opcodes directly as it reads tokens, collapsing parsing and code generation into a single pass.
-- quickening: the VM rewrites its own instructions as it runs. Once operand types are known, generic opcodes are replaced in-place with faster specialized ones. The bytecode never looks the same twice.
-- copy-and-patch: when quickening identifies a hotspot, the VM copies a precompiled native template into executable memory and patches the variable slots with real values. No code generation at runtime.
+* Offset-based token representation: Tokens store (start, end, kind) as indices into source buffer, avoiding string copies and maintaining O(n) lexing.
+* Monolithic bytecode emission: Opcodes generated directly from tokens in single pass, collapsing parser and codegen phases without AST materialization.
+* Inline opcode specialization: Generic bytecode replaced at runtime with type-specialized variants once operand types stabilize, enabling branch-free dispatch.
+* Template-driven code instantiation: Precompiled native code patches applied when hotspots detected, substituting runtime values without code generation overhead.
+* Adaptive bytecode metamorphosis: Instruction stream continuously rewritten based on execution profiles, allowing bytecode to evolve across runs.
 
-## Basic Architecture
+## Compilation Pipeline
 
-```txt
-bytes -> spans -> tokens -> bytecode -> [inline caching + quickening] -> copy-and-patch -> native code
+```bash
+source -> offset-indexed tokens -> monolithic bytecode -> [inline caching + type inference] -> template instantiation -> native execution
 ```
 
 $$
-\Gamma_{compiler} = \mathcal{C}_{patch} \circ \mathcal{V}_{quickening} \circ \mathcal{P}_{parser} \circ \mathcal{L}_{lexer}
+\Gamma_{compiler} = \mathcal{T}_{patch} \circ \mathcal{S}_{specialize} \circ \mathcal{E}_{emit} \circ \mathcal{P}_{parse}
 $$
+
+## Architecture
+
+```bash
+├── Cargo.toml
+├── README.md
+├── src
+│   ├── lib.rs
+│   ├── main.rs
+│   └── modules
+│       ├── compiler.rs
+│       ├── lexer.rs
+│       ├── opcodes.rs
+│       ├── parser.rs
+│       └── vm.rs
+└── tests
+```
+
+## Capabilities
+
+| types         | keywords         | builtin         | lexical         |
+|---------------|------------------|-----------------|-----------------|
+| int           | control flow     | i/o             | identation      |
+| float         | functions        | type conversion | fstring         |
+| str           | classes          | inspection      | walrus op       |
+| bool          | operators        | iteration       | comments        |
+| list          | variables        | aggregation     | docstrings      |
+| dict          | literals         | math            | complex numbers |
+| tuple         | alias            | debugging       | underscore      |
+| set           | try/exception    | reflection      |                 |
+| none          | context          | advances        |                 |
+|               | async/await      |                 |                 |
+|               | module           |                 |                 |
+|               | pattern matching |                 |                 |
+|               | type aliases     |                 |                 |
+|               | import           |                 |                 |
 
 ## References
 
-- Formally verified linear-time lexing: [2510.18479](https://arxiv.org/abs/2510.18479)
-- Deterministic parser with fused lexing: [2304.05276](https://arxiv.org/abs/2304.05276)
-- Structure and performance of efficient interpreters: [dl.acm.org/doi/10.1145/1328195.1328197](https://dl.acm.org/doi/10.1145/1328195.1328197)
-- Specializing adaptive interpreter: [2211.07633](https://arxiv.org/abs/2211.07633)
-- Copy and patch compilation: [dl.acm.org/doi/10.1145/3485513](https://dl.acm.org/doi/10.1145/3485513)
+* Structure and performance of efficient bytecode interpreters: dl.acm.org/doi/10.1145/1328195.1328197
+* Adaptive instruction specialization in interpreters: 2211.07633
+* Copy-and-patch JIT compilation: dl.acm.org/doi/10.1145/3485513
