@@ -10,7 +10,8 @@
     "links": [
       {
         "label": "GitHub",
-        "href": "https://github.com/dylan-sutton-chavez/edge-python"
+        "href": "https://github.com/dylan-sutton-chavez/edge-python",
+        "icon": "github" 
       }
     ]
   },
