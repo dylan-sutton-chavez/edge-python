@@ -57,11 +57,11 @@
   ["\"\"\"triple\"\"\"", ["String", "Endmarker"]],
   ["'''triple'''", ["String", "Endmarker"]],
 
-  ["f\"hello\"", ["FstringStart", "FstringEnd", "Endmarker"]],
-  ["f\"hello {x}\"", ["FstringStart", "FstringMiddle", "FstringEnd", "Endmarker"]],
-  ["f\"{a} and {b}\"", ["FstringStart", "FstringMiddle", "FstringEnd", "Endmarker"]],
-  ["f\"\"\"multi\nline\"\"\"", ["FstringStart", "FstringEnd", "Endmarker"]],
-  ["f\"\"\"multi\n{x}\"\"\"", ["FstringStart", "FstringMiddle", "FstringEnd", "Endmarker"]],
+  ["f\"hello\"", ["FstringStart", "FstringMiddle", "FstringEnd", "Endmarker"]],
+  ["f\"hello {x}\"", ["FstringStart", "FstringMiddle", "Lbrace", "Name", "Rbrace", "FstringEnd", "Endmarker"]],
+  ["f\"{a} and {b}\"", ["FstringStart", "Lbrace", "Name", "Rbrace", "FstringMiddle", "Lbrace", "Name", "Rbrace", "FstringEnd", "Endmarker"]],
+  ["f\"\"\"multi\nline\"\"\"", ["FstringStart", "FstringMiddle", "FstringEnd", "Endmarker"]],
+  ["f\"\"\"multi\n{x}\"\"\"", ["FstringStart", "FstringMiddle", "Lbrace", "Name", "Rbrace", "FstringEnd", "Endmarker"]],
 
   ["# comment", ["Comment", "Endmarker"]],
   ["x = 1 # inline", ["Name", "Equal", "Int", "Comment", "Endmarker"]],
@@ -72,23 +72,16 @@
   ["# N/a\n", ["Comment", "Newline", "Endmarker"]],
 
   ["if x:\n    pass\n", ["If", "Name", "Colon", "Newline", "Indent", "Pass", "Newline", "Dedent", "Endmarker"]],
-
   ["if True:\n\tpass\n", ["If", "True", "Colon", "Newline", "Indent", "Pass", "Newline", "Dedent", "Endmarker"]],
-
   ["def f():\n    if True:\n        pass\n", ["Def", "Name", "Lpar", "Rpar", "Colon", "Newline", "Indent", "If", "True", "Colon", "Newline", "Indent", "Pass", "Newline", "Dedent", "Dedent", "Endmarker"]],
-
   ["if x:\n    pass\n\n    pass\n", ["If", "Name", "Colon", "Newline", "Indent", "Pass", "Nl", "Newline", "Pass", "Newline", "Dedent", "Endmarker"]],
-
   ["if x:\n \tpass\n", ["If", "Name", "Colon", "Newline", "Endmarker"]],
-
   ["if x:\n    if y:\n        pass\nz\n", ["If", "Name", "Colon", "Newline", "Indent", "If", "Name", "Colon", "Newline", "Indent", "Pass", "Newline", "Dedent", "Dedent", "Name", "Newline", "Endmarker"]],
-
   ["x = 1", ["Name", "Equal", "Int", "Endmarker"]],
-
   ["(\n)\n", ["Lpar", "Nl", "Rpar", "Newline", "Endmarker"]],
   ["[\n1,\n2\n]\n", ["Lsqb", "Nl", "Int", "Comma", "Nl", "Int", "Nl", "Rsqb", "Newline", "Endmarker"]],
 
-  ["match = 5", ["Name", "Equal", "Int",  "Endmarker"]],
+  ["match = 5", ["Name", "Equal", "Int", "Endmarker"]],
   ["case = True", ["Name", "Equal", "True", "Endmarker"]],
   ["type = None", ["Name", "Equal", "None", "Endmarker"]],
   ["type X = int\n", ["Type", "Name", "Equal", "Name", "Newline", "Endmarker"]],
