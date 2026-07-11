@@ -454,6 +454,9 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     let elem_start = s.chunk.instructions.len();
                     s.name(t);
                     s.infix_bp(0);
+                    // Name-led arg bypasses expr(); parse a trailing ternary here too.
+                    s.saw_newline = false;
+                    s.ternary_tail(elem_start);
                     if matches!(s.peek(), Some(TokenType::For)) {
                         let versions_before = s.ssa_versions.clone();
                         let elem_ins: Vec<Instruction> = s.chunk.instructions.drain(elem_start..).collect();

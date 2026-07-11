@@ -13,19 +13,52 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     /* Entry: Pratt parse, then optional ternary. Recursion is bounded inside `expr_bp`. */
     pub(super) fn expr(&mut self) {
         self.saw_newline = false;
+        let val_start = self.chunk.instructions.len();
+        self.expr_bp(0);
+        self.ternary_tail(val_start);
+    }
+
+    /* Ternary: value was emitted first (single-pass), so reorder `[value][cond]` into `[cond][JumpIfFalse][value][Jump][else]` for CPython evaluation order. */
+    pub(super) fn ternary_tail(&mut self, val_start: usize) {
+        if self.saw_newline || !matches!(self.peek(), Some(TokenType::If)) { return; }
+        self.advance();
+        let cond_start = self.chunk.instructions.len();
         self.expr_bp(0);
 
-        if !self.saw_newline && matches!(self.peek(), Some(TokenType::If)) {
-            self.advance();
-            self.expr_bp(0);
-            let jf = self.emit_jump(OpCode::JumpIfFalse);
-            let jmp = self.emit_jump(OpCode::Jump);
-            self.patch(jf);
-            self.chunk.emit(OpCode::PopTop, 0);
-            self.eat(TokenType::Else);
-            // Recurse so a chained conditional in the else-branch parses (right-associative).
-            self.expr();
-            self.patch(jmp);
+        let cond_ins: Vec<Instruction> = self.chunk.instructions.drain(cond_start..).collect();
+        let val_ins: Vec<Instruction> = self.chunk.instructions.drain(val_start..).collect();
+        let calls_from = self.chunk.call_byte_pos.partition_point(|&(ip, _)| (ip as usize) < val_start);
+        let cond_delta = val_start as i64 - cond_start as i64;
+
+        self.push_shifted(cond_ins, cond_delta);
+        let jf = self.emit_jump(OpCode::JumpIfFalse);
+        let val_delta = self.chunk.instructions.len() as i64 - val_start as i64;
+        self.push_shifted(val_ins, val_delta);
+
+        // Remap recorded call ips; re-sort so resolve_call's binary search holds.
+        for e in &mut self.chunk.call_byte_pos[calls_from..] {
+            let d = if (e.0 as usize) < cond_start { val_delta } else { cond_delta };
+            e.0 = (e.0 as i64 + d) as u32;
+        }
+        self.chunk.call_byte_pos[calls_from..].sort_unstable_by_key(|&(ip, _)| ip);
+
+        let jmp = self.emit_jump(OpCode::Jump);
+        self.patch(jf);
+        self.eat(TokenType::Else);
+        // Recurse so a chained conditional in the else-branch parses (right-associative).
+        self.expr();
+        self.patch(jmp);
+    }
+
+    /* Re-append drained instructions, shifting internal jump targets by `delta`. */
+    fn push_shifted(&mut self, ins: Vec<Instruction>, delta: i64) {
+        for i in ins {
+            let operand = if matches!(i.opcode, OpCode::Jump | OpCode::JumpIfFalse | OpCode::JumpIfFalseOrPop | OpCode::JumpIfTrueOrPop | OpCode::ForIter) {
+                (i.operand as i64 + delta) as u16
+            } else {
+                i.operand
+            };
+            self.chunk.instructions.push(Instruction { opcode: i.opcode, operand });
         }
     }
 

@@ -662,14 +662,14 @@
     "src": "x = 1 if True else 2", 
     "constants": ["1", "2"], 
     "names": ["x_1"], 
-    "instructions": [["LoadConst",0], ["LoadTrue",0], ["JumpIfFalse",4], ["Jump",6], ["PopTop",0], ["LoadConst",1], ["StoreName",0], ["ReturnValue",0]], 
+    "instructions": [["LoadTrue",0], ["JumpIfFalse",4], ["LoadConst",0], ["Jump",5], ["LoadConst",1], ["StoreName",0], ["ReturnValue",0]],
     "annotations": {}
   },
   {
     "src": "x = a if a else b", 
     "constants": [], 
     "names": ["a_0", "b_0", "x_1"], 
-    "instructions": [["LoadName",0], ["LoadName",0], ["JumpIfFalse",4], ["Jump",6], ["PopTop",0], ["LoadName",1], ["StoreName",2], ["ReturnValue",0]], 
+    "instructions": [["LoadName",0], ["JumpIfFalse",4], ["LoadName",0], ["Jump",5], ["LoadName",1], ["StoreName",2], ["ReturnValue",0]],
     "annotations": {}
   },
   {

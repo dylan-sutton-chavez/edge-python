@@ -592,7 +592,7 @@ impl<'a> VM<'a> {
         }
     }
 
-    /* Three-layer fallback for a bare free-load name: caller's latest SSA -> callee module attrs -> entry globals. First hit wins. Centralised so the order is auditable. */
+    /* Four-layer fallback for a bare free-load name: caller's latest SSA -> callee module attrs -> entry globals -> entry module state. First hit wins. Centralised so the order is auditable. */
     fn resolve_free_name(&self, fi: usize, bare: &str, chunk: &SSAChunk, slots: &[Val]) -> Option<Val> {
         // Layer 1: caller's most-recent SSA version of `bare`.
         if let Some(idx) = self.chunk_name_versions.get(&(chunk as *const _)) && let Some(versions) = idx.get(bare)
@@ -617,7 +617,17 @@ impl<'a> VM<'a> {
             return Some(*v);
         }
         // Layer 3: globals, catches forward-ref mutual recursion in the entry chunk.
-        self.globals.get(bare).copied()
+        if let Some(&v) = self.globals.get(bare) {
+            return Some(v);
+        }
+        // Layer 4: entry-module bindings; classes and plain vars never reach `globals`.
+        if self.fn_module.get(fi).is_none_or(|m| m.is_none())
+            && let Some(&v) = self.module_state.get(bare)
+            && !v.is_undef()
+        {
+            return Some(v);
+        }
+        None
     }
 
     /* Bind the function's own name slot to `callee` so recursive calls skip the global lookup. No-op for lambdas or when an earlier phase already filled the slot. */
