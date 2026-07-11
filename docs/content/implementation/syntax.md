@@ -108,6 +108,22 @@ end:
 
 Preserves operand identity (returns the actual value, not a coerced bool) without an extra opcode.
 
+## Conditional expression lowering
+
+`a if cond else b` parses value-first: the value is textually first and there is no AST to reorder. On reaching `if`, the parser drains the value's instructions and re-emits them after the condition, shifting internal jump targets, so the condition runs first and only one branch executes (CPython order):
+
+```text
+a if cond else b
+
+LoadName cond
+JumpIfFalse -> else
+LoadName a
+Jump -> end
+else:
+LoadName b
+end:
+```
+
 ## SSA versioning
 
 Each binding emits a fresh slot with an incremented version. The parser keeps a `HashMap<String, u32>` of name -> current version. Names in `chunk.names` are stored as `name_version`:
