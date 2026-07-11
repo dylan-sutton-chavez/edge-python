@@ -73,6 +73,8 @@ impl Pending {
 
 /* `bare_name -> [(version, slot), ...]` for one chunk's `chunk.names`. */
 pub(crate) type NameVersionIndex = crate::util::fx::FxHashMap<String, Vec<(i64, usize)>>;
+// (caller slot, body slot) pairs for one call site.
+pub(crate) type PropagationMap = alloc::rc::Rc<[(u32, u32)]>;
 
 pub struct VM<'a> {
     pub(crate) stack: Vec<Val>,
@@ -118,8 +120,8 @@ pub struct VM<'a> {
     pub(crate) opcode_caches: HashMap<*const SSAChunk, OpcodeCache>,
     /* Per-chunk `bare -> [(version, slot)]` index for the free-load fallback. */
     pub(crate) chunk_name_versions: HashMap<*const SSAChunk, NameVersionIndex>,
-    /* Cached (caller slot, body slot) pairs per (caller chunk, callee fi); name matching is static, so hash it once, not per call. */
-    pub(crate) propagation_maps: HashMap<(*const SSAChunk, usize), alloc::rc::Rc<[(u32, u32)]>>,
+    /* Cached per (caller chunk, callee fi); name matching is static, so hash it once, not per call. */
+    pub(crate) propagation_maps: HashMap<(*const SSAChunk, usize), PropagationMap>,
     /* Const-pool ptrs for caches currently checked out by live exec() frames. */
     pub(crate) active_const_pools: Vec<*const [Val]>,
     /* Slot-slice ptrs for every live exec() frame; GC roots so a frame's mutating locals survive a nested resume. */

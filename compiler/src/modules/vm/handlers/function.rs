@@ -591,7 +591,7 @@ impl<'a> VM<'a> {
     }
 
     /* Build or fetch the static (caller slot, body slot) name-match pairs for (chunk, fi). Chunks are borrowed for the VM's lifetime, so the pointer key is stable. */
-    fn propagation_map(&mut self, fi: usize, chunk: &SSAChunk) -> alloc::rc::Rc<[(u32, u32)]> {
+    fn propagation_map(&mut self, fi: usize, chunk: &SSAChunk) -> super::super::PropagationMap {
         let key = (chunk as *const SSAChunk, fi);
         if let Some(m) = self.propagation_maps.get(&key) { return m.clone(); }
         let body_map = &self.body_maps[fi];

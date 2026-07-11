@@ -76,7 +76,7 @@ impl<'a> Scanner<'a> {
         let s = &self.src[start..end];
         if s[0] == b'_' || s[s.len() - 1] == b'_' {
             self.report(start, end, "invalid '_' in numeric literal");
-        } else if s.windows(2).any(|w| w == [b'_', b'_']) {
+        } else if s.windows(2).any(|w| w == *b"__") {
             self.report(start, end, "consecutive '_' in numeric literal");
         }
     }
