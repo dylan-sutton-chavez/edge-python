@@ -3683,5 +3683,8 @@
   {"src":"def f():\n    return K + 1\ndef g():\n    return f()\nK = 41\nprint(g())","output":["42"]},
   {"src":"def a():\n    return b()\ndef b():\n    return c()\ndef c():\n    return X\nX = 9\nprint(a())","output":["9"]},
   {"src":"def f():\n    return K\ndef g():\n    return f()\nK = 1\nprint(g())\nK = 2\nprint(g())","output":["1", "2"]},
-  {"src":"def f():\n    return missing_name\ndef g():\n    return f()\ntry:\n    g()\nexcept NameError:\n    print('NameError')","output":["NameError"]}
+  {"src":"def f():\n    return missing_name\ndef g():\n    return f()\ntry:\n    g()\nexcept NameError:\n    print('NameError')","output":["NameError"]},
+  {"src":"x = 5\ndef f():\n    return x\nprint(f())\nx = 7\nprint(f())","output":["5", "7"]},
+  {"src":"def f():\n    return N\ndef g():\n    unrelated = 123\n    return f()\nN = 4\nprint(f())\nprint(g())","output":["4", "4"]},
+  {"src":"def f(b):\n    if b:\n        return W\n    return 0\nprint(f(False))\nW = 8\nprint(f(True))","output":["0", "8"]}
 ]

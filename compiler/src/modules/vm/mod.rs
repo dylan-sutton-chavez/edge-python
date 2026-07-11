@@ -118,6 +118,8 @@ pub struct VM<'a> {
     pub(crate) opcode_caches: HashMap<*const SSAChunk, OpcodeCache>,
     /* Per-chunk `bare -> [(version, slot)]` index for the free-load fallback. */
     pub(crate) chunk_name_versions: HashMap<*const SSAChunk, NameVersionIndex>,
+    /* Cached (caller slot, body slot) pairs per (caller chunk, callee fi); name matching is static, so hash it once, not per call. */
+    pub(crate) propagation_maps: HashMap<(*const SSAChunk, usize), alloc::rc::Rc<[(u32, u32)]>>,
     /* Const-pool ptrs for caches currently checked out by live exec() frames. */
     pub(crate) active_const_pools: Vec<*const [Val]>,
     /* Slot-slice ptrs for every live exec() frame; GC roots so a frame's mutating locals survive a nested resume. */
@@ -228,6 +230,7 @@ impl<'a> VM<'a> {
             self_ref_slot: Vec::new(),
             opcode_caches: HashMap::default(),
             chunk_name_versions: HashMap::default(),
+            propagation_maps: HashMap::default(),
             active_const_pools: Vec::new(),
             active_slots: Vec::new(),
             sandbox_off,

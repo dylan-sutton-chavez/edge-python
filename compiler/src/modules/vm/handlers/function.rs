@@ -557,9 +557,7 @@ impl<'a> VM<'a> {
     }
 
     /* Push caller slots into body slots. Same scope: late-binding, overwrite freely. Different scope: skip capture-filled slots (fixes stacked-decorator clobber). */
-    fn apply_caller_slot_propagation(&self, fi: usize, captures: &[(usize, Val)], chunk: &SSAChunk, slots: &[Val], fn_slots: &mut [Val]) {
-        let body_map = &self.body_maps[fi];
-        let param_bm = &self.is_param_slot[fi];
+    fn apply_caller_slot_propagation(&mut self, fi: usize, captures: &[(usize, Val)], chunk: &SSAChunk, slots: &[Val], fn_slots: &mut [Val]) {
         let caller_fi = self.body_to_fi.get(&(chunk as *const _)).copied();
         let callee_parent_fi = self.function_parents.get(fi).and_then(|x| *x);
         // Same-scope also requires same module, keeps top-level imports (`parent_fi == None`) isolated.
@@ -571,11 +569,11 @@ impl<'a> VM<'a> {
         } else {
             captures.iter().map(|(s, _)| *s).collect()
         };
-        for (si, &v) in slots.iter().enumerate() {
-            if !v.is_undef()
-                && let Some(name) = chunk.names.get(si)
-                && let Some(&bs) = body_map.get(name.as_str())
-                && !param_bm.get(bs).copied().unwrap_or(false)
+        // Undef/captured filters stay per-call; the name matching is cached.
+        for &(si, bs) in self.propagation_map(fi, chunk).iter() {
+            let bs = bs as usize;
+            if let Some(&v) = slots.get(si as usize)
+                && !v.is_undef()
                 && !captured_set.contains(&bs)
             {
                 fn_slots[bs] = v;
@@ -590,6 +588,24 @@ impl<'a> VM<'a> {
                 fn_slots[*bs] = v;
             }
         }
+    }
+
+    /* Build or fetch the static (caller slot, body slot) name-match pairs for (chunk, fi). Chunks are borrowed for the VM's lifetime, so the pointer key is stable. */
+    fn propagation_map(&mut self, fi: usize, chunk: &SSAChunk) -> alloc::rc::Rc<[(u32, u32)]> {
+        let key = (chunk as *const SSAChunk, fi);
+        if let Some(m) = self.propagation_maps.get(&key) { return m.clone(); }
+        let body_map = &self.body_maps[fi];
+        let param_bm = &self.is_param_slot[fi];
+        let pairs: Vec<(u32, u32)> = chunk.names.iter().enumerate()
+            .filter_map(|(si, name)| {
+                let &bs = body_map.get(name.as_str())?;
+                if param_bm.get(bs).copied().unwrap_or(false) { return None; }
+                Some((si as u32, bs as u32))
+            })
+            .collect();
+        let map: alloc::rc::Rc<[(u32, u32)]> = pairs.into();
+        self.propagation_maps.insert(key, map.clone());
+        map
     }
 
     /* Four-layer fallback for a bare free-load name: caller's latest SSA -> callee module attrs -> entry globals -> entry module state. First hit wins. Centralised so the order is auditable. */
