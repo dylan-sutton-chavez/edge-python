@@ -382,6 +382,7 @@ The `wasm-pdk` crate (Plugin Development Kit), bundled in this repo, publishable
 - `#[plugin_const]`, zero-arg fn -> module constant via the `__const_<name>` export convention; the host calls it once at import and binds the value as a module attribute.
 - `#[plugin_class]` / `#[plugin_methods]` / `#[plugin_ctor]`, expose a Rust struct as a Python class via the `__class_<Name>_<method>` export convention.
 - `module!()`, expands to `#[global_allocator]` + `#[panic_handler]`.
+- `module_fixed_pool!()` (or `module_fixed_pool!(bytes)`), same but allocating from a fixed-size static pool that never calls `memory.grow`; used by the bundled `std` packages.
 - `FromValue` / `IntoValue` with primitive impls (`i64`, `i128`, `f64`, `bool`, `String`, `&str`, `Bytes`, `Option<T>`, `Handle`). `i64` rejects out-of-range values with `ValueError`; use `i128` for the full range. `Bytes` maps to Python `bytes` over `tag::RAW`.
 - `Handle` with `Drop`-driven release plus `call`, `get_attr` / `set_attr`, `get_item` / `set_item`, `len`, `iter` / `iter_next`, `new_dict` / `new_list`, `new_tuple` / `new_set` / `new_frozenset`, `type_of`.
 - `Args`, trailing variadic positional params as borrowed handles; declare it as the last param before any `Kwargs`.

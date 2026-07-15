@@ -45,6 +45,71 @@ macro_rules! module {
     };
 }
 
+// Hidden re-export so `module_fixed_pool!` resolves linked_list_allocator.
+#[cfg(target_arch = "wasm32")]
+#[doc(hidden)]
+pub use linked_list_allocator as __lla;
+
+/// Like `module!` but with a free-list allocator on a static `.bss` pool (default 4 MiB): never calls `memory.grow`, so host-side pre-captured `DataView(memory.buffer)`s stay attached, and `dealloc` reclaims chunks across repeated calls. Single-threaded wasm32 makes the `UnsafeCell`s safe.
+#[macro_export]
+macro_rules! module_fixed_pool {
+    () => { $crate::module_fixed_pool!(4 * 1024 * 1024); };
+    ($pool:expr) => {
+        #[cfg(target_arch = "wasm32")]
+        mod __wasm_pdk_allocator {
+            use core::alloc::{GlobalAlloc, Layout};
+            use core::cell::UnsafeCell;
+            use core::ptr::NonNull;
+            use core::sync::atomic::{AtomicBool, Ordering};
+            use $crate::__lla::Heap;
+
+            const POOL_SIZE: usize = $pool;
+
+            #[repr(align(16))]
+            struct Pool(UnsafeCell<[u8; POOL_SIZE]>);
+            unsafe impl Sync for Pool {}
+
+            static POOL: Pool = Pool(UnsafeCell::new([0; POOL_SIZE]));
+
+            struct HeapCell(UnsafeCell<Heap>);
+            unsafe impl Sync for HeapCell {}
+
+            static HEAP: HeapCell = HeapCell(UnsafeCell::new(Heap::empty()));
+            static INIT: AtomicBool = AtomicBool::new(false);
+
+            pub struct FreeListAlloc;
+
+            unsafe impl GlobalAlloc for FreeListAlloc {
+                unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+                    if !INIT.load(Ordering::Relaxed) {
+                        unsafe { (*HEAP.0.get()).init(POOL.0.get() as *mut u8, POOL_SIZE); }
+                        INIT.store(true, Ordering::Relaxed);
+                    }
+                    unsafe {
+                        (*HEAP.0.get())
+                            .allocate_first_fit(layout)
+                            .map_or(core::ptr::null_mut(), |p| p.as_ptr())
+                    }
+                }
+
+                unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+                    unsafe { (*HEAP.0.get()).deallocate(NonNull::new_unchecked(ptr), layout); }
+                }
+            }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        #[global_allocator]
+        static __WASM_PDK_ALLOC: __wasm_pdk_allocator::FreeListAlloc = __wasm_pdk_allocator::FreeListAlloc;
+
+        #[cfg(target_arch = "wasm32")]
+        #[panic_handler]
+        fn __wasm_pdk_panic(_: &core::panic::PanicInfo) -> ! {
+            core::arch::wasm32::unreachable()
+        }
+    };
+}
+
 use alloc::{string::String, vec::Vec};
 
 /* Wire imports */
@@ -447,65 +512,36 @@ impl<T: IntoValue> IntoValue for Option<T> {
 /* Universal dispatch via Handle */
 
 impl Handle {
-    /// Invoke `recv.<name>(args)`; argv handles stay owned by the caller.
-    pub fn call(&self, name: &str, args: &[u32]) -> Result<Handle> {
+    // Shared edge_op wrapper; empty name/argv pass null.
+    fn raw_op(opcode: u32, recv: u32, name: &str, argv: &[u32]) -> Result<u32> {
+        let name_ptr = if name.is_empty() { core::ptr::null() } else { name.as_ptr() };
+        let argv_ptr = if argv.is_empty() { core::ptr::null() } else { argv.as_ptr() };
         let mut out: u32 = 0;
         let r = unsafe {
-            edge_op(
-                op::CALL, self.raw,
-                name.as_ptr(), name.len() as u32,
-                args.as_ptr(), args.len() as u32,
-                &mut out as *mut u32,
-            )
+            edge_op(opcode, recv, name_ptr, name.len() as u32, argv_ptr, argv.len() as u32, &mut out as *mut u32)
         };
         if r != 0 { return Err(last_error()); }
-        Ok(Handle::from_raw(out))
+        Ok(out)
+    }
+
+    /// Invoke `recv.<name>(args)`; argv handles stay owned by the caller.
+    pub fn call(&self, name: &str, args: &[u32]) -> Result<Handle> {
+        Self::raw_op(op::CALL, self.raw, name, args).map(Handle::from_raw)
     }
 
     /// `recv.<name>`, read attribute or bind builtin method.
     pub fn get_attr(&self, name: &str) -> Result<Handle> {
-        let mut out: u32 = 0;
-        let r = unsafe {
-            edge_op(
-                op::GET_ATTR, self.raw,
-                name.as_ptr(), name.len() as u32,
-                core::ptr::null(), 0,
-                &mut out as *mut u32,
-            )
-        };
-        if r != 0 { return Err(last_error()); }
-        Ok(Handle::from_raw(out))
+        Self::raw_op(op::GET_ATTR, self.raw, name, &[]).map(Handle::from_raw)
     }
 
     /// `recv[key]`; key passed as handle (encode an int for list indexing, str for dict lookup).
     pub fn get_item(&self, key: &Handle) -> Result<Handle> {
-        let argv = [key.raw];
-        let mut out: u32 = 0;
-        let r = unsafe {
-            edge_op(
-                op::GET_ITEM, self.raw,
-                core::ptr::null(), 0,
-                argv.as_ptr(), 1,
-                &mut out as *mut u32,
-            )
-        };
-        if r != 0 { return Err(last_error()); }
-        Ok(Handle::from_raw(out))
+        Self::raw_op(op::GET_ITEM, self.raw, "", &[key.raw]).map(Handle::from_raw)
     }
 
     /// `recv[key] = value`; key/value passed as handles. Returns None which is released immediately.
     pub fn set_item(&self, key: &Handle, value: &Handle) -> Result<()> {
-        let argv = [key.raw, value.raw];
-        let mut out: u32 = 0;
-        let r = unsafe {
-            edge_op(
-                op::SET_ITEM, self.raw,
-                core::ptr::null(), 0,
-                argv.as_ptr(), 2,
-                &mut out as *mut u32,
-            )
-        };
-        if r != 0 { return Err(last_error()); }
+        let out = Self::raw_op(op::SET_ITEM, self.raw, "", &[key.raw, value.raw])?;
         let _ = Handle::from_raw(out);
         Ok(())
     }
@@ -513,110 +549,61 @@ impl Handle {
     /// `len(recv)`.
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> Result<i64> {
-        let mut out: u32 = 0;
-        let r = unsafe {
-            edge_op(
-                op::LEN, self.raw,
-                core::ptr::null(), 0,
-                core::ptr::null(), 0,
-                &mut out as *mut u32,
-            )
-        };
-        if r != 0 { return Err(last_error()); }
         // Wrap before decoding so Drop releases on any early return.
-        let h = Handle::from_raw(out);
+        let h = Handle::from_raw(Self::raw_op(op::LEN, self.raw, "", &[])?);
         i64::from_handle(h.raw())
     }
 
     /// `recv.<name> = value`; SET_ATTR returns None which we release immediately.
     pub fn set_attr(&self, name: &str, value: &Handle) -> Result<()> {
-        let argv = [value.raw];
-        let mut out: u32 = 0;
-        let r = unsafe {
-            edge_op(
-                op::SET_ATTR, self.raw,
-                name.as_ptr(), name.len() as u32,
-                argv.as_ptr(), 1,
-                &mut out as *mut u32,
-            )
-        };
-        if r != 0 { return Err(last_error()); }
+        let out = Self::raw_op(op::SET_ATTR, self.raw, name, &[value.raw])?;
         let _ = Handle::from_raw(out);
         Ok(())
     }
 
     /// Returns a fresh empty dict handle owned by the guest.
     pub fn new_dict() -> Result<Handle> {
-        let mut out: u32 = 0;
-        let r = unsafe {
-            edge_op(op::NEW_DICT, 0, core::ptr::null(), 0, core::ptr::null(), 0, &mut out as *mut u32)
-        };
-        if r != 0 { return Err(last_error()); }
-        Ok(Handle::from_raw(out))
+        Self::raw_op(op::NEW_DICT, 0, "", &[]).map(Handle::from_raw)
     }
 
     /// Returns a fresh empty list handle owned by the guest.
     pub fn new_list() -> Result<Handle> {
-        let mut out: u32 = 0;
-        let r = unsafe {
-            edge_op(op::NEW_LIST, 0, core::ptr::null(), 0, core::ptr::null(), 0, &mut out as *mut u32)
-        };
-        if r != 0 { return Err(last_error()); }
-        Ok(Handle::from_raw(out))
+        Self::raw_op(op::NEW_LIST, 0, "", &[]).map(Handle::from_raw)
     }
 
     /// Construct a tuple from item handles in one host call.
-    pub fn new_tuple(items: &[u32]) -> Result<Handle> { Self::new_composite(op::NEW_TUPLE, items) }
+    pub fn new_tuple(items: &[u32]) -> Result<Handle> {
+        Self::raw_op(op::NEW_TUPLE, 0, "", items).map(Handle::from_raw)
+    }
 
     /// Construct a set from item handles; unhashable items raise `TypeError`.
-    pub fn new_set(items: &[u32]) -> Result<Handle> { Self::new_composite(op::NEW_SET, items) }
+    pub fn new_set(items: &[u32]) -> Result<Handle> {
+        Self::raw_op(op::NEW_SET, 0, "", items).map(Handle::from_raw)
+    }
 
     /// Construct a frozenset from item handles; unhashable items raise `TypeError`.
-    pub fn new_frozenset(items: &[u32]) -> Result<Handle> { Self::new_composite(op::NEW_FROZENSET, items) }
-
-    // Shared constructor: passes item handles as argv to a NEW_* op.
-    fn new_composite(op: u32, items: &[u32]) -> Result<Handle> {
-        let mut out: u32 = 0;
-        let r = unsafe {
-            edge_op(op, 0, core::ptr::null(), 0, items.as_ptr(), items.len() as u32, &mut out as *mut u32)
-        };
-        if r != 0 { return Err(last_error()); }
-        Ok(Handle::from_raw(out))
+    pub fn new_frozenset(items: &[u32]) -> Result<Handle> {
+        Self::raw_op(op::NEW_FROZENSET, 0, "", items).map(Handle::from_raw)
     }
 
     /// `type(recv).__name__`; returns a fresh str handle naming the runtime type.
     pub fn type_of(&self) -> Result<Handle> {
-        let mut out: u32 = 0;
-        let r = unsafe {
-            edge_op(op::TYPE_OF, self.raw, core::ptr::null(), 0, core::ptr::null(), 0, &mut out as *mut u32)
-        };
-        if r != 0 { return Err(last_error()); }
-        Ok(Handle::from_raw(out))
+        Self::raw_op(op::TYPE_OF, self.raw, "", &[]).map(Handle::from_raw)
     }
 
     /// `iter(recv)`; materialises the receiver as a List iterator handle.
     pub fn iter(&self) -> Result<Handle> {
-        let mut out: u32 = 0;
-        let r = unsafe {
-            edge_op(op::ITER, self.raw, core::ptr::null(), 0, core::ptr::null(), 0, &mut out as *mut u32)
-        };
-        if r != 0 { return Err(last_error()); }
-        Ok(Handle::from_raw(out))
+        Self::raw_op(op::ITER, self.raw, "", &[]).map(Handle::from_raw)
     }
 
     /// `next(recv)`; returns `Ok(None)` at end-of-iteration, propagates other errors.
     pub fn iter_next(&self) -> Result<Option<Handle>> {
-        let mut out: u32 = 0;
-        let r = unsafe {
-            edge_op(op::ITER_NEXT, self.raw, core::ptr::null(), 0, core::ptr::null(), 0, &mut out as *mut u32)
-        };
-        if r != 0 {
-            let e = last_error();
+        match Self::raw_op(op::ITER_NEXT, self.raw, "", &[]) {
+            Ok(out) => Ok(Some(Handle::from_raw(out))),
             // Host renders the sentinel as "Exception: StopIteration", so match anywhere.
-            if e.message().contains("StopIteration") { return Ok(None); }
-            return Err(e);
+            Err(e) if e.message().contains("StopIteration") => Ok(None),
+            Err(e) => Err(e),
         }
-        Ok(Some(Handle::from_raw(out)))
     }
 }
 
