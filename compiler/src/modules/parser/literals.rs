@@ -53,18 +53,25 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     self.dict_tail(1, false);
                 }
             }
-            Some(TokenType::For) => {
-                let versions_before = self.ssa_versions.clone();
-                let elem_ins: Vec<Instruction> = self.chunk.instructions.drain(key_start..).collect();
-                self.chunk.emit(OpCode::BuildSet, 0);
-                self.comprehension_loop(&[(key_start, elem_ins)], OpCode::SetAdd, &versions_before);
-                self.eat(TokenType::Rbrace);
-            }
             _ => {
-                // First element already emitted; set_tail consolidates if a later `*` appears.
-                self.set_tail(1, false);
+                if self.maybe_comprehension(key_start, OpCode::BuildSet, OpCode::SetAdd) {
+                    self.eat(TokenType::Rbrace);
+                } else {
+                    // First element already emitted; set_tail consolidates if a later `*` appears.
+                    self.set_tail(1, false);
+                }
             }
         }
+    }
+
+    /* If `for` follows, lower [elem_start..] as a comprehension; true when consumed. */
+    pub(super) fn maybe_comprehension(&mut self, elem_start: usize, build: OpCode, append: OpCode) -> bool {
+        if !matches!(self.peek(), Some(TokenType::For)) { return false; }
+        let versions_before = self.ssa_versions.clone();
+        let elem_ins: Vec<Instruction> = self.chunk.instructions.drain(elem_start..).collect();
+        self.chunk.emit(build, 0);
+        self.comprehension_loop(&[(elem_start, elem_ins)], append, &versions_before);
+        true
     }
 
     /* `[]`: list literal or list-comp; always eat(Rsqb) to keep `bracket_stack` in sync. */
@@ -84,11 +91,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
         let elem_start = self.chunk.instructions.len();
         self.expr();
-        if matches!(self.peek(), Some(TokenType::For)) {
-            let versions_before = self.ssa_versions.clone();
-            let elem_ins: Vec<Instruction> = self.chunk.instructions.drain(elem_start..).collect();
-            self.chunk.emit(OpCode::BuildList, 0);
-            self.comprehension_loop(&[(elem_start, elem_ins)], OpCode::ListAppend, &versions_before);
+        if self.maybe_comprehension(elem_start, OpCode::BuildList, OpCode::ListAppend) {
             self.eat(TokenType::Rsqb);
         } else {
             // First element already emitted; list_tail consolidates if a later `*` appears.
@@ -252,12 +255,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     self.expr();
                     // Bare tuple in a replacement field: `f"{1,}"` builds (1,).
                     if matches!(self.peek(), Some(TokenType::Comma)) {
-                        let mut n = 1u16;
-                        while self.eat_if(TokenType::Comma) {
-                            if matches!(self.peek(), Some(TokenType::Rbrace | TokenType::Colon | TokenType::Exclamation | TokenType::Equal) | None) { break; }
-                            self.expr();
-                            n += 1;
-                        }
+                        let n = self.tuple_rest(1, |s| matches!(s.peek(), Some(TokenType::Rbrace | TokenType::Colon | TokenType::Exclamation | TokenType::Equal) | None));
                         self.chunk.emit(OpCode::BuildTuple, n);
                     }
                     self.in_fstring_expr = saved_in_fstring;
@@ -444,23 +442,13 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     // Name-led arg bypasses expr(); parse a trailing ternary here too.
                     s.saw_newline = false;
                     s.ternary_tail(elem_start);
-                    if matches!(s.peek(), Some(TokenType::For)) {
-                        let versions_before = s.ssa_versions.clone();
-                        let elem_ins: Vec<Instruction> = s.chunk.instructions.drain(elem_start..).collect();
-                        s.chunk.emit(OpCode::BuildList, 0);
-                        s.comprehension_loop(&[(elem_start, elem_ins)], OpCode::ListAppend, &versions_before);
-                    }
+                    s.maybe_comprehension(elem_start, OpCode::BuildList, OpCode::ListAppend);
                     pos = pos.saturating_add(1);
                 }
             } else {
                 let elem_start = s.chunk.instructions.len();
                 s.expr();
-                if matches!(s.peek(), Some(TokenType::For)) {
-                    let versions_before = s.ssa_versions.clone();
-                    let elem_ins: Vec<Instruction> = s.chunk.instructions.drain(elem_start..).collect();
-                    s.chunk.emit(OpCode::BuildList, 0);
-                    s.comprehension_loop(&[(elem_start, elem_ins)], OpCode::ListAppend, &versions_before);
-                }
+                s.maybe_comprehension(elem_start, OpCode::BuildList, OpCode::ListAppend);
                 pos = pos.saturating_add(1);
             }
         });
@@ -509,9 +497,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             self.chunk.record_call_pos(pos);
         }
 
-        let ver = self.increment_version(&cname);
-        let i = self.push_ssa_name(&cname, ver);
-        self.chunk.emit(OpCode::StoreName, i);
+        self.emit_store_new(&cname);
     }
 
     /* def/async def: parses signature, compiles body, emits MakeFunction/MakeCoroutine+decorators+StoreName. */
@@ -546,9 +532,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             self.chunk.record_call_pos(pos);
         }
 
-        let ver = self.increment_version(&fname);
-        let i = self.push_ssa_name(&fname, ver);
-        self.chunk.emit(OpCode::StoreName, i);
+        self.emit_store_new(&fname);
     }
 
     pub(super) fn parse_params(&mut self) -> (Vec<String>, u16) {

@@ -134,9 +134,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 let t = self.advance();
                 let name = self.lexeme(&t).to_string();
                 self.chunk.emit(OpCode::LoadName, subj);
-                let ver = self.increment_version(&name);
-                let i = self.push_ssa_name(&name, ver);
-                self.chunk.emit(OpCode::StoreName, i);
+                self.emit_store_new(&name);
             }
             // Literal/expr: equality-test against subject; precedence > bitwise-or keeps `1|2|3` as OR pattern.
             _ => {
@@ -273,9 +271,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 let name = self.source[toks[0].start..toks[0].end].to_string();
                 if name != "_" {
                     self.chunk.emit(OpCode::LoadName, item_subj);
-                    let ver = self.increment_version(&name);
-                    let ni = self.push_ssa_name(&name, ver);
-                    self.chunk.emit(OpCode::StoreName, ni);
+                    self.emit_store_new(&name);
                 }
             } else {
                 // Literal: replay tokens; supports Int/Float/Str/Bool/None/negation; else error.
@@ -385,12 +381,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.eat(TokenType::In);
         self.expr();
         // Unparenthesized tuple iterable: `for x in 1, 2:` iterates the tuple.
-        let mut n = 1u16;
-        while self.eat_if(TokenType::Comma) {
-            if matches!(self.peek(), Some(TokenType::Colon) | None) { break; }
-            self.expr();
-            n += 1;
-        }
+        let n = self.tuple_rest(1, |s| matches!(s.peek(), Some(TokenType::Colon) | None));
         if n > 1 { self.chunk.emit(OpCode::BuildTuple, n); }
         self.chunk.emit(OpCode::GetIter, is_async as u16);
 
@@ -576,16 +567,6 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             self.chunk.emit(OpCode::WithExit, operand);
             self.chunk.emit(OpCode::EndFinally, 0);
         }
-    }
-
-    /* Delegates to imports.rs; compile-time only, no import opcodes reach the VM. */
-
-    pub(super) fn import_stmt(&mut self) {
-        self.do_import_stmt();
-    }
-
-    pub(super) fn parse_from_stmt(&mut self) {
-        self.do_from_stmt();
     }
 
 }

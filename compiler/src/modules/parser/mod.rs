@@ -16,34 +16,22 @@ use crate::modules::packages::{Resolver, NoopResolver};
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 use core::iter::Peekable;
 
-// Bracket diagnostic strings kept out of the hot path.
+// Bracket table for either side: (opener, open str, close str).
 #[inline]
-pub(super) const fn open_str(k: TokenType) -> &'static str {
+pub(super) const fn bracket_pair(k: TokenType) -> (TokenType, &'static str, &'static str) {
     match k {
-        TokenType::Lpar => "'('",
-        TokenType::Lsqb => "'['",
-        TokenType::Lbrace => "'{'",
-        _ => "bracket",
+        TokenType::Lpar | TokenType::Rpar => (TokenType::Lpar, "'('", "')'"),
+        TokenType::Lsqb | TokenType::Rsqb => (TokenType::Lsqb, "'['", "']'"),
+        TokenType::Lbrace | TokenType::Rbrace => (TokenType::Lbrace, "'{'", "'}'"),
+        _ => (k, "bracket", "bracket"),
     }
 }
 #[inline]
-pub(super) const fn close_str(k: TokenType) -> &'static str {
-    match k {
-        TokenType::Rpar => "')'",
-        TokenType::Rsqb => "']'",
-        TokenType::Rbrace => "'}'",
-        _ => "bracket",
-    }
-}
+pub(super) const fn open_str(k: TokenType) -> &'static str { bracket_pair(k).1 }
 #[inline]
-pub(super) const fn match_close_str(open: TokenType) -> &'static str {
-    match open {
-        TokenType::Lpar => "')'",
-        TokenType::Lsqb => "']'",
-        TokenType::Lbrace => "'}'",
-        _ => "bracket",
-    }
-}
+pub(super) const fn close_str(k: TokenType) -> &'static str { bracket_pair(k).2 }
+#[inline]
+pub(super) const fn match_close_str(open: TokenType) -> &'static str { bracket_pair(open).2 }
 
 // Call operand: high byte keyword count, low byte positional count.
 #[inline]
@@ -152,6 +140,14 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         let ver = self.increment_version(&name);
         let i = self.push_ssa_name(&name, ver);
         self.chunk.emit(OpCode::StoreName, i);
+    }
+
+    /* Raw version-bump + StoreName; returns the slot. NOT `store_name`: deliberately skips `globals_decl` routing. */
+    pub(super) fn emit_store_new(&mut self, name: &str) -> u16 {
+        let ver = self.increment_version(name);
+        let i = self.push_ssa_name(name, ver);
+        self.chunk.emit(OpCode::StoreName, i);
+        i
     }
 
     pub(super) fn with_fresh_chunk(&mut self, f: impl FnOnce(&mut Self)) -> SSAChunk {
@@ -267,11 +263,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 self.bracket_stack.push((tok.kind, tok.start, tok.end, self.errors.len()));
             }
             TokenType::Rpar | TokenType::Rsqb | TokenType::Rbrace => {
-                let want_open = match tok.kind {
-                    TokenType::Rpar => TokenType::Lpar,
-                    TokenType::Rsqb => TokenType::Lsqb,
-                    _ => TokenType::Lbrace,
-                };
+                let want_open = bracket_pair(tok.kind).0;
                 /* Find matching opener; report unclosed brackets above it; handle orphan closers. */
                 if let Some(idx) = self.bracket_stack.iter().rposition(|&(k, _, _, _)| k == want_open) {
                     while self.bracket_stack.len() > idx + 1 {
@@ -404,11 +396,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 return;
             }
             // Missing closer: anchor diagnostic at the opener, not at the next-line token.
-            let want_open = match kind {
-                TokenType::Rpar => TokenType::Lpar,
-                TokenType::Rsqb => TokenType::Lsqb,
-                _ => TokenType::Lbrace,
-            };
+            let want_open = bracket_pair(kind).0;
             if let Some(&(opener_kind, start, end, errors_at_open)) = self.bracket_stack.last()
                 && opener_kind == want_open
             {

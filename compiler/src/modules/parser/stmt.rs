@@ -110,16 +110,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 false
             }
             Some(TokenType::Nonlocal) => {
-                self.advance();
-                loop {
-                    let name = self.advance_text();
-                    let idx = self.chunk.push_name(&name);
-                    self.chunk.emit(OpCode::Nonlocal, idx);
-                    if !self.chunk.nonlocals.contains(&name) {
-                        self.chunk.nonlocals.push(name);
-                    }
-                    if !self.eat_if(TokenType::Comma) { break; }
-                }
+                self.emit_name_list(OpCode::Nonlocal);
                 false
             }
             Some(TokenType::Assert) => {
@@ -216,11 +207,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     self.chunk.emit(OpCode::LoadNone, 0);
                 } else {
                     self.expr();
-                    let mut count = 1u16;
-                    while self.eat_if(TokenType::Comma) {
-                        self.expr();
-                        count += 1;
-                    }
+                    let count = self.tuple_rest(1, |_| false);
                     if count > 1 { self.chunk.emit(OpCode::BuildTuple, count); }
                 }
                 self.chunk.emit(OpCode::ReturnValue, 0);
@@ -258,12 +245,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     self.advance();
                     self.chunk.instructions.truncate(start); // drop the display's loads + BuildList
                     self.expr();
-                    let mut count = 1u16;
-                    while self.eat_if(TokenType::Comma) {
-                        if matches!(self.peek(), Some(TokenType::Newline | TokenType::Endmarker) | None) { break; }
-                        self.expr();
-                        count += 1;
-                    }
+                    let count = self.tuple_rest(1, |s| matches!(s.peek(), Some(TokenType::Newline | TokenType::Endmarker) | None));
                     if count > 1 { self.chunk.emit(OpCode::BuildTuple, count); }
                     self.chunk.emit(OpCode::UnpackSequence, targets.len() as u16);
                     for t in targets { self.store_name(t); }
@@ -274,14 +256,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             }
             _ => {
                 self.expr();
-                // `expr:` at statement level: suggest missing keyword instead of generic error.
-                if matches!(self.peek(), Some(TokenType::Colon)) {
-                    let t = self.advance();
-                    self.error_at(
-                        t.start, t.end,
-                        "unexpected ':' (missing 'if', 'while', 'for', or other statement keyword?)",
-                    );
-                }
+                self.diag_stray_colon();
                 true
             }
         }
@@ -296,15 +271,40 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* Emits Global/Nonlocal opcodes for a comma-separated name list. For Global, also registers each name so subsequent loads/stores route through LoadGlobal/StoreGlobal. */
+    /* Emits Global/Nonlocal opcodes for a comma-separated name list. Global registers each name so loads/stores route through LoadGlobal/StoreGlobal; Nonlocal records it in `chunk.nonlocals`. */
     pub(super) fn emit_name_list(&mut self, op: OpCode) {
         self.advance();
         loop {
             let name = self.advance_text();
             let idx = self.chunk.push_name(&name);
             self.chunk.emit(op, idx);
-            if matches!(op, OpCode::Global) { self.globals_decl.insert(name); }
+            match op {
+                OpCode::Global => { self.globals_decl.insert(name); }
+                OpCode::Nonlocal if !self.chunk.nonlocals.contains(&name) => self.chunk.nonlocals.push(name),
+                _ => {}
+            }
             if !self.eat_if(TokenType::Comma) { break; }
+        }
+    }
+
+    /* Eats `, expr` until `stop`; returns the element count. */
+    pub(super) fn tuple_rest(&mut self, mut count: u16, stop: impl Fn(&mut Self) -> bool) -> u16 {
+        while self.eat_if(TokenType::Comma) {
+            if stop(self) { break; }
+            self.expr();
+            count += 1;
+        }
+        count
+    }
+
+    // `expr:` at statement level: suggest the missing keyword.
+    fn diag_stray_colon(&mut self) {
+        if matches!(self.peek(), Some(TokenType::Colon)) {
+            let t = self.advance();
+            self.error_at(
+                t.start, t.end,
+                "unexpected ':' (missing 'if', 'while', 'for', or other statement keyword?)",
+            );
         }
     }
 
@@ -500,17 +500,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 if matches!(self.peek(), Some(TokenType::Equal)) {
                     self.advance();
                     self.expr();
-                    let mut count = 1u16;
-                    while self.eat_if(TokenType::Comma) {
-                        if matches!(
-                            self.peek(),
-                            Some(TokenType::Newline | TokenType::Endmarker) | None
-                        ) {
-                            break;
-                        }
-                        self.expr();
-                        count += 1;
-                    }
+                    let count = self.tuple_rest(1, |s| matches!(s.peek(), Some(TokenType::Newline | TokenType::Endmarker) | None));
                     if count > 1 {
                         self.chunk.emit(OpCode::BuildTuple, count);
                     }
@@ -542,14 +532,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             _ => {
                 self.emit_load_ssa(name);
                 self.expr_tails();
-                // `expr:` heuristic: suggest missing keyword.
-                if matches!(self.peek(), Some(TokenType::Colon)) {
-                    let t = self.advance();
-                    self.error_at(
-                        t.start, t.end,
-                        "unexpected ':' (missing 'if', 'while', 'for', or other statement keyword?)",
-                    );
-                }
+                self.diag_stray_colon();
                 true
             }
         }
@@ -672,13 +655,8 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.expr();
         // `x = 1,` / `x = 1, 2`: a trailing comma builds a tuple right-hand side.
         if matches!(self.peek_same_line(), Some(TokenType::Comma)) {
-            let mut count = 1u16;
-            while self.eat_if(TokenType::Comma) {
-                // A line boundary ends the tuple; `peek_same_line` won't cross the Newline.
-                if self.peek_same_line().is_none() { break; }
-                self.expr();
-                count += 1;
-            }
+            // A line boundary ends the tuple; `peek_same_line` won't cross the Newline.
+            let count = self.tuple_rest(1, |s| s.peek_same_line().is_none());
             self.chunk.emit(OpCode::BuildTuple, count);
         }
         self.store_name(name);

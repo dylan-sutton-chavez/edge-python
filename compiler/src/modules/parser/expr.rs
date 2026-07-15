@@ -239,11 +239,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 } else {
                     let elem_start = self.chunk.instructions.len();
                     self.expr();
-                    if matches!(self.peek(), Some(TokenType::For)) {
-                        let versions_before = self.ssa_versions.clone();
-                        let elem_ins: Vec<Instruction> = self.chunk.instructions.drain(elem_start..).collect();
-                        self.chunk.emit(OpCode::BuildList, 0);
-                        self.comprehension_loop(&[(elem_start, elem_ins)], OpCode::ListAppend, &versions_before);
+                    if self.maybe_comprehension(elem_start, OpCode::BuildList, OpCode::ListAppend) {
                         self.advance();
                     } else if self.eat_if(TokenType::Comma) {
                         let mut count = 1u16;
@@ -290,9 +286,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     self.chunk.emit(OpCode::StoreGlobal, i);
                     self.chunk.emit(OpCode::LoadGlobal, i);
                 } else {
-                    let ver = self.increment_version(&name);
-                    let i = self.push_ssa_name(&name, ver);
-                    self.chunk.emit(OpCode::StoreName, i);
+                    let i = self.emit_store_new(&name);
                     self.chunk.emit(OpCode::LoadName, i);
                 }
             }

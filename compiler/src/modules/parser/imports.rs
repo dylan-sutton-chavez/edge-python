@@ -15,8 +15,8 @@ use alloc::{string::{String, ToString}, vec::Vec};
 
 impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
-    /* `import name [as alias]`: resolves and binds module as HeapObj::Module under alias. */
-    pub(super) fn do_import_stmt(&mut self) {
+    /* `import name [as alias]`: resolves and binds module as HeapObj::Module under alias. Compile-time only, no import opcodes reach the VM. */
+    pub(super) fn import_stmt(&mut self) {
         self.advance(); // 'import'
         loop {
             let (spec, span) = self.read_module_spec();
@@ -31,7 +31,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     }
 
     /* `from <spec> import names|*`: spec is URL, path, or bare name; `*` binds all exports. Names may be parenthesized for multi-line lists, trailing comma allowed. */
-    pub(super) fn do_from_stmt(&mut self) {
+    pub(super) fn parse_from_stmt(&mut self) {
         self.advance(); // 'from'
         let (spec, spec_span) = self.read_module_spec();
         self.eat(TokenType::Import);
@@ -180,9 +180,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.chunk.emit(OpCode::LoadModule, import_idx);
         let attr_idx = self.chunk.push_name(name);
         self.chunk.emit(OpCode::LoadAttr, attr_idx);
-        let ver = self.increment_version(alias);
-        let slot = self.push_ssa_name(alias, ver);
-        self.chunk.emit(OpCode::StoreName, slot);
+        self.emit_store_new(alias);
     }
 
     /* Named import: registers module, emits LoadModule+LoadAttr+StoreName; Native also populates extern_table for functions. */
@@ -248,9 +246,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             }
         };
         self.chunk.emit(OpCode::LoadModule, import_idx);
-        let alias_ver = self.increment_version(alias);
-        let alias_slot = self.push_ssa_name(alias, alias_ver);
-        self.chunk.emit(OpCode::StoreName, alias_slot);
+        self.emit_store_new(alias);
     }
 
     /* Star import: Native fills extern_index; Code scans top-level and emits LoadModule+LoadAttr+StoreName per export. */
