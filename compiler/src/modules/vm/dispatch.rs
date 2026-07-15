@@ -35,6 +35,7 @@ impl<'a> VM<'a> {
                     None => return Ok(FastOutcome::Overflow),
                 }
             }
+            FastOp::SubFloat if a.is_float() && b.is_float() => Val::float(a.as_float() - b.as_float()),
             FastOp::MulInt if a.is_int() && b.is_int() => {
                 let r = a.as_int() as i128 * b.as_int() as i128;
                 if r >= Val::INT_MIN as i128 && r <= Val::INT_MAX as i128 { Val::int(r as i64) } else { return Ok(FastOutcome::Overflow); }

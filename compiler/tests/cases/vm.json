@@ -3686,5 +3686,15 @@
   {"src":"def f():\n    return missing_name\ndef g():\n    return f()\ntry:\n    g()\nexcept NameError:\n    print('NameError')","output":["NameError"]},
   {"src":"x = 5\ndef f():\n    return x\nprint(f())\nx = 7\nprint(f())","output":["5", "7"]},
   {"src":"def f():\n    return N\ndef g():\n    unrelated = 123\n    return f()\nN = 4\nprint(f())\nprint(g())","output":["4", "4"]},
-  {"src":"def f(b):\n    if b:\n        return W\n    return 0\nprint(f(False))\nW = 8\nprint(f(True))","output":["0", "8"]}
+  {"src":"def f(b):\n    if b:\n        return W\n    return 0\nprint(f(False))\nW = 8\nprint(f(True))","output":["0", "8"]},
+  {"src":"print(3.5 - 1.25)","output":["2.25"]},
+  {"src":"print(1.5 - 2.75)","output":["-1.25"]},
+  {"src":"print(2.5 - 2.5)","output":["0.0"]},
+  {"src":"x = 100.0\nfor _ in range(50):\n    x = x - 1.5\nprint(x)","output":["25.0"]},
+  {"src":"x = 10.0\nfor _ in range(10):\n    x -= 0.5\nprint(x)","output":["5.0"]},
+  {"src":"s = 0.0\nfor i in range(20):\n    s = s - 0.25\nprint(s)","output":["-5.0"]},
+  {"src":"def sub(a, b):\n    return a - b\nfor _ in range(30):\n    r = sub(8.5, 0.5)\nprint(r)\nprint(sub(9, 2))\nprint(sub(9.5, 0.25))","output":["8.0", "7", "9.25"]},
+  {"src":"vals = [5, 5.0, 7, 7.5]\nfor v in vals:\n    print(v - 1.5)","output":["3.5", "3.5", "5.5", "6.0"]},
+  {"src":"x = float('inf')\nprint(x - 1e308)\nprint(1e308 - x)","output":["inf", "-inf"]},
+  {"src":"n = float('nan')\nfor _ in range(10):\n    n = n - 1.0\nprint(n)","output":["nan"]}
 ]
