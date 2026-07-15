@@ -27,23 +27,19 @@ fn map(data: &[u8], f: impl Fn(f64) -> f64) -> Result<Vec<u8>> {
 
 /* Element-wise transforms: `bytes` -> `bytes`, same length. */
 
-#[plugin_fn]
-fn sqrt_all(data: Bytes) -> Result<Bytes> { Ok(Bytes(map(&data, libm::sqrt)?)) }
+macro_rules! map_all { ($($f:ident => $l:ident),* $(,)?) => { $(
+    #[plugin_fn]
+    fn $f(data: Bytes) -> Result<Bytes> { Ok(Bytes(map(&data, libm::$l)?)) }
+)* } }
 
-#[plugin_fn]
-fn abs_all(data: Bytes) -> Result<Bytes> { Ok(Bytes(map(&data, libm::fabs)?)) }
-
-#[plugin_fn]
-fn exp_all(data: Bytes) -> Result<Bytes> { Ok(Bytes(map(&data, libm::exp)?)) }
-
-#[plugin_fn]
-fn log_all(data: Bytes) -> Result<Bytes> { Ok(Bytes(map(&data, libm::log)?)) }
-
-#[plugin_fn]
-fn sin_all(data: Bytes) -> Result<Bytes> { Ok(Bytes(map(&data, libm::sin)?)) }
-
-#[plugin_fn]
-fn cos_all(data: Bytes) -> Result<Bytes> { Ok(Bytes(map(&data, libm::cos)?)) }
+map_all!(
+    sqrt_all => sqrt,
+    abs_all => fabs,
+    exp_all => exp,
+    log_all => log,
+    sin_all => sin,
+    cos_all => cos,
+);
 
 /* Reductions: `bytes` -> scalar, the largest boundary win (N values in, one out). */
 

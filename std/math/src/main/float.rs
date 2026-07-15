@@ -8,6 +8,47 @@ use wasm_pdk::*;
 // Raises ValueError with this exact text on out-of-domain inputs.
 fn dom() -> Error { Error::Value(String::from("math domain error")) }
 
+// One-arg libm pass-throughs.
+macro_rules! libm1 { ($($f:ident),* $(,)?) => { $(
+    #[plugin_fn]
+    fn $f(x: f64) -> f64 { libm::$f(x) }
+)* } }
+
+// One-arg with an out-of-domain predicate.
+macro_rules! dom1 { ($($f:ident($x:ident) if $bad:expr),* $(,)?) => { $(
+    #[plugin_fn]
+    fn $f($x: f64) -> Result<f64> {
+        if $bad { return Err(dom()); }
+        Ok(libm::$f($x))
+    }
+)* } }
+
+// NaN result from non-NaN input means domain error.
+macro_rules! nan1 { ($($f:ident => $l:ident),* $(,)?) => { $(
+    #[plugin_fn]
+    fn $f(x: f64) -> Result<f64> {
+        let r = libm::$l(x);
+        if r.is_nan() && !x.is_nan() { return Err(dom()); }
+        Ok(r)
+    }
+)* } }
+
+// Two-arg variant of `nan1`.
+macro_rules! nan2 { ($($f:ident),* $(,)?) => { $(
+    #[plugin_fn]
+    fn $f(x: f64, y: f64) -> Result<f64> {
+        let r = libm::$f(x, y);
+        if r.is_nan() && !x.is_nan() && !y.is_nan() { return Err(dom()); }
+        Ok(r)
+    }
+)* } }
+
+// Round with libm, then convert via `to_int`.
+macro_rules! int1 { ($($f:ident),* $(,)?) => { $(
+    #[plugin_fn]
+    fn $f(x: f64) -> Result<i128> { to_int(libm::$f(x)) }
+)* } }
+
 /* Constants */
 
 #[plugin_const]
@@ -27,28 +68,11 @@ fn nan() -> f64 { f64::NAN }
 
 /* Power and logarithmic */
 
-#[plugin_fn]
-fn sqrt(x: f64) -> Result<f64> { if x < 0.0 { return Err(dom()); } Ok(libm::sqrt(x)) }
+dom1!(sqrt(x) if x < 0.0);
+libm1!(cbrt, exp, exp2, expm1);
 
-#[plugin_fn]
-fn cbrt(x: f64) -> f64 { libm::cbrt(x) }
-
-#[plugin_fn]
-fn exp(x: f64) -> f64 { libm::exp(x) }
-
-#[plugin_fn]
-fn exp2(x: f64) -> f64 { libm::exp2(x) }
-
-#[plugin_fn]
-fn expm1(x: f64) -> f64 { libm::expm1(x) }
-
-#[plugin_fn]
-fn pow(x: f64, y: f64) -> Result<f64> {
-    let r = libm::pow(x, y);
-    // libm yields NaN on a domain error such as a negative base with a fractional exponent.
-    if r.is_nan() && !x.is_nan() && !y.is_nan() { return Err(dom()); }
-    Ok(r)
-}
+// libm yields NaN on a domain error such as a negative base with a fractional exponent.
+nan2!(pow);
 
 // Optional second positional `base`, matching `math.log(x[, base])`.
 #[plugin_fn]
@@ -66,34 +90,19 @@ fn log(x: f64, rest: Args) -> Result<f64> {
     }
 }
 
-#[plugin_fn]
-fn log2(x: f64) -> Result<f64> { if x <= 0.0 { return Err(dom()); } Ok(libm::log2(x)) }
-
-#[plugin_fn]
-fn log10(x: f64) -> Result<f64> { if x <= 0.0 { return Err(dom()); } Ok(libm::log10(x)) }
-
-#[plugin_fn]
-fn log1p(x: f64) -> Result<f64> { if x <= -1.0 { return Err(dom()); } Ok(libm::log1p(x)) }
+dom1!(
+    log2(x) if x <= 0.0,
+    log10(x) if x <= 0.0,
+    log1p(x) if x <= -1.0,
+);
 
 /* Trigonometric */
 
-#[plugin_fn]
-fn sin(x: f64) -> f64 { libm::sin(x) }
-
-#[plugin_fn]
-fn cos(x: f64) -> f64 { libm::cos(x) }
-
-#[plugin_fn]
-fn tan(x: f64) -> f64 { libm::tan(x) }
-
-#[plugin_fn]
-fn asin(x: f64) -> Result<f64> { if !(-1.0..=1.0).contains(&x) { return Err(dom()); } Ok(libm::asin(x)) }
-
-#[plugin_fn]
-fn acos(x: f64) -> Result<f64> { if !(-1.0..=1.0).contains(&x) { return Err(dom()); } Ok(libm::acos(x)) }
-
-#[plugin_fn]
-fn atan(x: f64) -> f64 { libm::atan(x) }
+libm1!(sin, cos, tan, atan);
+dom1!(
+    asin(x) if !(-1.0..=1.0).contains(&x),
+    acos(x) if !(-1.0..=1.0).contains(&x),
+);
 
 #[plugin_fn]
 fn atan2(y: f64, x: f64) -> f64 { libm::atan2(y, x) }
@@ -126,23 +135,11 @@ fn dist(p: Handle, q: Handle) -> Result<f64> {
 
 /* Hyperbolic */
 
-#[plugin_fn]
-fn sinh(x: f64) -> f64 { libm::sinh(x) }
-
-#[plugin_fn]
-fn cosh(x: f64) -> f64 { libm::cosh(x) }
-
-#[plugin_fn]
-fn tanh(x: f64) -> f64 { libm::tanh(x) }
-
-#[plugin_fn]
-fn asinh(x: f64) -> f64 { libm::asinh(x) }
-
-#[plugin_fn]
-fn acosh(x: f64) -> Result<f64> { if x < 1.0 { return Err(dom()); } Ok(libm::acosh(x)) }
-
-#[plugin_fn]
-fn atanh(x: f64) -> Result<f64> { if x <= -1.0 || x >= 1.0 { return Err(dom()); } Ok(libm::atanh(x)) }
+libm1!(sinh, cosh, tanh, asinh);
+dom1!(
+    acosh(x) if x < 1.0,
+    atanh(x) if x <= -1.0 || x >= 1.0,
+);
 
 /* Angular conversion */
 
@@ -154,44 +151,13 @@ fn radians(x: f64) -> f64 { x * (core::f64::consts::PI / 180.0) }
 
 /* Special functions */
 
-#[plugin_fn]
-fn erf(x: f64) -> f64 { libm::erf(x) }
-
-#[plugin_fn]
-fn erfc(x: f64) -> f64 { libm::erfc(x) }
-
-#[plugin_fn]
-fn gamma(x: f64) -> Result<f64> {
-    let r = libm::tgamma(x);
-    if r.is_nan() && !x.is_nan() { return Err(dom()); }
-    Ok(r)
-}
-
-#[plugin_fn]
-fn lgamma(x: f64) -> Result<f64> {
-    let r = libm::lgamma(x);
-    if r.is_nan() && !x.is_nan() { return Err(dom()); }
-    Ok(r)
-}
+libm1!(erf, erfc);
+nan1!(gamma => tgamma, lgamma => lgamma);
 
 /* Floating-point manipulation and classification */
 
-#[plugin_fn]
-fn fabs(x: f64) -> f64 { libm::fabs(x) }
-
-#[plugin_fn]
-fn fmod(x: f64, y: f64) -> Result<f64> {
-    let r = libm::fmod(x, y);
-    if r.is_nan() && !x.is_nan() && !y.is_nan() { return Err(dom()); }
-    Ok(r)
-}
-
-#[plugin_fn]
-fn remainder(x: f64, y: f64) -> Result<f64> {
-    let r = libm::remainder(x, y);
-    if r.is_nan() && !x.is_nan() && !y.is_nan() { return Err(dom()); }
-    Ok(r)
-}
+libm1!(fabs);
+nan2!(fmod, remainder);
 
 #[plugin_fn]
 fn copysign(x: f64, y: f64) -> f64 { libm::copysign(x, y) }
@@ -220,14 +186,7 @@ fn to_int(x: f64) -> Result<i128> {
     Ok(x as i128)
 }
 
-#[plugin_fn]
-fn floor(x: f64) -> Result<i128> { to_int(libm::floor(x)) }
-
-#[plugin_fn]
-fn ceil(x: f64) -> Result<i128> { to_int(libm::ceil(x)) }
-
-#[plugin_fn]
-fn trunc(x: f64) -> Result<i128> { to_int(libm::trunc(x)) }
+int1!(floor, ceil, trunc);
 
 // `modf(x) -> (fractional, integral)`, both with the sign of `x`.
 #[plugin_fn]
