@@ -30,7 +30,8 @@ export function makeRt(getExports) {
     };
 }
 
-function decodeBytes(exps, handle, expectedTag) {
+// Shared alloc/decode/retry cycle; returns tag+bytes.
+function rawDecode(exps, handle) {
     const tagPtr = exps.wasm_alloc(4);
     let cap = 256;
     let dstPtr = exps.wasm_alloc(cap);
@@ -44,13 +45,15 @@ function decodeBytes(exps, handle, expectedTag) {
     }
     const tag = new DataView(exps.memory.buffer).getUint32(tagPtr, true);
     exps.wasm_free(tagPtr, 4);
-    if (tag !== expectedTag) {
-        exps.wasm_free(dstPtr, cap);
-        throw new Error(`expected tag ${expectedTag}, got ${tag}`);
-    }
-    const out = new Uint8Array(exps.memory.buffer, dstPtr, n).slice();
+    const bytes = n > 0 ? new Uint8Array(exps.memory.buffer, dstPtr, n).slice() : new Uint8Array(0);
     exps.wasm_free(dstPtr, cap);
-    return out;
+    return { tag, bytes };
+}
+
+function decodeBytes(exps, handle, expectedTag) {
+    const { tag, bytes } = rawDecode(exps, handle);
+    if (tag !== expectedTag) throw new Error(`expected tag ${expectedTag}, got ${tag}`);
+    return bytes;
 }
 
 const decodeStr = (exps, h) => TD.decode(decodeBytes(exps, h, TAG_BYTES));
@@ -98,23 +101,9 @@ function encodeFloat(exps, f) {
     return h;
 }
 
-/* Decode any tag -> JS value; mirrors `decodeBytes` but inspects (not asserts) the tag. */
+// Decode any tag to a JS value.
 function decodeAny(exps, handle) {
-    const tagPtr = exps.wasm_alloc(4);
-    let cap = 256;
-    let dstPtr = exps.wasm_alloc(cap);
-    let n = exps.host_edge_decode(handle, tagPtr, dstPtr, cap);
-    if (n < 0) {
-        const needed = -n;
-        exps.wasm_free(dstPtr, cap);
-        cap = needed;
-        dstPtr = exps.wasm_alloc(cap);
-        n = exps.host_edge_decode(handle, tagPtr, dstPtr, cap);
-    }
-    const tag = new DataView(exps.memory.buffer).getUint32(tagPtr, true);
-    exps.wasm_free(tagPtr, 4);
-    const bytes = n > 0 ? new Uint8Array(exps.memory.buffer, dstPtr, n).slice() : new Uint8Array(0);
-    exps.wasm_free(dstPtr, cap);
+    const { tag, bytes } = rawDecode(exps, handle);
     switch (tag) {
         case TAG_NONE: return null;
         case TAG_BOOL: return bytes[0] !== 0;
