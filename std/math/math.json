@@ -53,5 +53,6 @@
   {"src": "acos(2)", "error": "math domain error"},
   {"src": "factorial(-1)", "error": "factorial() not defined for negative values"},
   {"src": "isqrt(-1)", "error": "nonnegative"},
-  {"src": "sqrt_all(bytes(7))", "error": "multiple of 8"}
+  {"src": "sqrt_all(bytes(7))", "error": "multiple of 8"},
+  {"src": "s = 0.0\nfor i in range(300000):\n    s += sin(i * 0.001)\nprint(isfinite(s))\nprint('done')", "output": ["True", "done"]}
 ]

@@ -3714,5 +3714,12 @@
   {"src":"x = 3\ndef inner():\n    return globals()['x']\ndef outer():\n    return inner()\nprint(outer())","output":["3"]},
   {"src":"def f():\n    return K\ndef g():\n    return f()\nK = 1\nfor _ in range(5):\n    g()\nprint(g())\nK = 2\nprint(g())","output":["1", "2"]},
   {"src":"class C:\n    def m(self, a, b, c, d, e, f, g, h, i):\n        return a + b + c + d + e + f + g + h + i\nc = C()\nprint(c.m(1, 2, 3, 4, 5, 6, 7, 8, 9))","output":["45"]},
-  {"src":"class C:\n    def m(self, **kw):\n        return sorted(kw.items())\nc = C()\nprint(c.m(a=1, b=2, c=3, d=4, e=5))","output":["[('a', 1), ('b', 2), ('c', 3), ('d', 4), ('e', 5)]"]}
+  {"src":"class C:\n    def m(self, **kw):\n        return sorted(kw.items())\nc = C()\nprint(c.m(a=1, b=2, c=3, d=4, e=5))","output":["[('a', 1), ('b', 2), ('c', 3), ('d', 4), ('e', 5)]"]},
+  {"src":"x = f\"a\" f\"b\"\nprint(x)","output":["ab"]},
+  {"src":"x = (f\"a\"\n     f\"b\")\nprint(x)","output":["ab"]},
+  {"src":"print(\"a\" f\"b\")","output":["ab"]},
+  {"src":"v = 1\nprint(f\"{v}a\" f\"{v}b\")","output":["1a1b"]},
+  {"src":"class C:\n    def __init__(self):\n        self.v = 0\n\nxs = [C()]\nxs[0].v = 7\nprint(xs[0].v)","output":["7"]},
+  {"src":"class C:\n    def __init__(self):\n        self.v = 0\n\nxs = [C()]\nxs[0].v += 1\nprint(xs[0].v)","output":["1"]},
+  {"src":"class C:\n    def __init__(self):\n        self.v = 0\nclass D:\n    def __init__(self):\n        self.items = [C()]\n\nd = D()\nd.items[0].v = 9\nprint(d.items[0].v)","output":["9"]}
 ]
