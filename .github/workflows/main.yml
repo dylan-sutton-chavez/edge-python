@@ -79,7 +79,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [json, re, math, struct, test]
+        # math re-enters (revert) once struct is on the CDN.
+        package: [json, re, struct, test]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/std
