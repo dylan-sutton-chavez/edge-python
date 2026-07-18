@@ -232,12 +232,13 @@ impl<'a> VM<'a> {
     }
 
     pub(crate) fn handle_load_attr(&mut self, name_idx: u16, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
-        let name = chunk.names.get(name_idx as usize).ok_or(VmErr::Runtime("LoadAttr: bad name index"))?.clone();
+        // Borrow, don't clone: `chunk` outlives every `&mut self` call below.
+        let name = chunk.names.get(name_idx as usize).ok_or(VmErr::Runtime("LoadAttr: bad name index"))?;
         let obj = self.pop()?;
-        let lookup = match self.resolve_attr(obj, &name) {
+        let lookup = match self.resolve_attr(obj, name) {
             Ok(l) => l,
             Err(VmErr::Attribute(msg)) => {
-                if let Some(v) = self.try_getattr_fallback(obj, &name, chunk, slots)? {
+                if let Some(v) = self.try_getattr_fallback(obj, name, chunk, slots)? {
                     self.push(v);
                     return Ok(());
                 }

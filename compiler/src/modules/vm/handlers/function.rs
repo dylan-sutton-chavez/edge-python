@@ -199,14 +199,15 @@ impl<'a> VM<'a> {
         let callee = self.pop()?;
         if !callee.is_heap() { return Err(cold_type("object is not callable")); }
 
-        if self.try_dispatch_non_func_callable(callee, &positional, &kw_flat, num_kw, chunk, slots)? {
-            return Ok(());
-        }
-
-        // Snapshot defaults/captures once, both are tiny (<10), and cloning beats the 3+ heap re-reads later phases would do. Back-prop still uses `get_mut` since it writes.
+        // Snapshot defaults/captures once, both are tiny (<10), and cloning beats the 3+ heap re-reads later phases would do. Back-prop still uses `get_mut` since it writes. Probing Func first skips the 9-shape non-func walk on the hottest (user function) path.
         let (fi, defaults, captures) = match self.heap.get(callee) {
             HeapObj::Func(i, d, c) => (*i, d.clone(), c.clone()),
-            _ => return Err(cold_type("object is not callable")),
+            _ => {
+                if self.try_dispatch_non_func_callable(callee, &positional, &kw_flat, num_kw, chunk, slots)? {
+                    return Ok(());
+                }
+                return Err(cold_type("object is not callable"));
+            }
         };
 
         // Pure-call memoisation. Disabled under impure outer frames (stale-view risk) or kwargs (cache key only spans positionals).
@@ -219,7 +220,10 @@ impl<'a> VM<'a> {
 
         self.depth += 1;
         let (_params, body, _, _) = self.functions[fi];
-        let mut fn_slots = self.slot_templates[fi].clone();
+        // Reuse a pooled buffer: clear + bulk copy beats a fresh alloc per call.
+        let mut fn_slots = self.slot_pool.pop().unwrap_or_default();
+        fn_slots.clear();
+        fn_slots.extend_from_slice(&self.slot_templates[fi]);
 
         self.bind_function_args(fi, &defaults, &captures, &positional, &kw_flat, &mut fn_slots)?;
 
@@ -283,6 +287,8 @@ impl<'a> VM<'a> {
             }
             self.push(result);
         }
+        // Recycle the frame buffer; error/suspend paths above just drop theirs.
+        if self.slot_pool.len() < 64 { self.slot_pool.push(fn_slots); }
         Ok(())
     }
 
@@ -298,11 +304,12 @@ impl<'a> VM<'a> {
         self.pending.kw_delta = 0;
 
         let total_items = num_pos + 2 * num_kw;
-        let mut stack_items: Vec<Val> = (0..total_items).map(|_| self.pop()).collect::<Result<_, _>>()?;
-        stack_items.reverse();
-
-        let kw_flat: Vec<Val> = stack_items.split_off(num_pos);
-        Ok((stack_items, kw_flat, num_pos, num_kw))
+        // Bulk-copy the stack tail: one memcpy instead of per-item pops plus a reverse.
+        let at = self.stack.len().checked_sub(total_items).ok_or(cold_runtime("stack underflow"))?;
+        let kw_flat: Vec<Val> = self.stack[at + num_pos..].to_vec();
+        let mut positional = self.stack.split_off(at);
+        positional.truncate(num_pos);
+        Ok((positional, kw_flat, num_pos, num_kw))
     }
 
     /* Pack a flat `[name, val, name, val, ...]` slice into a heap dict for the trailing kwargs slot. `None` when there are no kwargs so the FFI layer can serialize handle 0 on the wire. */
@@ -558,19 +565,14 @@ impl<'a> VM<'a> {
 
     /* Push caller slots into body slots. Same scope: late-binding, overwrite freely. Different scope: skip capture-filled slots (fixes stacked-decorator clobber). */
     fn apply_caller_slot_propagation(&mut self, fi: usize, captures: &[(usize, Val)], chunk: &SSAChunk, slots: &[Val], fn_slots: &mut [Val]) {
-        let caller_fi = self.body_to_fi.get(&(chunk as *const _)).copied();
-        let callee_parent_fi = self.function_parents.get(fi).and_then(|x| *x);
-        // Same-scope also requires same module, keeps top-level imports (`parent_fi == None`) isolated.
-        let caller_module = caller_fi.and_then(|cf| self.fn_module.get(cf).cloned().flatten());
-        let callee_module = self.fn_module.get(fi).cloned().flatten();
-        let same_scope = caller_fi == callee_parent_fi && caller_module == callee_module;
-        let captured_set: crate::util::fx::FxHashSet<usize> = if same_scope {
+        let info = self.propagation_map(fi, chunk);
+        let captured_set: crate::util::fx::FxHashSet<usize> = if info.same_scope {
             crate::util::fx::FxHashSet::default()
         } else {
             captures.iter().map(|(s, _)| *s).collect()
         };
         // Undef/captured filters stay per-call; the name matching is cached.
-        for &(si, bs) in self.propagation_map(fi, chunk).iter() {
+        for &(si, bs) in info.pairs.iter() {
             let bs = bs as usize;
             if let Some(&v) = slots.get(si as usize)
                 && !v.is_undef()
@@ -580,17 +582,28 @@ impl<'a> VM<'a> {
             }
         }
 
-        // Bare-name fallback: body refs `<base>_0` but caller may store a higher SSA version. `resolve_free_name` centralises the three-layer order; captured slots are skipped.
-        let free_loads = &self.body_free_loads[fi];
-        for (bare, bs) in free_loads {
-            if captured_set.contains(bs) { continue; }
-            if let Some(v) = self.resolve_free_name(fi, bare, chunk, slots) {
-                fn_slots[*bs] = v;
+        // Bare-name fallback: body refs `<base>_0` but caller may store a higher SSA version. Layer 1 (caller's latest live version) runs off the cached candidates; misses fall to the shared slow layers.
+        for (bare, bs, versions) in info.free.iter() {
+            let bs = *bs as usize;
+            if captured_set.contains(&bs) { continue; }
+            let mut latest_ver: i64 = -1;
+            let mut latest_v: Val = Val::undef();
+            for &(v, si) in versions.iter() {
+                let si = si as usize;
+                if si < slots.len() && !slots[si].is_undef() && v > latest_ver {
+                    latest_ver = v;
+                    latest_v = slots[si];
+                }
+            }
+            if !latest_v.is_undef() {
+                fn_slots[bs] = latest_v;
+            } else if let Some(v) = self.resolve_free_name_fallback(fi, bare) {
+                fn_slots[bs] = v;
             }
         }
     }
 
-    /* Build or fetch the static (caller slot, body slot) name-match pairs for (chunk, fi). Chunks are borrowed for the VM's lifetime, so the pointer key is stable. */
+    /* Build or fetch the static propagation info for (chunk, fi). Chunks are borrowed for the VM's lifetime, so the pointer key is stable. */
     fn propagation_map(&mut self, fi: usize, chunk: &SSAChunk) -> super::super::PropagationMap {
         let key = (chunk as *const SSAChunk, fi);
         if let Some(m) = self.propagation_maps.get(&key) { return m.clone(); }
@@ -603,26 +616,30 @@ impl<'a> VM<'a> {
                 Some((si as u32, bs as u32))
             })
             .collect();
-        let map: alloc::rc::Rc<[(u32, u32)]> = pairs.into();
+        // Same-scope also requires same module, keeps top-level imports (`parent_fi == None`) isolated.
+        let caller_fi = self.body_to_fi.get(&(chunk as *const _)).copied();
+        let callee_parent_fi = self.function_parents.get(fi).and_then(|x| *x);
+        let caller_module = caller_fi.and_then(|cf| self.fn_module.get(cf).and_then(|m| m.as_deref()));
+        let callee_module = self.fn_module.get(fi).and_then(|m| m.as_deref());
+        let same_scope = caller_fi == callee_parent_fi && caller_module == callee_module;
+        // Free loads with their caller-chunk (version, slot) candidates resolved once.
+        let name_index = self.chunk_name_versions.get(&(chunk as *const _));
+        let free: Vec<super::super::FreeLoadEntry> = self.body_free_loads[fi].iter()
+            .map(|(bare, bs)| {
+                let versions = name_index
+                    .and_then(|idx| idx.get(bare.as_str()))
+                    .map(|v| v.iter().map(|&(ver, si)| (ver, si as u32)).collect())
+                    .unwrap_or_default();
+                (bare.clone(), *bs as u32, versions)
+            })
+            .collect();
+        let map: super::super::PropagationMap = alloc::rc::Rc::new(super::super::PropInfo { same_scope, pairs, free });
         self.propagation_maps.insert(key, map.clone());
         map
     }
 
-    /* Four-layer fallback for a bare free-load name: caller's latest SSA -> callee module attrs -> entry globals -> entry module state. First hit wins. Centralised so the order is auditable. */
-    fn resolve_free_name(&self, fi: usize, bare: &str, chunk: &SSAChunk, slots: &[Val]) -> Option<Val> {
-        // Layer 1: caller's most-recent SSA version of `bare`.
-        if let Some(idx) = self.chunk_name_versions.get(&(chunk as *const _)) && let Some(versions) = idx.get(bare)
-        {
-            let mut latest_ver: i64 = -1;
-            let mut latest_v: Val = Val::undef();
-            for &(v, si) in versions {
-                if si < slots.len() && !slots[si].is_undef() && v > latest_ver {
-                    latest_ver = v;
-                    latest_v = slots[si];
-                }
-            }
-            if !latest_v.is_undef() { return Some(latest_v); }
-        }
+    /* Slow layers for a bare free-load name after the caller-slot layer missed: callee module attrs -> entry globals -> entry module state. First hit wins. Centralised so the order is auditable. */
+    fn resolve_free_name_fallback(&self, fi: usize, bare: &str) -> Option<Val> {
         // Layer 2: callee's module attrs, keeps `a.helper` and `b.helper` isolated.
         if let Some(Some(spec)) = self.fn_module.get(fi).cloned()
             && let Some(mod_val) = self.module_table.get(&spec).copied()
@@ -658,9 +675,11 @@ impl<'a> VM<'a> {
 
     /* Run the body with caller slots pinned in `live_slots` (GC roots) and a CallFrame on `call_stack` (traceback). Frame popped on success only; the dispatch catch clears it on swallowed exceptions. Returns `(callee_impure, exec_result)`. */
     fn run_body_with_frame(&mut self, fi: usize, body: &SSAChunk, chunk: &SSAChunk, fn_slots: &mut [Val], slots: &[Val]) -> (bool, Result<Val, VmErr>) {
-        // `mark()` short-circuits on non-heap values, so the whole slice is fine.
+        // GC roots come from `active_slots` (every live exec frame); `live_slots` only feeds `globals()`, which reads the entry chunk's slots at the bottom. Copy just that frame.
         let snap = self.live_slots.len();
-        self.live_slots.extend_from_slice(slots);
+        if snap == 0 && core::ptr::eq(chunk, self.chunk) {
+            self.live_slots.extend_from_slice(slots);
+        }
 
         // Frame snapshots caller's source/path so render doesn't borrow live chunk pointers.
         let call_byte_pos = self.pending.call_byte_pos.take().unwrap_or(0);

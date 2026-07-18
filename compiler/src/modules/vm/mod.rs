@@ -73,8 +73,19 @@ impl Pending {
 
 /* `bare_name -> [(version, slot), ...]` for one chunk's `chunk.names`. */
 pub(crate) type NameVersionIndex = crate::util::fx::FxHashMap<String, Vec<(i64, usize)>>;
-// (caller slot, body slot) pairs for one call site.
-pub(crate) type PropagationMap = alloc::rc::Rc<[(u32, u32)]>;
+
+/* Free-load propagation entry: (bare name, body slot, caller [(version, slot)] candidates). */
+pub(crate) type FreeLoadEntry = (String, u32, Vec<(i64, u32)>);
+
+/* Static caller->callee propagation data for one (caller chunk, callee fi) pair; built once, then per call is pure slot reads (no string hashing). */
+pub(crate) struct PropInfo {
+    /* Caller/callee share the lexical scope and module: late-binding, overwrite freely. */
+    pub same_scope: bool,
+    /* (caller slot, body slot) exact-name matches. */
+    pub pairs: Vec<(u32, u32)>,
+    pub free: Vec<FreeLoadEntry>,
+}
+pub(crate) type PropagationMap = alloc::rc::Rc<PropInfo>;
 
 pub struct VM<'a> {
     pub(crate) stack: Vec<Val>,
@@ -108,6 +119,8 @@ pub struct VM<'a> {
     pub(crate) param_slots: Vec<Vec<(ParamKind, usize)>>,
     pub(crate) slot_templates: Vec<Vec<Val>>,
     pub(crate) nonlocal_tables: Vec<Vec<(usize, usize)>>,
+    /* Recycled fn_slots buffers; popped in exec_call, pushed back on normal return. Never a GC root (entries are cleared before reuse). */
+    pub(crate) slot_pool: Vec<Vec<Val>>,
     pub(crate) needs_caller_slots: Vec<bool>,
     /* Bitmap: slot bound to a formal parameter; protected from caller-slot propagation. */
     pub(crate) is_param_slot: Vec<Vec<bool>>,
@@ -224,6 +237,7 @@ impl<'a> VM<'a> {
             param_slots: Vec::new(),
             slot_templates: Vec::new(),
             nonlocal_tables: Vec::new(),
+            slot_pool: Vec::new(),
             needs_caller_slots: Vec::new(),
             is_param_slot: Vec::new(),
             body_free_loads: Vec::new(),

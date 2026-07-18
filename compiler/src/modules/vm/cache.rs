@@ -235,20 +235,40 @@ fn result_memoizable(result: Val, heap: &super::types::HeapPool) -> bool {
     matches!(heap.try_get(result), Some(HeapObj::Str(_) | HeapObj::Bytes(_) | HeapObj::LongInt(_)))
 }
 
+/* Disable a fi's memo after this many consecutive lookup misses; the scan tax outweighs stale hope. */
+const MISS_LIMIT: u16 = 256;
+
 // Indexed by dense `fi`; Vec gives O(1) lookup with no HashMap monomorphization.
-pub struct Templates { slots: Vec<Vec<TplEntry>> }
+pub struct Templates { slots: Vec<Vec<TplEntry>>, misses: Vec<u16> }
 
 impl Templates {
-    pub fn new() -> Self { Self { slots: Vec::new() } }
+    pub fn new() -> Self { Self { slots: Vec::new(), misses: Vec::new() } }
 
-    pub fn lookup(&self, fi: usize, args: &[Val], heap: &super::types::HeapPool) -> Option<Val> {
+    fn dead(&self, fi: usize) -> bool {
+        self.misses.get(fi).copied().unwrap_or(0) >= MISS_LIMIT
+    }
+
+    pub fn lookup(&mut self, fi: usize, args: &[Val], heap: &super::types::HeapPool) -> Option<Val> {
+        let entries = self.slots.get(fi)?;
+        if entries.is_empty() || self.dead(fi) { return None; }
         let h = hash_args(args);
-        self.slots.get(fi)?.iter()
+        let hit = entries.iter()
             .find(|e| e.hits >= TPL_THRESH && args_match(e, args, h, heap))
-            .map(|e| e.result)
+            .map(|e| e.result);
+        if self.misses.len() <= fi { self.misses.resize(fi + 1, 0); }
+        match hit {
+            Some(_) => self.misses[fi] = 0,
+            None => {
+                self.misses[fi] = self.misses[fi].saturating_add(1);
+                // Reclaim the dead table: entries would otherwise stay GC roots forever.
+                if self.misses[fi] >= MISS_LIMIT { self.slots[fi] = Vec::new(); }
+            }
+        }
+        hit
     }
 
     pub fn record(&mut self, fi: usize, args: &[Val], result: Val, heap: &super::types::HeapPool) {
+        if self.dead(fi) { return; }
         if !args_memoizable(args, heap) || !result_memoizable(result, heap) { return; }
         if self.slots.len() <= fi { self.slots.resize_with(fi + 1, Vec::new); }
         let h = hash_args(args);
@@ -274,24 +294,48 @@ impl Templates {
     }
 }
 
-/* Fuse adjacent LoadAttr+Call(0) into CallMethod+CallMethodArgs; only safe when Call has no args. */
+/* Fuse LoadAttr + [single-push arg loads] + Call into CallMethod+CallMethodArgs. Arg loads shift left one slot so the pair sits adjacent at the Call; only pure single-push opcodes relocate, and never across a jump target. */
 fn fuse_method_calls(chunk: &SSAChunk) -> Vec<Instruction> {
     let src = &chunk.instructions;
     let n = src.len();
     let mut out = src.clone();
 
+    // Instruction indices any jump/handler/unwind can enter; relocation across them is unsafe.
+    let mut targeted = vec![false; n + 1];
+    for (k, ins) in src.iter().enumerate() {
+        match ins.opcode {
+            OpCode::Jump | OpCode::JumpIfFalse | OpCode::JumpIfTrueOrPop | OpCode::JumpIfFalseOrPop
+            | OpCode::ForIter | OpCode::SetupExcept | OpCode::SetupFinally => {
+                let t = ins.operand as usize;
+                if t <= n { targeted[t] = true; }
+            }
+            // Unwind::Goto resumes at the instruction after UnwindFinally.
+            OpCode::UnwindFinally => targeted[k + 1] = true,
+            _ => {}
+        }
+    }
+
+    const MAX_WINDOW: usize = 8;
     let mut i = 0;
     while i + 1 < n {
-        if src[i].opcode == OpCode::LoadAttr
-            && src[i + 1].opcode == OpCode::Call
-            && src[i + 1].operand == 0
+        if src[i].opcode != OpCode::LoadAttr { i += 1; continue; }
+        // Scan the run of relocatable single-push arg loads after the LoadAttr.
+        let mut j = i + 1;
+        while j < n
+            && j - i - 1 < MAX_WINDOW
+            && !targeted[j]
+            && matches!(src[j].opcode, OpCode::LoadConst | OpCode::LoadName | OpCode::LoadTrue | OpCode::LoadFalse | OpCode::LoadNone)
         {
-            out[i].opcode = OpCode::CallMethod;
-            out[i + 1].opcode = OpCode::CallMethodArgs;
-            i += 2;
-            continue;
+            j += 1;
         }
-        i += 1;
+        if j >= n || src[j].opcode != OpCode::Call || targeted[j] { i += 1; continue; }
+        // Every arg must be exactly one whitelisted push, else stack layout breaks.
+        let raw = src[j].operand as usize;
+        if (raw & 0xFF) + 2 * ((raw >> 8) & 0xFF) != j - i - 1 { i += 1; continue; }
+        out[i..(j - 1)].copy_from_slice(&src[(i + 1)..j]);
+        out[j - 1] = Instruction { opcode: OpCode::CallMethod, operand: src[i].operand };
+        out[j] = Instruction { opcode: OpCode::CallMethodArgs, operand: src[j].operand };
+        i = j + 1;
     }
     out
 }

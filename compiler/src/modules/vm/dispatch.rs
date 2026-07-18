@@ -286,13 +286,14 @@ impl<'a> VM<'a> {
         let positional = stack_items;
 
         let obj = self.pop()?;
-        let name = chunk.names.get(attr_idx as usize).ok_or(VmErr::Runtime("CallMethod: bad name index"))?.clone();
+        // Borrow, don't clone: `chunk` outlives every `&mut self` call below.
+        let name = chunk.names.get(attr_idx as usize).ok_or(VmErr::Runtime("CallMethod: bad name index"))?;
 
-        let lookup = match self.resolve_attr(obj, &name) {
+        let lookup = match self.resolve_attr(obj, name) {
             Ok(l) => l,
             Err(VmErr::Attribute(msg)) => {
                 //  if `__getattr__` resolves the name to a callable, invoke it with the positional args.
-                if let Some(v) = self.try_getattr_fallback(obj, &name, chunk, slots)? {
+                if let Some(v) = self.try_getattr_fallback(obj, name, chunk, slots)? {
                     self.push(v);
                     for a in &positional { self.push(*a); }
                     for a in &kw_flat { self.push(*a); }
@@ -316,11 +317,12 @@ impl<'a> VM<'a> {
                 self.exec_call(encoded, chunk, slots)
             }
             handlers::methods::AttrLookup::InstanceMethod { recv, func, class } => {
-                // Prepend `self`; kwargs aren't forwarded (preserved behaviour). `super()` reads the binding off `pending`.
+                // Prepend `self`; kw pairs re-pushed like the unfused BoundUserMethod path. `super()` reads the binding off `pending`.
                 self.pending.method_binding = Some((class, recv));
                 self.push(func);
                 self.push(recv);
                 for a in &positional { self.push(*a); }
+                for a in &kw_flat { self.push(*a); }
                 let argc = (positional.len() + 1) as u16;
                 let encoded = ((kw_flat.len() as u16 / 2) << 8) | argc;
                 self.exec_call(encoded, chunk, slots)
