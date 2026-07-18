@@ -22,46 +22,63 @@ export function makeGuestEnv(compilerExports) {
             if (len) compMem().set(gMem().subarray(ptr, ptr + len), c);
             return c;
         };
+        const unstage = (c, len) => compilerExports.wasm_free(c, Math.max(1, len));
 
         return {
             edge_op: (op, recv, name_ptr, name_len, argv_ptr, argc, out) => {
                 const cName = stage(name_ptr, name_len);
-                const cArgv = compilerExports.wasm_alloc(Math.max(4, argc * 4));
+                const argvLen = Math.max(4, argc * 4);
+                const cArgv = compilerExports.wasm_alloc(argvLen);
                 const cOut = compilerExports.wasm_alloc(4);
                 for (let i = 0; i < argc; i++) {
                     compView().setUint32(cArgv + i * 4, gView().getUint32(argv_ptr + i * 4, true), true);
                 }
                 const ret = compilerExports.host_edge_op(op, recv, cName, name_len, cArgv, argc, cOut);
                 if (ret === 0 && out) gView().setUint32(out, compView().getUint32(cOut, true), true);
+                unstage(cName, name_len);
+                compilerExports.wasm_free(cArgv, argvLen);
+                compilerExports.wasm_free(cOut, 4);
                 return ret;
             },
 
-            edge_encode: (tag, ptr, len) =>
-                compilerExports.host_edge_encode(tag, stage(ptr, len), len),
+            edge_encode: (tag, ptr, len) => {
+                const c = stage(ptr, len);
+                const h = compilerExports.host_edge_encode(tag, c, len);
+                unstage(c, len);
+                return h;
+            },
 
             edge_decode: (h, out_tag, dst, dst_max) => {
+                const bufLen = Math.max(1, dst_max);
                 const cTag = compilerExports.wasm_alloc(4);
-                const cBuf = compilerExports.wasm_alloc(Math.max(1, dst_max));
+                const cBuf = compilerExports.wasm_alloc(bufLen);
                 const ret = compilerExports.host_edge_decode(h, cTag, cBuf, dst_max);
                 gView().setUint32(out_tag, compView().getUint32(cTag, true), true);
                 if (ret > 0) gMem().set(compMem().subarray(cBuf, cBuf + ret), dst);
+                compilerExports.wasm_free(cTag, 4);
+                compilerExports.wasm_free(cBuf, bufLen);
                 return ret;
             },
 
             edge_release: (h) => compilerExports.host_edge_release(h),
 
             edge_throw: (kind, msg_ptr, msg_len) => {
-                compilerExports.host_edge_throw(kind, stage(msg_ptr, msg_len), msg_len);
+                const c = stage(msg_ptr, msg_len);
+                compilerExports.host_edge_throw(kind, c, msg_len);
+                unstage(c, msg_len);
             },
 
             edge_take_error: (out_kind, dst, dst_max) => {
+                const bufLen = Math.max(1, dst_max);
                 const cKind = compilerExports.wasm_alloc(4);
-                const cBuf = compilerExports.wasm_alloc(Math.max(1, dst_max));
+                const cBuf = compilerExports.wasm_alloc(bufLen);
                 const ret = compilerExports.host_edge_take_error(cKind, cBuf, dst_max);
                 if (ret >= 0) {
                     gView().setUint32(out_kind, compView().getUint32(cKind, true), true);
                     if (ret > 0) gMem().set(compMem().subarray(cBuf, cBuf + ret), dst);
                 }
+                compilerExports.wasm_free(cKind, 4);
+                compilerExports.wasm_free(cBuf, bufLen);
                 return ret;
             },
         };
@@ -91,6 +108,8 @@ async function builtinWasmPdkLoader(module, ctx) {
         if (k.startsWith('__') && !k.startsWith('__class_') && !k.startsWith('__const_') && !k.startsWith('__fn_')) continue;
         names.push(k);
         v.__edge_alloc = instance.exports.__edge_alloc;
+        // Optional on older plugins; callers use `?.`.
+        v.__edge_free = instance.exports.__edge_free;
         v.__edge_memory = instance.exports.memory;
         v.__edge_kind = 'wasmpdk';
         fns.push(v);

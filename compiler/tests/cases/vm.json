@@ -3721,5 +3721,10 @@
   {"src":"v = 1\nprint(f\"{v}a\" f\"{v}b\")","output":["1a1b"]},
   {"src":"class C:\n    def __init__(self):\n        self.v = 0\n\nxs = [C()]\nxs[0].v = 7\nprint(xs[0].v)","output":["7"]},
   {"src":"class C:\n    def __init__(self):\n        self.v = 0\n\nxs = [C()]\nxs[0].v += 1\nprint(xs[0].v)","output":["1"]},
-  {"src":"class C:\n    def __init__(self):\n        self.v = 0\nclass D:\n    def __init__(self):\n        self.items = [C()]\n\nd = D()\nd.items[0].v = 9\nprint(d.items[0].v)","output":["9"]}
+  {"src":"class C:\n    def __init__(self):\n        self.v = 0\nclass D:\n    def __init__(self):\n        self.items = [C()]\n\nd = D()\nd.items[0].v = 9\nprint(d.items[0].v)","output":["9"]},
+  {"src":"xs = [[1, 2], [3, 4]]\nxs[0][1] += 10\nprint(xs)","output":["[[1, 12], [3, 4]]"]},
+  {"src":"d = {'k': [1]}\nd['k'][0] -= 1\nprint(d)","output":["{'k': [0]}"]},
+  {"src":"class C:\n    def __init__(self):\n        self.a = 5\nx = C()\nprint(f\"{x.a=}\")","output":["x.a=5"]},
+  {"src":"print(\"a\" \"b\".upper())","output":["AB"]},
+  {"src":"v = 7\nprint(f\"\" f\"{v}\" \"x\" f\"{v}\")","output":["7x7"]}
 ]

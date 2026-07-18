@@ -205,14 +205,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         let t = self.advance();
         match t.kind {
             TokenType::Name => self.name(t),
-            TokenType::String => {
-                let mut s = parse_string(self.lexeme(&t));
-                while matches!(self.peek(), Some(TokenType::String)) {
-                    let t = self.advance();
-                    s.push_str(&parse_string(self.lexeme(&t)));
-                }
-                self.emit_const(Value::Str(s));
-            }
+            TokenType::String | TokenType::FstringStart => self.string_group(t),
             TokenType::Bytes => {
                 // Adjacent bytes literals concat; mixing with str surfaces a diagnostic.
                 let mut buf = parse_bytes_literal(self.lexeme(&t));
@@ -229,7 +222,6 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             TokenType::False => self.chunk.emit(OpCode::LoadFalse, 0),
             TokenType::None => self.chunk.emit(OpCode::LoadNone, 0),
             TokenType::Ellipsis => self.chunk.emit(OpCode::LoadEllipsis, 0),
-            TokenType::FstringStart => self.fstring(t.start, t.end),
             TokenType::Lbrace => self.brace_literal(),
             TokenType::Lsqb => self.list_literal(),
             TokenType::Lpar => {
@@ -266,6 +258,45 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             }
         }
         self.postfix_tail();
+    }
+
+    /* Adjacent str/f-string literals concat into one value. */
+    fn string_group(&mut self, first: Token) {
+        let mut parts = 0u16;
+        let mut fstrings = 0u32;
+        let mut lit = String::new();
+        let mut tok = first;
+        loop {
+            if tok.kind == TokenType::String {
+                lit.push_str(&parse_string(self.lexeme(&tok)));
+            } else {
+                // Flush pending literal text so part order holds.
+                if !lit.is_empty() {
+                    self.emit_const(Value::Str(core::mem::take(&mut lit)));
+                    parts += 1;
+                }
+                parts += self.fstring(tok.start, tok.end);
+                fstrings += 1;
+            }
+            match self.peek() {
+                Some(TokenType::String | TokenType::FstringStart) => tok = self.advance(),
+                _ => break,
+            }
+        }
+        // Pure literals fold to a single constant.
+        if fstrings == 0 {
+            self.emit_const(Value::Str(lit));
+            return;
+        }
+        if !lit.is_empty() {
+            self.emit_const(Value::Str(lit));
+            parts += 1;
+        }
+        if parts == 0 {
+            self.emit_const(Value::Str(String::new()));
+        } else {
+            self.chunk.emit(OpCode::BuildString, parts);
+        }
     }
 
     /* Name: assignment, walrus `:=`, call, or plain load. */
@@ -389,6 +420,11 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                         self.chunk.emit(OpCode::LoadNone, 0);
                         return;
                     }
+                    if let Some(op) = self.peek().and_then(|t| Self::augmented_op(&t)) {
+                        self.emit_augmented_subscript(op);
+                        self.chunk.emit(OpCode::LoadNone, 0);
+                        return;
+                    }
                     self.chunk.emit(OpCode::GetItem, 0);
                 }
                 Some(TokenType::Dot) => {
@@ -396,6 +432,24 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     let t = self.advance();
                     let (start, end) = (t.start, t.end);
                     let idx = self.chunk.push_name(&self.source[start..end]);
+                    // Attribute assignment: StoreAttr, mirroring the subscript case. In f-strings `=` is the debug marker.
+                    if !self.in_fstring_expr && matches!(self.peek(), Some(TokenType::Equal)) {
+                        self.advance();
+                        self.expr();
+                        self.chunk.emit(OpCode::StoreAttr, idx);
+                        self.chunk.emit(OpCode::LoadNone, 0);
+                        return;
+                    }
+                    if let Some(op) = self.peek().and_then(|t| Self::augmented_op(&t)) {
+                        self.advance();
+                        self.chunk.emit(OpCode::Dup, 0);
+                        self.chunk.emit(OpCode::LoadAttr, idx);
+                        self.expr();
+                        self.chunk.emit(op, 0);
+                        self.chunk.emit(OpCode::StoreAttr, idx);
+                        self.chunk.emit(OpCode::LoadNone, 0);
+                        return;
+                    }
                     // LoadAttr adjacent to Call lets `fuse_method_calls` collapse them.
                     self.chunk.emit(OpCode::LoadAttr, idx);
                 }

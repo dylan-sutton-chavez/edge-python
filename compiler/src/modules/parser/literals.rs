@@ -215,16 +215,15 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* f-string: parses literal+expr chunks until FstringEnd; `fs_start/fs_end` anchor unclosed-string errors. */
-    pub(super) fn fstring(&mut self, fs_start: usize, fs_end: usize) {
+    /* f-string: emits literal+expr parts until FstringEnd, returns the count; caller wraps in BuildString. `fs_start/fs_end` anchor unclosed-string errors. */
+    pub(super) fn fstring(&mut self, fs_start: usize, fs_end: usize) -> u16 {
         let mut parts = 0u16;
         let mut got_end = false;
         // Raw f-strings (`rf"..."`) keep backslashes literal; plain ones decode escapes like a normal string.
         let is_raw = super::types::has_raw_prefix(&self.source[fs_start..fs_end]);
         if matches!(self.peek(), Some(TokenType::FstringEnd)) {
             self.advance();
-            self.emit_const(Value::Str(String::new()));
-            return;
+            return 0;
         }
         loop {
             match self.peek() {
@@ -328,9 +327,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         if !got_end {
             self.error_at(fs_start, fs_end, "f-string was never closed");
         }
-        if parts > 0 {
-            self.chunk.emit(OpCode::BuildString, parts);
-        }
+        parts
     }
 
     /* Dispatches call: print/range opcodes; imported natives (shadow builtins); builtins table; else LoadName+Call. */

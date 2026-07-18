@@ -151,11 +151,22 @@ pub mod __internals {
         unsafe { super::edge_throw(kind, msg.as_ptr(), msg.len() as u32); }
     }
 
-    /// Host-side argv stager; allocations leak until the WASM instance is dropped.
+    /// Host-side argv stager; paired with `__edge_free`.
     #[unsafe(no_mangle)]
     pub extern "C" fn __edge_alloc(size: u32) -> *mut u8 {
         let v = alloc::vec![0u8; size as usize];
         alloc::boxed::Box::into_raw(v.into_boxed_slice()) as *mut u8
+    }
+
+    /// Frees an `__edge_alloc` buffer; sizes must match.
+    #[unsafe(no_mangle)]
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    pub extern "C" fn __edge_free(ptr: *mut u8, size: u32) {
+        if ptr.is_null() || size == 0 { return; }
+        unsafe {
+            let slice = core::slice::from_raw_parts_mut(ptr, size as usize);
+            let _ = alloc::boxed::Box::from_raw(slice as *mut [u8]);
+        }
     }
 }
 

@@ -539,7 +539,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     }
 
     /* `x[i] op= rhs`: Dup2 preserves container+index; GetItem, apply op, StoreItem. */
-    fn emit_augmented_subscript(&mut self, op: OpCode) {
+    pub(super) fn emit_augmented_subscript(&mut self, op: OpCode) {
         self.advance();
         self.chunk.emit(OpCode::Dup2, 0);
         self.chunk.emit(OpCode::GetItem, 0);

@@ -46,6 +46,8 @@ pub extern "C" fn __edge_abi_version() -> u32;
 
 `__edge_alloc` lets the host stage `argv` arrays in guest linear memory before invoking each export.
 
+Guests SHOULD also export `__edge_free(ptr: *mut u8, size: u32)` so the host can release that staging after each call. The host treats it as optional; without it, staging accumulates for the instance's lifetime.
+
 `__edge_abi_version` returns the wire-format version (currently `1`). The host MUST read this once at instantiation and refuse unknown versions. Otherwise a v2 host would silently decode garbage from a v1 module.
 
 At v1 every loader targets 1, so the bundled `compiler.wasm` shim does not yet read the symbol. The check becomes load-bearing when v2 ships.
@@ -327,6 +329,13 @@ pub extern "C" fn __edge_alloc(size: u32) -> *mut u8 {
   Box::into_raw(vec![0u8; size as usize].into_boxed_slice()) as *mut u8
 }
 
+/// Releases an `__edge_alloc` buffer after the call; sizes must match.
+#[unsafe(no_mangle)]
+pub extern "C" fn __edge_free(ptr: *mut u8, size: u32) {
+  if ptr.is_null() || size == 0 { return; }
+  drop(unsafe { Box::from_raw(std::slice::from_raw_parts_mut(ptr, size as usize) as *mut [u8]) });
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn slugify(argv: *const u32, argc: u32, out: *mut u32) -> i32 {
   if argc != 1 { return 1; }
@@ -388,7 +397,7 @@ The `wasm-pdk` crate (Plugin Development Kit), bundled in this repo, publishable
 - `Args`, trailing variadic positional params as borrowed handles; declare it as the last param before any `Kwargs`.
 - `Kwargs`, thin wrapper around the trailing kwargs handle with `get::<T>(name)` for primitive kwargs and `get_handle(name)` for callables, tuples, dicts.
 - `PluginCell<T>`, single-threaded interior mutability cell for static plugin state.
-- `__edge_alloc` + `__edge_abi_version` emitted automatically.
+- `__edge_alloc` / `__edge_free` + `__edge_abi_version` emitted automatically.
 
 The macro emits the worked-example boilerplate. Manual is around 25 lines for the first function, around 5 per additional.
 

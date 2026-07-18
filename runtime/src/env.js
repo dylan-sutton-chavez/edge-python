@@ -57,7 +57,8 @@ export function makeCompilerEnv({ getExports, onLine, fetchedSources, lockfile, 
             const guestView = () => new DataView(fn.__edge_memory.buffer);
             const compView = () => new DataView(exports.memory.buffer);
 
-            const g_argv = fn.__edge_alloc(Math.max(4, argc * 4));
+            const argvLen = Math.max(4, argc * 4);
+            const g_argv = fn.__edge_alloc(argvLen);
             const g_out = fn.__edge_alloc(4);
             for (let i = 0; i < argc; i++) {
                 guestView().setUint32(g_argv + i * 4, compView().getUint32(argv_ptr + i * 4, true), true);
@@ -67,6 +68,9 @@ export function makeCompilerEnv({ getExports, onLine, fetchedSources, lockfile, 
             if (status === 0) {
                 compView().setUint32(out_ptr, guestView().getUint32(g_out, true), true);
             }
+            // Optional export: pre-__edge_free plugins still leak.
+            fn.__edge_free?.(g_argv, argvLen);
+            fn.__edge_free?.(g_out, 4);
             return status;
         },
 

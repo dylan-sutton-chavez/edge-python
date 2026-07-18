@@ -53,17 +53,16 @@ Operands and the constant pool, name table, and instruction stream per chunk are
 
 ```text
 Name                     -> name() (handles assignment, walrus, calls)
-String                   -> emit Str constant; concatenate adjacent String tokens
+String / FstringStart    -> string_group(); adjacent str/f-string literals concatenate
 Int / Float              -> emit numeric constant; ints widen i64->i128, beyond ±2¹²⁷ is a parse error
 True/False/None/Ellipsis -> emit dedicated load opcode
-FstringStart             -> fstring()
 Lbrace                   -> brace_literal() (dict, set, comprehension)
 Lsqb                     -> list_literal() (list, comprehension)
 Lpar                     -> grouped expr, tuple, generator, or empty tuple
 Lambda                   -> parse_lambda()
 ```
 
-After an atom, `postfix_tail()` handles trailers (subscript, attribute, call), iterating until none apply. So `fns[0](-3)`, `obj.method()`, `(lambda x: x)(3)`, and `compose(f, g)(x)` all parse uniformly.
+After an atom, `postfix_tail()` handles trailers (subscript, attribute, call), iterating until none apply, plus store tails on the last trailer (`xs[0].v = 7`, `xs[0][1] += 1`). So `fns[0](-3)`, `obj.method()`, `(lambda x: x)(3)`, and `compose(f, g)(x)` all parse uniformly.
 
 `*args` / `**kwargs` are accepted in **call** position. Starred unpacking also works in list (`[*a, *b]`), set (`{*s}`), and dict (`{**d1, **d2}`) literals, lowering via `ListExtend` / `SetUpdate` / `DictUpdate`; tuple-literal unpacking (`(1, *xs, 2)`) is not.
 

@@ -164,7 +164,7 @@ export default {
 
 Two valid `kind` values:
 
-- **`wasmpdk`**, each `fn` is a wasm export with signature `(g_argv, argc, g_out) -> i32` reading from its own linear memory. Each fn must be annotated with `__edge_alloc` and `__edge_memory` (the built-in loader does this automatically). The dispatcher stages argv in guest memory and copies the result handle back.
+- **`wasmpdk`**, each `fn` is a wasm export with signature `(g_argv, argc, g_out) -> i32` reading from its own linear memory. Each fn must be annotated with `__edge_alloc`, `__edge_memory`, and (optionally) `__edge_free` (the built-in loader does this automatically). The dispatcher stages argv in guest memory, copies the result handle back, and frees the staging when the guest exports `__edge_free`.
 
 - **`capability`**, each `fn` is a plain JS function `(handles: number[]) => number` taking u32 handles in compiler's memory and returning a u32 result handle. The dispatcher calls it directly without staging.
 
