@@ -3,7 +3,7 @@ description: Lint, build/optimize (wasm), test one stdpkg, then stage its artifa
 
 inputs:
   package:
-    description: "json | re | math | test"
+    description: "json | re | math | struct | test"
     required: true
 
 runs:
@@ -80,6 +80,14 @@ runs:
           --target wasm32-unknown-unknown \
           --lib --release \
           -Z build-std=std,panic_abort
+
+    # Keyword-named crates (struct) emit another artifact name.
+    - name: Normalize artifact name
+      if: inputs.package != 'test'
+      shell: bash
+      run: |
+        DIR="std/${{ inputs.package }}/target/wasm32-unknown-unknown/release"
+        [ -f "$DIR/${{ inputs.package }}.wasm" ] || cp "$DIR"/*.wasm "$DIR/${{ inputs.package }}.wasm"
 
     - name: Size (unoptimized)
       if: inputs.package != 'test'

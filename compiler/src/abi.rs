@@ -6,7 +6,7 @@ Spec: docs/reference/wasm-abi.md.
 
 use alloc::{string::String, vec::Vec};
 
-pub use wasm_abi::{nan_box, EDGE_ABI_VERSION, TAG_INVALID};
+pub use wasm_abi::{nan_box, WireValue, EDGE_ABI_VERSION, MAX_WIRE_DEPTH, TAG_INVALID};
 
 /* Sealed enum + `from_u32` reverse map from one variant list, so the two can't drift. Values mirror `wasm_abi::*`. */
 macro_rules! abi_enum {
@@ -51,6 +51,9 @@ abi_enum!(Tag {
     Bytes = wasm_abi::tag::BYTES,
     // Opaque bytes: no UTF-8 validation, maps to Python `bytes`.
     Raw = wasm_abi::tag::RAW,
+    // TLV composites; payloads defined in `wasm_abi::WireValue`.
+    List = wasm_abi::tag::LIST,
+    Dict = wasm_abi::tag::DICT,
 });
 
 /* Error kinds (sealed), values mirror `wasm_abi::error_kind::*`. */
@@ -157,18 +160,25 @@ impl ErrorStash {
 
 /* Primitive codec helpers */
 
-// edge_encode outcome: Direct (Val bits), AllocStr / AllocBytes / AllocLongInt (host alloc), or Invalid.
+// edge_encode outcome: Direct (Val bits), AllocStr / AllocBytes / AllocLongInt (host alloc), Composite (host builds recursively), or Invalid.
 pub enum EncodeRequest<'a> {
     Direct(u64),
     AllocStr(&'a str),
     AllocBytes(&'a [u8]),
     AllocLongInt(i128),
+    Composite(WireValue),
     Invalid,
 }
 
 // Inline range for Val::int (47-bit signed); values outside go to HeapObj::LongInt.
 const INLINE_INT_MIN: i128 = -0x0000_8000_0000_0000i64 as i128;
 const INLINE_INT_MAX: i128 =  0x0000_7FFF_FFFF_FFFFi64 as i128;
+
+// Val bits for an inline int; `None` when the value needs a LongInt.
+pub fn inline_int_bits(i: i128) -> Option<u64> {
+    use nan_box::*;
+    (INLINE_INT_MIN..=INLINE_INT_MAX).contains(&i).then_some(TAG_INT | ((i as i64) as u64 & INT_PAYLOAD_MASK))
+}
 
 // Maps (tag, bytes) to EncodeRequest using the sealed `nan_box` layout.
 pub fn classify_encode(tag: u32, bytes: &[u8]) -> EncodeRequest<'_> {
@@ -187,10 +197,9 @@ pub fn classify_encode(tag: u32, bytes: &[u8]) -> EncodeRequest<'_> {
             buf.copy_from_slice(bytes);
             let i = i128::from_le_bytes(buf);
             // Fits in 47-bit inline range -> emit as Val::int directly; else heap-alloc LongInt.
-            if (INLINE_INT_MIN..=INLINE_INT_MAX).contains(&i) {
-                EncodeRequest::Direct(TAG_INT | ((i as i64) as u64 & INT_PAYLOAD_MASK))
-            } else {
-                EncodeRequest::AllocLongInt(i)
+            match inline_int_bits(i) {
+                Some(bits) => EncodeRequest::Direct(bits),
+                None => EncodeRequest::AllocLongInt(i),
             }
         }
         Some(Tag::Float) => {
@@ -205,6 +214,10 @@ pub fn classify_encode(tag: u32, bytes: &[u8]) -> EncodeRequest<'_> {
         },
         // Raw bytes bypass UTF-8 validation and become a Python `bytes`.
         Some(Tag::Raw) => EncodeRequest::AllocBytes(bytes),
+        Some(Tag::List) | Some(Tag::Dict) => match WireValue::decode_body(tag, bytes) {
+            Some(w) => EncodeRequest::Composite(w),
+            None => EncodeRequest::Invalid,
+        },
         None => EncodeRequest::Invalid,
     }
 }

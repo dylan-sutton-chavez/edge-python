@@ -7,9 +7,9 @@ Edge Python has no bundled stdlib. Three ways to add native functionality:
 
 | Path | Distribution | Type coverage | Maintenance |
 |---|---|---|---|
-| **`.wasm` module via URL** ([WASM ABI](/reference/wasm-abi)) | Publish `.wasm` to a CDN; any host loads dynamically | Primitives only (None, bool, i128, f64, bytes/str) | Reference [`wasm-pdk`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/wasm-pdk) (Rust), community PDKs, or hand-written wire boilerplate |
-| **Host capability** | Custom `compiler.wasm` (additional host imports declared) + host runtime they bridge to | Primitives + access to host services (DOM, FS, fetch) through embedder host imports | You own embedder + host runtime; bindings travel together |
-| **JS host module** | Plain ESM via `createWorker` (`mainThreadModules` eager, `hostModules` lazy) or the `host` field of `packages.json` | Primitives only (same as Path A) | Pure JS; no Rust, no `.wasm`, no build step |
+| **`.wasm` module via URL** ([WASM ABI](/reference/wasm-abi)) | Publish `.wasm` to a CDN; any host loads dynamically | Transit values (None, bool, i128, f64, bytes/str, list, dict) | Reference [`wasm-pdk`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/wasm-pdk) (Rust), community PDKs, or hand-written wire boilerplate |
+| **Host capability** | Custom `compiler.wasm` (additional host imports declared) + host runtime they bridge to | Transit values + access to host services (DOM, FS, fetch) through embedder host imports | You own embedder + host runtime; bindings travel together |
+| **JS host module** | Plain ESM via `createWorker` (`mainThreadModules` eager, `hostModules` lazy) or the `host` field of `packages.json` | Transit values (same as Path A) | Pure JS; no Rust, no `.wasm`, no build step |
 
 `.wasm` matches the marketplace pattern (`from "https://x.wasm" import f` works in any host). Host capability is for runtime distributions that own their `compiler.wasm` and expose host services to scripts (the same pattern `print` and `input` use). JS host modules keep upstream `compiler.wasm` untouched while exposing main-thread surface (DOM, dialogs, FileReader, observers, anything `window.*`).
 
@@ -135,7 +135,7 @@ Handlers take decoded JS values and return plain JS values. Supported tags: `Non
 |---|---|---|
 | Compiler artifact | Custom per capability set | Vanilla upstream |
 | Composition | Embed-time | Load-time, by import |
-| Binding language | Rust (or C/Zig, any wasm32 target) compiled into the embedder | JavaScript, primitives only |
+| Binding language | Rust (or C/Zig, any wasm32 target) compiled into the embedder | JavaScript, transit values only |
 | Per-op overhead | Native call through embedder host import | `postMessage` round-trip (around 0.1 to 0.4 ms) |
 | Threading model | Wherever the embedder runs | Main thread (handlers reach `document`) |
 | Build pipeline | `cargo` | None |

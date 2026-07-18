@@ -254,7 +254,103 @@ pub unsafe extern "C" fn host_edge_encode(tag: u32, ptr: *const u8, len: u32) ->
         EncodeRequest::AllocStr(s) => alloc_and_put(HeapObj::Str(s.to_string())),
         EncodeRequest::AllocBytes(b) => alloc_and_put(HeapObj::Bytes(b.to_vec())),
         EncodeRequest::AllocLongInt(i) => alloc_and_put(HeapObj::LongInt(i)),
+        EncodeRequest::Composite(w) => {
+            match with_vm(|vm| wire_to_val(vm, &w).ok()).flatten() {
+                Some(val) => put_val(val),
+                None => 0,
+            }
+        }
         EncodeRequest::Invalid => 0,
+    }
+}
+
+/* Wire tree to heap value. Str keys only for dicts; mirrors `classify_encode` inline-int split. */
+fn wire_to_val(vm: &mut crate::modules::vm::VM, w: &crate::abi::WireValue) -> Result<Val, VmErr> {
+    use crate::abi::WireValue;
+    Ok(match w {
+        WireValue::None => Val::none(),
+        WireValue::Bool(b) => Val::bool(*b),
+        WireValue::Int(i) => match crate::abi::inline_int_bits(*i) {
+            Some(bits) => Val(bits),
+            None => vm.heap.alloc(HeapObj::LongInt(*i))?,
+        },
+        WireValue::Float(f) => Val::float(*f),
+        WireValue::Bytes(b) => {
+            let s = core::str::from_utf8(b).map_err(|_| VmErr::Value("invalid UTF-8 in wire str"))?;
+            vm.heap.alloc(HeapObj::Str(s.to_string()))?
+        }
+        WireValue::Raw(b) => vm.heap.alloc(HeapObj::Bytes(b.clone()))?,
+        WireValue::List(items) => {
+            let vals = items.iter().map(|it| wire_to_val(vm, it)).collect::<Result<Vec<_>, _>>()?;
+            vm.heap.alloc(HeapObj::List(Rc::new(RefCell::new(vals))))?
+        }
+        WireValue::Dict(pairs) => {
+            let mut map = DictMap::new();
+            for (k, v) in pairs {
+                let WireValue::Bytes(kb) = k else { return Err(VmErr::Type("wire dict keys must be str")); };
+                let ks = core::str::from_utf8(kb).map_err(|_| VmErr::Value("invalid UTF-8 in wire str"))?;
+                let key = vm.heap.alloc(HeapObj::Str(ks.to_string()))?;
+                let val = wire_to_val(vm, v)?;
+                map.insert(key, val, &vm.heap);
+            }
+            vm.heap.alloc(HeapObj::Dict(Rc::new(RefCell::new(map))))?
+        }
+    })
+}
+
+/* Heap value to wire tree. `None` on cycles, depth past the cap, or non-transit members. */
+fn val_to_wire(vm: &crate::modules::vm::VM, v: Val, depth: u32, seen: &mut Vec<u64>) -> Option<crate::abi::WireValue> {
+    use crate::abi::{DecodeBits as DB, PrimitiveBytes as PB, WireValue, MAX_WIRE_DEPTH};
+    if depth > MAX_WIRE_DEPTH { return None; }
+    match classify_decode(v.0) {
+        DB::Primitive { tag, bytes } => {
+            let buf: Vec<u8> = match bytes {
+                PB::None => Vec::new(),
+                PB::Bool(b) => alloc::vec![b],
+                PB::Eight(a) => a.to_vec(),
+                PB::Sixteen(a) => a.to_vec(),
+            };
+            WireValue::decode_body(tag, &buf)
+        }
+        DB::Heap => {
+            // Shared references are fine; re-entering a value mid-walk is a cycle.
+            let guard = |vm: &crate::modules::vm::VM, seen: &mut Vec<u64>, items: &[Val]| -> Option<Vec<crate::abi::WireValue>> {
+                items.iter().map(|it| val_to_wire(vm, *it, depth + 1, seen)).collect()
+            };
+            if seen.contains(&v.0) { return None; }
+            match vm.heap.get(v) {
+                HeapObj::Str(s) => Some(WireValue::Bytes(s.as_bytes().to_vec())),
+                HeapObj::Bytes(b) => Some(WireValue::Raw(b.clone())),
+                HeapObj::LongInt(i) => Some(WireValue::Int(*i)),
+                HeapObj::List(rc) => {
+                    seen.push(v.0);
+                    let items = guard(vm, seen, &rc.borrow())?;
+                    seen.pop();
+                    Some(WireValue::List(items))
+                }
+                HeapObj::Tuple(t) => {
+                    seen.push(v.0);
+                    let items = guard(vm, seen, t)?;
+                    seen.pop();
+                    Some(WireValue::List(items))
+                }
+                HeapObj::Dict(rc) => {
+                    seen.push(v.0);
+                    let mut pairs = Vec::new();
+                    for (k, val) in rc.borrow().entries.iter() {
+                        let key = match val_to_wire(vm, *k, depth + 1, seen)? {
+                            key @ WireValue::Bytes(_) => key,
+                            _ => return None,
+                        };
+                        pairs.push((key, val_to_wire(vm, *val, depth + 1, seen)?));
+                    }
+                    seen.pop();
+                    Some(WireValue::Dict(pairs))
+                }
+                _ => None,
+            }
+        }
+        DB::Invalid => None,
     }
 }
 
@@ -285,18 +381,29 @@ pub unsafe extern "C" fn host_edge_decode(h: u32, out_tag: *mut u32, dst: *mut u
             PrimitiveBytes::Sixteen(a) => copy_into(tag, &a),
         },
         DecodeBits::Heap => {
-            // Str, Bytes and LongInt decode to primitives; other composites must go through `edge_op`.
-            enum Decoded { Str(alloc::string::String), Bytes(Vec<u8>), LongInt(i128), Other }
+            // Str, Bytes, LongInt and TLV composites decode; sets, instances and other non-transit values go through `edge_op`.
+            enum Decoded { Str(alloc::string::String), Bytes(Vec<u8>), LongInt(i128), Wire(u32, Vec<u8>), Other }
             let decoded = with_vm(|vm| match vm.heap.get(v) {
                 HeapObj::Str(s) => Decoded::Str(s.clone()),
                 HeapObj::Bytes(b) => Decoded::Bytes(b.clone()),
                 HeapObj::LongInt(i) => Decoded::LongInt(*i),
+                HeapObj::List(_) | HeapObj::Tuple(_) | HeapObj::Dict(_) => {
+                    match val_to_wire(vm, v, 0, &mut Vec::new()) {
+                        Some(w) => {
+                            let mut buf = Vec::new();
+                            w.encode_body(&mut buf);
+                            Decoded::Wire(w.tag(), buf)
+                        }
+                        None => Decoded::Other,
+                    }
+                }
                 _ => Decoded::Other,
             }).unwrap_or(Decoded::Other);
             match decoded {
                 Decoded::Str(s) => copy_into(crate::abi::Tag::Bytes as u32, s.as_bytes()),
                 Decoded::Bytes(b) => copy_into(crate::abi::Tag::Raw as u32, &b),
                 Decoded::LongInt(i) => copy_into(crate::abi::Tag::Int as u32, &i.to_le_bytes()),
+                Decoded::Wire(tag, buf) => copy_into(tag, &buf),
                 Decoded::Other => { unsafe { *out_tag = TAG_INVALID; } 0 }
             }
         }

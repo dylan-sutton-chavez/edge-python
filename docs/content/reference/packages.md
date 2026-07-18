@@ -48,6 +48,20 @@ print(findall(r'\w+', 'one two three')) # ['one', 'two', 'three']
 
 Functions: `match`, `search`, `fullmatch`, `findall`, `groups`, `span`, `sub`. Flags go inline (`(?i)`, `(?s)`, `(?m)`). Pre-built `.wasm` is served from `https://cdn.edgepython.com/std/re.wasm`. Full API: [`std/re/README.md`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/std/re).
 
+### `struct`
+
+CPython-style `struct` subset: pack primitive values into `bytes` and back. Standard sizes, `<`/`>`/`!`/`=` byte-order prefixes, repeat counts, codes `x b B ? h H i I q Q f d`. The binary fast lane for bulk numeric data — a packed buffer crosses the host boundary once and the receiving side reads it with zero parsing (in JS, straight into a `Float32Array`).
+
+```python
+from struct import pack, unpack, calcsize
+
+buf = pack("3f", 92.5, -115.25, 0.75) # 12 bytes exactly
+print(unpack("3f", buf)) # [92.5, -115.25, 0.75]
+print(calcsize("!hh")) # 4
+```
+
+`unpack` returns a list (not a tuple), and there is no native-alignment mode. Full API: [`std/struct/README.md`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/std/struct).
+
 ### `math`
 
 CPython-style `math`, scalar transcendentals on `libm` (no platform libc) with CPython domain errors (`sqrt(-1)` raises `ValueError: math domain error`).
@@ -57,7 +71,7 @@ CPython-style `math`, scalar transcendentals on `libm` (no platform libc) with C
 - Tuple returns: `modf`, `frexp`
 - Variadic: `hypot` and `gcd`
 
-A packed-f64 batch path (`sqrt_all`, `fsum_all`, and friends) processes a whole `bytes` buffer in one host crossing for bulk work.
+A packed-f64 batch path (`sqrt_all`, `fsum_all`, and friends) processes a whole `bytes` buffer in one host crossing for bulk work — including binary kernels (`add_all`, `mul_all`, `dot_all`, `matvec`) that pair with `struct` for small numeric training loops.
 
 ```python
 from math import sqrt, pi, hypot, factorial
@@ -185,7 +199,7 @@ One manifest drives both directions: `imports` for worker-side `.py` / `.wasm` m
 
 ### Defaults
 
-The browser runtime ships a built-in base manifest, so the official packages resolve by bare name with **no `packages.json` at all**: the std packages (`json`, `re`, `math`, and the pure-Python `test`) and the host libraries (`dom`, `network`, `storage`, `time`). Three rules:
+The browser runtime ships a built-in base manifest, so the official packages resolve by bare name with **no `packages.json` at all**: the std packages (`json`, `re`, `math`, `struct`, and the pure-Python `test`) and the host libraries (`dom`, `network`, `storage`, `time`). `dom` resolves to a pure-Python façade over the internal `_dom` host module, adding opt-in mutation batching. Three rules:
 
 - **Lazy.** A default is fetched only when a run actually imports it. Unused defaults never hit the network.
 - **Overridable.** Your `packages.json` (or `imports` / `hostModules`) wins for the same name, so you can pin a specific version or URL.

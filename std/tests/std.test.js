@@ -27,21 +27,27 @@ async function runPackage(pkg) {
     const dir = `${ROOT}${pkg}`;
     // Import the package's `.py` entry when it has one, else the built wasm.
     const hasPy = existsSync(`${dir}/src/entry.py`);
-    const wasmUrl = `/${pkg}/target/wasm32-unknown-unknown/release/${pkg}.wasm`;
 
     let entry;
     if (hasPy) {
         entry = `/${pkg}/src/entry.py`;
     } else {
-        if (!existsSync(`${ROOT}${wasmUrl.slice(1)}`)) {
-            throw new Error(`built artifact not found for '${pkg}' at ${ROOT}${wasmUrl.slice(1)}\nrun (from ${pkg}/): cargo build --release --target wasm32-unknown-unknown`);
+        // Artifact name can differ from the dir (e.g. `struct` is a Rust keyword); any single .wasm in release/ counts.
+        const releaseDir = `${dir}/target/wasm32-unknown-unknown/release`;
+        const wasmName = existsSync(`${releaseDir}/${pkg}.wasm`)
+            ? `${pkg}.wasm`
+            : (existsSync(releaseDir) ? readdirSync(releaseDir).find((f) => f.endsWith(".wasm")) : undefined);
+        if (!wasmName) {
+            throw new Error(`built artifact not found for '${pkg}' in ${releaseDir}\nrun (from ${pkg}/): cargo build --release --target wasm32-unknown-unknown`);
         }
-        entry = wasmUrl;
+        entry = `/${pkg}/target/wasm32-unknown-unknown/release/${wasmName}`;
     }
 
     const cases = JSON.parse(readFileSync(`${dir}/${pkg}.json`, "utf-8"));
-    // The tag's packages.json, synthesized: the package keyed by name -> its .py or wasm.
-    const manifest = JSON.stringify({ imports: { [pkg]: entry } });
+    // The tag's packages.json: a package may pin its own (e.g. cross-package corpora), else synthesized keyed by name.
+    const manifest = existsSync(`${dir}/packages.json`)
+        ? readFileSync(`${dir}/packages.json`, "utf-8")
+        : JSON.stringify({ imports: { [pkg]: entry } });
 
     const browser = await chromium.launch();
     const page = await browser.newPage();

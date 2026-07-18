@@ -302,7 +302,7 @@ impl FromValue for Kwargs {
 
 /* Bootstrap codec */
 
-/// Decode a handle into a typed `Value`; errors on composites (use `Handle::call`).
+/// Decode a handle into a typed `Value`; errors on non-transit composites (use `Handle::call`).
 pub fn decode(h: u32) -> Result<Value> {
     let mut tag: u32 = 0;
     let mut buf = alloc::vec![0u8; 256];
@@ -312,67 +312,28 @@ pub fn decode(h: u32) -> Result<Value> {
         };
         if r >= 0 {
             if tag == u32::MAX {
-                return Err(Error::Type(alloc::string::String::from("value is not a primitive (use Handle::call for composites)")));
+                return Err(Error::Type(alloc::string::String::from("value is not a transit value (use Handle::call for composites)")));
             }
             buf.truncate(r as usize);
-            return Ok(match tag {
-                0 => Value::None,
-                1 => Value::Bool(buf[0] != 0),
-                2 => {
-                    let mut a = [0u8; 16];
-                    a.copy_from_slice(&buf[..16]);
-                    Value::Int(i128::from_le_bytes(a))
-                }
-                3 => {
-                    let mut a = [0u8; 8];
-                    a.copy_from_slice(&buf[..8]);
-                    Value::Float(f64::from_le_bytes(a))
-                }
-                4 => Value::Bytes(buf),
-                5 => Value::Raw(buf),
-                _ => return Err(Error::Type(alloc::string::String::from("unknown tag"))),
-            });
+            return Value::decode_body(tag, &buf)
+                .ok_or_else(|| Error::Type(alloc::string::String::from("malformed wire value")));
         }
         // Negative = -needed.
         buf.resize((-r) as usize, 0);
     }
 }
 
-/// Encode a primitive into a handle.
+/// Encode a transit value into a handle.
 pub fn encode(v: Value) -> Result<Handle> {
-    let raw = match v {
-        Value::None => unsafe { edge_encode(tag::NONE, core::ptr::null(), 0) },
-        Value::Bool(b) => {
-            let buf = [if b { 1u8 } else { 0u8 }];
-            unsafe { edge_encode(tag::BOOL, buf.as_ptr(), 1) }
-        }
-        Value::Int(i) => {
-            let buf = i.to_le_bytes();
-            unsafe { edge_encode(tag::INT, buf.as_ptr(), 16) }
-        }
-        Value::Float(f) => {
-            let buf = f.to_le_bytes();
-            unsafe { edge_encode(tag::FLOAT, buf.as_ptr(), 8) }
-        }
-        Value::Bytes(b) => unsafe { edge_encode(tag::BYTES, b.as_ptr(), b.len() as u32) },
-        Value::Raw(b) => unsafe { edge_encode(tag::RAW, b.as_ptr(), b.len() as u32) },
-    };
+    let mut body = Vec::new();
+    v.encode_body(&mut body);
+    let raw = unsafe { edge_encode(v.tag(), body.as_ptr(), body.len() as u32) };
     if raw == 0 { Err(Error::Runtime(alloc::string::String::from("encode failed"))) }
     else { Ok(Handle::from_raw(raw)) }
 }
 
-/// Typed primitive value; composites (list, dict, set, instances) go through `Handle::call`.
-#[derive(Debug, Clone)]
-pub enum Value {
-    None,
-    Bool(bool),
-    Int(i128),
-    Float(f64),
-    /// UTF-8 transit; the host materialises a `str`.
-    Bytes(Vec<u8>),
-    /// Opaque bytes transit; the host materialises a `bytes`.
-    Raw(Vec<u8>),
-}
+/// Typed transit value, shared with the host as `wasm_abi::WireValue`; sets and instances go through `Handle::call`.
+pub use wasm_abi::WireValue as Value;
 
 /* FromValue / IntoValue */
 
@@ -487,6 +448,42 @@ impl FromValue for Bytes {
 }
 impl IntoValue for Bytes {
     fn into_handle(self) -> Result<Handle> { encode(Value::Raw(self.0)) }
+}
+
+impl FromValue for Value {
+    fn from_handle(h: u32) -> Result<Self> { decode(h) }
+}
+impl IntoValue for Value {
+    fn into_handle(self) -> Result<Handle> { encode(self) }
+}
+
+/* List transit: the whole sequence crosses in one edge_decode/edge_encode instead of per-item ops. */
+
+impl FromValue for Vec<Value> {
+    fn from_handle(h: u32) -> Result<Self> {
+        match decode(h)? {
+            Value::List(items) => Ok(items),
+            v => Err(Error::Type(alloc::format!("expected a sequence, got {:?}", v))),
+        }
+    }
+}
+impl IntoValue for Vec<Value> {
+    fn into_handle(self) -> Result<Handle> { encode(Value::List(self)) }
+}
+
+impl FromValue for Vec<f64> {
+    fn from_handle(h: u32) -> Result<Self> {
+        Vec::<Value>::from_handle(h)?.into_iter().map(|v| match v {
+            Value::Float(f) => Ok(f),
+            Value::Int(i) => Ok(i as f64),
+            other => Err(Error::Type(alloc::format!("expected a sequence of numbers, got {:?}", other))),
+        }).collect()
+    }
+}
+impl IntoValue for Vec<f64> {
+    fn into_handle(self) -> Result<Handle> {
+        encode(Value::List(self.into_iter().map(Value::Float).collect()))
+    }
 }
 
 /// Trailing variadic params of a `#[plugin_fn]`, captured as borrowed handles.

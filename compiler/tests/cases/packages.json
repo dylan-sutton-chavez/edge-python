@@ -578,5 +578,13 @@
     "src": "from m import *\nprint(abs(-5))",
     "output": ["42"],
     "modules": { "m": { "native": ["abs"] } }
+  },
+  {
+    "src": "from facade import *\nprint(extra())\nprint(mk())",
+    "output": ["40", "5"],
+    "modules": {
+      "base": { "native": ["add", "square"] },
+      "facade": { "code": "from base import *\nfrom base import (\n    add as _a,\n    square as _s,\n)\nclass _CM:\n    def __enter__(self):\n        return self\n    def __exit__(self, a, b, c):\n        return False\ndef extra():\n    return _a(_s(6), _s(2))\ndef mk():\n    with _CM():\n        return 5" }
+    }
   }
 ]

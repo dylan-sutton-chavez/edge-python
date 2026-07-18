@@ -18,5 +18,41 @@
   {
     "src": "el = create_element('div')\nappend_child(body(), el)\nh = animate(el, '[{\"opacity\":0},{\"opacity\":1}]', '{\"duration\":30}', 'done')\nev = receive()\nprint('\"msg\":\"done\"' in ev, '\"ok\":true' in ev, f'\"animation_handle\":{h}' in ev)",
     "output": ["True True True"]
+  },
+  {
+    "src": "el = create_element('div')\nappend_child(body(), el)\nwith batch():\n    set_text(el, 'a')\n    print(get_text(el))\nprint(get_text(el))",
+    "output": ["", "a"]
+  },
+  {
+    "src": "el = create_element('div')\nappend_child(body(), el)\nwith batch():\n    set_text(el, 'x')\n    set_attribute(el, 'title', 't1')\n    add_class(el, 'boxed')\n    print(pending())\nprint(pending())\nprint(get_text(el))\nprint(get_attribute(el, 'title'))\nprint(get_attribute(el, 'class'))",
+    "output": ["3", "0", "x", "t1", "boxed"]
+  },
+  {
+    "src": "el = create_element('span')\nappend_child(body(), el)\nwith batch():\n    set_text(el, 'first')\n    set_text(el, 'second')\nprint(get_text(el))",
+    "output": ["second"]
+  },
+  {
+    "src": "flush()\nprint(pending())",
+    "output": ["0"]
+  },
+  {
+    "src": "b = body()\nel = create_element('div')\nappend_child(b, el)\ntry:\n    with batch():\n        set_text(el, 'nope')\n        raise ValueError('boom')\nexcept ValueError:\n    pass\nprint(get_text(el))\nprint(pending())",
+    "output": ["", "0"]
+  },
+  {
+    "src": "b = body()\nel = create_element('div')\nappend_child(b, el)\nwith batch():\n    with batch():\n        set_text(el, 'n')\n    print(get_text(el))\nprint(get_text(el))",
+    "output": ["", "n"]
+  },
+  {
+    "src": "b = body()\nel = create_element('div')\nappend_child(b, el)\nwith batch():\n    remove(el)\nprint(len([h for h in children(b).split(',') if h]))",
+    "output": ["0"]
+  },
+  {
+    "src": "inp = create_element('input')\nappend_child(body(), inp)\nwith batch():\n    set_value(inp, '42')\n    set_checked(inp, True)\nprint(get_value(inp))\nprint(get_checked(inp))",
+    "output": ["42", "True"]
+  },
+  {
+    "src": "apply_batch([['query', 'div']])",
+    "error": "not batchable"
   }
 ]

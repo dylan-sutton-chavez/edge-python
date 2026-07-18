@@ -1,0 +1,22 @@
+# Empty table: this crate is its own workspace root, not part of the parent compiler workspace.
+[workspace]
+
+# `struct` is a Rust keyword, so the crate is `edge-struct`; the test runner resolves the artifact by extension.
+[package]
+name = "edge-struct"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "edge_struct"
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-pdk = { path = "../../wasm-pdk" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

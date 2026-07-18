@@ -82,7 +82,7 @@ Wraps a primitive in a fresh handle (rc=1; release when done). `ptr`/`len` descr
 
 ### `edge_decode`
 
-Writes the value's tag at `*out_tag` and copies bytes into `dst[..dst_max]`. Returns bytes copied (`>= 0`), or `-bytes_needed` if the buffer was too small (re-allocate and retry). On invalid handle or non-primitive, returns `0` with `*out_tag = 0xFFFFFFFF` (composites go through `edge_op`).
+Writes the value's tag at `*out_tag` and copies bytes into `dst[..dst_max]`. Returns bytes copied (`>= 0`), or `-bytes_needed` if the buffer was too small (re-allocate and retry). On invalid handle or non-transit value (set, instance, cyclic composite), returns `0` with `*out_tag = 0xFFFFFFFF`; those go through `edge_op`.
 
 ### `edge_release`
 
@@ -139,8 +139,25 @@ Values `14..u32::MAX` are reserved. Old hosts return `1` with `kind=Runtime`.
 | Float | 3 | 8 bytes IEEE 754 little-endian |
 | Bytes | 4 | UTF-8 bytes -> `str`; non-UTF-8 is rejected |
 | Raw | 5 | bytes -> `bytes`, no UTF-8 validation |
+| List | 6 | TLV: `count:u32le`, then `count` nodes -> `list` |
+| Dict | 7 | TLV: `count:u32le`, then `count` key,value node pairs -> `dict` |
 
-List and dict construct via `NewList` / `NewDict`. Tuple, set, and frozenset construct via `NewTuple` / `NewSet` / `NewFrozenSet`. Remaining composites (instance, callable, iterator) construct via `edge_op(Call, type_handle, ...)` and operate via indexing ops.
+### Composite transit (TLV)
+
+`List` / `Dict` payloads nest values as TLV nodes, each framed `tag:u32le len:u32le payload[len]` with any transit tag inside:
+
+```python
+inp = tick({"positions": [[92.5, 115.75], [50.0, 20.25]], "step": 2})  # dict crosses whole
+```
+
+- Dict keys must be `str`; any other key makes the whole value non-transit.
+- Nesting caps at depth 32; malformed or deeper input rejects (`edge_encode` returns handle `0`).
+- Cyclic values cannot serialize; `edge_decode` reports them as non-transit (`0xFFFFFFFF`).
+- Python `tuple` flattens to `List` on the wire.
+
+The canonical codec is `wasm_abi::WireValue` (`encode_body` / `decode_body`), shared by the compiler and `wasm-pdk`.
+
+Sets and frozensets construct via `NewSet` / `NewFrozenSet`. Remaining composites (instance, callable, iterator) construct via `edge_op(Call, type_handle, ...)` and operate via indexing ops.
 
 ## Error kinds (for `edge_take_error`)
 
@@ -392,7 +409,7 @@ The `wasm-pdk` crate (Plugin Development Kit), bundled in this repo, publishable
 - `#[plugin_class]` / `#[plugin_methods]` / `#[plugin_ctor]`, expose a Rust struct as a Python class via the `__class_<Name>_<method>` export convention.
 - `module!()`, expands to `#[global_allocator]` + `#[panic_handler]`.
 - `module_fixed_pool!()` (or `module_fixed_pool!(bytes)`), same but allocating from a fixed-size static pool that never calls `memory.grow`; used by the bundled `std` packages.
-- `FromValue` / `IntoValue` with primitive impls (`i64`, `i128`, `f64`, `bool`, `String`, `&str`, `Bytes`, `Option<T>`, `Handle`). `i64` rejects out-of-range values with `ValueError`; use `i128` for the full range. `Bytes` maps to Python `bytes` over `tag::RAW`.
+- `FromValue` / `IntoValue` with primitive impls (`i64`, `i128`, `f64`, `bool`, `String`, `&str`, `Bytes`, `Option<T>`, `Handle`, `Value`). `i64` rejects out-of-range values with `ValueError`; use `i128` for the full range. `Bytes` maps to Python `bytes` over `tag::RAW`. `Vec<Value>` / `Vec<f64>` cross a whole sequence in one TLV transit instead of per-item ops.
 - `Handle` with `Drop`-driven release plus `call`, `get_attr` / `set_attr`, `get_item` / `set_item`, `len`, `iter` / `iter_next`, `new_dict` / `new_list`, `new_tuple` / `new_set` / `new_frozenset`, `type_of`.
 - `Args`, trailing variadic positional params as borrowed handles; declare it as the last param before any `Kwargs`.
 - `Kwargs`, thin wrapper around the trailing kwargs handle with `get::<T>(name)` for primitive kwargs and `get_handle(name)` for callables, tuples, dicts.
