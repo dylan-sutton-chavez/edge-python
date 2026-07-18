@@ -79,18 +79,21 @@ fn check_pair(a: &[u8], b: &[u8]) -> Result<()> {
     Ok(())
 }
 
+// Element-wise over two zipped operand buffers.
+fn zip_map(a: &[u8], b: &[u8], f: impl Fn(f64, f64) -> f64) -> Result<Vec<u8>> {
+    check_pair(a, b)?;
+    let mut out = Vec::with_capacity(a.len());
+    for (x, y) in a.chunks_exact(8).zip(b.chunks_exact(8)) {
+        let xv = f64::from_le_bytes(x.try_into().unwrap());
+        let yv = f64::from_le_bytes(y.try_into().unwrap());
+        out.extend_from_slice(&f(xv, yv).to_le_bytes());
+    }
+    Ok(out)
+}
+
 macro_rules! bin_all { ($($f:ident => $op:tt),* $(,)?) => { $(
     #[plugin_fn]
-    fn $f(a: Bytes, b: Bytes) -> Result<Bytes> {
-        check_pair(&a, &b)?;
-        let mut out = Vec::with_capacity(a.len());
-        for (x, y) in a.chunks_exact(8).zip(b.chunks_exact(8)) {
-            let xv = f64::from_le_bytes(x.try_into().unwrap());
-            let yv = f64::from_le_bytes(y.try_into().unwrap());
-            out.extend_from_slice(&(xv $op yv).to_le_bytes());
-        }
-        Ok(Bytes(out))
-    }
+    fn $f(a: Bytes, b: Bytes) -> Result<Bytes> { Ok(Bytes(zip_map(&a, &b, |x, y| x $op y)?)) }
 )* } }
 
 bin_all!(
@@ -102,12 +105,7 @@ bin_all!(
 // Scalar broadcast: every element times `k`.
 #[plugin_fn]
 fn scale_all(data: Bytes, k: f64) -> Result<Bytes> {
-    check_len(&data)?;
-    let mut out = Vec::with_capacity(data.len());
-    for src in data.chunks_exact(8) {
-        out.extend_from_slice(&(f64::from_le_bytes(src.try_into().unwrap()) * k).to_le_bytes());
-    }
-    Ok(Bytes(out))
+    Ok(Bytes(map(&data, |x| x * k)?))
 }
 
 // Neumaier compensated dot product.

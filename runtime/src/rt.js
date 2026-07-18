@@ -15,6 +15,25 @@ const TAG_RAW = 5;
 const TAG_LIST = 6;
 const TAG_DICT = 7;
 
+const U64_MASK = (1n << 64n) - 1n;
+const I128_MAX = (1n << 127n) - 1n;
+const I128_MIN = -(1n << 127n);
+const SAFE_MAX = BigInt(Number.MAX_SAFE_INTEGER);
+
+// i128 LE read; BigInt past 2^53.
+function readI128(v, off) {
+    const big = (v.getBigInt64(off + 8, true) << 64n) | v.getBigUint64(off, true);
+    return big >= -SAFE_MAX && big <= SAFE_MAX ? Number(big) : big;
+}
+
+// i128 LE write; throws beyond i128.
+function writeI128(v, off, n) {
+    const big = BigInt(n);
+    if (big > I128_MAX || big < I128_MIN) throw new RangeError(`int out of i128 range: ${n}`);
+    v.setBigUint64(off, big & U64_MASK, true);
+    v.setBigInt64(off + 8, big >> 64n, true);
+}
+
 export function makeRt(getExports) {
     return {
         decodeStr: (h) => decodeStr(getExports(), h),
@@ -62,7 +81,7 @@ function decodeBytes(exps, handle, expectedTag) {
 const decodeStr = (exps, h) => TD.decode(decodeBytes(exps, h, TAG_BYTES));
 const decodeInt = (exps, h) => {
     const b = decodeBytes(exps, h, TAG_INT);
-    return Number(new DataView(b.buffer, b.byteOffset, 16).getBigInt64(0, true));
+    return readI128(new DataView(b.buffer, b.byteOffset, 16), 0);
 };
 const decodeBool = (exps, h) => decodeBytes(exps, h, TAG_BOOL)[0] !== 0;
 const decodeFloat = (exps, h) => {
@@ -80,11 +99,7 @@ function encodeStr(exps, s) {
 }
 function encodeInt(exps, n) {
     const buf = exps.wasm_alloc(16);
-    const view = new DataView(exps.memory.buffer);
-    const big = BigInt(n);
-    view.setBigInt64(buf, big, true);
-    /* Sign-extend upper 64 bits so the i128 round-trip preserves negative values. */
-    view.setBigInt64(buf + 8, big < 0n ? -1n : 0n, true);
+    writeI128(new DataView(exps.memory.buffer), buf, n);
     const h = exps.host_edge_encode(TAG_INT, buf, 16);
     exps.wasm_free(buf, 16);
     return h;
@@ -116,7 +131,7 @@ function decodeBody(tag, bytes) {
     switch (tag) {
         case TAG_NONE: return null;
         case TAG_BOOL: return bytes[0] !== 0;
-        case TAG_INT: return Number(view().getBigInt64(0, true));
+        case TAG_INT: return readI128(view(), 0);
         case TAG_FLOAT: return view().getFloat64(0, true);
         case TAG_BYTES: return TD.decode(bytes);
         // Copy: nested payloads are views into the parent buffer.
@@ -150,7 +165,7 @@ function decodeBody(tag, bytes) {
 function encodeAny(exps, value) {
     if (value === null || value === undefined) return exps.host_edge_encode(TAG_NONE, 0, 0);
     if (typeof value === 'boolean') return encodeBool(exps, value);
-    if (typeof value === 'bigint') return encodeInt(exps, Number(value));
+    if (typeof value === 'bigint') return encodeInt(exps, value);
     if (typeof value === 'number') {
         return Number.isInteger(value) ? encodeInt(exps, value) : encodeFloat(exps, value);
     }
@@ -175,9 +190,7 @@ function encodeNode(value) {
             v.setFloat64(0, value, true);
             return { tag: TAG_FLOAT, body };
         }
-        const big = BigInt(value);
-        v.setBigInt64(0, big, true);
-        v.setBigInt64(8, big < 0n ? -1n : 0n, true);
+        writeI128(v, 0, value);
         return { tag: TAG_INT, body };
     }
     if (typeof value === 'string') return { tag: TAG_BYTES, body: TE.encode(value) };

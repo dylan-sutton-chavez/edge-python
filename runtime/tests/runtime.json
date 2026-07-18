@@ -1,6 +1,12 @@
 [
     { "script": "render(str(add(2, 3) + sub(10, 4) + mul(2, 5)))", "expect": "21" },
     { "script": "render(upper('hola'))", "expect": "HOLA" },
+    { "script": "render(str(echo(2**70)))", "expect": "1180591620717411303424" },
+    { "script": "render(str(echo(-(2**77 + 123456789))))", "expect": "-151115727451828770295061" },
+    { "script": "render(jstype(2**70))", "expect": "bigint" },
+    { "script": "render(jstype(41))", "expect": "number" },
+    { "script": "render(str(echo([7, 8])))", "expect": "[7, 8]" },
+    { "script": "render(str(echo([2**70, 7])))", "expect": "[1180591620717411303424, 7]" },
     { "script": "render(f'{2 ** 10}')", "expect": "1024" },
     { "script": "render(str(10 // 0))", "error": "ZeroDivisionError" },
     { "script": "import calc\nrender(str(calc.add(2, 3)))", "expect": "5" },

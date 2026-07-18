@@ -2,7 +2,7 @@
   "_meta": {
     "source": "MicroPython tests/basics differential vs CPython 3.13",
     "verified": "each repro re-run through VM + python3",
-    "count": 3,
+    "count": 4,
     "fixed": "100 bugs fixed in vm.json: try/finally unwinding, yield-from expressions, range overflow/truncation/contains, in-place set ops, del of closures, lt sorting, nested next() corruption, nested generator/comprehension ForIter relocation, nested-call spread-arg count corruption, spread-arg after keyword, kwarg name colliding with *args/**kwargs param, kwarg duplicated into **kwargs."
   },
   "bugs": [
@@ -29,6 +29,14 @@
       "repro": "def f():\n    def g():\n        return x\n    x = 3\n    return g\nprint(f()())",
       "expected": "3",
       "actual": "__VMERR__ NameError: name 'x' is not defined"
+    },
+    {
+      "id": "global_rebind_cross_function",
+      "category": "scoping",
+      "summary": "A global rebind inside one function is invisible to reads from other functions; in-place mutation propagates. Found building dom batch(); also pinned red in vm.json. Note: fix host/dom/src/entry.py line 25 around after this.",
+      "repro": "x = [1]\ndef rebind():\n    global x\n    x = []\ndef read():\n    return len(x)\nrebind()\nprint(read())",
+      "expected": "0",
+      "actual": "1"
     }
   ]
 }
