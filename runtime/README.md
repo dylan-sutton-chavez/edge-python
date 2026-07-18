@@ -190,7 +190,7 @@ const dom = ({ pushEvent }) => {
 const worker = await createWorker({ wasmUrl: "...", mainThreadModules: { dom } });
 ```
 
-Supported tags: `None`, `bool`, `int` (i64, range-limited by JS Number), `float`, string bytes. Opaque references (DOM nodes, files, observers) -> integer IDs in a main-thread registry (the `alloc` / `node` pattern).
+Supported values: `None`, `bool`, `int` (i64, range-limited by JS Number), `float`, `str`, `bytes` (`Uint8Array`), plus nested `list` / `dict` (str keys) of these. Opaque references (DOM nodes, files, observers) to integer IDs in a main-thread registry (the `alloc` / `node` pattern).
 
 Per-call overhead: one `postMessage` round-trip (around 0.1 to 0.4 ms in modern browsers). Fine for UI-rate workloads. For tight per-frame loops over thousands of fine-grained ops, prefer a Worker-side capability (Path A `.wasm`).
 

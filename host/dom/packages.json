@@ -1,0 +1,4 @@
+{
+    "imports": { "dom": "/dom/src/entry.py" },
+    "host": { "_dom": "/dom/src/index.js" }
+}

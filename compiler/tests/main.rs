@@ -1,5 +1,6 @@
 // Integration test entry point.
 mod common;
+mod abi;
 mod lexer;
 mod parser;
 mod vm;

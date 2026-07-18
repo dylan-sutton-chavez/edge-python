@@ -1,0 +1,6 @@
+{
+    "imports": {
+        "math": "/math/target/wasm32-unknown-unknown/release/math.wasm",
+        "struct": "/struct/target/wasm32-unknown-unknown/release/edge_struct.wasm"
+    }
+}

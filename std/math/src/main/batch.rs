@@ -67,3 +67,84 @@ fn prod_all(data: Bytes) -> Result<f64> {
     }
     Ok(acc)
 }
+
+/* Binary kernels: two same-length `bytes` operand buffers. */
+
+fn check_pair(a: &[u8], b: &[u8]) -> Result<()> {
+    check_len(a)?;
+    check_len(b)?;
+    if a.len() != b.len() {
+        return Err(Error::Value(String::from("buffers must have the same length")));
+    }
+    Ok(())
+}
+
+macro_rules! bin_all { ($($f:ident => $op:tt),* $(,)?) => { $(
+    #[plugin_fn]
+    fn $f(a: Bytes, b: Bytes) -> Result<Bytes> {
+        check_pair(&a, &b)?;
+        let mut out = Vec::with_capacity(a.len());
+        for (x, y) in a.chunks_exact(8).zip(b.chunks_exact(8)) {
+            let xv = f64::from_le_bytes(x.try_into().unwrap());
+            let yv = f64::from_le_bytes(y.try_into().unwrap());
+            out.extend_from_slice(&(xv $op yv).to_le_bytes());
+        }
+        Ok(Bytes(out))
+    }
+)* } }
+
+bin_all!(
+    add_all => +,
+    sub_all => -,
+    mul_all => *,
+);
+
+// Scalar broadcast: every element times `k`.
+#[plugin_fn]
+fn scale_all(data: Bytes, k: f64) -> Result<Bytes> {
+    check_len(&data)?;
+    let mut out = Vec::with_capacity(data.len());
+    for src in data.chunks_exact(8) {
+        out.extend_from_slice(&(f64::from_le_bytes(src.try_into().unwrap()) * k).to_le_bytes());
+    }
+    Ok(Bytes(out))
+}
+
+// Neumaier compensated dot product.
+#[plugin_fn]
+fn dot_all(a: Bytes, b: Bytes) -> Result<f64> {
+    check_pair(&a, &b)?;
+    let mut sum = 0.0_f64;
+    let mut c = 0.0_f64;
+    for (x, y) in a.chunks_exact(8).zip(b.chunks_exact(8)) {
+        let p = f64::from_le_bytes(x.try_into().unwrap()) * f64::from_le_bytes(y.try_into().unwrap());
+        let t = sum + p;
+        if sum.abs() >= p.abs() { c += (sum - t) + p; } else { c += (p - t) + sum; }
+        sum = t;
+    }
+    Ok(sum + c)
+}
+
+/* Row-major (rows x cols) matrix times vector; returns `rows` packed values. */
+#[plugin_fn]
+fn matvec(m: Bytes, x: Bytes, cols: i64) -> Result<Bytes> {
+    check_len(&m)?;
+    check_len(&x)?;
+    if cols <= 0 || x.len() != (cols as usize) * 8 {
+        return Err(Error::Value(String::from("vector length must equal cols")));
+    }
+    let row_bytes = (cols as usize) * 8;
+    if !m.len().is_multiple_of(row_bytes) {
+        return Err(Error::Value(String::from("matrix length must be a multiple of cols")));
+    }
+    let xs: Vec<f64> = x.chunks_exact(8).map(|c| f64::from_le_bytes(c.try_into().unwrap())).collect();
+    let mut out = Vec::with_capacity(m.len() / (cols as usize));
+    for row in m.chunks_exact(row_bytes) {
+        let mut acc = 0.0_f64;
+        for (c, xv) in row.chunks_exact(8).zip(&xs) {
+            acc += f64::from_le_bytes(c.try_into().unwrap()) * xv;
+        }
+        out.extend_from_slice(&acc.to_le_bytes());
+    }
+    Ok(Bytes(out))
+}

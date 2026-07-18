@@ -33,15 +33,18 @@ print(hypot(3, 4, 12)) # 13.0
 For array workloads, the `*_all` functions take and return `bytes` holding little-endian f64 values. The whole buffer crosses the boundary once, so `n` elements cost two crossings instead of `2n`.
 
 ```python
-from math import sqrt_all, fsum_all
-import struct  # any packer of little-endian f64
+from math import sqrt_all, fsum_all, dot_all
+from struct import pack
 
-buf = struct.pack("<4d", 1.0, 4.0, 9.0, 16.0)
+buf = pack("4d", 1.0, 4.0, 9.0, 16.0)
 roots = sqrt_all(buf) # bytes -> bytes, element-wise sqrt
 print(fsum_all(buf)) # 30.0, compensated sum over the buffer
+print(dot_all(buf, buf)) # 354.0, compensated dot product
 ```
 
-Element-wise (`bytes -> bytes`): `sqrt_all`, `abs_all`, `exp_all`, `log_all`, `sin_all`, `cos_all`. Reductions (`bytes -> float`): `fsum_all`, `prod_all`. A buffer length that is not a multiple of 8 raises `ValueError`.
+Element-wise (`bytes -> bytes`): `sqrt_all`, `abs_all`, `exp_all`, `log_all`, `sin_all`, `cos_all`; same-length pairs: `add_all`, `sub_all`, `mul_all`; scalar broadcast: `scale_all(buf, k)`. Reductions (`bytes -> float`): `fsum_all`, `prod_all`, `dot_all`. Row-major matrix times vector: `matvec(m, x, cols)`. A buffer length that is not a multiple of 8, or mismatched operand lengths, raises `ValueError`.
+
+Together with [`struct`](../struct) this covers small numeric training loops: Python orchestrates, the kernels run native, `pack`/`unpack` move and persist the weights.
 
 ## Limitations
 

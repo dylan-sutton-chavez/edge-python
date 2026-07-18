@@ -31,12 +31,14 @@ async function runCapability(cap) {
     const hasPy = existsSync(`${dir}/src/entry.py`);
 
     const cases = JSON.parse(readFileSync(`${dir}/${cap}.json`, "utf-8"));
-    // The tag's packages.json, synthesized: python -> entry.py as a code module; else the JS host module.
-    const manifest = JSON.stringify(
-        hasPy
-            ? { imports: { [cap]: `/${cap}/src/entry.py` } }
-            : { host: { [cap]: `/${cap}/src/index.js` } },
-    );
+    // The tag's packages.json: a capability may pin its own (e.g. python wrapper + host module pairs), else synthesized: python to entry.py as a code module; else the JS host module.
+    const manifest = existsSync(`${dir}/packages.json`)
+        ? readFileSync(`${dir}/packages.json`, "utf-8")
+        : JSON.stringify(
+            hasPy
+                ? { imports: { [cap]: `/${cap}/src/entry.py` } }
+                : { host: { [cap]: `/${cap}/src/index.js` } },
+        );
 
     const browser = await chromium.launch();
     const page = await browser.newPage();

@@ -79,7 +79,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [json, re, math, test]
+        package: [json, re, math, struct, test]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/std

@@ -24,7 +24,7 @@ export const dom = (ctx) => {
         else console.error(`[dom:${where}]`, e);
     };
     const ctxPlus = { ...ctx, emitError };
-    return Object.assign(
+    const handlers = Object.assign(
         {},
         tree(state),
         style(state),
@@ -36,6 +36,24 @@ export const dom = (ctx) => {
         platform(state, ctxPlus),
         { bind_global_error: (msg) => { errorMsg = msg; } },
     );
+
+    /* Mutators an `apply_batch` op list may call; anything returning a value cannot batch. */
+    const BATCHABLE = new Set([
+        'set_text', 'set_html', 'set_attribute', 'remove_attribute',
+        'add_class', 'remove_class', 'set_data',
+        'append_child', 'insert_before', 'remove', 'replace_children',
+        'set_style', 'set_scroll_top', 'scroll_into_view', 'focus', 'blur',
+        'set_value', 'set_checked',
+    ]);
+
+    /* One call, many mutations: `ops` is a list of `[name, ...args]`. See the `dom_batch` package for the Python side. */
+    handlers.apply_batch = (ops) => {
+        for (const [name, ...args] of ops) {
+            if (!BATCHABLE.has(name)) throw new Error(`apply_batch: '${name}' is not batchable`);
+            handlers[name](...args);
+        }
+    };
+    return handlers;
 };
 
 export default dom;

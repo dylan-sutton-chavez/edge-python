@@ -8,12 +8,14 @@ export const DEFAULT_IMPORTS = {
     json: 'https://cdn.edgepython.com/std/json.wasm',
     re: 'https://cdn.edgepython.com/std/re.wasm',
     math: 'https://cdn.edgepython.com/std/math.wasm',
+    struct: 'https://cdn.edgepython.com/std/struct.wasm',
     test: 'https://cdn.edgepython.com/std/test.py',
+    dom: 'https://cdn.edgepython.com/host/dom/entry.py', // e.g., `dom` is a .py facade over the `_dom` host module.
 };
 
 /* Main-thread host libraries (ESM). Pages flattens each `<name>/src/` to `cdn.edgepython.com/host/<name>/`. Same lazy + opt-out rules; merged under any user `host` entries. */
 export const DEFAULT_HOST = {
-    dom: 'https://cdn.edgepython.com/host/dom/index.js',
+    _dom: 'https://cdn.edgepython.com/host/dom/index.js',
     network: 'https://cdn.edgepython.com/host/network/index.js',
     storage: 'https://cdn.edgepython.com/host/storage/index.js',
     time: 'https://cdn.edgepython.com/host/time/index.js',

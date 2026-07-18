@@ -14,7 +14,9 @@ async def main():
         set_text(query("#btn"), f"clicked {n} times")
 ```
 
-Register it with `createWorker({ mainThreadModules: { dom } })` (or the `host` field of `packages.json`); see [`host/README.md`](../README.md) for the setup boilerplate. Engine runs in a Web Worker; `dom` handlers run on the page's main thread (where `document` lives) via the runtime's deferred host-call mechanism. Python sees every call as synchronous.
+Two pieces, one import name: the JS handlers register as the internal `_dom` module (`createWorker({ mainThreadModules: { _dom: dom } })`, or the `host` field of `packages.json`), and Python imports the [`src/entry.py`](src/entry.py) façade declared as `dom` under `imports` — it re-exports every handler and adds [batching](#batched-mutations). 
+
+See [`host/README.md`](../README.md) for the setup boilerplate and [`packages.json`](packages.json) for the manifest pair. Engine runs in a Web Worker; `dom` handlers run on the page's main thread (where `document` lives) via the runtime's deferred host-call mechanism. Python sees every call as synchronous.
 
 ## Testing
 
@@ -175,6 +177,25 @@ set_attribute(circle, "r", "40")
 append_child(query("svg"), circle)
 ```
 
+### Batched mutations
+
+Inside a `batch()` block, mutators buffer locally instead of crossing per call; the block exit applies the whole buffer with a single host call. Outside a block every call is immediate, and reads (`get_text`, `query`, ...) are always immediate.
+
+```python
+from dom import query, batch, set_text, set_style
+
+hud = query("#hud")
+speed = query("#speed")
+
+def frame(v):
+    with batch():
+        set_text(speed, str(v)) # buffered, no host call
+        set_style(hud, "opacity", "1") # buffered, no host call
+    # exit applies both with ONE host call
+```
+
+Batchable mutators: `set_text`, `set_html`, `set_attribute`, `remove_attribute`, `add_class`, `remove_class`, `set_data`, `append_child`, `insert_before`, `remove`, `replace_children`, `set_style`, `set_scroll_top`, `scroll_into_view`, `focus`, `blur`, `set_value`, `set_checked`. Nested `batch()` blocks coalesce into the outermost flush; an exception inside a block discards the buffer. `pending()` counts buffered ops and `flush()` applies them early. The raw op list rides `apply_batch(ops)` (`[name, ...args]` per op), which raises on any name outside the list above.
+
 ### Errors
 
 Async errors in DOM callbacks (event listeners, observer callbacks, swallowed promise rejections in `media_play` / `request_fullscreen` / `request_pointer_lock` / `animate`) go to the browser console by default. Bind a message to surface them as ordinary Python events:
@@ -197,11 +218,13 @@ Payload: `{msg, where, error, stack?}`. `where` identifies the call site (`event
 
 ## How it works
 
-Factory `(ctx) => handlers`. `src/main/state.js` opens a fresh closure per `createWorker` with handle tables (`nodes`, `bindings`, `files`, observers, animations), `alloc` / `node` / `allocList` helpers, and `cleanSubtree`. Eight handler slices in `src/main/` (`tree`, `style`, `events`, `forms`, `observers`, `animations`, `media`, `platform`) each return an object literal of handlers closing over the shared state; `src/index.js` composes them with `Object.assign` and wraps async callbacks with `emitError` so failures surface via `bind_global_error`. Adding a handler is one entry in one slice.
+Factory `(ctx) => handlers`. `src/main/state.js` opens a fresh closure per `createWorker` with handle tables (`nodes`, `bindings`, `files`, observers, animations), `alloc` / `node` / `allocList` helpers, and `cleanSubtree`. Eight handler slices in `src/main/` (`tree`, `style`, `events`, `forms`, `observers`, `animations`, `media`, `platform`) each return an object literal of handlers closing over the shared state; `src/index.js` composes them with `Object.assign` and wraps async callbacks with `emitError` so failures surface via `bind_global_error`. 
+
+Adding a handler is one entry in one slice; the [`entry.py`](src/entry.py) façade re-exports it automatically, and a new *mutator* also gets a buffered wrapper there plus an `index.js` `BATCHABLE` entry.
 
 ## Performance
 
-Per-handler cost is one `postMessage` round-trip (~0.1–0.4 ms in modern browsers), plenty for UI-rate workloads at hundreds of ops/frame. Bad fit: tight per-frame loops with thousands of fine-grained ops, or pixel-precise renders — pair with a `<canvas>` capability for the framebuffer path.
+Per-handler cost is one `postMessage` round-trip (~0.1–0.4 ms in modern browsers), plenty for UI-rate workloads at hundreds of ops/frame. Per-frame bursts of mutations should go inside a [`batch()`](#batched-mutations) block so the whole burst pays one round-trip. Bad fit: pixel-precise renders — pair with a `<canvas>` capability for the framebuffer path.
 
 ## Distribution
 

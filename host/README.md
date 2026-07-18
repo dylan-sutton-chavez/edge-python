@@ -6,7 +6,9 @@ Official JS modules for [Edge Python](https://edgepython.com) exposing host APIs
 
 ```
 ├── dom
+│   ├── packages.json
 │   └── src
+│       ├── entry.py
 │       ├── index.js
 │       └── main
 ├── network
@@ -35,7 +37,9 @@ One folder per capability. Each ships a `<name>/<name>.json` corpus; the shared 
 
     const worker = await createWorker({
         wasmUrl: "https://cdn.edgepython.com/compiler.wasm",
-        mainThreadModules: { dom },
+        // JS handlers register as `_dom`; scripts import the `dom` façade (see dom/packages.json).
+        mainThreadModules: { _dom: dom },
+        imports: { dom: "https://cdn.edgepython.com/host/dom/src/entry.py" },
     });
     await worker.run(await (await fetch("./script.py")).text());
 </script>
@@ -45,7 +49,7 @@ One folder per capability. Each ships a `<name>/<name>.json` corpus; the shared 
 
 | Folder | Description |
 |--------|-------------|
-| `dom`     | Browser DOM access, see [`dom/README.md`](dom/README.md) |
+| `dom`     | Browser DOM access with opt-in `batch()` mutation batching, see [`dom/README.md`](dom/README.md) |
 | `network` | HTTP fetch, WebSocket, SEE, see [`network/README.md`](network/README.md) |
 | `storage` | localStorage, sessionStorage, IndexedDB, see [`storage/README.md`](storage/README.md) |
 | `time`    | Clocks, sleep, calendar formatting, see [`time/README.md`](time/README.md) |

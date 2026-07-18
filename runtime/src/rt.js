@@ -11,6 +11,9 @@ const TAG_BOOL = 1;
 const TAG_INT = 2;
 const TAG_FLOAT = 3;
 const TAG_BYTES = 4;
+const TAG_RAW = 5;
+const TAG_LIST = 6;
+const TAG_DICT = 7;
 
 export function makeRt(getExports) {
     return {
@@ -104,12 +107,41 @@ function encodeFloat(exps, f) {
 // Decode any tag to a JS value.
 function decodeAny(exps, handle) {
     const { tag, bytes } = rawDecode(exps, handle);
+    return decodeBody(tag, bytes);
+}
+
+/* Wire payload to JS value; LIST/DICT payloads hold nested TLV nodes (tag:u32le len:u32le payload). */
+function decodeBody(tag, bytes) {
+    const view = () => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     switch (tag) {
         case TAG_NONE: return null;
         case TAG_BOOL: return bytes[0] !== 0;
-        case TAG_INT: return Number(new DataView(bytes.buffer, bytes.byteOffset, 16).getBigInt64(0, true));
-        case TAG_FLOAT: return new DataView(bytes.buffer, bytes.byteOffset, 8).getFloat64(0, true);
+        case TAG_INT: return Number(view().getBigInt64(0, true));
+        case TAG_FLOAT: return view().getFloat64(0, true);
         case TAG_BYTES: return TD.decode(bytes);
+        // Copy: nested payloads are views into the parent buffer.
+        case TAG_RAW: return bytes.slice();
+        case TAG_LIST: case TAG_DICT: {
+            const v = view();
+            const count = v.getUint32(0, true);
+            let pos = 4;
+            const nextNode = () => {
+                const t = v.getUint32(pos, true);
+                const len = v.getUint32(pos + 4, true);
+                const payload = bytes.subarray(pos + 8, pos + 8 + len);
+                pos += 8 + len;
+                return decodeBody(t, payload);
+            };
+            if (tag === TAG_LIST) {
+                return Array.from({ length: count }, nextNode);
+            }
+            const obj = {};
+            for (let i = 0; i < count; i++) {
+                const key = nextNode();
+                obj[key] = nextNode();
+            }
+            return obj;
+        }
         default: throw new Error(`unknown handle tag ${tag}`);
     }
 }
@@ -123,5 +155,56 @@ function encodeAny(exps, value) {
         return Number.isInteger(value) ? encodeInt(exps, value) : encodeFloat(exps, value);
     }
     if (typeof value === 'string') return encodeStr(exps, value);
+    // Composites and raw bytes serialize to one TLV payload, then a single host_edge_encode.
+    const { tag, body } = encodeNode(value);
+    const ptr = exps.wasm_alloc(Math.max(1, body.length));
+    new Uint8Array(exps.memory.buffer, ptr, body.length).set(body);
+    const h = exps.host_edge_encode(tag, ptr, body.length);
+    exps.wasm_free(ptr, Math.max(1, body.length));
+    return h;
+}
+
+/* JS value to {tag, body}; used for nested nodes and composite roots. */
+function encodeNode(value) {
+    if (value === null || value === undefined) return { tag: TAG_NONE, body: new Uint8Array(0) };
+    if (typeof value === 'boolean') return { tag: TAG_BOOL, body: Uint8Array.of(value ? 1 : 0) };
+    if (typeof value === 'number' || typeof value === 'bigint') {
+        const body = new Uint8Array(typeof value === 'number' && !Number.isInteger(value) ? 8 : 16);
+        const v = new DataView(body.buffer);
+        if (body.length === 8) {
+            v.setFloat64(0, value, true);
+            return { tag: TAG_FLOAT, body };
+        }
+        const big = BigInt(value);
+        v.setBigInt64(0, big, true);
+        v.setBigInt64(8, big < 0n ? -1n : 0n, true);
+        return { tag: TAG_INT, body };
+    }
+    if (typeof value === 'string') return { tag: TAG_BYTES, body: TE.encode(value) };
+    if (value instanceof Uint8Array) return { tag: TAG_RAW, body: value };
+    if (value instanceof ArrayBuffer) return { tag: TAG_RAW, body: new Uint8Array(value) };
+    if (Array.isArray(value)) {
+        return { tag: TAG_LIST, body: joinNodes(value.length, value.map(encodeNode)) };
+    }
+    if (typeof value === 'object') {
+        const nodes = Object.entries(value).flatMap(([k, v]) => [encodeNode(k), encodeNode(v)]);
+        return { tag: TAG_DICT, body: joinNodes(Object.keys(value).length, nodes) };
+    }
     throw new Error(`cannot encode JS value of type ${typeof value}`);
+}
+
+// count:u32le then each node framed as tag:u32le len:u32le payload.
+function joinNodes(count, nodes) {
+    const total = 4 + nodes.reduce((n, { body }) => n + 8 + body.length, 0);
+    const out = new Uint8Array(total);
+    const v = new DataView(out.buffer);
+    v.setUint32(0, count, true);
+    let pos = 4;
+    for (const { tag, body } of nodes) {
+        v.setUint32(pos, tag, true);
+        v.setUint32(pos + 4, body.length, true);
+        out.set(body, pos + 8);
+        pos += 8 + body.length;
+    }
+    return out;
 }
