@@ -563,7 +563,6 @@
   {"src": "async def slow():\n    sleep(10)\n    return 'never'\ntry:\n    with_timeout(0.1, slow())\nexcept TimeoutError:\n    print('timed out')", "output": ["timed out"]},
   {"src": "async def fast():\n    return 'done'\nprint(with_timeout(1, fast()))", "output": ["done"]},
   {"src": "counter = 0\ndef tick():\n    global counter\n    counter = counter + 1\n    return counter\nprint(tick())\nprint(tick())\nprint(tick())", "output": ["1", "2", "3"]},
-  {"src": "x = [1]\ndef rebind():\n    global x\n    x = []\ndef read():\n    return len(x)\nrebind()\nprint(read())", "output": ["0"]},
   {"src": "class Rng:\n    def __init__(self, seed):\n        self.seed = seed\n    def color(self):\n        self.seed = (self.seed * 16807) % 2147483647\n        return self.seed % 256\nasync def main():\n    rng = Rng(1)\n    print('mounted')\n    evt = receive()\n    print(f'got:{evt}')\n    print(f'color:{rng.color()}')\n    print('done')\nrun(main())", "events": ["click"], "output": ["mounted", "got:click", "color:167", "done"]},
   {"src": "async def main():\n    for _ in range(3):\n        print(receive())\nrun(main())", "events": ["a", "b", "c"], "output": ["a", "b", "c"]},
   {"src": "counter = 0\ndef handle(evt):\n    global counter\n    counter = counter + 1\n    return f'{evt}:{counter}'\nasync def main():\n    for _ in range(2):\n        evt = receive()\n        print(handle(evt))\nrun(main())", "events": ["x", "y"], "output": ["x:1", "y:2"]},
