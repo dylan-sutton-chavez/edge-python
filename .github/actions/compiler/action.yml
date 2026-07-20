@@ -80,14 +80,15 @@ runs:
           --lib \
           --release \
           -p edge-python \
-          -Z build-std=std,panic_abort
+          -Z build-std=std,panic_abort \
+          -Z build-std-features=optimize_for_size
 
     - name: Size (unoptimized)
       if: inputs.mode == 'build'
       shell: bash
       run: ls -lh target/wasm32-unknown-unknown/release/compiler.wasm
 
-    # Two passes: -Oz with traps-never-happen, then reflatten for a fresh CFG.
+    # Three passes: -Oz with traps-never-happen, reflatten for a fresh CFG, then a final converge sweep.
     - name: Optimize
       if: inputs.mode == 'build'
       shell: bash
@@ -107,9 +108,15 @@ runs:
           --enable-bulk-memory-opt \
           --enable-nontrapping-float-to-int \
           --enable-sign-ext \
-          -o "$INPUT" /tmp/wasm_stage1.wasm
+          -o /tmp/wasm_stage2.wasm /tmp/wasm_stage1.wasm
 
-        rm /tmp/wasm_stage1.wasm
+        wasm-opt -Oz --converge \
+          --enable-bulk-memory-opt \
+          --enable-nontrapping-float-to-int \
+          --enable-sign-ext \
+          -o "$INPUT" /tmp/wasm_stage2.wasm
+
+        rm /tmp/wasm_stage1.wasm /tmp/wasm_stage2.wasm
 
     - name: Size (optimized)
       if: inputs.mode == 'build'
