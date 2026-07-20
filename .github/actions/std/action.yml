@@ -123,6 +123,14 @@ runs:
       shell: bash
       run: ls -lh "std/${{ inputs.package }}/target/wasm32-unknown-unknown/release/${{ inputs.package }}.wasm"
 
+    # STDPKG narrows Deno's test discovery to this package's corpus.
+    - name: Test
+      shell: bash
+      working-directory: std
+      env:
+        STDPKG: ${{ inputs.package }}
+      run: deno test --allow-all tests/
+
     # Stage native -> <pkg>.wasm, pure-Python -> <pkg>.py.
     - name: Stage artifact
       shell: bash
