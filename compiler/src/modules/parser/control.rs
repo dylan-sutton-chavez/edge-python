@@ -534,7 +534,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.commit_block();
     }
 
-    /* with / async with: each CM is a SetupFinally cleanup frame whose handler runs `WithExit`. The pending exit (none/return/break/exception) selects the `__exit__` args and suppression. */
+    /* with / async with: each CM is a SetupFinally cleanup frame whose handler stages `WithExit`. Dunders run as staged plain Calls so host deferrals can park. */
 
     pub(super) fn with_stmt_inner(&mut self, is_async: bool) {
         self.advance();
@@ -542,7 +542,8 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         let mut setups: Vec<usize> = Vec::new();
         loop {
             self.expr();
-            self.chunk.emit(OpCode::SetupWith, operand);
+            self.chunk.emit(OpCode::WithEnter, operand);
+            self.chunk.emit(OpCode::Call, 1);
             if self.eat_if(TokenType::As) {
                 let name = self.advance_text();
                 self.store_name(name);
@@ -565,6 +566,8 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             let h = self.chunk.instructions.len() as u16;
             self.patch_to(s, h);
             self.chunk.emit(OpCode::WithExit, operand);
+            self.chunk.emit(OpCode::Call, 4);
+            self.chunk.emit(OpCode::WithJudge, 0);
             self.chunk.emit(OpCode::EndFinally, 0);
         }
     }

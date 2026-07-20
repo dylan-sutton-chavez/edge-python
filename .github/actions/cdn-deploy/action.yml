@@ -56,6 +56,10 @@ runs:
           cap="$(basename "$(dirname "$dir")")"
           mkdir -p "_site/host/$cap"
           cp -r "$dir"/. "_site/host/$cap/"
+          # entry.py resolves `_<cap>` via this manifest.
+          if [ -f "$dir/entry.py" ]; then
+            printf '{ "host": { "_%s": "./index.js" } }\n' "$cap" > "_site/host/$cap/packages.json"
+          fi
         done
 
         # cli: release tarballs + the install/uninstall scripts, served under cdn.edgepython.com/cli/.

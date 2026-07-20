@@ -745,14 +745,14 @@
     "src": "with x as f:\n    pass",
     "constants": [],
     "names": ["x_0", "f_1"],
-    "instructions": [["LoadName",0], ["SetupWith",0], ["StoreName",1], ["SetupFinally",6], ["PopExcept",0], ["BeginFinally",0], ["WithExit",0], ["EndFinally",0], ["ReturnValue",0]],
+    "instructions": [["LoadName",0], ["WithEnter",0], ["Call",1], ["StoreName",1], ["SetupFinally",7], ["PopExcept",0], ["BeginFinally",0], ["WithExit",0], ["Call",4], ["WithJudge",0], ["EndFinally",0], ["ReturnValue",0]],
     "annotations": {}
   },
   {
     "src": "with x:\n    pass",
     "constants": [],
     "names": ["x_0"],
-    "instructions": [["LoadName",0], ["SetupWith",0], ["PopTop",0], ["SetupFinally",6], ["PopExcept",0], ["BeginFinally",0], ["WithExit",0], ["EndFinally",0], ["ReturnValue",0]],
+    "instructions": [["LoadName",0], ["WithEnter",0], ["Call",1], ["PopTop",0], ["SetupFinally",7], ["PopExcept",0], ["BeginFinally",0], ["WithExit",0], ["Call",4], ["WithJudge",0], ["EndFinally",0], ["ReturnValue",0]],
     "annotations": {}
   },
   {
@@ -1076,14 +1076,14 @@
     "src": "with a, b:\n    pass",
     "constants": [],
     "names": ["a_0", "b_0"],
-    "instructions": [["LoadName",0], ["SetupWith",0], ["PopTop",0], ["SetupFinally",14], ["LoadName",1], ["SetupWith",0], ["PopTop",0], ["SetupFinally",10], ["PopExcept",0], ["BeginFinally",0], ["WithExit",0], ["EndFinally",0], ["PopExcept",0], ["BeginFinally",0], ["WithExit",0], ["EndFinally",0], ["ReturnValue",0]],
+    "instructions": [["LoadName",0], ["WithEnter",0], ["Call",1], ["PopTop",0], ["SetupFinally",18], ["LoadName",1], ["WithEnter",0], ["Call",1], ["PopTop",0], ["SetupFinally",12], ["PopExcept",0], ["BeginFinally",0], ["WithExit",0], ["Call",4], ["WithJudge",0], ["EndFinally",0], ["PopExcept",0], ["BeginFinally",0], ["WithExit",0], ["Call",4], ["WithJudge",0], ["EndFinally",0], ["ReturnValue",0]],
     "annotations": {}
   },
   {
     "src": "with a as x, b as y:\n    pass",
     "constants": [],
     "names": ["a_0", "x_1", "b_0", "y_1"],
-    "instructions": [["LoadName",0], ["SetupWith",0], ["StoreName",1], ["SetupFinally",14], ["LoadName",2], ["SetupWith",0], ["StoreName",3], ["SetupFinally",10], ["PopExcept",0], ["BeginFinally",0], ["WithExit",0], ["EndFinally",0], ["PopExcept",0], ["BeginFinally",0], ["WithExit",0], ["EndFinally",0], ["ReturnValue",0]],
+    "instructions": [["LoadName",0], ["WithEnter",0], ["Call",1], ["StoreName",1], ["SetupFinally",18], ["LoadName",2], ["WithEnter",0], ["Call",1], ["StoreName",3], ["SetupFinally",12], ["PopExcept",0], ["BeginFinally",0], ["WithExit",0], ["Call",4], ["WithJudge",0], ["EndFinally",0], ["PopExcept",0], ["BeginFinally",0], ["WithExit",0], ["Call",4], ["WithJudge",0], ["EndFinally",0], ["ReturnValue",0]],
     "annotations": {}
   },
   {
@@ -1285,7 +1285,7 @@
     "src": "async with a as x:\n    pass",
     "constants": [],
     "names": ["a_0", "x_1"],
-    "instructions": [["LoadName",0], ["SetupWith",1], ["StoreName",1], ["SetupFinally",6], ["PopExcept",0], ["BeginFinally",0], ["WithExit",1], ["EndFinally",0], ["ReturnValue",0]],
+    "instructions": [["LoadName",0], ["WithEnter",1], ["Call",1], ["StoreName",1], ["SetupFinally",7], ["PopExcept",0], ["BeginFinally",0], ["WithExit",1], ["Call",4], ["WithJudge",0], ["EndFinally",0], ["ReturnValue",0]],
     "annotations": {}
   },
   {

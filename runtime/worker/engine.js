@@ -169,9 +169,9 @@ export async function run({ src, entryDir = '', baseUrl = null, onLine, incremen
         rt,
         loaders,
         // Lazy host: fetch export names from the page, then register the mt: stubs here.
-        loadHost: (name) => {
+        loadHost: (name, url) => {
             if (!loadHostDelegate) throw new Error(`host '${name}' imported but no main-thread loader is wired`);
-            return loadHostDelegate(name);
+            return loadHostDelegate(name, url);
         },
         registerHost,
     });

@@ -16,14 +16,14 @@ engine.setHostCallDelegate((module, name, args) => new Promise((resolve, reject)
     self.postMessage({ type: 'host-call', reqId, module, name, args });
 }));
 
-/* Lazy host load: post `{type:'load-host', reqId, name}` to main and await `{type:'load-host-response'}` with export names. */
+/* Lazy host load: post `{type:'load-host', reqId, name, url}` to main and await `{type:'load-host-response'}` with export names. */
 let nextLoadHostReqId = 0;
 const pendingLoadHost = new Map();
 
-engine.setLoadHostDelegate((name) => new Promise((resolve, reject) => {
+engine.setLoadHostDelegate((name, url) => new Promise((resolve, reject) => {
     const reqId = ++nextLoadHostReqId;
     pendingLoadHost.set(reqId, { resolve, reject });
-    self.postMessage({ type: 'load-host', reqId, name });
+    self.postMessage({ type: 'load-host', reqId, name, url });
 }));
 
 const handlers = {

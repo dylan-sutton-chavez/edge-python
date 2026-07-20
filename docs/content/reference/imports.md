@@ -106,6 +106,7 @@ my_app/
 
 - **Bare-name imports** (`from utils import x`) walk up looking for `packages.json`. The first one declaring the name wins; following its `extends` chain is capped at 32 hops. Over that: `packages.json walk-up exceeded <cap> hops resolving '<name>'`.
 - **Hermetic by default**: if the nearest manifest doesn't declare the alias, compilation fails (`alias '<name>' not declared in '<manifest>'`). No silent fall-through. This prevents a deep transitive dep from borrowing parent aliases.
+- **`host` entries declare too**: a manifest's `host` field ([Path C](/reference/writing-modules#path-c-js-host-module)) grants those bare names to the files under it, same walk-up rules.
 - **`extends` opts in to inheritance**: `"extends": ".."` re-runs the search from the extended directory when the alias isn't local. Cycles detected at compile time (`circular extends chain in packages.json`).
 - **Quoted relative paths** (`from "./helpers.py" import f`) resolve against the importing file; transitively-imported `lib/a.py` doing `from "./b.py" import g` finds `lib/b.py`.
 

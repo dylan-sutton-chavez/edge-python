@@ -17,7 +17,7 @@ pub enum OpCode {
     CallOrd, BuildDict, BuildList, NotEq, Lt, Gt, LtEq, GtEq, And, Or, Not, JumpIfFalse, Jump, 
     GetIter, ForIter, GetItem, Mod, Pow, FloorDiv, LoadTrue, LoadFalse, LoadNone, LoadAttr, StoreAttr, 
     BuildSlice, MakeClass, SetupExcept, PopExcept, Raise, BitAnd, BitOr, BitXor,
-    BitNot, Shl, Shr, In, NotIn, Is, IsNot, UnpackSequence, BuildTuple, SetupWith, WithExit, Yield,
+    BitNot, Shl, Shr, In, NotIn, Is, IsNot, UnpackSequence, BuildTuple, WithEnter, WithExit, Yield,
     /* Finally/with block stack: setup pushes a cleanup frame, BeginFinally marks a normal entry, EndFinally resumes the exit. */
     SetupFinally, BeginFinally, EndFinally,
     /* break/continue across N finally/with blocks before its jump; operand is N. */
@@ -49,6 +49,8 @@ pub enum OpCode {
     InPlaceBitOr, InPlaceBitAnd, InPlaceBitXor,
     // Push a fresh spread-delta frame.
     BeginArgs,
+    /* Consume the staged `__exit__` result; truthy suppresses a pending re-raise. */
+    WithJudge,
 }
 
 // Python builtin name -> (specialised OpCode, `leaves_value_on_stack`).

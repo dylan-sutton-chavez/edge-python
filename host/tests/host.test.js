@@ -2,8 +2,11 @@
 
 import { chromium } from "npm:playwright";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import { DEFAULT_IMPORTS } from "../../runtime/src/defaults.js";
 
 const ROOT = new URL("../", import.meta.url).pathname;
+const RUNTIME = new URL("../../runtime/", import.meta.url).pathname;
+const CDN_HOST = new URL(Object.values(DEFAULT_IMPORTS)[0]).host;
 const MANIFEST = "/_packages.json"; // synthesized; keeps the agnostic <cap>/ folder free of test artifacts
 
 /* Repo-root dirs with a `<cap>/<cap>.json` corpus are host capabilities. `HOSTCAP=<name>` narrows discovery to one capability, used by the matrix-fanned CI to isolate per-shard work. */
@@ -49,6 +52,15 @@ async function runCapability(cap) {
     /* Serve repo files from disk; synthesize the manifest. External CDNs (cdn.edgepython.com) pass through. */
     await page.route("**/*", (route) => {
         const url = new URL(route.request().url());
+        // In-tree runtime first; CI must test the checkout, not the deploy.
+        if (url.host === CDN_HOST && url.pathname.startsWith("/runtime/")) {
+            const path = RUNTIME + url.pathname.slice("/runtime/".length);
+            try {
+                return route.fulfill({ body: readFileSync(path), contentType: TYPES[path.slice(path.lastIndexOf("."))] ?? "application/octet-stream" });
+            } catch {
+                return route.continue();
+            }
+        }
         if (url.host !== "localhost") return route.continue();
         if (url.pathname === MANIFEST) return route.fulfill({ contentType: "application/json", body: manifest });
         const path = ROOT + url.pathname.slice(1);

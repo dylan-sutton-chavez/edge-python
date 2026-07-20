@@ -3726,5 +3726,6 @@
   {"src":"d = {'k': [1]}\nd['k'][0] -= 1\nprint(d)","output":["{'k': [0]}"]},
   {"src":"class C:\n    def __init__(self):\n        self.a = 5\nx = C()\nprint(f\"{x.a=}\")","output":["x.a=5"]},
   {"src":"print(\"a\" \"b\".upper())","output":["AB"]},
-  {"src":"v = 7\nprint(f\"\" f\"{v}\" \"x\" f\"{v}\")","output":["7x7"]}
+  {"src":"v = 7\nprint(f\"\" f\"{v}\" \"x\" f\"{v}\")","output":["7x7"]},
+  {"src":"class E:\n    def __enter__(self):\n        return self\nwith E():\n    pass","output":[],"error":"context manager protocol"}
 ]

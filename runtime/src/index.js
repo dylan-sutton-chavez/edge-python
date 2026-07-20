@@ -33,9 +33,10 @@ export async function createWorker(opts) {
     /* Lazy host modules: name -> ESM url, imported only when the worker reports the bare name is used. Base defaults sit under user entries; `defaults:false` opts out. */
     const hostUrls = { ...(opts?.defaults !== false ? DEFAULT_HOST : {}), ...(opts?.hostModules || {}) };
     const loadedHosts = new Map(); // name -> export names, memoized across runs
-    const loadHostModule = async (name) => {
+    const loadHostModule = async (name, manifestUrl) => {
         if (loadedHosts.has(name)) return loadedHosts.get(name);
-        const url = hostUrls[name];
+        // Embedder entries win; manifest-declared hosts supply their own url.
+        const url = hostUrls[name] ?? manifestUrl;
         if (!url) throw new Error(`no host module registered for '${name}'`);
         const mod = await import(url);
         const factory = mod[name] ?? mod.default;
@@ -69,7 +70,7 @@ export async function createWorker(opts) {
         }
         if (data.type === 'load-host') {
             try {
-                const exports = await loadHostModule(data.name);
+                const exports = await loadHostModule(data.name, data.url);
                 worker.postMessage({ type: 'load-host-response', reqId: data.reqId, exports });
             } catch (e) {
                 worker.postMessage({ type: 'load-host-response', reqId: data.reqId, error: e?.message ?? String(e) });

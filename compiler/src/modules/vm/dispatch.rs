@@ -635,42 +635,45 @@ impl<'a> VM<'a> {
                     unwind_depth: self.unwind_stack.len(),
                 });
             }
-            OpCode::SetupWith => {
+            OpCode::WithEnter => {
                 let _ = operand;
                 let cm = self.pop()?;
-                // `with` needs the context-manager protocol; reject objects lacking `__enter__`. Its return feeds the `as` target.
-                let Some(bound) = self.try_call_dunder(cm, "__enter__", &[], chunk, slots)? else {
-                    return Err(VmErr::TypeMsg(s!("'", str self.type_name(cm), "' object does not support the context manager protocol")));
-                };
+                // Both dunders resolve up front, like CPython.
+                let (enter_fn, class) = self.with_dunder(cm, "__enter__")?;
+                self.with_dunder(cm, "__exit__")?;
                 self.with_stack.push(cm);
-                self.push(bound);
+                self.pending.method_binding = Some((class, cm));
+                self.push(enter_fn);
+                self.push(cm);
             }
             // Marks a normal fall-through into a finally body so EndFinally balances its pop.
             OpCode::BeginFinally => self.unwind_stack.push(Unwind::Normal),
-            // Context-manager cleanup; the top unwind reason selects exception vs normal `__exit__` args.
+            // Stages `__exit__` for the plain Call behind it; parking-safe.
             OpCode::WithExit => {
                 let _ = operand;
-                let cm = self.with_stack.pop().ok_or(cold_runtime("WithExit without matching SetupWith"))?;
-                let is_instance = cm.is_heap() && matches!(self.heap.get(cm), HeapObj::Instance(..));
-                if matches!(self.unwind_stack.last(), Some(Unwind::Reraise(_))) {
-                    // with body raised: __exit__(type, exc, None); truthy return suppresses the re-raise.
+                let cm = self.with_stack.pop().ok_or(cold_runtime("WithExit without matching WithEnter"))?;
+                let (exit_fn, class) = self.with_dunder(cm, "__exit__")?;
+                // Reraise selects `__exit__(type, exc, None)`; other exits pass three Nones.
+                let (exc_type, exc) = if matches!(self.unwind_stack.last(), Some(Unwind::Reraise(_))) {
                     let exc = self.pending.exc_val.unwrap_or(Val::none());
                     let exc_name = self.exc_type_name(exc);
-                    if is_instance {
-                        let exc_type = self.heap.alloc(HeapObj::Type(exc_name))?;
-                        let n = Val::none();
-                        if let Some(r) = self.try_call_dunder(cm, "__exit__", &[exc_type, exc, n], chunk, slots)?
-                            && self.truthy(r)
-                        {
-                            // Suppress: turn the re-raise into a normal exit and drop the exc identity.
-                            if let Some(top) = self.unwind_stack.last_mut() { *top = Unwind::Normal; }
-                            self.pending.exc_val = None;
-                        }
-                    }
-                } else if is_instance {
-                    // Normal / return / break / continue exit signals "no exception".
-                    let n = Val::none();
-                    let _ = self.try_call_dunder(cm, "__exit__", &[n, n, n], chunk, slots)?;
+                    (self.heap.alloc(HeapObj::Type(exc_name))?, exc)
+                } else {
+                    (Val::none(), Val::none())
+                };
+                self.pending.method_binding = Some((class, cm));
+                self.push(exit_fn);
+                self.push(cm);
+                self.push(exc_type);
+                self.push(exc);
+                self.push(Val::none());
+            }
+            OpCode::WithJudge => {
+                let r = self.pop()?;
+                if matches!(self.unwind_stack.last(), Some(Unwind::Reraise(_))) && self.truthy(r) {
+                    // Suppress: turn the re-raise into a normal exit and drop the exc identity.
+                    if let Some(top) = self.unwind_stack.last_mut() { *top = Unwind::Normal; }
+                    self.pending.exc_val = None;
                 }
             }
             // End of a finally body / WithExit: pop its reason and resume the exit it carried.
@@ -753,6 +756,21 @@ impl<'a> VM<'a> {
             }
         }
         None
+    }
+
+    /* MRO-bound dunder pair for a context manager; Err when unmet. */
+    fn with_dunder(&mut self, cm: Val, name: &str) -> Result<(Val, Val), VmErr> {
+        if cm.is_heap()
+            && let HeapObj::Instance(cls_val, _) = self.heap.get(cm) {
+            let cls = *cls_val;
+            if let Some((func, class)) = self.lookup_class_member(cls, name)
+                && func.is_heap()
+                && matches!(self.heap.get(func), HeapObj::Func(..))
+            {
+                return Ok((func, class));
+            }
+        }
+        Err(VmErr::TypeMsg(s!("'", str self.type_name(cm), "' object does not support the context manager protocol")))
     }
 
     /* Exception class name for a raised value; defaults to "Exception" for non-instances. */

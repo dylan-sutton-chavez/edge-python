@@ -5,7 +5,7 @@ bare names resolve against the manifest chain (defaults < user packages.json), a
 
 import { fetchWithLockfile } from './fetch.js';
 import { loadNativeModule, nativeTable } from './native.js';
-import { dirOf, joinRel, SOURCE_LIMIT } from './specs.js';
+import { dirOf, joinRel, parentDir, SOURCE_LIMIT } from './specs.js';
 
 const TD = new TextDecoder();
 const TE = new TextEncoder();
@@ -52,15 +52,19 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
     const table = { ...(importsMap || {}) };
     // Bare names scanned before a manifest declared them; retried after each manifest merge.
     const pendingBare = new Map(); // name -> importer dirs, for relative targets
+    const hostEsmUrls = new Map(); // name -> ESM url from discovered `host` declarations
 
     const writeBytes = (bytes) => {
         const ptr = exports.wasm_alloc(Math.max(1, bytes.length));
         new Uint8Array(exports.memory.buffer, ptr, bytes.length).set(bytes);
         return ptr;
     };
-    const enqueueManifestSibling = (forSpec) => {
-        const m = dirOf(forSpec) + 'packages.json';
-        if (!knownMissing.has(m)) queue.push(m);
+    // Probe every ancestor manifest, mirroring the compiler walk-up.
+    const enqueueManifestChain = (forSpec) => {
+        for (let dir = dirOf(forSpec); dir != null; dir = parentDir(dir)) {
+            const m = dir + 'packages.json';
+            if (!knownMissing.has(m)) queue.push(m);
+        }
     };
 
     /* A scanned import contributes at most one fetch target: quoted is direct, bare resolves via the table. */
@@ -98,7 +102,7 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
         if (spec.startsWith('mt:')) {
             const name = spec.slice(3);
             let exportNames;
-            try { exportNames = await ctx.loadHost(name); }
+            try { exportNames = await ctx.loadHost(name, hostEsmUrls.get(name)); }
             catch (e) { failures.push(`host '${name}' failed to load: ${e?.message ?? e}`); continue; }
             ctx.registerHost(name, exportNames);
             mainThreadSpecs.add(spec);
@@ -127,6 +131,11 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
             for (const [name, target] of Object.entries(parsed.imports || {})) {
                 if (!(name in table)) table[name] = joinRel(dir, target);
             }
+            // `host` entries declare mt: stubs; the page imports the ESM.
+            for (const [name, target] of Object.entries(parsed.host || {})) {
+                if (!(name in table)) table[name] = 'mt:' + name;
+                if (!hostEsmUrls.has(name)) hostEsmUrls.set(name, joinRel(dir, target));
+            }
             retryPending();
             if (parsed.extends) {
                 const extDir = joinRel(dir, parsed.extends);
@@ -154,7 +163,7 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
                 writeBytes(namesBytes), namesBytes.length,
                 baseId,
             );
-            enqueueManifestSibling(spec);
+            enqueueManifestChain(spec);
             continue;
         }
 
@@ -164,7 +173,7 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
 
         const dir = dirOf(spec);
         for (const imp of scanImports(TD.decode(bytes), exports)) enqueueImport(imp, dir);
-        enqueueManifestSibling(spec);
+        enqueueManifestChain(spec);
     }
 
     if (failures.length) {

@@ -6,6 +6,7 @@ use super::VM;
 use super::types::*;
 
 /* Collect top-level StoreName bindings as module attrs; `seen` keeps the latest per bare name. */
+// `_`-prefixed names stay: the free-name fallback resolves module functions here.
 fn collect_module_attrs(chunk: &SSAChunk, slots: &[Val]) -> Vec<(String, Val)> {
     let mut attrs: Vec<(String, Val)> = Vec::new();
     let mut seen: crate::util::fx::FxHashSet<String> = crate::util::fx::FxHashSet::default();
@@ -13,8 +14,6 @@ fn collect_module_attrs(chunk: &SSAChunk, slots: &[Val]) -> Vec<(String, Val)> {
         if !matches!(ins.opcode, OpCode::StoreName) { continue; }
         let Some(name) = chunk.names.get(ins.operand as usize) else { continue; };
         let bare = ssa_strip(name).to_string();
-        // Skip `_`-prefixed names, mirroring `from m import *` semantics.
-        if bare.starts_with('_') { continue; }
         if !seen.insert(bare.clone()) { continue; }
         if let Some(&v) = slots.get(ins.operand as usize) && !v.is_undef()
         {

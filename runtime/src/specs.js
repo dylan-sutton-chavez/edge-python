@@ -25,7 +25,7 @@ export const parentDir = (dir) => {
 };
 
 export const joinRel = (base, target) => {
-    if (target.includes('://') || target.startsWith('/')) return target;
+    if (target.includes('://') || target.startsWith('/') || target.startsWith('mt:')) return target;
     if (base.includes('://')) return new URL(target, base).toString();
     let b = base, t = target;
     while (t.startsWith('../')) {

@@ -11,7 +11,7 @@ pub struct Manifest {
     pub extends: Option<String>,
 }
 
-/* Parse `{ "imports": {...}, "extends": "..." }`. Both optional; unknown keys skipped for forward compat; numbers, arrays, bools rejected. */
+/* Parse `{ "imports": {...}, "host": {...}, "extends": "..." }`. All optional; unknown keys skipped for forward compat; numbers, arrays, bools rejected. */
 pub fn parse_manifest(bytes: &[u8]) -> Result<Manifest, String> {
     let src = core::str::from_utf8(bytes).map_err(|_| s!("packages.json is not valid UTF-8"))?;
     let mut p = Reader { src: src.as_bytes(), pos: 0 };
@@ -30,6 +30,15 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<Manifest, String> {
         p.skip_ws();
         match key.as_str() {
             "imports" => p.read_imports_into(&mut m.imports)?,
+            "host" => {
+                let mut pairs = Vec::new();
+                p.read_imports_into(&mut pairs)?;
+                // Host names fold in as `mt:` specs; urls are runtime-side.
+                m.imports.extend(pairs.into_iter().map(|(name, _)| {
+                    let spec = s!("mt:", str &name);
+                    (name, spec)
+                }));
+            }
             "extends" => m.extends = Some(p.read_string()?),
             _ => p.skip_value()?,
         }
@@ -63,7 +72,7 @@ pub fn dir_of(spec: &str) -> &str {
 
 /* Resolve `target` against `dir`. Absolute forms pass through; `../` pops parents; `./` strips only when base is non-empty. */
 pub fn join_relative(dir: &str, target: &str) -> String {
-    if target.contains("://") || target.starts_with('/') {
+    if target.contains("://") || target.starts_with('/') || target.starts_with("mt:") {
         return target.to_string();
     }
     let mut base = dir.to_string();

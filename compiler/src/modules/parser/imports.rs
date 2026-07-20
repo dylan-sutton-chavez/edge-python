@@ -263,8 +263,10 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     self.chunk.extern_index.insert(b.name.clone(), idx);
                 }
                 let import_idx = self.register_import(&canonical, Self::native_import_kind(&bindings, &classes, &consts));
-                // Star import binds each class and const via LoadModule+LoadAttr+StoreName under its own name.
-                for name in classes.iter().map(|c| &c.name).chain(consts.iter().map(|c| &c.name)) {
+                // Star import binds each export via LoadModule+LoadAttr+StoreName under its name.
+                for name in bindings.iter().map(|b| &b.name)
+                    .chain(classes.iter().map(|c| &c.name))
+                    .chain(consts.iter().map(|c| &c.name)) {
                     self.bind_module_attr(import_idx, name, name);
                 }
             }

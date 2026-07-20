@@ -586,5 +586,35 @@
       "base": { "native": ["add", "square"] },
       "facade": { "code": "from base import *\nfrom base import (\n    add as _a,\n    square as _s,\n)\nclass _CM:\n    def __enter__(self):\n        return self\n    def __exit__(self, a, b, c):\n        return False\ndef extra():\n    return _a(_s(6), _s(2))\ndef mk():\n    with _CM():\n        return 5" }
     }
+  },
+  {
+    "src": "from m import host_defer\nclass C:\n    def __enter__(self):\n        return self\n    def __exit__(self, a, b, c):\n        host_defer()\n        return False\nwith C():\n    print('in')\nprint('out')",
+    "modules": { "m": { "native": ["host_defer"] } },
+    "host_results": ["x"],
+    "output": ["in", "out"]
+  },
+  {
+    "src": "from m import host_defer\nclass C:\n    def __enter__(self):\n        host_defer()\n        return 7\n    def __exit__(self, a, b, c):\n        return False\nwith C() as v:\n    print(v)",
+    "modules": { "m": { "native": ["host_defer"] } },
+    "host_results": ["x"],
+    "output": ["7"]
+  },
+  {
+    "src": "from m import host_defer\nclass C:\n    def __enter__(self):\n        return self\n    def __exit__(self, a, b, c):\n        host_defer()\n        return True\nwith C():\n    raise ValueError('boom')\nprint('after')",
+    "modules": { "m": { "native": ["host_defer"] } },
+    "host_results": ["x"],
+    "output": ["after"]
+  },
+  {
+    "src": "from m import host_defer\nclass C:\n    def __enter__(self):\n        return self\n    def __exit__(self, a, b, c):\n        host_defer()\n        return False\nwith C():\n    raise ValueError('boom')",
+    "modules": { "m": { "native": ["host_defer"] } },
+    "host_results": ["x"],
+    "error": "ValueError"
+  },
+  {
+    "src": "from m import host_defer\nclass C:\n    def __init__(self, n):\n        self.n = n\n    def __enter__(self):\n        return self\n    def __exit__(self, a, b, c):\n        host_defer()\n        print(f'exit:{self.n}')\n        return False\nwith C(1):\n    with C(2):\n        print('in')\nprint('out')",
+    "modules": { "m": { "native": ["host_defer"] } },
+    "host_results": ["x", "y"],
+    "output": ["in", "exit:2", "exit:1", "out"]
   }
 ]
