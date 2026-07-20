@@ -60,6 +60,19 @@ impl<'a> VM<'a> {
         Ok(out)
     }
 
+    /* Bind a resolved MRO member `mv` to `recv`: Property -> getter, staticmethod -> unbound, function -> descriptor-bound; plain data returned as-is. Guards is_heap before heap.get so a non-heap data member is never read as a pointer. */
+    fn bind_member(&self, mv: Val, recv: Val, defining: Val) -> AttrLookup {
+        if mv.is_heap() {
+            match self.heap.get(mv) {
+                HeapObj::Property(getter, _) => return AttrLookup::PropertyGet { recv, getter: *getter },
+                HeapObj::StaticMethod(func) => return AttrLookup::ClassMember(*func),
+                HeapObj::Func(..) => return AttrLookup::InstanceMethod { recv, func: mv, class: defining },
+                _ => {}
+            }
+        }
+        AttrLookup::ClassMember(mv)
+    }
+
     // Member lookup along the C3 MRO; first hit wins. Falls back to a direct-then-DFS walk for uncached classes (native classes have no bases, so DFS = own members). Returns `(value, defining_class)` so callers building `BoundUserMethod` / `InstanceMethod` record where the method came from for `super()`.
     pub(crate) fn lookup_class_member(&self, cls: Val, name: &str) -> Option<(Val, Val)> {
         if !cls.is_heap() { return None; }
@@ -158,20 +171,7 @@ impl<'a> VM<'a> {
                     .map(|(_, v)| *v);
                 if let Some(v) = found { return Ok(AttrLookup::InstanceField(v)); }
                 if let Some((mv, defining)) = self.lookup_class_member(cls_val, bare) {
-                    // Guard on is_heap before heap.get: a non-heap data member (e.g. a wide int) would otherwise be read as a heap pointer and index a garbage slot.
-                    if mv.is_heap() {
-                        match self.heap.get(mv) {
-                            // A Property member triggers getter invocation in `handle_load_attr`.
-                            HeapObj::Property(getter, _) => return Ok(AttrLookup::PropertyGet { recv: obj, getter: *getter }),
-                            // `staticmethod` returns the wrapped function unbound, with no `self`.
-                            HeapObj::StaticMethod(func) => return Ok(AttrLookup::ClassMember(*func)),
-                            // Functions stay bound to the receiver via the descriptor protocol.
-                            HeapObj::Func(..) => return Ok(AttrLookup::InstanceMethod { recv: obj, func: mv, class: defining }),
-                            _ => {}
-                        }
-                    }
-                    // Plain data class attribute: returned as-is, like access via the class itself.
-                    return Ok(AttrLookup::ClassMember(mv));
+                    return Ok(self.bind_member(mv, obj, defining));
                 }
                 let ty = self.type_name(obj);
                 return Err(VmErr::Attribute(s!("'", str ty, "' object has no attribute '", str name, "'")));
@@ -187,16 +187,7 @@ impl<'a> VM<'a> {
                     _ => cls_val,
                 };
                 if let Some((mv, defining)) = self.lookup_class_member_after(derived, cls_val, name) {
-                    // Bind callables; non-callable data attributes return as-is, like the instance path.
-                    if mv.is_heap() {
-                        match self.heap.get(mv) {
-                            HeapObj::Property(getter, _) => return Ok(AttrLookup::PropertyGet { recv, getter: *getter }),
-                            HeapObj::StaticMethod(func) => return Ok(AttrLookup::ClassMember(*func)),
-                            HeapObj::Func(..) => return Ok(AttrLookup::InstanceMethod { recv, func: mv, class: defining }),
-                            _ => {}
-                        }
-                    }
-                    return Ok(AttrLookup::ClassMember(mv));
+                    return Ok(self.bind_member(mv, recv, defining));
                 }
                 return Err(VmErr::Attribute(s!("'super' object has no attribute '", str name, "'")));
             }

@@ -12,13 +12,15 @@ struct Item {
     count: usize,
 }
 
-fn width(code: u8) -> usize {
-    match code {
+// Byte width of a format code; None for an unknown code (the single source of the legal-code set).
+fn width(code: u8) -> Option<usize> {
+    Some(match code {
         b'x' | b'b' | b'B' | b'?' => 1,
         b'h' | b'H' => 2,
         b'i' | b'I' | b'f' => 4,
-        _ => 8,
-    }
+        b'q' | b'Q' | b'd' => 8,
+        _ => return None,
+    })
 }
 
 // (big_endian, items); rejects unknown codes and dangling counts.
@@ -42,7 +44,7 @@ fn parse_fmt(fmt: &str) -> Result<(bool, Vec<Item>)> {
         }
         let code = *bytes.get(i).ok_or_else(|| Error::Value(String::from("format ends with a repeat count")))?;
         i += 1;
-        if !matches!(code, b'x' | b'b' | b'B' | b'?' | b'h' | b'H' | b'i' | b'I' | b'q' | b'Q' | b'f' | b'd') {
+        if width(code).is_none() {
             return Err(Error::Value(format!("bad char in struct format: '{}'", code as char)));
         }
         items.push(Item { code, count: if has_count { count } else { 1 } });
@@ -51,7 +53,8 @@ fn parse_fmt(fmt: &str) -> Result<(bool, Vec<Item>)> {
 }
 
 fn total_size(items: &[Item]) -> usize {
-    items.iter().map(|it| it.count * width(it.code)).sum()
+    // Codes are validated by parse_fmt, so width is always Some here.
+    items.iter().map(|it| it.count * width(it.code).unwrap()).sum()
 }
 
 fn value_count(items: &[Item]) -> usize {
@@ -73,7 +76,7 @@ fn put_int(out: &mut Vec<u8>, big: bool, code: u8, i: i128) -> Result<()> {
     if !(min..=max).contains(&i) {
         return Err(Error::Value(format!("argument out of range for '{}'", code as char)));
     }
-    let w = width(code);
+    let w = width(code).unwrap();
     let full = if big { i.to_be_bytes() } else { i.to_le_bytes() };
     // i128 buffer: value bytes sit at the tail for BE, at the head for LE.
     let slice = if big { &full[16 - w..] } else { &full[..w] };
@@ -153,7 +156,7 @@ fn unpack(fmt: String, data: Bytes) -> Result<Vec<Value>> {
     let mut pos = 0;
     for it in &items {
         for _ in 0..it.count {
-            let w = width(it.code);
+            let w = width(it.code).unwrap();
             let chunk = &data[pos..pos + w];
             pos += w;
             if it.code == b'x' { continue; }

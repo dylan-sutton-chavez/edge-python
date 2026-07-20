@@ -141,10 +141,17 @@ impl<'a> VM<'a> {
             self.exec_call(1, chunk, slots)?;
             keys.push(self.pop()?);
         }
+        // Root both keys and items: a `__lt__` comparison can run user code that GCs.
+        let order = self.sorted_order(&keys, &items, chunk, slots)?;
+        Ok(order.into_iter().map(|i| items[i]).collect())
+    }
+
+    /* Root the operands (comparators can run GC-triggering user code), stable-sort `keys` via `sort_lt`, and return the index permutation. `extra_roots` keeps caller-only values (e.g. the items in a keyed sort) alive across comparisons. First comparison error wins; later comparisons degrade to Equal. */
+    fn sorted_order(&mut self, keys: &[Val], extra_roots: &[Val], chunk: &SSAChunk, slots: &mut [Val]) -> Result<Vec<usize>, VmErr> {
         let roots_base = self.temp_roots.len();
-        for &v in keys.iter().chain(items.iter()) { self.temp_roots.push(v); }
+        for &v in keys.iter().chain(extra_roots.iter()) { self.temp_roots.push(v); }
         let mut sort_err: Option<VmErr> = None;
-        let order = Self::stable_sort_indices(items.len(), |a, b| {
+        let order = Self::stable_sort_indices(keys.len(), |a, b| {
             if sort_err.is_some() { return core::cmp::Ordering::Equal; }
             match self.sort_lt(keys[a], keys[b], chunk, slots) {
                 Ok(true) => core::cmp::Ordering::Less,
@@ -158,7 +165,7 @@ impl<'a> VM<'a> {
         });
         self.temp_roots.truncate(roots_base);
         if let Some(e) = sort_err { return Err(e); }
-        Ok(order.into_iter().map(|i| items[i]).collect())
+        Ok(order)
     }
 
     // a < b via __lt__ when either side defines it, else the built-in comparison.
@@ -172,23 +179,7 @@ impl<'a> VM<'a> {
     /* In-place sort dispatching `__lt__`; roots items since a comparison can run user code that GCs. */
     pub(crate) fn sort_by_lt(&mut self, items: &mut [Val], chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         let snapshot = items.to_vec();
-        let roots_base = self.temp_roots.len();
-        for &v in &snapshot { self.temp_roots.push(v); }
-        let mut sort_err: Option<VmErr> = None;
-        let order = Self::stable_sort_indices(snapshot.len(), |a, b| {
-            if sort_err.is_some() { return core::cmp::Ordering::Equal; }
-            match self.sort_lt(snapshot[a], snapshot[b], chunk, slots) {
-                Ok(true) => core::cmp::Ordering::Less,
-                Ok(false) => match self.sort_lt(snapshot[b], snapshot[a], chunk, slots) {
-                    Ok(true) => core::cmp::Ordering::Greater,
-                    Ok(false) => core::cmp::Ordering::Equal,
-                    Err(e) => { sort_err = Some(e); core::cmp::Ordering::Equal }
-                },
-                Err(e) => { sort_err = Some(e); core::cmp::Ordering::Equal }
-            }
-        });
-        self.temp_roots.truncate(roots_base);
-        if let Some(e) = sort_err { return Err(e); }
+        let order = self.sorted_order(&snapshot, &[], chunk, slots)?;
         for (dst, &src) in order.iter().enumerate() { items[dst] = snapshot[src]; }
         Ok(())
     }
@@ -482,35 +473,25 @@ impl<'a> VM<'a> {
         self.alloc_and_push_list(out)
     }
 
-    pub fn call_all(&mut self, op: u16) -> Result<(), VmErr> {
-        if op != 1 { return Err(cold_type("all() takes exactly 1 argument")); }
+    /* Short-circuit truthiness scan shared by `all`/`any`: stops at the first element whose truthiness equals `find`, pushing `find`; pushes `!find` on exhaustion. */
+    fn scan_truthy(&mut self, op: u16, find: bool, arity_err: &'static str) -> Result<(), VmErr> {
+        if op != 1 { return Err(cold_type(arity_err)); }
         let o = self.pop()?;
         let mut cur = self.iter_cursor(o)?;
         while let Some(v) = cur.next(&mut self.heap)? {
             self.charge_step()?; // native iteration over a huge range must charge the op-budget
-            if !self.truthy(v) {
-                self.push(Val::bool(false));
+            if self.truthy(v) == find {
+                self.push(Val::bool(find));
                 return Ok(());
             }
         }
-        self.push(Val::bool(true));
+        self.push(Val::bool(!find));
         Ok(())
     }
 
-    pub fn call_any(&mut self, op: u16) -> Result<(), VmErr> {
-        if op != 1 { return Err(cold_type("any() takes exactly 1 argument")); }
-        let o = self.pop()?;
-        let mut cur = self.iter_cursor(o)?;
-        while let Some(v) = cur.next(&mut self.heap)? {
-            self.charge_step()?; // native iteration over a huge range must charge the op-budget
-            if self.truthy(v) {
-                self.push(Val::bool(true));
-                return Ok(());
-            }
-        }
-        self.push(Val::bool(false));
-        Ok(())
-    }
+    pub fn call_all(&mut self, op: u16) -> Result<(), VmErr> { self.scan_truthy(op, false, "all() takes exactly 1 argument") }
+
+    pub fn call_any(&mut self, op: u16) -> Result<(), VmErr> { self.scan_truthy(op, true, "any() takes exactly 1 argument") }
 
     // Materialise an iterable to a list, strings -> chars, ranges eager, coroutines drained.
     pub fn call_list(&mut self, argc: u16, chunk: &crate::modules::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {

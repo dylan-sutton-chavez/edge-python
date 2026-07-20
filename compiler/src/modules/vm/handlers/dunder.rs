@@ -71,55 +71,36 @@ impl<'a> VM<'a> {
         match self.heap.get(v) { HeapObj::Instance(c, _) => Some(*c), _ => None }
     }
 
-    /* Binary arithmetic dunder dispatch with Python's subclass-first ordering: if `type(b)` is a strict subclass of `type(a)`, the reflected op runs first so overrides win. */
-    pub(crate) fn try_binary_dunder(&mut self, op: OpCode, a: Val, b: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Option<Val>, VmErr> {
-        let a_cls = self.instance_class(a);
-        let b_cls = self.instance_class(b);
-        if a_cls.is_none() && b_cls.is_none() { return Ok(None); }
-
-        let Some((lname, rname)) = binary_dunder_names(op) else { return Ok(None); };
-
-        let b_overrides = match (a_cls, b_cls) {
+    /* Ordered forward/reflected dunder dispatch: reflected (`b.rname(a)`) runs first when `type(b)` strictly subclasses `type(a)`, so overrides win. Returns the first non-None result. */
+    fn dispatch_reflected(&mut self, a: Val, b: Val, lname: &str, rname: &str, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Option<Val>, VmErr> {
+        let b_overrides = match (self.instance_class(a), self.instance_class(b)) {
             (Some(ac), Some(bc)) => ac.0 != bc.0 && self.heap.is_subclass(bc, ac),
             _ => false,
         };
-
-        if b_overrides {
-            if let Some(r) = self.try_call_dunder(b, rname, &[a], chunk, slots)? { return Ok(Some(r)); }
-            if let Some(r) = self.try_call_dunder(a, lname, &[b], chunk, slots)? { return Ok(Some(r)); }
+        let calls: [(Val, &str, Val); 2] = if b_overrides {
+            [(b, rname, a), (a, lname, b)]
         } else {
-            if let Some(r) = self.try_call_dunder(a, lname, &[b], chunk, slots)? { return Ok(Some(r)); }
-            if let Some(r) = self.try_call_dunder(b, rname, &[a], chunk, slots)? { return Ok(Some(r)); }
+            [(a, lname, b), (b, rname, a)]
+        };
+        for (recv, name, arg) in calls {
+            if let Some(r) = self.try_call_dunder(recv, name, &[arg], chunk, slots)? { return Ok(Some(r)); }
         }
         Ok(None)
     }
 
+    /* Binary arithmetic dunder dispatch with Python's subclass-first ordering: if `type(b)` is a strict subclass of `type(a)`, the reflected op runs first so overrides win. */
+    pub(crate) fn try_binary_dunder(&mut self, op: OpCode, a: Val, b: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Option<Val>, VmErr> {
+        if self.instance_class(a).is_none() && self.instance_class(b).is_none() { return Ok(None); }
+        let Some((lname, rname)) = binary_dunder_names(op) else { return Ok(None); };
+        self.dispatch_reflected(a, b, lname, rname, chunk, slots)
+    }
+
     /* Comparison dunder dispatch. `__eq__` reflects to itself; `__ne__` falls back to `not __eq__`; `<` reflects to `>` and vice-versa. */
     pub(crate) fn try_compare_dunder(&mut self, op: OpCode, a: Val, b: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Option<Val>, VmErr> {
-        let a_cls = self.instance_class(a);
-        let b_cls = self.instance_class(b);
-        if a_cls.is_none() && b_cls.is_none() { return Ok(None); }
-
+        if self.instance_class(a).is_none() && self.instance_class(b).is_none() { return Ok(None); }
         let Some((lname, rname, negate)) = compare_dunder_names(op) else { return Ok(None); };
 
-        let b_overrides = match (a_cls, b_cls) {
-            (Some(ac), Some(bc)) => ac.0 != bc.0 && self.heap.is_subclass(bc, ac),
-            _ => false,
-        };
-
-        let raw = if b_overrides {
-            match self.try_call_dunder(b, rname, &[a], chunk, slots)? {
-                Some(r) => Some(r),
-                None => self.try_call_dunder(a, lname, &[b], chunk, slots)?,
-            }
-        } else {
-            match self.try_call_dunder(a, lname, &[b], chunk, slots)? {
-                Some(r) => Some(r),
-                None => self.try_call_dunder(b, rname, &[a], chunk, slots)?,
-            }
-        };
-
-        let Some(r) = raw else {
+        let Some(r) = self.dispatch_reflected(a, b, lname, rname, chunk, slots)? else {
             // `!=` falls back to negated `__eq__` when `__ne__` is absent.
             if matches!(op, OpCode::NotEq)
                 && let Some(eq) = self.try_compare_dunder(OpCode::Eq, a, b, chunk, slots)? {

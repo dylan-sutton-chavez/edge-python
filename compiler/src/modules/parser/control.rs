@@ -398,14 +398,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         if vars.len() == 1 && star_pos.is_none() {
             self.store_name(vars[0].clone());
         } else {
-            if let Some(sp) = star_pos {
-                let before = sp as u16;
-                let after = (vars.len() - sp - 1) as u16;
-                self.chunk.emit(OpCode::UnpackEx, (before << 8) | after);
-            } else {
-                self.chunk.emit(OpCode::UnpackSequence, vars.len() as u16);
-            }
-            for var in &vars { self.store_name(var.clone()); }
+            self.emit_unpack_stores(&vars, star_pos);
         }
 
         self.eat(TokenType::Colon);

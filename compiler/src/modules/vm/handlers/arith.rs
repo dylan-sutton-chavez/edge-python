@@ -18,10 +18,12 @@ impl<'a> VM<'a> {
     /* Add/Sub/Mul/Div with IC; Mod/Pow/FloorDiv on i128 with overflow trap; Minus is unary. */
     pub(crate) fn handle_arith(&mut self, op: OpCode, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         if op == OpCode::Minus {
-            return self.exec_neg(rip, cache, chunk, slots);
+            // -i128::MIN overflows; everything else fits.
+            return self.exec_unary(rip, cache, chunk, slots, "__neg__", |v| Val::float(-v.as_float()), i128::checked_neg, "unary - requires a number");
         }
         if op == OpCode::Pos {
-            return self.exec_pos(rip, cache, chunk, slots);
+            // +float returns the value unchanged; bool drops its tag to int.
+            return self.exec_unary(rip, cache, chunk, slots, "__pos__", |v| v, Some, "unary + requires a number");
         }
 
         let (a, b) = self.pop2()?;
@@ -76,42 +78,23 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    fn exec_neg(&mut self, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    /* Unary `-`/`+`: instance dunder takes precedence over numeric coercion; `ffl` maps the float case, `fint` the i128 case. */
+    #[allow(clippy::too_many_arguments)]
+    fn exec_unary(&mut self, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk, slots: &mut [Val],
+                  name: &'static str, ffl: fn(Val) -> Val, fint: fn(i128) -> Option<i128>, err: &'static str) -> Result<(), VmErr> {
         let v = self.pop()?;
-        // instance `__neg__` takes precedence over numeric coercion.
-        if let Some(r) = self.try_call_dunder(v, "__neg__", &[], chunk, slots)? {
-            // monomorphic `-instance` sites promote like binary ops.
-            self.record_dunder_hit(rip, cache, v, "__neg__", 1);
+        if let Some(r) = self.try_call_dunder(v, name, &[], chunk, slots)? {
+            // monomorphic unary-instance sites promote like binary ops.
+            self.record_dunder_hit(rip, cache, v, name, 1);
             self.push(r);
             return Ok(());
         }
         let result = if v.is_float() {
-            Val::float(-v.as_float())
+            ffl(v)
         } else if let Some(i) = self.as_i128(v) {
-            // -i128::MIN overflows; everything else fits.
-            self.int_to_val(i.checked_neg())?
+            self.int_to_val(fint(i))?
         } else {
-            return Err(cold_type("unary - requires a number"));
-        };
-        self.push(result);
-        Ok(())
-    }
-
-    fn exec_pos(&mut self, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
-        let v = self.pop()?;
-        // instance `__pos__` takes precedence over numeric coercion.
-        if let Some(r) = self.try_call_dunder(v, "__pos__", &[], chunk, slots)? {
-            self.record_dunder_hit(rip, cache, v, "__pos__", 1);
-            self.push(r);
-            return Ok(());
-        }
-        let result = if v.is_float() {
-            v
-        } else if let Some(i) = self.as_i128(v) {
-            // bool drops its tag to int; plain ints round-trip unchanged.
-            self.int_to_val(Some(i))?
-        } else {
-            return Err(cold_type("unary + requires a number"));
+            return Err(cold_type(err));
         };
         self.push(result);
         Ok(())

@@ -32,16 +32,6 @@ mod wasm_api {
         r.map_err(to_error)
     }
 
-    /* Builds a Python list handle from string items. */
-    fn str_list(items: &[String]) -> Result<Handle> {
-        let list = Handle::new_list()?;
-        for s in items {
-            let h = encode(Value::Bytes(s.clone().into_bytes()))?;
-            list.call("append", &[h.raw()])?;
-        }
-        Ok(list)
-    }
-
     /* search: leftmost match anywhere, returns group 0 or None. */
     #[plugin_fn]
     fn search(pattern: String, string: String) -> Result<Option<String>> {
@@ -54,48 +44,33 @@ mod wasm_api {
         Ok(rx(main::find(&pattern, &string, Mode::Full))?.map(|f| f.text))
     }
 
-    /* findall: list of matches, group shaped like CPython for zero or one group. */
+    /* findall: list of matches, group shaped like CPython for zero or one group. One boundary crossing per call via the LIST transit. */
     #[plugin_fn]
-    fn findall(pattern: String, string: String) -> Result<Handle> {
+    fn findall(pattern: String, string: String) -> Result<Vec<Value>> {
         let (founds, ngroups) = rx(main::find_all(&pattern, &string))?;
         if ngroups <= 1 {
-            let items: Vec<String> = founds.iter().map(|f| pick(f, ngroups)).collect();
-            return str_list(&items);
+            return Ok(founds.iter().map(|f| Value::Bytes(pick(f, ngroups).into_bytes())).collect());
         }
-        let list = Handle::new_list()?;
-        for f in &founds {
-            let groups: Vec<String> = f.groups.iter().map(|g| g.clone().unwrap_or_default()).collect();
-            let sub = str_list(&groups)?;
-            list.call("append", &[sub.raw()])?;
-        }
-        Ok(list)
+        Ok(founds.iter().map(|f| Value::List(
+            f.groups.iter().map(|g| Value::Bytes(g.clone().unwrap_or_default().into_bytes())).collect(),
+        )).collect())
     }
 
     /* groups: capture groups of the first match, or None. */
     #[plugin_fn]
-    fn groups(pattern: String, string: String) -> Result<Option<Handle>> {
+    fn groups(pattern: String, string: String) -> Result<Option<Vec<Value>>> {
         let Some(f) = rx(main::find(&pattern, &string, Mode::Search))? else { return Ok(None); };
-        let list = Handle::new_list()?;
-        for g in &f.groups {
-            let h = match g {
-                Some(s) => encode(Value::Bytes(s.clone().into_bytes()))?,
-                None => encode(Value::None)?,
-            };
-            list.call("append", &[h.raw()])?;
-        }
-        Ok(Some(list))
+        Ok(Some(f.groups.iter().map(|g| match g {
+            Some(s) => Value::Bytes(s.clone().into_bytes()),
+            None => Value::None,
+        }).collect()))
     }
 
     /* span: codepoint start and end of the first match as a two element list. */
     #[plugin_fn]
-    fn span(pattern: String, string: String) -> Result<Option<Handle>> {
+    fn span(pattern: String, string: String) -> Result<Option<Vec<Value>>> {
         let Some(f) = rx(main::find(&pattern, &string, Mode::Search))? else { return Ok(None); };
-        let list = Handle::new_list()?;
-        let a = encode(Value::Int(f.start as i128))?;
-        let b = encode(Value::Int(f.end as i128))?;
-        list.call("append", &[a.raw()])?;
-        list.call("append", &[b.raw()])?;
-        Ok(Some(list))
+        Ok(Some(alloc::vec![Value::Int(f.start as i128), Value::Int(f.end as i128)]))
     }
 
     /* sub: replace every match, expanding backreferences in the template. */

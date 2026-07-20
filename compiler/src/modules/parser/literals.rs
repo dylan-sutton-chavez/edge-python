@@ -163,10 +163,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             if vars.len() == 1 {
                 self.store_name(vars[0].clone());
             } else {
-                self.chunk.emit(OpCode::UnpackSequence, vars.len() as u16);
-                for var in &vars {
-                    self.store_name(var.clone());
-                }
+                self.emit_unpack_stores(&vars, None);
             }
             for v in &vars { all_vars.push(v.clone()); }
 
@@ -356,17 +353,14 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             return true;
         }
 
-        // dict() needs positional and keyword counts distinct.
-        if name == "dict" {
-            let (pos, kw) = self.parse_args();
-            self.chunk.emit(OpCode::CallDict, super::pack_call(pos, kw));
-            self.chunk.record_call_pos(call_pos);
-            return true;
-        }
-
-        // min()/max() (`default=`/`key=`) and enumerate() (`start=`) take keywords, so keep positional and keyword counts distinct.
-        if name == "min" || name == "max" || name == "enumerate" {
-            let op = match name.as_str() { "min" => OpCode::CallMin, "max" => OpCode::CallMax, _ => OpCode::CallEnumerate };
+        // dict()/min()/max()/enumerate() take keywords (`default=`/`key=`/`start=`), so keep positional and keyword counts distinct via the packed operand.
+        if let Some(op) = match name.as_str() {
+            "dict" => Some(OpCode::CallDict),
+            "min" => Some(OpCode::CallMin),
+            "max" => Some(OpCode::CallMax),
+            "enumerate" => Some(OpCode::CallEnumerate),
+            _ => None,
+        } {
             let (pos, kw) = self.parse_args();
             self.chunk.emit(op, super::pack_call(pos, kw));
             self.chunk.record_call_pos(call_pos);
@@ -456,14 +450,28 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     /* class: compiles body into fresh chunk, emits MakeClass+decorators+StoreName. */
     pub(super) fn class_def(&mut self) { self.class_def_with(0) }
 
-    pub(super) fn class_def_with(&mut self, decorators: u16) {
-        // Missing name: non-syncing diagnostic + synthetic name so body still parses.
-        let cname = if matches!(self.peek(), Some(TokenType::Name)) {
+    /* Consume the next Name, or emit a non-syncing diagnostic and return a synthetic name so parsing continues. */
+    fn ident_or_missing(&mut self, msg: &str) -> String {
+        if matches!(self.peek(), Some(TokenType::Name)) {
             self.advance_text()
         } else {
-            self.diag_at_peek("expected class name");
+            self.diag_at_peek(msg);
             "<missing>".to_string()
-        };
+        }
+    }
+
+    /* Emit one `Call(1)` per decorator, innermost first, each applied to the previous result. */
+    fn emit_decorator_calls(&mut self, n: u16) {
+        for _ in 0..n {
+            let pos = self.last_end as u32;
+            self.chunk.emit(OpCode::Call, 1);
+            self.chunk.record_call_pos(pos);
+        }
+    }
+
+    pub(super) fn class_def_with(&mut self, decorators: u16) {
+        // Missing name: non-syncing diagnostic + synthetic name so body still parses.
+        let cname = self.ident_or_missing("expected class name");
 
         // Bases are pushed left-to-right; `MakeClass` pops `num_bases` and stores them in the Class.
         let mut num_bases: u16 = 0;
@@ -488,11 +496,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.chunk.emit(OpCode::MakeClass, (num_bases << 8) | ci);
 
         // Each decorator Calls with the previous result, same as for functions.
-        for _ in 0..decorators {
-            let pos = self.last_end as u32;
-            self.chunk.emit(OpCode::Call, 1);
-            self.chunk.record_call_pos(pos);
-        }
+        self.emit_decorator_calls(decorators);
 
         self.emit_store_new(&cname);
     }
@@ -500,34 +504,14 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     /* def/async def: parses signature, compiles body, emits MakeFunction/MakeCoroutine+decorators+StoreName. */
     pub(super) fn func_def_inner(&mut self, decorators: u16, is_async: bool) {
         // Missing name: non-syncing diagnostic + synthetic name so signature+body still parse.
-        let fname = if matches!(self.peek(), Some(TokenType::Name)) {
-            self.advance_text()
-        } else {
-            self.diag_at_peek("expected function name");
-            "<missing>".to_string()
-        };
+        let fname = self.ident_or_missing("expected function name");
         let (params, defaults) = self.parse_params();
         let body = self.compile_body(&params);
 
         // Propagate free names to parent chunk so nested defs capture grandparent vars.
-        let param_slots: crate::util::fx::FxHashSet<String> = params.iter()
-            .map(|p| s!(str super::types::param_base_name(p), "_0")).collect();
-        for name in &body.names {
-            if !param_slots.contains(name.as_str()) {
-                self.chunk.push_name(name);
-            }
-        }
+        self.push_function(params, body, defaults, Some(&fname), if is_async { OpCode::MakeCoroutine } else { OpCode::MakeFunction });
 
-        let fi = self.chunk.functions.len() as u16;
-        let name_slot = self.push_ssa_name(&fname, self.current_version(&fname) + 1);
-        self.chunk.functions.push((params, body, defaults, name_slot));
-        self.chunk.emit(if is_async { OpCode::MakeCoroutine } else { OpCode::MakeFunction }, fi);
-
-        for _ in 0..decorators {
-            let pos = self.last_end as u32;
-            self.chunk.emit(OpCode::Call, 1);
-            self.chunk.record_call_pos(pos);
-        }
+        self.emit_decorator_calls(decorators);
 
         self.emit_store_new(&fname);
     }

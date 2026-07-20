@@ -64,15 +64,11 @@ pub(super) fn builtin(name: &str) -> Option<(OpCode, bool)> {
         "float" => Some((OpCode::CallFloat, true)),
         "bool" => Some((OpCode::CallBool, true)),
         "round" => Some((OpCode::CallRound, true)),
-        "min" => Some((OpCode::CallMin, true)),
-        "max" => Some((OpCode::CallMax, true)),
         "sum" => Some((OpCode::CallSum, true)),
-        // sorted: key= kwarg needs generic LoadName+Call path.
-        "enumerate" => Some((OpCode::CallEnumerate, true)),
+        // dict/min/max/enumerate and sorted need the keyword-aware path in `call()`, not this table.
         "zip" => Some((OpCode::CallZip, true)),
         "list" => Some((OpCode::CallList, true)),
         "tuple" => Some((OpCode::CallTuple, true)),
-        "dict" => Some((OpCode::CallDict, true)),
         "set" => Some((OpCode::CallSet, true)),
         "input" => Some((OpCode::CallInput, true)),
         "isinstance" => Some((OpCode::CallIsInstance, true)),
@@ -403,17 +399,6 @@ impl Diagnostic {
     }
 }
 
-impl Diagnostic {
-    /* One-line render for tests: `path:line:col: msg`. */
-    pub fn render_oneline(&self, src: &str, path: Option<&str>) -> alloc::string::String {
-        use crate::s;
-        let (line, col) = Self::line_col(src, self.start);
-        match path {
-            Some(p) => s!(str p, ":", int line, ":", int col, ": ", str &self.msg),
-            None => s!("line ", int line, ":", int col, ": ", str &self.msg),
-        }
-    }
-}
 
 /* Scan only the prefix chars before the opening quote; the body itself may legally contain 'r'/'R'. */
 pub(super) fn has_raw_prefix(s: &str) -> bool {

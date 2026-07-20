@@ -4,6 +4,16 @@ use alloc::vec::Vec;
 use super::super::VM;
 use super::super::types::*;
 
+/* Convert a float to i128 for int()/round(): NaN and infinity raise, and the value is rejected before the saturating cast overflows. `transform` truncates or rounds. */
+fn finite_f64_to_i128(f: f64, transform: impl Fn(f64) -> f64) -> Result<i128, VmErr> {
+    if f.is_nan() { return Err(cold_value("cannot convert float NaN to integer")); }
+    if f.is_infinite() { return Err(VmErr::Raised(String::from("OverflowError: cannot convert float infinity to integer"))); }
+    let v = transform(f);
+    // i128::MAX as f64 rounds up past the true max, so reject before the saturating cast.
+    if !(-1.7014118346046923e38..=1.7014118346046921e38).contains(&v) { return Err(cold_overflow()); }
+    Ok(v as i128)
+}
+
 fn i128_to_radix(n: i128, radix: u32, prefix: &str) -> String {
     if n == 0 {
         let mut s = String::with_capacity(prefix.len() + 1);
@@ -135,13 +145,7 @@ impl<'a> VM<'a> {
             self.push(o); return Ok(());
         }
         let i: i128 = if o.is_float() {
-            let f = o.as_float();
-            if f.is_nan() { return Err(cold_value("cannot convert float NaN to integer")); }
-            if f.is_infinite() { return Err(VmErr::Raised(alloc::string::String::from("OverflowError: cannot convert float infinity to integer"))); }
-            let t = ftrunc(f);
-            // i128::MAX as f64 rounds up past the true max, so reject before the saturating cast.
-            if !(-1.7014118346046923e38..=1.7014118346046921e38).contains(&t) { return Err(cold_overflow()); }
-            t as i128
+            finite_f64_to_i128(o.as_float(), ftrunc)?
         }
             else if o.is_bool() { o.as_bool() as i128 }
             else if o.is_heap() && let HeapObj::Str(s) = self.heap.get(o) {
@@ -230,12 +234,8 @@ impl<'a> VM<'a> {
             }
             (Some(o), None) if o.is_float() => {
                 // 1-arg round returns an int; promote via int_to_val so large results don't wrap.
-                let f = o.as_float();
-                if f.is_nan() { return Err(cold_value("cannot convert float NaN to integer")); }
-                if f.is_infinite() { return Err(VmErr::Raised(alloc::string::String::from("OverflowError: cannot convert float infinity to integer"))); }
-                let r = fround(f);
-                if !(-1.7014118346046923e38..=1.7014118346046921e38).contains(&r) { return Err(cold_overflow()); }
-                self.int_to_val(Some(r as i128))?
+                let i = finite_f64_to_i128(o.as_float(), fround)?;
+                self.int_to_val(Some(i))?
             }
             // Ints/bools round to themselves; negative ndigits round to tens/hundreds.
             (Some(o), n) if o.is_bool() || o.is_int() || (o.is_heap() && matches!(self.heap.get(o), HeapObj::LongInt(_))) => {
@@ -345,18 +345,11 @@ impl<'a> VM<'a> {
     pub fn call_oct(&mut self) -> Result<(), VmErr> { self.call_radix(8,  "0o") }
     pub fn call_hex(&mut self) -> Result<(), VmErr> { self.call_radix(16, "0x") }
 
+    /* Push int as "<prefix><digits>" with optional sign. */
     fn call_radix(&mut self, radix: u32, prefix: &str) -> Result<(), VmErr> {
         let o = self.pop()?;
-        let s = self.int_to_radix_string(o, radix, prefix)?;
-        self.alloc_and_push_str(s)
-    }
-
-    /* Converts int to "<prefix><digits>" with optional sign. */
-    fn int_to_radix_string(&self, v: Val, radix: u32, prefix: &str) -> Result<String, VmErr> {
-        if let Some(i) = self.as_i128(v) {
-            return Ok(i128_to_radix(i, radix, prefix));
-        }
-        Err(cold_type("integer required"))
+        let Some(i) = self.as_i128(o) else { return Err(cold_type("integer required")); };
+        self.alloc_and_push_str(i128_to_radix(i, radix, prefix))
     }
 
     pub fn call_divmod(&mut self) -> Result<(), VmErr> {
@@ -389,7 +382,7 @@ impl<'a> VM<'a> {
         let args = self.pop_n(op as usize)?;
         match args.len() {
             2 => {
-                let r = self.pow_2arg(args[0], args[1])?;
+                let r = self.pow_vals(args[0], args[1], "pow() requires numeric operands")?;
                 self.push(r);
                 Ok(())
             }
@@ -426,9 +419,6 @@ impl<'a> VM<'a> {
         }
     }
 
-    fn pow_2arg(&mut self, a: Val, b: Val) -> Result<Val, VmErr> {
-        self.pow_vals(a, b, "pow() requires numeric operands")
-    }
 
     /* Two-arg power for `pow()` and `**`. int**non-neg int stays i128 (overflow trap); floats or negative exponents promote to f64. */
     pub(crate) fn pow_vals(&mut self, a: Val, b: Val, err_msg: &'static str) -> Result<Val, VmErr> {

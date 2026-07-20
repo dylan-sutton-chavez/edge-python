@@ -30,8 +30,8 @@ pub fn constant_fold(chunk: &mut SSAChunk) {
             | OpCode::Shl | OpCode::Shr => {
                 try_fold_binop(chunk, &mut dead, ip);
             }
-            OpCode::Not => try_fold_not(chunk, &mut dead, ip),
-            OpCode::Minus => try_fold_neg(chunk, &mut dead, ip),
+            OpCode::Not => try_fold_unary(chunk, &mut dead, ip, fold_not),
+            OpCode::Minus => try_fold_unary(chunk, &mut dead, ip, fold_neg),
             _ => {}
         }
     }
@@ -174,6 +174,9 @@ fn find_or_push_const(chunk: &mut SSAChunk, v: Val) -> Option<u16> {
     u16::try_from(idx).ok()
 }
 
+/* Widen an int/float Val to f64 (caller guarantees numeric). */
+fn as_f64(v: Val) -> f64 { if v.is_int() { v.as_int() as f64 } else { v.as_float() } }
+
 fn const_to_val(constants: &[Value], idx: u16) -> Option<Val> {
     match constants.get(idx as usize)? {
         Value::Int(i) if (Val::INT_MIN..=Val::INT_MAX).contains(i) => Some(Val::int(*i)),
@@ -214,64 +217,41 @@ fn try_fold_binop(chunk: &mut SSAChunk, dead: &mut [bool], ip: usize) {
     dead[ip] = true;
 }
 
-fn try_fold_not(chunk: &mut SSAChunk, dead: &mut [bool], ip: usize) {
+/* Fold a unary op over the preceding LoadConst; `fold` supplies the per-op table. */
+fn try_fold_unary(chunk: &mut SSAChunk, dead: &mut [bool], ip: usize, fold: impl Fn(Val) -> Option<Val>) {
     let Some(prev1_ip) = prev_live(dead, ip) else { return };
     let p1 = chunk.instructions[prev1_ip];
     if p1.opcode != OpCode::LoadConst { return; }
     let Some(v) = const_to_val(&chunk.constants, p1.operand) else { return };
 
-    let folded = if v.is_bool() {
-        Some(Val::bool(!v.as_bool()))
-    } else if v.is_int() {
-        Some(Val::bool(v.as_int() == 0))
-    } else if v.is_float() {
-        Some(Val::bool(v.as_float() == 0.0))
-    } else if v.is_none() {
-        Some(Val::bool(true))
-    } else {
-        None
-    };
-
-    if let Some(r) = folded
+    if let Some(r) = fold(v)
         && write_const_load(chunk, prev1_ip, r)
     {
         dead[ip] = true;
     }
 }
 
-fn try_fold_neg(chunk: &mut SSAChunk, dead: &mut [bool], ip: usize) {
-    let Some(prev1_ip) = prev_live(dead, ip) else { return };
-    let p1 = chunk.instructions[prev1_ip];
-    if p1.opcode != OpCode::LoadConst { return; }
-    let Some(v) = const_to_val(&chunk.constants, p1.operand) else { return };
+fn fold_not(v: Val) -> Option<Val> {
+    if v.is_bool() { Some(Val::bool(!v.as_bool())) }
+    else if v.is_int() { Some(Val::bool(v.as_int() == 0)) }
+    else if v.is_float() { Some(Val::bool(v.as_float() == 0.0)) }
+    else if v.is_none() { Some(Val::bool(true)) }
+    else { None }
+}
 
-    let folded = if v.is_int() {
+fn fold_neg(v: Val) -> Option<Val> {
+    if v.is_int() {
         let r = -(v.as_int() as i128);
-        if (Val::INT_MIN as i128..=Val::INT_MAX as i128).contains(&r) {
-            Some(Val::int(r as i64))
-        } else { None }
+        if (Val::INT_MIN as i128..=Val::INT_MAX as i128).contains(&r) { Some(Val::int(r as i64)) } else { None }
     } else if v.is_float() {
         Some(Val::float(-v.as_float()))
-    } else { None };
-
-    if let Some(r) = folded
-        && write_const_load(chunk, prev1_ip, r)
-    {
-        dead[ip] = true;
-    }
+    } else { None }
 }
 
 fn fold_binop(op: OpCode, a: Val, b: Val) -> Option<Val> {
     if matches!(op, OpCode::Eq | OpCode::NotEq | OpCode::Lt | OpCode::Gt | OpCode::LtEq | OpCode::GtEq) {
-        let (af, bf) = if a.is_int() && b.is_int() {
-            (a.as_int() as f64, b.as_int() as f64)
-        } else if (a.is_int() || a.is_float()) && (b.is_int() || b.is_float()) {
-            let af = if a.is_int() { a.as_int() as f64 } else { a.as_float() };
-            let bf = if b.is_int() { b.as_int() as f64 } else { b.as_float() };
-            (af, bf)
-        } else {
-            return None;
-        };
+        if !((a.is_int() || a.is_float()) && (b.is_int() || b.is_float())) { return None; }
+        let (af, bf) = (as_f64(a), as_f64(b));
         return Some(Val::bool(match op {
             OpCode::Eq => af == bf,
             OpCode::NotEq => af != bf,
@@ -306,8 +286,7 @@ fn fold_binop(op: OpCode, a: Val, b: Val) -> Option<Val> {
     }
 
     if (a.is_int() || a.is_float()) && (b.is_int() || b.is_float()) {
-        let af = if a.is_int() { a.as_int() as f64 } else { a.as_float() };
-        let bf = if b.is_int() { b.as_int() as f64 } else { b.as_float() };
+        let (af, bf) = (as_f64(a), as_f64(b));
         return Some(Val::float(match op {
             OpCode::Add => af + bf,
             OpCode::Sub => af - bf,

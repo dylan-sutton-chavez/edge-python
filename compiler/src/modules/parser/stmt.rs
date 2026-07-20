@@ -196,9 +196,8 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 }
                 self.eat(TokenType::Equal);
                 self.expr();
-                let after = (targets.len() - 1) as u16;
-                self.chunk.emit(OpCode::UnpackEx, after);
-                for target in targets { self.store_name(target.trim_start_matches('*').to_string()); }
+                // Leading star: equivalent to star at position 0.
+                self.emit_unpack_stores(&targets, Some(0));
                 false
             }
             Some(TokenType::Return) => {
@@ -504,16 +503,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     if count > 1 {
                         self.chunk.emit(OpCode::BuildTuple, count);
                     }
-                    if let Some(sp) = star_pos {
-                        let before = sp as u16;
-                        let after = (targets.len() - sp - 1) as u16;
-                        self.chunk.emit(OpCode::UnpackEx, (before << 8) | after);
-                    } else {
-                        self.chunk.emit(OpCode::UnpackSequence, targets.len() as u16);
-                    }
-                    for target in targets {
-                        self.store_name(target.trim_start_matches('*').to_string());
-                    }
+                    self.emit_unpack_stores(&targets, star_pos);
                     false
                 } else {
                     for t in &targets {

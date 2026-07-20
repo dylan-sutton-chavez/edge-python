@@ -166,22 +166,21 @@ impl<'a> VM<'a> {
             }
         };
 
-        if !arg2.is_heap() {
-            return Err(VmErr::Type("isinstance() arg 2 must be a type or tuple of types"));
-        }
+        self.check_classinfo(arg2, check_one)
+    }
 
-        let result = match self.heap.get(arg2) {
-            HeapObj::Type(_) | HeapObj::NativeFn(_) | HeapObj::Class(..) => check_one(arg2, &self.heap)?,
-            HeapObj::Tuple(items) => {
-                // Propagate TypeError from a non-class member instead of silently ignoring it.
-                let items: Vec<Val> = items.clone();
-                let mut found = false;
-                for t in items { if check_one(t, &self.heap)? { found = true; break; } }
-                found
-            }
-            _ => return Err(VmErr::Type("isinstance() arg 2 must be a type or tuple of types")),
+    /* Shared `isinstance`/`issubclass` classinfo dispatch: a tuple matches if any member does, else a single check. `single` already emits the correct TypeError for non-heap / wrong-variant args. */
+    fn check_classinfo<F>(&mut self, arg2: Val, single: F) -> Result<(), VmErr>
+    where F: Fn(Val, &HeapPool) -> Result<bool, VmErr> {
+        let result = if arg2.is_heap() && let HeapObj::Tuple(items) = self.heap.get(arg2) {
+            // Propagate TypeError from a non-class member instead of silently ignoring it.
+            let items: Vec<Val> = items.clone();
+            let mut found = false;
+            for t in items { if single(t, &self.heap)? { found = true; break; } }
+            found
+        } else {
+            single(arg2, &self.heap)?
         };
-
         self.push(Val::bool(result));
         Ok(())
     }
@@ -211,22 +210,6 @@ impl<'a> VM<'a> {
             }
         };
 
-        if !arg2.is_heap() {
-            return Err(VmErr::Type("issubclass() arg 2 must be a class or tuple of classes"));
-        }
-        let result = match self.heap.get(arg2) {
-            HeapObj::Type(_) | HeapObj::Class(..) => check_one(arg2, &self.heap)?,
-            HeapObj::Tuple(items) => {
-                // Propagate TypeError from a non-class member instead of silently ignoring it.
-                let items: Vec<Val> = items.clone();
-                let mut found = false;
-                for t in items { if check_one(t, &self.heap)? { found = true; break; } }
-                found
-            }
-            _ => return Err(VmErr::Type("issubclass() arg 2 must be a class or tuple of classes")),
-        };
-
-        self.push(Val::bool(result));
-        Ok(())
+        self.check_classinfo(arg2, check_one)
     }
 }

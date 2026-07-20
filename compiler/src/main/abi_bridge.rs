@@ -24,12 +24,12 @@ pub unsafe extern "C" fn host_edge_op(op: u32, recv: u32, name_ptr: *const u8, n
         Some(Op::Len) => dispatch_len(recv),
         Some(Op::Iter) => dispatch_iter(recv),
         Some(Op::IterNext) => dispatch_iter_next(recv),
-        Some(Op::NewDict) => dispatch_new_dict(),
-        Some(Op::NewList) => dispatch_new_list(),
+        Some(Op::NewDict) => in_vm("edge_op new_dict called outside run()", |vm| vm.heap.alloc(HeapObj::Dict(Rc::new(RefCell::new(DictMap::new()))))),
+        Some(Op::NewList) => in_vm("edge_op new_list called outside run()", |vm| vm.heap.alloc(HeapObj::List(Rc::new(RefCell::new(Vec::new()))))),
         Some(Op::TypeOf) => dispatch_type_of(recv),
-        Some(Op::NewTuple) => dispatch_new_tuple(&args),
-        Some(Op::NewSet) => dispatch_new_set(&args),
-        Some(Op::NewFrozenSet) => dispatch_new_frozenset(&args),
+        Some(Op::NewTuple) => in_vm("edge_op new_tuple called outside run()", |vm| vm.tuple_from_items(args.to_vec())),
+        Some(Op::NewSet) => in_vm("edge_op new_set called outside run()", |vm| vm.set_from_items(args.to_vec())),
+        Some(Op::NewFrozenSet) => in_vm("edge_op new_frozenset called outside run()", |vm| vm.frozenset_from_items(args.to_vec())),
         None => Err(VmErr::Raised(s!("edge_op: unsupported op ", int op as i64))),
     };
 
@@ -209,26 +209,6 @@ fn dispatch_iter_next(recv_h: u32) -> Result<Val, VmErr> {
             Err(VmErr::TypeMsg(s!("iter_next expects a List iterator (produced by Op::Iter), got '", str vm.type_name(recv), "'")))
         }
     })
-}
-
-fn dispatch_new_dict() -> Result<Val, VmErr> {
-    in_vm("edge_op new_dict called outside run()", |vm| vm.heap.alloc(HeapObj::Dict(Rc::new(RefCell::new(DictMap::new())))))
-}
-
-fn dispatch_new_list() -> Result<Val, VmErr> {
-    in_vm("edge_op new_list called outside run()", |vm| vm.heap.alloc(HeapObj::List(Rc::new(RefCell::new(Vec::new())))))
-}
-
-fn dispatch_new_tuple(args: &[Val]) -> Result<Val, VmErr> {
-    in_vm("edge_op new_tuple called outside run()", |vm| vm.tuple_from_items(args.to_vec()))
-}
-
-fn dispatch_new_set(args: &[Val]) -> Result<Val, VmErr> {
-    in_vm("edge_op new_set called outside run()", |vm| vm.set_from_items(args.to_vec()))
-}
-
-fn dispatch_new_frozenset(args: &[Val]) -> Result<Val, VmErr> {
-    in_vm("edge_op new_frozenset called outside run()", |vm| vm.frozenset_from_items(args.to_vec()))
 }
 
 fn dispatch_type_of(recv_h: u32) -> Result<Val, VmErr> {

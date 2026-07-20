@@ -175,7 +175,8 @@ fn rsplit_ws_max(s: &str, m: usize) -> Vec<String> {
     out
 }
 
-pub fn split(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
+// `str.split`/`rsplit([sep[, maxsplit]])`; `from_right` counts from the right and reverses sep-mode results.
+fn split_impl(vm: &mut VM, recv: Val, pos: &[Val], from_right: bool) -> Result<(), VmErr> {
     let s = recv_str(vm, recv)?;
     // Optional second arg: maxsplit (<0 means unlimited).
     let maxsplit: Option<usize> = match pos.get(1) {
@@ -186,13 +187,14 @@ pub fn split(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let strs: Vec<String> = if pos.is_empty() || pos[0].is_none() {
         // No separator: split on runs of whitespace, dropping empties.
         match maxsplit {
-            Some(m) => split_ws_max(&s, m),
+            Some(m) => if from_right { rsplit_ws_max(&s, m) } else { split_ws_max(&s, m) },
             None => s.split_whitespace().map(String::from).collect(),
         }
     } else {
         let sep = val_to_str(vm, pos[0])?;
         if sep.is_empty() { return Err(cold_value("empty separator")); }
         match maxsplit {
+            Some(m) if from_right => { let mut v: Vec<String> = s.rsplitn(m + 1, sep.as_str()).map(String::from).collect(); v.reverse(); v }
             Some(m) => s.splitn(m + 1, sep.as_str()).map(String::from).collect(),
             None => s.split(sep.as_str()).map(String::from).collect(),
         }
@@ -200,6 +202,8 @@ pub fn split(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let parts: Vec<Val> = strs.into_iter().map(|p| vm.heap.alloc(HeapObj::Str(p))).collect::<Result<_, _>>()?;
     vm.alloc_and_push_list(parts)
 }
+
+pub fn split(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> { split_impl(vm, recv, pos, false) }
 
 pub fn join(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let sep = recv_str(vm, recv)?;
@@ -223,29 +227,7 @@ pub fn replace(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
 }
 
 // `str.rsplit([sep[, maxsplit]])`: like split but counts from the right.
-pub fn rsplit(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
-    let s = recv_str(vm, recv)?;
-    let maxsplit: Option<usize> = match pos.get(1) {
-        Some(n) if n.is_int() => { let m = n.as_int(); if m < 0 { None } else { Some(m as usize) } }
-        Some(_) => return Err(cold_type("maxsplit must be an integer")),
-        None => None,
-    };
-    let mut strs: Vec<String> = if pos.is_empty() || pos[0].is_none() {
-        match maxsplit {
-            Some(m) => rsplit_ws_max(&s, m),
-            None => s.split_whitespace().map(String::from).collect(),
-        }
-    } else {
-        let sep = val_to_str(vm, pos[0])?;
-        if sep.is_empty() { return Err(cold_value("empty separator")); }
-        match maxsplit {
-            Some(m) => { let mut v: Vec<String> = s.rsplitn(m + 1, sep.as_str()).map(String::from).collect(); v.reverse(); v }
-            None => s.split(sep.as_str()).map(String::from).collect(),
-        }
-    };
-    let parts: Vec<Val> = strs.drain(..).map(|p| vm.heap.alloc(HeapObj::Str(p))).collect::<Result<_, _>>()?;
-    vm.alloc_and_push_list(parts)
-}
+pub fn rsplit(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> { split_impl(vm, recv, pos, true) }
 
 // `str.format(*args)`: positional/auto/explicit-index fields with `{[idx][!r|!s][:spec]}`. Keyword fields aren't supported (the method dispatcher forbids kwargs).
 pub fn format(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
@@ -307,17 +289,24 @@ pub fn format(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
 str_transform!(casefold, |s: &str| s.to_lowercase());
 str_transform!(swapcase, |s: &str| s.chars().map(|c| if c.is_uppercase() { c.to_lowercase().to_string() } else if c.is_lowercase() { c.to_uppercase().to_string() } else { c.to_string() }).collect::<String>());
 
-// `str.ljust`/`rjust(width[, fill])`: pad to width in code points.
-fn justify(vm: &mut VM, recv: Val, pos: &[Val], right: bool) -> Result<(), VmErr> {
-    let s = recv_str(vm, recv)?;
-    if !pos[0].is_int() { return Err(cold_type("width must be an integer")); }
+/* Parse a pad-method `(width[, fill])` arg pair; `width_err` names the method for the width TypeError. */
+fn width_and_fill(vm: &mut VM, pos: &[Val], width_err: &'static str) -> Result<(usize, char), VmErr> {
+    if !pos[0].is_int() { return Err(cold_type(width_err)); }
     let width = pos[0].as_int().max(0) as usize;
+    // User-controlled width drives the output size; cap it so a huge value errors instead of aborting in the allocator.
     if width > vm.heap.limit() { return Err(cold_heap()); }
     let fill = if pos.len() > 1 {
         let f = val_to_str(vm, pos[1])?;
         let mut cs = f.chars();
         match (cs.next(), cs.next()) { (Some(c), None) => c, _ => return Err(cold_type("The fill character must be exactly one character long")) }
     } else { ' ' };
+    Ok((width, fill))
+}
+
+// `str.ljust`/`rjust(width[, fill])`: pad to width in code points.
+fn justify(vm: &mut VM, recv: Val, pos: &[Val], right: bool) -> Result<(), VmErr> {
+    let s = recv_str(vm, recv)?;
+    let (width, fill) = width_and_fill(vm, pos, "width must be an integer")?;
     let pad = width.saturating_sub(s.chars().count());
     let fills: String = iter::repeat_n(fill, pad).collect();
     let out = if right { fills + &s } else { s + &fills };
@@ -455,18 +444,7 @@ pub fn rpartition(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> { pa
 // str: padding.
 pub fn center(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let s = recv_str(vm, recv)?;
-    if !pos[0].is_int() { return Err(cold_type("center() width must be an integer")); }
-    let width = pos[0].as_int().max(0) as usize;
-    // User-controlled width drives the output size; cap it so a huge value errors instead of aborting in the allocator.
-    if width > vm.heap.limit() { return Err(cold_heap()); }
-    let fill = if pos.len() > 1 {
-        let f = val_to_str(vm, pos[1])?;
-        let mut cs = f.chars();
-        match (cs.next(), cs.next()) {
-            (Some(c), None) => c,
-            _ => return Err(cold_type("The fill character must be exactly one character long")),
-        }
-    } else { ' ' };
+    let (width, fill) = width_and_fill(vm, pos, "center() width must be an integer")?;
     // Padding measured in code points, not UTF-8 bytes (Unicode parity).
     let pad = width.saturating_sub(s.chars().count());
     let left = pad / 2;

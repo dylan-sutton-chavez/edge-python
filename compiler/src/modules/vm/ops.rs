@@ -68,14 +68,7 @@ fn repr_str(s: &str) -> String {
 /* Coerce a numeric pair to f64; returns None if neither operand is a float. */
 fn coerce_floats(a: Val, b: Val, heap: &HeapPool) -> Option<(f64, f64)> {
     if !a.is_float() && !b.is_float() { return None; }
-    let extract_f64 = |v: &Val| -> Option<f64> {
-        if v.is_float() { Some(v.as_float()) }
-        else if v.is_int() { Some(v.as_int() as f64) }
-        else if v.is_bool() { Some(v.as_bool() as i64 as f64) }
-        else if v.is_heap() { if let HeapObj::LongInt(i) = heap.get(*v) { Some(*i as f64) } else { None } }
-        else { None }
-    };
-    Some((extract_f64(&a)?, extract_f64(&b)?))
+    Some((num_as_f64(a, heap)?, num_as_f64(b, heap)?))
 }
 
 /* Record heap type tags so the IC can promote a stable binop to FastOp. */
@@ -106,24 +99,12 @@ impl<'a> VM<'a> {
             HeapObj::Set(s) => !s.borrow().is_empty(),
             HeapObj::FrozenSet(s) => !s.is_empty(),
             HeapObj::Range(s,e,st) => if *st > 0 { s < e } else { s > e },
-            HeapObj::Type(_) => true,
-            HeapObj::Func(_, _, _) => true,
-            HeapObj::Slice(..) => true,
-            HeapObj::BoundMethod(..) => true,
-            HeapObj::NativeFn(_) => true,
-            HeapObj::Class(..) => true,
-            HeapObj::BoundUserMethod(..) => true,
-            HeapObj::Super(..) => true,
-            HeapObj::Property(..) => true,
-            HeapObj::PropertySetter(..) => true,
-            HeapObj::StaticMethod(..) => true,
-            HeapObj::Instance(..) => true,
-            HeapObj::Coroutine(..) => true,
-            HeapObj::Module(..) => true,
-            HeapObj::Extern(_) => true,
-            HeapObj::ExcInstance(..) => true,
-            HeapObj::Ellipsis => true,
-            HeapObj::NotImplemented => true,
+            HeapObj::Type(_) | HeapObj::Func(..) | HeapObj::Slice(..) | HeapObj::BoundMethod(..)
+            | HeapObj::NativeFn(_) | HeapObj::Class(..) | HeapObj::BoundUserMethod(..)
+            | HeapObj::Super(..) | HeapObj::Property(..) | HeapObj::PropertySetter(..)
+            | HeapObj::StaticMethod(..) | HeapObj::Instance(..) | HeapObj::Coroutine(..)
+            | HeapObj::Module(..) | HeapObj::Extern(_) | HeapObj::ExcInstance(..)
+            | HeapObj::Ellipsis | HeapObj::NotImplemented => true,
         }
     }
 
@@ -230,21 +211,17 @@ impl<'a> VM<'a> {
             HeapObj::FrozenSet(_) => "frozenset",
             HeapObj::Tuple(_) => "tuple",
             HeapObj::Func(_, _, _) => "function",
-            HeapObj::Type(_) => "type",
+            HeapObj::Type(_) | HeapObj::Class(..) => "type",
             HeapObj::Range(..) => "range",
             HeapObj::Slice(..) => "slice",
-            HeapObj::BoundMethod(..) => "builtin_function_or_method",
-            HeapObj::NativeFn(_) => "builtin_function_or_method",
-            HeapObj::Class(_name, _, _) => "type",
+            HeapObj::BoundMethod(..) | HeapObj::NativeFn(_) | HeapObj::Extern(_) => "builtin_function_or_method",
             HeapObj::BoundUserMethod(..) => "<bound method>",
             HeapObj::Super(..) => "super",
-            HeapObj::Property(..) => "property",
-            HeapObj::PropertySetter(..) => "property",
+            HeapObj::Property(..) | HeapObj::PropertySetter(..) => "property",
             HeapObj::StaticMethod(..) => "staticmethod",
             HeapObj::Instance(..) => "object",
             HeapObj::Coroutine(..) => "coroutine",
             HeapObj::Module(..) => "module",
-            HeapObj::Extern(_) => "builtin_function_or_method",
             HeapObj::ExcInstance(..) => "exception",
             HeapObj::Ellipsis => "ellipsis",
             HeapObj::NotImplemented => "NotImplementedType",
@@ -381,10 +358,6 @@ impl<'a> VM<'a> {
     }
 
     /* Lexicographic `<` for sequences: first differing element decides; otherwise the shorter is less. Recurses through `lt_vals`, so nested sequences and mixed element types are handled (and rejected) consistently. */
-    pub fn seq_lt(&self, xs: &[Val], ys: &[Val]) -> Result<bool, VmErr> {
-        self.seq_lt_d(xs, ys, 0)
-    }
-
     fn seq_lt_d(&self, xs: &[Val], ys: &[Val], depth: usize) -> Result<bool, VmErr> {
         if depth > CMP_DEPTH_MAX { return Err(cold_depth()); }
         for (&x, &y) in xs.iter().zip(ys.iter()) {
@@ -532,27 +505,28 @@ impl<'a> VM<'a> {
             }
             HeapObj::List(rc) => {
                 let src = rc.borrow().clone();
-                // Empty source: result is empty for any n, so skip the n-iteration loop.
-                if src.is_empty() { return self.heap.alloc(HeapObj::List(Rc::new(RefCell::new(Vec::new())))); }
-                let cap = src.len().checked_mul(n).ok_or(cold_overflow())?;
-                if cap > self.heap.limit() { return Err(cold_heap()); }
-                let mut out = Vec::with_capacity(cap);
-                for _ in 0..n { out.extend_from_slice(&src); }
+                let out = self.repeat_seq(&src, n)?;
                 return self.heap.alloc(HeapObj::List(Rc::new(RefCell::new(out))));
             }
             HeapObj::Tuple(v) => {
                 let src = v.clone();
-                // Empty source: result is empty for any n, so skip the n-iteration loop.
-                if src.is_empty() { return self.heap.alloc(HeapObj::Tuple(Vec::new())); }
-                let cap = src.len().checked_mul(n).ok_or(cold_overflow())?;
-                if cap > self.heap.limit() { return Err(cold_heap()); }
-                let mut out = Vec::with_capacity(cap);
-                for _ in 0..n { out.extend_from_slice(&src); }
+                let out = self.repeat_seq(&src, n)?;
                 return self.heap.alloc(HeapObj::Tuple(out));
             }
             _ => {}
         }
         Err(VmErr::TypeMsg(s!("unsupported operand type(s) for *: '", str self.type_name(a), "' and '", str self.type_name(b), "'")))
+    }
+
+    /* Repeat a sequence `n` times with the same budget/overflow/heap-limit guards as `seq * n`. */
+    fn repeat_seq(&self, src: &[Val], n: usize) -> Result<Vec<Val>, VmErr> {
+        // Empty source: result is empty for any n, so skip the n-iteration loop.
+        if src.is_empty() { return Ok(Vec::new()); }
+        let cap = src.len().checked_mul(n).ok_or(cold_overflow())?;
+        if cap > self.heap.limit() { return Err(cold_heap()); }
+        let mut out = Vec::with_capacity(cap);
+        for _ in 0..n { out.extend_from_slice(src); }
+        Ok(out)
     }
 
     pub fn div_vals(&mut self, a: Val, b: Val) -> Result<Val, VmErr> {
@@ -569,11 +543,7 @@ impl<'a> VM<'a> {
     }
 
     pub(crate) fn to_f64_coerce(&self, v: Val) -> Result<f64, VmErr> {
-        if v.is_int() { return Ok(v.as_int() as f64); }
-        if v.is_float() { return Ok(v.as_float()); }
-        if v.is_bool() { return Ok(v.as_bool() as i64 as f64); }
-        if v.is_heap() && let HeapObj::LongInt(i) = self.heap.get(v) { return Ok(*i as f64); }
-        Err(cold_type("numeric operand required"))
+        num_as_f64(v, &self.heap).ok_or(cold_type("numeric operand required"))
     }
 
     /* Wrap an i128 into the narrowest Val: None->Overflow, 47-bit->inline, else LongInt. */

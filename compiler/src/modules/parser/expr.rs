@@ -505,15 +505,6 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             s.chunk.emit(OpCode::ReturnValue, 0);
         });
 
-        let param_slots: crate::util::fx::FxHashSet<String> = params.iter().map(|p| s!(str super::types::param_base_name(p), "_0")).collect();
-        for name in &body.names {
-            if !param_slots.contains(name.as_str()) {
-                self.chunk.push_name(name);
-            }
-        }
-
-        let fi = self.chunk.functions.len() as u16;
-        self.chunk.functions.push((params, body, defaults, u16::MAX));
-        self.chunk.emit(OpCode::MakeFunction, fi);
+        self.push_function(params, body, defaults, None, OpCode::MakeFunction);
     }
 }

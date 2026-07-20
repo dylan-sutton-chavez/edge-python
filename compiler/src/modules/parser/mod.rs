@@ -142,6 +142,36 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.chunk.emit(OpCode::StoreName, i);
     }
 
+    /* Emit UnpackEx (starred) or UnpackSequence then store each target; a leading `*` on a starred name is stripped. */
+    pub(super) fn emit_unpack_stores(&mut self, targets: &[String], star_pos: Option<usize>) {
+        if let Some(sp) = star_pos {
+            let before = sp as u16;
+            let after = (targets.len() - sp - 1) as u16;
+            self.chunk.emit(OpCode::UnpackEx, (before << 8) | after);
+        } else {
+            self.chunk.emit(OpCode::UnpackSequence, targets.len() as u16);
+        }
+        for target in targets { self.store_name(target.trim_start_matches('*').to_string()); }
+    }
+
+    /* Propagate the body's free names to the parent chunk, register the function, and emit its make-op. `fname` is None for lambdas (anonymous, sentinel slot); Some(name) registers a store slot for a def. Order matches the historic def path: free-name propagation, then slot, then push. */
+    pub(super) fn push_function(&mut self, params: Vec<String>, body: SSAChunk, defaults: u16, fname: Option<&str>, op: OpCode) {
+        let param_slots: crate::util::fx::FxHashSet<String> = params.iter()
+            .map(|p| s!(str types::param_base_name(p), "_0")).collect();
+        for name in &body.names {
+            if !param_slots.contains(name.as_str()) {
+                self.chunk.push_name(name);
+            }
+        }
+        let fi = self.chunk.functions.len() as u16;
+        let name_slot = match fname {
+            Some(f) => self.push_ssa_name(f, self.current_version(f) + 1),
+            None => u16::MAX,
+        };
+        self.chunk.functions.push((params, body, defaults, name_slot));
+        self.chunk.emit(op, fi);
+    }
+
     /* Raw version-bump + StoreName; returns the slot. NOT `store_name`: deliberately skips `globals_decl` routing. */
     pub(super) fn emit_store_new(&mut self, name: &str) -> u16 {
         let ver = self.increment_version(name);
@@ -465,13 +495,6 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     pub fn with_resolver(source: &'src str, iter: I, resolver: Box<dyn Resolver>) -> Self {
         Self::with_shared_cache(source, iter, resolver,
             alloc::rc::Rc::new(core::cell::RefCell::new(Vec::new())))
-    }
-
-    /* Like with_resolver but sets chunk path for traceback display. */
-    pub fn with_path(source: &'src str, iter: I, resolver: Box<dyn Resolver>, path: &str) -> Self {
-        let mut p = Self::with_resolver(source, iter, resolver);
-        p.chunk.path = alloc::sync::Arc::new(path.into());
-        p
     }
 
     /* Shared-cache constructor; sub-parsers inherit it so each spec parses once. */

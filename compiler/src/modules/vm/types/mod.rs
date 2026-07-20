@@ -22,9 +22,6 @@ impl Limits {
     pub fn sandbox() -> Self { Self { calls: 256, ops: 100_000_000, heap: 100_000 } }
 }
 
-/* Plain fn-pointer alias for `ExternFn::from_fn`; the `Arc<dyn Fn ...>` form lives in `ExternCallable`. */
-pub type ExternFnPlain = fn(&mut HeapPool, &[Val], Option<Val>) -> Result<Val, VmErr>;
-
 /* Host-provided callable, resolved at compile time and dispatched by `CallExtern`. `Arc<dyn Fn>` lets loaders capture stateful handles; `pure` enables memoization. Third arg is the kwargs slot, `None` for plain positional calls, `Some(dict_val)` when the caller used `name=value` syntax. */
 pub type ExternCallable =
     alloc::sync::Arc<dyn Fn(&mut HeapPool, &[Val], Option<Val>) -> Result<Val, VmErr> + Send + Sync>;
@@ -39,13 +36,6 @@ pub struct ExternFn {
 impl core::fmt::Debug for ExternFn {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("ExternFn").field("name", &self.name).field("pure", &self.pure).finish()
-    }
-}
-
-impl ExternFn {
-    /* Build from a plain `fn` pointer (stateless Rust natives). */
-    pub fn from_fn(name: impl Into<String>, func: ExternFnPlain, pure: bool) -> Self {
-        Self { name: name.into(), func: alloc::sync::Arc::new(func), pure }
     }
 }
 
@@ -102,10 +92,6 @@ impl Val {
     #[inline(always)] pub fn float(f: f64) -> Self {
         let bits = f.to_bits();
         if (bits & QNAN) == QNAN { Self(Self::CANON_NAN) } else { Self(bits) }
-    }
-    #[inline(always)]
-    pub fn is_numeric(&self) -> bool {
-        self.is_int() || self.is_float()
     }
     pub const INT_MAX: i64 = 0x0000_7FFF_FFFF_FFFF;
     pub const INT_MIN: i64 = -0x0000_8000_0000_0000;
@@ -447,35 +433,22 @@ impl HeapPool {
         }
     }
 
+    /* Existing interned/singleton slot for `obj`, if any. Str/Bytes intern only when small. */
+    #[inline]
+    fn intern_lookup(&self, obj: &HeapObj) -> Option<u32> {
+        match obj {
+            HeapObj::Str(s) if s.len() <= 128 => self.strings.get(s).copied(),
+            HeapObj::Bytes(b) if b.len() <= 128 => self.bytes_intern.get(b).copied(),
+            HeapObj::LongInt(i) => self.longints.get(i).copied(),
+            HeapObj::Type(name) => self.types.get(name).copied(),
+            HeapObj::Ellipsis => self.ellipsis_idx,
+            HeapObj::NotImplemented => self.notimpl_idx,
+            _ => None,
+        }
+    }
+
     pub fn alloc(&mut self, obj: HeapObj) -> Result<Val, VmErr> {
-        if let HeapObj::Str(ref s) = obj
-            && s.len() <= 128
-            && let Some(&idx) = self.strings.get(s) {
-                return Ok(Val::heap(idx));
-        }
-        if let HeapObj::Bytes(ref b) = obj
-            && b.len() <= 128
-            && let Some(&idx) = self.bytes_intern.get(b) {
-                return Ok(Val::heap(idx));
-        }
-        if let HeapObj::LongInt(i) = obj
-            && let Some(&idx) = self.longints.get(&i) {
-                return Ok(Val::heap(idx));
-        }
-        if let HeapObj::Type(ref name) = obj
-            && let Some(&idx) = self.types.get(name) {
-                return Ok(Val::heap(idx));
-        }
-        // Ellipsis is a true singleton, every `...` literal returns the same Val.
-        if matches!(obj, HeapObj::Ellipsis)
-            && let Some(idx) = self.ellipsis_idx {
-                return Ok(Val::heap(idx));
-        }
-        // `NotImplemented` follows the same singleton rule so `is` and dunder checks agree.
-        if matches!(obj, HeapObj::NotImplemented)
-            && let Some(idx) = self.notimpl_idx {
-                return Ok(Val::heap(idx));
-        }
+        if let Some(idx) = self.intern_lookup(&obj) { return Ok(Val::heap(idx)); }
         if self.live >= self.limit { return Err(cold_heap()); }
         if self.slots.len() >= (1 << 28) { return Err(VmErr::Heap); }
 
@@ -524,45 +497,18 @@ impl HeapPool {
             match &slot.obj {
                 None => {}
                 Some(_) if slot.marked => { slot.marked = false; }
-                Some(HeapObj::Str(s)) => {
-                    self.strings.remove(s);
-                    slot.obj = None;
-                    self.free_list.push(idx as u32);
-                    self.live -= 1;
-                }
-                Some(HeapObj::Bytes(b)) => {
-                    self.bytes_intern.remove(b);
-                    slot.obj = None;
-                    self.free_list.push(idx as u32);
-                    self.live -= 1;
-                }
-                Some(HeapObj::LongInt(i)) => {
-                    self.longints.remove(i);
-                    slot.obj = None;
-                    self.free_list.push(idx as u32);
-                    self.live -= 1;
-                }
-                Some(HeapObj::Type(name)) => {
-                    self.types.remove(name);
-                    slot.obj = None;
-                    self.free_list.push(idx as u32);
-                    self.live -= 1;
-                }
-                Some(HeapObj::Ellipsis) => {
-                    // Cached singleton index becomes stale when its slot is freed.
-                    if self.ellipsis_idx == Some(idx as u32) { self.ellipsis_idx = None; }
-                    slot.obj = None;
-                    self.free_list.push(idx as u32);
-                    self.live -= 1;
-                }
-                Some(HeapObj::NotImplemented) => {
-                    // Singleton index becomes stale when its slot is freed.
-                    if self.notimpl_idx == Some(idx as u32) { self.notimpl_idx = None; }
-                    slot.obj = None;
-                    self.free_list.push(idx as u32);
-                    self.live -= 1;
-                }
-                Some(_) => {
+                Some(obj) => {
+                    // Evict any intern-table entry, then free the slot.
+                    match obj {
+                        HeapObj::Str(s) => { self.strings.remove(s); }
+                        HeapObj::Bytes(b) => { self.bytes_intern.remove(b); }
+                        HeapObj::LongInt(i) => { self.longints.remove(i); }
+                        HeapObj::Type(name) => { self.types.remove(name); }
+                        // Cached singleton index becomes stale when its slot is freed.
+                        HeapObj::Ellipsis if self.ellipsis_idx == Some(idx as u32) => { self.ellipsis_idx = None; }
+                        HeapObj::NotImplemented if self.notimpl_idx == Some(idx as u32) => { self.notimpl_idx = None; }
+                        _ => {}
+                    }
                     slot.obj = None;
                     self.free_list.push(idx as u32);
                     self.live -= 1;

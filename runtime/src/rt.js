@@ -89,34 +89,26 @@ const decodeFloat = (exps, h) => {
     return new DataView(b.buffer, b.byteOffset, 8).getFloat64(0, true);
 };
 
+// Alloc `len` guest bytes, fill via `write(ptr)`, encode to a handle, free. Pairs alloc/free so lengths can't drift.
+function encodeScalar(exps, tag, len, write) {
+    const ptr = exps.wasm_alloc(len);
+    write(ptr);
+    const h = exps.host_edge_encode(tag, ptr, len);
+    exps.wasm_free(ptr, len);
+    return h;
+}
 function encodeStr(exps, s) {
     const bytes = TE.encode(s);
-    const ptr = exps.wasm_alloc(bytes.length);
-    new Uint8Array(exps.memory.buffer, ptr, bytes.length).set(bytes);
-    const h = exps.host_edge_encode(TAG_BYTES, ptr, bytes.length);
-    exps.wasm_free(ptr, bytes.length);
-    return h;
+    return encodeScalar(exps, TAG_BYTES, bytes.length, (ptr) => new Uint8Array(exps.memory.buffer, ptr, bytes.length).set(bytes));
 }
 function encodeInt(exps, n) {
-    const buf = exps.wasm_alloc(16);
-    writeI128(new DataView(exps.memory.buffer), buf, n);
-    const h = exps.host_edge_encode(TAG_INT, buf, 16);
-    exps.wasm_free(buf, 16);
-    return h;
+    return encodeScalar(exps, TAG_INT, 16, (ptr) => writeI128(new DataView(exps.memory.buffer), ptr, n));
 }
 function encodeBool(exps, b) {
-    const buf = exps.wasm_alloc(1);
-    new Uint8Array(exps.memory.buffer, buf, 1)[0] = b ? 1 : 0;
-    const h = exps.host_edge_encode(TAG_BOOL, buf, 1);
-    exps.wasm_free(buf, 1);
-    return h;
+    return encodeScalar(exps, TAG_BOOL, 1, (ptr) => { new Uint8Array(exps.memory.buffer, ptr, 1)[0] = b ? 1 : 0; });
 }
 function encodeFloat(exps, f) {
-    const buf = exps.wasm_alloc(8);
-    new DataView(exps.memory.buffer).setFloat64(buf, f, true);
-    const h = exps.host_edge_encode(TAG_FLOAT, buf, 8);
-    exps.wasm_free(buf, 8);
-    return h;
+    return encodeScalar(exps, TAG_FLOAT, 8, (ptr) => new DataView(exps.memory.buffer).setFloat64(ptr, f, true));
 }
 
 // Decode any tag to a JS value.

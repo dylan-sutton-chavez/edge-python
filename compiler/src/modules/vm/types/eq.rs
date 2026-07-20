@@ -51,7 +51,7 @@ fn hash_depth(v: Val, heap: &HeapPool, depth: usize) -> u64 {
 }
 
 /* f64 view of any numeric Val (int/bool/float/LongInt); None for non-numerics. */
-fn num_as_f64(v: Val, heap: &HeapPool) -> Option<f64> {
+pub(in crate::modules::vm) fn num_as_f64(v: Val, heap: &HeapPool) -> Option<f64> {
     if v.is_float() { Some(v.as_float()) }
     else if v.is_int() { Some(v.as_int() as f64) }
     else if v.is_bool() { Some(v.as_bool() as i64 as f64) }

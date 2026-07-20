@@ -5,7 +5,7 @@ Returns Err(msg); caller raises ValueError.
 */
 
 use alloc::string::{String, ToString};
-use crate::modules::vm::types::{Val, HeapObj, HeapPool, VmErr, cold_value, fabs, ffloor, flog10, fsignum, ftrunc};
+use crate::modules::vm::types::{Val, HeapObj, HeapPool, VmErr, cold_value, fabs, ffloor, flog10, fsignum, ftrunc, num_as_f64};
 
 // `%c`/`{:c}` out-of-range raises OverflowError; other format errors are ValueError.
 pub const C_RANGE_ERR: &str = "%c arg not in range(0x110000)";
@@ -161,12 +161,7 @@ fn format_percent(v: Val, s: &Spec, heap: &HeapPool) -> Result<String, &'static 
     let body = if f.is_nan() { "nan".to_string() }
     else if f.is_infinite() { if f.is_sign_negative() { "-inf".into() } else { "inf".into() } }
     else { fixed(f.abs(), prec) };
-    let sign_ch = sign_char(f.is_sign_negative() && !f.is_nan(), s.sign);
-    let mut left = String::new();
-    if let Some(c) = sign_ch { left.push(c); }
-    left.push_str(&body);
-    left.push('%');
-    Ok(pad_aligned(s, &left, sign_ch.map(|_| 1).unwrap_or(0)))
+    Ok(signed_pad(s, f.is_sign_negative() && !f.is_nan(), "", &alloc::format!("{body}%")))
 }
 
 fn format_char(v: Val, s: &Spec) -> Result<String, &'static str> {
@@ -189,12 +184,7 @@ fn format_int(v: Val, s: &Spec, heap: &HeapPool) -> Result<String, &'static str>
         _ => unreachable!(),
     };
     let body = if s.sep != 0 { add_grouped(&digits, group_size(s.ty, s.sep), s.sep) } else { digits };
-    let sign_ch = sign_char(neg, s.sign);
-    let mut left = String::new();
-    if let Some(c) = sign_ch { left.push(c); }
-    left.push_str(prefix);
-    left.push_str(&body);
-    Ok(pad_aligned(s, &left, sign_ch.map(|_| 1).unwrap_or(0) + prefix.len()))
+    Ok(signed_pad(s, neg, prefix, &body))
 }
 
 fn format_float(v: Val, s: &Spec, ty: u8, heap: &HeapPool) -> Result<String, &'static str> {
@@ -207,11 +197,7 @@ fn format_float(v: Val, s: &Spec, ty: u8, heap: &HeapPool) -> Result<String, &'s
         return Ok(pad_string(s, body));
     }
     if f.is_infinite() {
-        let mut out = String::new();
-        let sign_ch = sign_char(f.is_sign_negative(), s.sign);
-        if let Some(c) = sign_ch { out.push(c); }
-        out.push_str(if ty == b'F' { "INF" } else { "inf" });
-        return Ok(pad_aligned(s, &out, sign_ch.map(|_| 1).unwrap_or(0)));
+        return Ok(signed_pad(s, f.is_sign_negative(), "", if ty == b'F' { "INF" } else { "inf" }));
     }
 
     let mag = f.abs();
@@ -237,11 +223,7 @@ fn format_float(v: Val, s: &Spec, ty: u8, heap: &HeapPool) -> Result<String, &'s
         _ => unreachable!(),
     };
     let body = if s.sep != 0 { add_thousands_float(&body, s.sep) } else { body };
-    let sign_ch = sign_char(f.is_sign_negative(), s.sign);
-    let mut left = String::new();
-    if let Some(c) = sign_ch { left.push(c); }
-    left.push_str(&body);
-    Ok(pad_aligned(s, &left, sign_ch.map(|_| 1).unwrap_or(0)))
+    Ok(signed_pad(s, f.is_sign_negative(), "", &body))
 }
 
 fn format_with_e(mag: f64, prec: usize, upper: bool) -> String {
@@ -260,11 +242,7 @@ fn format_with_e(mag: f64, prec: usize, upper: bool) -> String {
 }
 
 fn require_float(v: Val, heap: &HeapPool) -> Result<f64, &'static str> {
-    if v.is_float() { return Ok(v.as_float()); }
-    if v.is_int() { return Ok(v.as_int() as f64); }
-    if v.is_bool() { return Ok(v.as_bool() as i64 as f64); }
-    if v.is_heap() && let HeapObj::LongInt(i) = heap.get(v) { return Ok(*i as f64); }
-    Err("format spec requires a number")
+    num_as_f64(v, heap).ok_or("format spec requires a number")
 }
 
 fn int_to_decimal_parts(v: Val, heap: &HeapPool) -> Result<(bool, String), &'static str> {
@@ -334,13 +312,19 @@ fn sign_char(neg: bool, sign_flag: u8) -> Option<char> {
     else { None }
 }
 
-fn pad_numeric(s: &Spec, body: &str) -> String {
-    let (neg, mag) = if let Some(rest) = body.strip_prefix('-') { (true, rest) } else { (false, body) };
+/* Sign char + optional radix prefix + body, then numeric-aligned padding. */
+fn signed_pad(s: &Spec, neg: bool, prefix: &str, body: &str) -> String {
     let sign_ch = sign_char(neg, s.sign);
     let mut left = String::new();
     if let Some(c) = sign_ch { left.push(c); }
-    left.push_str(mag);
-    pad_aligned(s, &left, sign_ch.map(|_| 1).unwrap_or(0))
+    left.push_str(prefix);
+    left.push_str(body);
+    pad_aligned(s, &left, sign_ch.map(|_| 1).unwrap_or(0) + prefix.len())
+}
+
+fn pad_numeric(s: &Spec, body: &str) -> String {
+    let (neg, mag) = if let Some(rest) = body.strip_prefix('-') { (true, rest) } else { (false, body) };
+    signed_pad(s, neg, "", mag)
 }
 
 fn pad_string(s: &Spec, body: &str) -> String {
