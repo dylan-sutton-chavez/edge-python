@@ -7,7 +7,7 @@ use super::types::*;
 
 /* Collect top-level StoreName bindings as module attrs; `seen` keeps the latest per bare name. */
 // `_`-prefixed names stay: the free-name fallback resolves module functions here.
-fn collect_module_attrs(chunk: &SSAChunk, slots: &[Val]) -> Vec<(String, Val)> {
+pub(crate) fn collect_module_attrs(chunk: &SSAChunk, slots: &[Val]) -> Vec<(String, Val)> {
     let mut attrs: Vec<(String, Val)> = Vec::new();
     let mut seen: crate::util::fx::FxHashSet<String> = crate::util::fx::FxHashSet::default();
     for ins in &chunk.instructions {

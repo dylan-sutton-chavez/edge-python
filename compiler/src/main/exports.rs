@@ -299,6 +299,98 @@ pub extern "C" fn last_yield_deadline_ns() -> u64 {
     with_runtime(|rt| rt.paused_run.as_ref().map(|p| p.last_yield_deadline_ns).unwrap_or(0))
 }
 
+use crate::modules::vm::snapshot;
+
+/* Serialize the parked run into an internal buffer; returns blob length, -1 when nothing is parked. Read via `snapshot_ptr`. */
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn save_state() -> i64 {
+    let blob = with_runtime(|rt| {
+        let vm = rt.paused_run.as_ref().and_then(|p| p.vm.as_ref())?;
+        let source = vm.chunk.source.clone();
+        Some(snapshot::save(vm, &source))
+    });
+    match blob {
+        Some(b) => {
+            let len = b.len() as i64;
+            with_runtime(|rt| rt.snapshot = b);
+            len
+        }
+        None => -1,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn snapshot_ptr() -> *const u8 {
+    with_runtime(|rt| rt.snapshot.as_ptr())
+}
+
+/* Boot a VM from the blob's embedded source (written to the SRC buffer) and overlay its saved state; returns the same packed status word as `run_start`. Host-side resources (pending host calls, handles) are not restored. */
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn restore_state(len: usize) -> u32 {
+    with_runtime(|rt| {
+        rt.paused_run = None;
+        rt.current_vm = None;
+    });
+    let blob: alloc::vec::Vec<u8> = with_runtime(|rt| rt.src[..len.min(SZ)].to_vec());
+
+    let source = match snapshot::source_of(&blob) {
+        Ok(s) => s.to_string(),
+        Err(e) => {
+            let n = unsafe { write_out(&e) };
+            return STATUS_ERROR | ((n as u32) & STATUS_PAYLOAD_MASK);
+        }
+    };
+    let limits = match snapshot::limits_of(&blob) {
+        Ok(l) => l,
+        Err(e) => {
+            let n = unsafe { write_out(&e) };
+            return STATUS_ERROR | ((n as u32) & STATUS_PAYLOAD_MASK);
+        }
+    };
+
+    let (tokens, lex_errs) = lex(&source);
+    let resolver = Box::new(WasmHostResolver { dir: String::new() });
+    let mut p = Parser::with_resolver(&source, tokens.into_iter(), resolver);
+    for e in lex_errs {
+        p.errors.push(Diagnostic { start: e.start, end: e.end, msg: e.msg.into() });
+    }
+    let (mut chunk, errs) = p.parse();
+    if !errs.is_empty() {
+        let n = unsafe { write_out("snapshot source no longer parses; was it saved by another compiler version?") };
+        return STATUS_ERROR | ((n as u32) & STATUS_PAYLOAD_MASK);
+    }
+    crate::modules::vm::optimizer::constant_fold(&mut chunk);
+
+    let chunk_static: &'static SSAChunk = Box::leak(Box::new(chunk));
+    let mut vm = VM::with_limits(chunk_static, limits);
+    vm.print_hook = Some(stream_print);
+    vm.set_time_hook(now_ns_host);
+
+    if let Err(e) = snapshot::restore(&mut vm, &blob) {
+        let n = unsafe { write_out(&e) };
+        return STATUS_ERROR | ((n as u32) & STATUS_PAYLOAD_MASK);
+    }
+    step_vm(vm, &source, None)
+}
+
+/* JSON of the parked run's module-level bindings; empty object when nothing is parked. Returns out-buffer length. */
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn state_globals() -> usize {
+    let json = with_runtime(|rt| {
+        rt.paused_run.as_ref().and_then(|p| p.vm.as_ref()).map(snapshot::inspect_globals)
+    });
+    unsafe { write_out(json.as_deref().unwrap_or("{}")) }
+}
+
+/* JSON array of the parked run's coroutines (state, function, ip, frames); empty when nothing is parked. */
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn state_stack() -> usize {
+    let json = with_runtime(|rt| {
+        rt.paused_run.as_ref().and_then(|p| p.vm.as_ref()).map(snapshot::inspect_stack)
+    });
+    unsafe { write_out(json.as_deref().unwrap_or("[]")) }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn run(len: usize) -> usize {
     let src = match read_src(len) {

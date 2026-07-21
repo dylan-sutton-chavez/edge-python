@@ -6,5 +6,6 @@ export default {
     functions: 'Functions',
     classes: 'Classes',
     dunders: 'Dunders',
-    async: 'Async'
+    async: 'Async',
+    snapshots: 'Snapshots'
 }

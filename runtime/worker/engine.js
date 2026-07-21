@@ -100,58 +100,13 @@ export async function run({ src, entryDir = '', baseUrl = null, onLine, incremen
     if (incremental && compilerExports) {
         exports = compilerExports;
     } else {
-        const env = makeCompilerEnv({
-            getExports: () => compilerExports,
-            onLine: onLine ?? (() => {}),
-            fetchedSources,
-            lockfile,
-            integrityActive,
-            rt,
-            captureHostCall: (id, call) => { pendingHostCalls.set(id, call); },
-        });
-        ({ exports } = await WebAssembly.instantiate(wasmModule, { env }));
-        compilerExports = exports;
-        exports.reset_modules();
-        resetNativeTable();
+        exports = await makeInstance(onLine, lockfile, rt);
     }
 
-    const writeBytes = (bytes) => {
-        const ptr = exports.wasm_alloc(Math.max(1, bytes.length));
-        new Uint8Array(exports.memory.buffer, ptr, bytes.length).set(bytes);
-        return ptr;
-    };
-
-    /* Register a main-thread module at `mt:<name>`: push a stub per export (the real call defers to the page) and tell the compiler its export names. */
-    const registerHost = (name, exportNames) => {
-        const baseId = nativeTable.length;
-        for (const fnName of exportNames) {
-            const stub = () => {};
-            stub.__edge_kind = 'capability';
-            stub.__edge_main_thread = true;
-            stub.__edge_name = fnName;
-            stub.__edge_module = name;
-            nativeTable.push(stub);
-        }
-        const specBytes = TE.encode(`mt:${name}`);
-        const namesBytes = TE.encode(exportNames.join('\n'));
-        exports.register_native_module(
-            writeBytes(specBytes), specBytes.length,
-            writeBytes(namesBytes), namesBytes.length,
-            baseId,
-        );
-    };
+    const registerHost = makeRegisterHost(exports);
 
     /* Both kinds graft `<name> -> mt:<name>` so the bare name resolves; eager ones (programmatic objects) register now, lazy ones (urls) load on first import during prefetch. In incremental mode the native table is preserved, so skip re-registration. */
-    const mainThreadSpecs = new Set();
-    const augmentedImports = { ...(importsMap || {}) }; // defaults already folded in by the embedder (index.js)
-    for (const m of mainThreadManifests) {
-        if (!incremental) registerHost(m.name, m.exports);
-        mainThreadSpecs.add(`mt:${m.name}`);
-        augmentedImports[m.name] = `mt:${m.name}`;
-    }
-    for (const name of lazyHostNames) {
-        if (!mainThreadSpecs.has(`mt:${name}`)) augmentedImports[name] = `mt:${name}`;
-    }
+    const { mainThreadSpecs, augmentedImports } = hostImportMap(registerHost, incremental);
 
     const writeSrc = () => new Uint8Array(exports.memory.buffer).set(srcBytes, exports.src_ptr());
     writeSrc();
@@ -182,7 +137,76 @@ export async function run({ src, entryDir = '', baseUrl = null, onLine, incremen
     // Driver loop: `run_start` then `run_resume` after each host wake-up until Done / Error.
     const t0 = performance.now();
     pendingHostCalls.clear(); // drop any stale captures from a prior run
-    let status = exports.run_start(srcBytes.length);
+    const result = await drive(exports, rt, exports.run_start(srcBytes.length), t0);
+
+    if (integrityActive) {
+        try { await cache.saveLockfile(lockfile); }
+        catch { /* persistence failure is non-fatal; lockfile lives in-memory until next save */ }
+    }
+
+    return result;
+}
+
+/* Register a main-thread module at `mt:<name>`: push a stub per export (the real call defers to the page) and tell the compiler its export names. */
+const makeRegisterHost = (exports) => (name, exportNames) => {
+    const baseId = nativeTable.length;
+    for (const fnName of exportNames) {
+        const stub = () => {};
+        stub.__edge_kind = 'capability';
+        stub.__edge_main_thread = true;
+        stub.__edge_name = fnName;
+        stub.__edge_module = name;
+        nativeTable.push(stub);
+    }
+    const writeBytes = (bytes) => {
+        const ptr = exports.wasm_alloc(Math.max(1, bytes.length));
+        new Uint8Array(exports.memory.buffer, ptr, bytes.length).set(bytes);
+        return ptr;
+    };
+    const specBytes = TE.encode(`mt:${name}`);
+    const namesBytes = TE.encode(exportNames.join('\n'));
+    exports.register_native_module(
+        writeBytes(specBytes), specBytes.length,
+        writeBytes(namesBytes), namesBytes.length,
+        baseId,
+    );
+};
+
+/* Eager mt: registrations plus the name -> mt:<name> import grafts shared by run() and restoreState(). */
+function hostImportMap(registerHost, skipRegistration) {
+    const mainThreadSpecs = new Set();
+    const augmentedImports = { ...(importsMap || {}) }; // defaults already folded in by the embedder (index.js)
+    for (const m of mainThreadManifests) {
+        if (!skipRegistration) registerHost(m.name, m.exports);
+        mainThreadSpecs.add(`mt:${m.name}`);
+        augmentedImports[m.name] = `mt:${m.name}`;
+    }
+    for (const name of lazyHostNames) {
+        if (!mainThreadSpecs.has(`mt:${name}`)) augmentedImports[name] = `mt:${name}`;
+    }
+    return { mainThreadSpecs, augmentedImports };
+}
+
+/* Fresh wasm instance wired to this run's env; resets module registry and native table. */
+async function makeInstance(onLine, lockfile, rt) {
+    const env = makeCompilerEnv({
+        getExports: () => compilerExports,
+        onLine: onLine ?? (() => {}),
+        fetchedSources,
+        lockfile,
+        integrityActive,
+        rt,
+        captureHostCall: (id, call) => { pendingHostCalls.set(id, call); },
+    });
+    const { exports } = await WebAssembly.instantiate(wasmModule, { env });
+    compilerExports = exports;
+    exports.reset_modules();
+    resetNativeTable();
+    return exports;
+}
+
+/* Shared driver: services each yield kind until Done / Error / Exit, then decodes the out buffer. */
+async function drive(exports, rt, status, t0) {
     while (true) {
         const kind = (status >>> STATUS_KIND_SHIFT) & 7;
         if (kind === STATUS_DONE || kind === STATUS_ERROR || kind === STATUS_EXIT) break;
@@ -237,13 +261,81 @@ export async function run({ src, entryDir = '', baseUrl = null, onLine, incremen
     const out = len > 0
         ? TD.decode(new Uint8Array(exports.memory.buffer, exports.out_ptr(), len))
         : '';
-
-    if (integrityActive) {
-        try { await cache.saveLockfile(lockfile); }
-        catch { /* persistence failure is non-fatal; lockfile lives in-memory until next save */ }
-    }
-
     return { out, ms };
+}
+
+/* Blob layout prefix (see vm/snapshot.rs): magic u32, format u32, fingerprint u64, source len u64, source bytes. */
+function snapshotSource(blob) {
+    if (blob.length < 24) throw new Error('not an edge-python snapshot');
+    const v = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
+    if (v.getUint32(0, true) !== 0x4E535045) throw new Error('not an edge-python snapshot');
+    const len = Number(v.getBigUint64(16, true));
+    if (24 + len > blob.length) throw new Error('not an edge-python snapshot');
+    return TD.decode(blob.subarray(24, 24 + len));
+}
+
+/* Serialize the currently parked run into a portable blob. Only valid while the program is suspended (waiting on events / timers / frames). */
+export function saveState() {
+    if (!compilerExports) throw new Error('nothing to save: no run has started');
+    const len = Number(compilerExports.save_state());
+    if (len < 0) throw new Error('nothing to save: the program is not paused');
+    return new Uint8Array(compilerExports.memory.buffer, compilerExports.snapshot_ptr(), len).slice();
+}
+
+/* Boot a fresh instance from the blob's embedded source and continue it from the saved state. Resolves like run() when the restored program finishes. */
+export async function restoreState({ blob, onLine }) {
+    if (!wasmModule) throw new Error('engine.load() must be called before restoreState()');
+    const bytes = blob instanceof Uint8Array ? blob : new Uint8Array(blob);
+    if (bytes.length > SOURCE_LIMIT) throw new Error(`snapshot exceeds ${SOURCE_LIMIT} bytes`);
+    const src = snapshotSource(bytes);
+
+    let lockfile = new Map();
+    if (integrityActive) {
+        try { lockfile = await cache.loadLockfile(); }
+        catch { /* non-fatal, same as run() */ }
+    }
+    const rt = makeRt(() => compilerExports);
+    const exports = await makeInstance(onLine, lockfile, rt);
+
+    // Same module registration as run(): the re-parse inside restore_state must resolve the source's imports.
+    const registerHost = makeRegisterHost(exports);
+    const { mainThreadSpecs, augmentedImports } = hostImportMap(registerHost, false);
+    await bfsPrefetch(src, exports, lockfile, {
+        cache,
+        baseUrl: null,
+        entryDir: '',
+        knownMissing,
+        importsMap: augmentedImports,
+        mainThreadSpecs,
+        integrityActive,
+        fetchedSources,
+        compilerExports: exports,
+        rt,
+        loadHost: (name, url) => {
+            if (!loadHostDelegate) throw new Error(`host '${name}' imported but no main-thread loader is wired`);
+            return loadHostDelegate(name, url);
+        },
+        registerHost,
+    });
+
+    new Uint8Array(exports.memory.buffer).set(bytes, exports.src_ptr());
+    const t0 = performance.now();
+    pendingHostCalls.clear();
+    return drive(exports, rt, exports.restore_state(bytes.length), t0);
+}
+
+/* JSON of the parked program's module-level bindings and their reprs. */
+export function stateGlobals() {
+    if (!compilerExports) return {};
+    const len = compilerExports.state_globals();
+    return JSON.parse(TD.decode(new Uint8Array(compilerExports.memory.buffer, compilerExports.out_ptr(), len)));
+}
+
+/* JSON array describing the parked program's coroutines: state, function, ip, suspended frames. */
+export function stateStack() {
+    if (!compilerExports) return [];
+    const len = compilerExports.state_stack();
+    return JSON.parse(TD.decode(new Uint8Array(compilerExports.memory.buffer, compilerExports.out_ptr(), len)));
 }
 
 /* Inject directly into the paused VM. Returns false if the VM isn't ready yet (no compilerExports, or no paused run) so callers can buffer. */

@@ -26,6 +26,7 @@ It reads like Python: it parses Python syntax. It runs differently. What it exec
 - **Type annotations**: parsed and discarded, no runtime `__annotations__`, no enforcement.
 - **Module identity**: `__name__` is bound to `"__main__"` in the entry chunk and to the module's spec inside imported modules, so the canonical `if __name__ == "__main__":` guard works as expected.
 - **Modules**: `import`, `from <spec> import names`, and `from <spec> import *` resolve at parse time through a host-injected resolver, with optional `#sha256-<hex>` integrity on URL specs. Two flavors: `.py` source modules and native modules. See [Imports](/reference/imports) for resolution semantics, [Writing modules](/reference/writing-modules) for the three delivery paths, and [Official packages](/reference/packages) for the ready-made modules (`json`, `dom`, `network`, `storage`, and more).
+- **State snapshots**: a paused program (blocked on `receive()`, `sleep()`, or a host call) can be serialized whole, heap, globals, and suspended coroutines included, then restored later, even on a fresh page load, to continue from the pause point. See [Snapshots](/language/snapshots).
 
 ## What it doesn't support
 

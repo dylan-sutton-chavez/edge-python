@@ -4,6 +4,7 @@ mod ops;
 mod builtins;
 pub(crate) mod handlers;
 pub mod optimizer;
+pub mod snapshot;
 
 mod dispatch;
 mod gc;

@@ -117,6 +117,12 @@ export async function createWorker(opts) {
         loadMs: ready.loadMs,
 
         run: (src, runOpts = {}) => send('run', { src, ...runOpts }),
+        /* Snapshot of the paused program as a portable Uint8Array; throws when nothing is paused. */
+        saveState: () => send('save-state'),
+        /* Boot from a saved blob and continue it; resolves like run() when the program finishes. */
+        restoreState: (blob) => send('restore-state', { blob }),
+        stateGlobals: () => send('state-globals'),
+        stateStack: () => send('state-stack'),
         reset: () => send('reset'),
         clearCache: () => send('clearCache'),
         pushEvent,

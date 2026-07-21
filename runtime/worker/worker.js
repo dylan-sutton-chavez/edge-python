@@ -29,6 +29,10 @@ engine.setLoadHostDelegate((name, url) => new Promise((resolve, reject) => {
 const handlers = {
     load: (data) => engine.load(data.opts, data.mainThreadManifests),
     run: (data) => engine.run({ ...data, onLine }),
+    'save-state': () => engine.saveState(),
+    'restore-state': (data) => engine.restoreState({ blob: data.blob, onLine }),
+    'state-globals': () => engine.stateGlobals(),
+    'state-stack': () => engine.stateStack(),
     reset: () => engine.reset(),
     clearCache: () => engine.clearCache(),
     dispose: () => { engine.dispose(); self.close(); },

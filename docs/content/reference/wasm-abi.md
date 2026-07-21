@@ -420,7 +420,41 @@ The macro emits the worked-example boilerplate. Manual is around 25 lines for th
 
 Community PDKs (uncoordinated releases, each tracking the sealed wire spec): Zig (`wasm-pdk-zig`), AssemblyScript (`wasm-pdk-as`), C (`wasm-pdk.h`).
 
+## Snapshot exports
+
+Distinct from the sealed plugin imports above, these are exports on `compiler.wasm` itself, part of the host-driver surface an embedder calls to freeze and revive a paused run (the host-facing feature is [Snapshots](/language/snapshots)). They reuse the linear-memory buffers and the packed status word of the run lifecycle (`run_start` / `run_resume` / `run_push_event`).
+
+| Export | Signature | Meaning |
+|---|---|---|
+| `save_state` | `() -> i64` | Serialise the parked run into an internal buffer. Returns the blob length, or `-1` when nothing is parked. |
+| `snapshot_ptr` | `() -> *const u8` | Pointer to the blob left by the last `save_state`. |
+| `restore_state` | `(len: usize) -> u32` | Boot a VM from a blob staged in the source buffer and overlay its state. Returns the same packed status word as `run_start`. |
+| `state_globals` | `() -> usize` | Write the parked run's module-level bindings as JSON into the out buffer. Returns its byte length. |
+| `state_stack` | `() -> usize` | Write the parked run's coroutines as JSON into the out buffer. Returns its byte length. |
+
+Buffers are the run lifecycle's: `src_ptr()` (1 MiB input), `out_ptr()` (1 MiB output), and `snapshot_ptr()` for the blob.
+
+- **Save.** Drive to a pause (`run_start`, then `run_resume` until a `PENDING_*` status), call `save_state()`, and if the result is non-negative read that many bytes at `snapshot_ptr()`.
+- **Restore.** Boot a fresh instance and register the same host modules (the embedded source is re-parsed, so its imports must resolve), write the blob into `src_ptr()`, then call `restore_state(len)` and drive it with `run_resume` like any other run.
+- **Inspect.** Call `state_globals()` or `state_stack()` and read that many UTF-8 bytes at `out_ptr()`, one JSON value each.
+
+### Blob layout
+
+Little-endian, self-contained, versioned.
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 4 | magic, `0x4E535045` |
+| 4 | 4 | format version, currently `1` |
+| 8 | 8 | fingerprint, FNV-1a of the bytecode structure |
+| 16 | 8 | source length in bytes |
+| 24 | N | source, UTF-8 |
+| 24+N | rest | serialised VM state (heap, stacks, scheduler, pending) |
+
+`restore_state` re-parses the embedded source, recomputes the fingerprint, and rejects any blob whose fingerprint does not match the freshly compiled chunk, which pins each blob to one program and one compiler build. The whole blob must fit the 1 MiB source buffer. Serializer: [`vm/snapshot.rs`](https://github.com/dylan-sutton-chavez/edge-python/blob/main/compiler/src/modules/vm/snapshot.rs); internals in [Design](/implementation/design#snapshots).
+
 ## See also
 
 - [Imports](/reference/imports): how `from "..." import` resolves on the script side, including walk-up packages.json and integrity verification.
 - [Writing modules](/reference/writing-modules): overview of the three module delivery paths.
+- [Snapshots](/language/snapshots): freezing and resuming a paused run from the host.

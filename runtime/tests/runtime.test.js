@@ -89,6 +89,42 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
             }
         }
 
+        // Snapshot API: park a run on receive(), save + inspect, finish it, then restore the blob and steer the copy differently.
+        const snap = await page.evaluate(async () => {
+            const el = globalThis.el;
+            const chunks = [];
+            el.onOutput((c) => chunks.push(c));
+            const src = "history = []\nwhile True:\n    m = receive()\n    if m == 'stop':\n        break\n    history.append(m)\nprint('|'.join(history))";
+            const running = el.run(src);
+            const parked = async () => {
+                for (let i = 0; i < 100; i++) {
+                    if (JSON.stringify(await el.stateStack()).includes("waiting_event")) return;
+                    await new Promise((r) => setTimeout(r, 20));
+                }
+                throw new Error("run never parked on receive()");
+            };
+            await parked();
+            el.pushEvent("a");
+            await parked();
+            const blob = await el.saveState();
+            const globalsAtSave = await el.stateGlobals();
+            el.pushEvent("b");
+            el.pushEvent("stop");
+            await running;
+            const first = chunks.join("");
+            chunks.length = 0;
+            const resumed = el.restoreState(blob);
+            el.pushEvent("c");
+            el.pushEvent("d");
+            el.pushEvent("stop");
+            await resumed;
+            return { first, second: chunks.join(""), globalsAtSave, blobLen: blob.length };
+        });
+        if (snap.first !== "a|b\n") throw new Error(`snapshot: original run produced ${JSON.stringify(snap.first)}`);
+        if (snap.second !== "a|c|d\n") throw new Error(`snapshot: restored run produced ${JSON.stringify(snap.second)}`);
+        if (snap.globalsAtSave.history !== "['a']") throw new Error(`snapshot: stateGlobals saw ${JSON.stringify(snap.globalsAtSave)}`);
+        if (!(snap.blobLen > 100)) throw new Error(`snapshot: implausible blob length ${snap.blobLen}`);
+
         // Laziness: only what the corpus imports gets fetched; declared-but-unused stays untouched.
         if (!reqd("/app/ui.js")) throw new Error("host ui was used but ui.js never loaded");
         if (!reqd("json.wasm")) throw new Error("json default imported but json.wasm never fetched");

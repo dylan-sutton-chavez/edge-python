@@ -60,7 +60,7 @@ Importing `element.js` auto-registers the tag. On connect, the element reads its
 
 ### Programmatic use
 
-The element keeps its worker on `el.worker`, so you can drive the same VM from JS after `ready` fires; `run(src, opts?)` and `onOutput(cb)` proxy the worker.
+The element keeps its worker on `el.worker`, so you can drive the same VM from JS after `ready` fires; `run(src, opts?)`, `onOutput(cb)`, `pushEvent(msg)`, `saveState()`, `restoreState(blob)`, `stateGlobals()` and `stateStack()` proxy the worker.
 
 ```js
 const el = document.querySelector("edge-python");
@@ -130,7 +130,29 @@ The returned object exposes:
 | `reset()` | `() => Promise<void>` | Clear registered modules without rebooting the worker. |
 | `clearCache()` | `() => Promise<void>` | Wipe IDB CAS + lockfile (or memory cache). Next run re-fetches everything. |
 | `pushEvent(message)` | `(string) => void` | Wake a paused `receive()` in the running script with `message`. Fire-and-forget. Browser bridges fire `CustomEvent("edge-python-event")` on `window`, which `createWorker` routes through `pushEvent` automatically. |
+| `saveState()` | `() => Promise<Uint8Array>` | Snapshot the paused program (see [State snapshots](#state-snapshots)) as a portable blob. Rejects when no run is paused. |
+| `restoreState(blob)` | `(Uint8Array) => Promise<{out, ms}>` | Boot from a saved blob and continue the program from where it was saved. Resolves like `run()` when it finishes. |
+| `stateGlobals()` | `() => Promise<object>` | `{name: repr}` of the paused program's module-level bindings. |
+| `stateStack()` | `() => Promise<array>` | Per-coroutine `{state, function, ip, frames}` of the paused program. |
 | `dispose()` | `() => void` | Terminate the worker. Subsequent calls fail. |
+
+### State snapshots
+
+While a program is paused (waiting on `receive()`, `sleep()`, `frame()`, or a host call), its entire interpreter state, heap, globals, suspended coroutines and call frames included, can be serialized:
+
+```js
+const blob = await worker.saveState(); // Uint8Array, persist anywhere
+// ... later, any page load, same runtime version ...
+const done = worker.restoreState(blob); // continues from the pause point
+worker.pushEvent("hello"); // steer the restored copy
+await done;
+```
+
+The blob embeds the source and a compiler fingerprint: `restoreState` re-parses, verifies both, and rejects blobs saved by a different program or compiler version. One blob can be restored any number of times, each restore is an independent copy. 
+
+Host-side resources are not part of the snapshot: DOM node handles, sockets and in-flight host calls do not survive; programs that only hold Python state (plus queued but unconsumed events, which are preserved) restore exactly.
+
+Size ceiling: the blob holds the source **plus the entire live heap and coroutine state**, and `restoreState` loads it through the runtime's source buffer, capped at 1 MiB (`1 << 20`). `saveState` is uncapped, so a program with a large live heap can produce a blob it returns happily but `restoreState` later rejects with `snapshot exceeds 1048576 bytes`. The limit bites only on restore; keep snapshotted state well under the ceiling.
 
 ## Writing a loader
 
