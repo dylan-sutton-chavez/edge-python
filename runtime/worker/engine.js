@@ -23,6 +23,7 @@ const STATUS_PENDING_EVENT = 3;
 const STATUS_ERROR = 4;
 const STATUS_PENDING_HOST_CALL = 5;
 const STATUS_EXIT = 6; // uncaught SystemExit: clean termination, low 8 bits = exit code
+const STATUS_PREEMPTED = 7; // interval elapsed at a loop back-edge; snapshottable, resumes with no host action
 const ERR_RUNTIME = 2; // wasm-abi error_kind::RUNTIME, for failed deferred host calls
 
 // Worker-lifetime state
@@ -38,6 +39,15 @@ let eventWaiter = null;
 const pendingEvents = [];
 /* Deferred host calls captured by env.host_call_native, keyed by the VM-assigned call_id; drained concurrently in the PENDING_HOST_CALL branch. */
 const pendingHostCalls = new Map();
+// Back-edges between preempt yields; 0 leaves the VM cooperative-only.
+let preemptEvery = 0;
+let pauseRequested = false;
+// Set before a run's first await so a mid-boot `pause` still waits for a park.
+let running = false;
+// Resolves the caller's `pause()` once the run is actually parked.
+let pauseAck = null;
+// Resolves at `resume()` to un-park a run held at a preempt.
+let resumeGate = null;
 /* (name, args) => Promise<value>. Set by worker.js (postMessage round-trip) or by a main-thread embedder. */
 let hostCallDelegate = null;
 /* Host modules resolvable by bare name but loaded on demand; (name) => Promise<exportNames>. */
@@ -80,7 +90,13 @@ export async function load({ wasmUrl, integrity = true, loaders: loaderUrls = []
     return { integrityActive, loadMs: performance.now() - t0 };
 }
 
-export async function run({ src, entryDir = '', baseUrl = null, onLine, incremental = false }) {
+export async function run(opts) {
+    running = true;
+    try { return await runProgram(opts); }
+    finally { running = false; }
+}
+
+async function runProgram({ src, entryDir = '', baseUrl = null, onLine, incremental = false }) {
     if (!wasmModule) throw new Error('engine.load() must be called before run()');
 
     const srcBytes = TE.encode(src);
@@ -201,8 +217,15 @@ async function makeInstance(onLine, lockfile, rt) {
     const { exports } = await WebAssembly.instantiate(wasmModule, { env });
     compilerExports = exports;
     exports.reset_modules();
+    applyPreemptInterval(exports);
     resetNativeTable();
     return exports;
+}
+
+function settlePause(parked) {
+    const ack = pauseAck;
+    pauseAck = null;
+    if (ack) ack(parked);
 }
 
 /* Shared driver: services each yield kind until Done / Error / Exit, then decodes the out buffer. */
@@ -210,7 +233,13 @@ async function drive(exports, rt, status, t0) {
     while (true) {
         const kind = (status >>> STATUS_KIND_SHIFT) & 7;
         if (kind === STATUS_DONE || kind === STATUS_ERROR || kind === STATUS_EXIT) break;
-        if (kind === STATUS_PENDING_TIMER) {
+        // Every other kind leaves the VM parked, so a waiting pause() can settle here.
+        if (pauseRequested) settlePause(true);
+        if (kind === STATUS_PREEMPTED) {
+            // A macrotask, not a microtask: queued postMessage events only land between tasks.
+            await new Promise((r) => setTimeout(r, 0));
+            if (pauseRequested) await new Promise((r) => { resumeGate = r; });
+        } else if (kind === STATUS_PENDING_TIMER) {
             const deadlineNs = exports.last_yield_deadline_ns();
             const nowNs = BigInt(Date.now()) * 1_000_000n;
             const waitMs = deadlineNs > nowNs ? Number((deadlineNs - nowNs) / 1_000_000n) : 0;
@@ -252,6 +281,9 @@ async function drive(exports, rt, status, t0) {
 
         status = exports.run_resume();
     }
+    // The run is over; a pause that never found a park must not hang.
+    pauseRequested = false;
+    settlePause(false);
     // SystemExit: low 8 bits are the exit code, not a buffer length; finish without a traceback.
     if (((status >>> STATUS_KIND_SHIFT) & 7) === STATUS_EXIT) {
         return { out: '', ms: performance.now() - t0, exitCode: status & 0xFF };
@@ -274,6 +306,36 @@ function snapshotSource(blob) {
     return TD.decode(blob.subarray(24, 24 + len));
 }
 
+/* An older compiler.wasm has no preempt export: cooperative-only is fine, preemption is not. */
+function applyPreemptInterval(exports) {
+    if (!exports.set_preempt_interval) {
+        if (preemptEvery > 0) throw new Error('preemption needs a newer compiler.wasm');
+        return;
+    }
+    exports.set_preempt_interval(preemptEvery);
+}
+
+/* Yield every `n` loop back-edges so any program can be paused; 0 disables. */
+export function setPreemptInterval(n) {
+    preemptEvery = Math.max(0, n | 0);
+    if (compilerExports) applyPreemptInterval(compilerExports);
+}
+
+/* Park the run for saveState(). Resolves true once parked, false when no run reached a park. */
+export function pause() {
+    if (!running) return Promise.resolve(false);
+    pauseRequested = true;
+    return new Promise((r) => { pauseAck = r; });
+}
+
+/* Release a run held at a preempt; a no-op when parked on an event. */
+export function resume() {
+    pauseRequested = false;
+    const gate = resumeGate;
+    resumeGate = null;
+    if (gate) gate();
+}
+
 /* Serialize the currently parked run into a portable blob. Only valid while the program is suspended (waiting on events / timers / frames). */
 export function saveState() {
     if (!compilerExports) throw new Error('nothing to save: no run has started');
@@ -283,7 +345,13 @@ export function saveState() {
 }
 
 /* Boot a fresh instance from the blob's embedded source and continue it from the saved state. Resolves like run() when the restored program finishes. */
-export async function restoreState({ blob, onLine }) {
+export async function restoreState(opts) {
+    running = true;
+    try { return await restoreProgram(opts); }
+    finally { running = false; }
+}
+
+async function restoreProgram({ blob, onLine }) {
     if (!wasmModule) throw new Error('engine.load() must be called before restoreState()');
     const bytes = blob instanceof Uint8Array ? blob : new Uint8Array(blob);
     if (bytes.length > SOURCE_LIMIT) throw new Error(`snapshot exceeds ${SOURCE_LIMIT} bytes`);

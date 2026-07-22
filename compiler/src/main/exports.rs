@@ -20,6 +20,8 @@ const STATUS_ERROR: u32 = 4 << STATUS_KIND_SHIFT;
 const STATUS_PENDING_HOST_CALL: u32 = 5 << STATUS_KIND_SHIFT;
 // Uncaught `SystemExit`: clean termination, low 8 bits carry the POSIX exit code (not a buffer length).
 const STATUS_EXIT: u32 = 6 << STATUS_KIND_SHIFT;
+// Preempt interval elapsed: snapshottable, and `run_resume` continues with no host action.
+const STATUS_PREEMPTED: u32 = 7 << STATUS_KIND_SHIFT;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn src_ptr() -> *mut u8 {
@@ -129,6 +131,7 @@ fn step_vm(mut vm: VM<'static>, src: &str, prev_paused: Option<Box<PausedRun>>) 
                 SchedulerStatus::PendingFrame => (STATUS_PENDING_FRAME, 0),
                 SchedulerStatus::PendingEvent => (STATUS_PENDING_EVENT, 0),
                 SchedulerStatus::PendingHostCall => (STATUS_PENDING_HOST_CALL, 0),
+                SchedulerStatus::Preempted => (STATUS_PREEMPTED, 0),
                 SchedulerStatus::Done => (STATUS_DONE, 0),
             };
             let mut paused = match prev_paused {
@@ -209,6 +212,7 @@ pub unsafe extern "C" fn run_start(len: usize) -> u32 {
     vm.print_hook = Some(stream_print);
     vm.set_time_hook(now_ns_host);
     vm.strict_input = true;
+    vm.set_preempt_interval(with_runtime(|rt| rt.preempt_every));
 
     let inp_text = with_runtime(|rt| {
         if rt.inp_len == 0 { return String::new(); }
@@ -301,6 +305,12 @@ pub extern "C" fn last_yield_deadline_ns() -> u64 {
 
 use crate::modules::vm::snapshot;
 
+/* Yield `STATUS_PREEMPTED` every `n` loop back-edges; 0 disables. Applies to the next `run_start` / `restore_state`. */
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn set_preempt_interval(n: u32) {
+    with_runtime(|rt| rt.preempt_every = n as usize);
+}
+
 /* Serialize the parked run into an internal buffer; returns blob length, -1 when nothing is parked. Read via `snapshot_ptr`. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn save_state() -> i64 {
@@ -365,6 +375,7 @@ pub unsafe extern "C" fn restore_state(len: usize) -> u32 {
     let mut vm = VM::with_limits(chunk_static, limits);
     vm.print_hook = Some(stream_print);
     vm.set_time_hook(now_ns_host);
+    vm.set_preempt_interval(with_runtime(|rt| rt.preempt_every));
 
     if let Err(e) = snapshot::restore(&mut vm, &blob) {
         let n = unsafe { write_out(&e) };

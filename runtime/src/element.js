@@ -35,25 +35,6 @@ export class EdgePythonElement extends HTMLElement {
         if (file) await this.worker.run(await fetch(file).then(r => r.text()));
         this.dispatchEvent(new Event("ready"));
     }
-
-    // Run a Python source string on the element's worker. Resolves with { out, ms }.
-    run(src, opts) { return this.worker.run(src, opts); }
-
-    // Fire a string into the running script's receive() queue.
-    pushEvent(message) { this.worker.pushEvent(message); }
-
-    // Snapshot the paused program as a portable Uint8Array; rejects when nothing is paused.
-    saveState() { return this.worker.saveState(); }
-
-    // Boot from a saved blob and continue it; resolves like run() when the program finishes.
-    restoreState(blob) { return this.worker.restoreState(blob); }
-
-    // Inspect the paused program: module bindings with reprs / coroutine states.
-    stateGlobals() { return this.worker.stateGlobals(); }
-    stateStack() { return this.worker.stateStack(); }
-
-    // Register a streaming stdout handler; fires per raw print() chunk (body + its `end`), no newline added.
-    onOutput(handler) { this.worker.onOutput(handler); }
 }
 
 export function defineElement( tag = 'edge-python' ) {

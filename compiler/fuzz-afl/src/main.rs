@@ -2,7 +2,14 @@ use afl::fuzz;
 
 use compiler::modules::lexer::lex;
 use compiler::modules::parser::Parser;
+use compiler::modules::vm::snapshot;
+use compiler::modules::vm::types::{SchedulerStatus, VmErr};
 use compiler::modules::vm::{Limits, VM};
+
+// Tight enough that any fuzzed loop preempts and exercises the unwind path.
+const PREEMPT_EVERY: usize = 7;
+// Caps the cooperative wake-ups so a `while True: receive()` cannot stall an exec.
+const MAX_WAKEUPS: u32 = 16;
 
 fn main() {
     fuzz!(|data: &[u8]| {
@@ -22,6 +29,37 @@ fn main() {
         let mut vm = VM::with_limits(&chunk, limits);
         // Host-driven input: never block on real stdin (AFL feeds the program via shmem).
         vm.strict_input = true;
-        let _ = vm.run();
+        vm.set_preempt_interval(PREEMPT_EVERY);
+
+        // Drive every park kind; snapshot the first, preempted or cooperative.
+        let mut hopped = false;
+        let mut wakeups = 0;
+        loop {
+            let park = match vm.run() {
+                Err(VmErr::HostYield(s)) => s,
+                _ => break,
+            };
+            let drivable = matches!(park, SchedulerStatus::Preempted
+                | SchedulerStatus::PendingEvent
+                | SchedulerStatus::PendingFrame);
+            if !drivable { break; }
+
+            if !hopped {
+                hopped = true;
+                let blob = snapshot::save(&vm, src);
+                let mut fresh = VM::with_limits(&chunk, Limits { ops: 100_000, ..Limits::sandbox() });
+                fresh.strict_input = true;
+                fresh.set_preempt_interval(PREEMPT_EVERY);
+                if snapshot::restore(&mut fresh, &blob).is_ok() {
+                    vm = fresh;
+                }
+            }
+
+            if matches!(park, SchedulerStatus::Preempted) { continue; }
+            // A `receive()` waiter needs an event; a `frame()` waiter is woken by re-entering `run`.
+            if wakeups >= MAX_WAKEUPS { break; }
+            wakeups += 1;
+            if matches!(park, SchedulerStatus::PendingEvent) && vm.push_event("e").is_err() { break; }
+        }
     });
 }

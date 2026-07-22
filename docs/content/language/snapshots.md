@@ -9,7 +9,23 @@ The blob embeds the source and a structural fingerprint of the compiled bytecode
 
 ## Where a run can freeze
 
-The program decides where it can be frozen, never the host. A snapshot is only possible while the run is parked at a suspension point the code itself reached, meaning an empty `receive()`, a `sleep(n>0)`, a `frame()`, or a pending host call (see [Async](/language/async)). At those points the VM unwinds to a clean serializable state. There is no preemption, so a program with no such yield point can never be snapshotted, and `saveState` rejects whenever nothing is parked.
+A run freezes at a suspension point, and there are two ways to reach one.
+
+The program can reach it on its own: an empty `receive()`, a `sleep(n>0)`, a `frame()`, or a pending host call (see [Async](/language/async)). At those points the VM unwinds to a clean serializable state and stays there until the host wakes it.
+
+The host can also force one. With `setPreemptInterval(n)` the VM yields every `n` loop back-edges, so `pause()` stops a program that has no suspension point at all, including a bare `while True:` that only counts. The program needs no cooperation and no rewriting. See [Pause from the host](#pause-from-the-host).
+
+Either way `saveState` rejects while the run is executing, because a snapshot is only coherent at a suspension point.
+
+## What cannot be preempted
+
+A preempt lands at a loop back-edge and only where the VM can unwind, so three cases keep running past their interval and yield at the next reachable back-edge instead.
+
+A class body and a module's top level are not preemptible, so `while` loops there run to the end. Neither is user code a builtin re-enters: a `sort(key=...)` or `sorted(key=...)` callback, a generator body being drained by `list()` or `sum()`, and the `__init__` / `__call__` that run while an object is being constructed or invoked. And a single long native operation has no back-edge inside it, so sorting a huge list or `"x" * 10**8` runs to completion before the next yield.
+
+Everything else preempts, including function and method bodies at any call depth, `for` and `while` loops, comprehensions, and loops inside `try` or `with` blocks.
+
+None of this changes results. An unpreemptible stretch delays the pause; it never corrupts one.
 
 ## A program that pauses
 
@@ -76,6 +92,69 @@ const { out } = await done; // resolves like run() once the program finishes
 ```
 
 The whole point shows in that last total of **40** rather than 0, because the snapshot restored the heap and the program continued instead of restarting.
+
+## Pause from the host
+
+`setPreemptInterval(n)` makes the VM yield every `n` loop back-edges. Nothing else changes: the yields are invisible, the run continues on its own, and the host only notices when it asks to stop. `pause()` then resolves once the run is actually parked, and `resume()` lets it go again.
+
+```python
+# counter.py, no suspension point anywhere
+n = 0
+while True:
+    n += 1
+    if n % 1_000_000 == 0:
+        print(n)
+```
+
+```js
+const worker = await createWorker();
+await worker.setPreemptInterval(50_000); // ~1 yield per 50k loop iterations
+
+worker.run(counterSrc); // never awaited, it runs forever
+
+await worker.pause(); // resolves true once parked, mid-loop
+const blob = await worker.saveState();
+await worker.stateGlobals(); // { n: "3170000" }
+worker.resume(); // keeps counting from 3170000
+```
+
+Pick `n` for how fast you need a pause to land. Each yield is one event-loop round trip, which browsers clamp to a few milliseconds, so the interval decides how many you pay: a tight `i = i + 1` loop runs about a million iterations per second, so `n = 1_000` yields every millisecond of work and costs several times the runtime, while `n = 1_000_000` yields about once a second and costs almost nothing. `0` turns preemption off and leaves the program cooperative-only, which is the default.
+
+## Save when the tab closes
+
+The tag spins up the worker and exposes it on `el.worker`; everything else is calls on that.
+
+```html
+<edge-python></edge-python>
+
+<script type="module">
+  import "https://cdn.edgepython.com/runtime/src/element.js";
+
+  const el = document.querySelector("edge-python");
+  const store = await caches.open("edge-python");
+  const KEY = "/session";
+
+  el.addEventListener("ready", async () => {
+    const worker = el.worker;
+    await worker.setPreemptInterval(50000);
+    const hit = await store.match(KEY);
+    hit
+      ? worker.restoreState(new Uint8Array(await hit.arrayBuffer()))
+      : worker.run(await fetch("./counter.py").then((r) => r.text()));
+
+    const checkpoint = async () => {
+      if (!await worker.pause()) return; // the run already finished
+      await store.put(KEY, new Response(await worker.saveState()));
+      worker.resume();
+    };
+
+    setInterval(checkpoint, 5000);
+    addEventListener("visibilitychange", () => document.hidden && checkpoint());
+  });
+</script>
+```
+
+The interval is what actually protects the session. `visibilitychange` is the last event that reliably fires on mobile, but the handler is async and the browser can kill the page before the write lands, so the rolling checkpoint is the guarantee and the handler only shortens what a close costs.
 
 ## Download it to a file
 
@@ -144,7 +223,7 @@ await worker.stateGlobals();
 // { items: "[10, 25]", total: "35" }   values are reprs
 ```
 
-The `state` field reads `"waiting_event"` for a parked `receive()`, `"sleeping"` for a `sleep()`, and so on.
+The `state` field reads `"waiting_event"` for a parked `receive()`, `"sleeping"` for a `sleep()`, and so on. A run held by `pause()` reads `"ready"`, because a preempted coroutine is not waiting on anything, it is simply not being stepped.
 
 ## See also
 

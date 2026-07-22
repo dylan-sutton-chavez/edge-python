@@ -431,10 +431,12 @@ Distinct from the sealed plugin imports above, these are exports on `compiler.wa
 | `restore_state` | `(len: usize) -> u32` | Boot a VM from a blob staged in the source buffer and overlay its state. Returns the same packed status word as `run_start`. |
 | `state_globals` | `() -> usize` | Write the parked run's module-level bindings as JSON into the out buffer. Returns its byte length. |
 | `state_stack` | `() -> usize` | Write the parked run's coroutines as JSON into the out buffer. Returns its byte length. |
+| `set_preempt_interval` | `(n: u32)` | Yield `PREEMPTED` every `n` loop back-edges so a program with no suspension point stays snapshottable. Defaults to `0`, which disables it. Applies to the next `run_start` / `restore_state`. |
 
 Buffers are the run lifecycle's: `src_ptr()` (1 MiB input), `out_ptr()` (1 MiB output), and `snapshot_ptr()` for the blob.
 
 - **Save.** Drive to a pause (`run_start`, then `run_resume` until a `PENDING_*` status), call `save_state()`, and if the result is non-negative read that many bytes at `snapshot_ptr()`.
+- **Preempt.** With a non-zero `set_preempt_interval`, `run_start` / `run_resume` also return kind `7` (`PREEMPTED`). The run is parked and snapshottable, and needs no host action: call `run_resume` to continue, or `save_state()` first to freeze a program that never suspends on its own.
 - **Restore.** Boot a fresh instance and register the same host modules (the embedded source is re-parsed, so its imports must resolve), write the blob into `src_ptr()`, then call `restore_state(len)` and drive it with `run_resume` like any other run.
 - **Inspect.** Call `state_globals()` or `state_stack()` and read that many UTF-8 bytes at `out_ptr()`, one JSON value each.
 

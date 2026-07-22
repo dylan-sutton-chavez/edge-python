@@ -2,8 +2,8 @@
   "_meta": {
     "source": "MicroPython tests/basics differential vs CPython 3.13",
     "verified": "each repro re-run through VM + python3",
-    "count": 5,
-    "fixed": "100 bugs fixed in vm.json: try/finally unwinding, yield-from expressions, range overflow/truncation/contains, in-place set ops, del of closures, lt sorting, nested next() corruption, nested generator/comprehension ForIter relocation, nested-call spread-arg count corruption, spread-arg after keyword, kwarg name colliding with *args/**kwargs param, kwarg duplicated into **kwargs."
+    "count": 4,
+    "fixed": "101 bugs fixed in vm.json: try/finally unwinding, yield-from expressions, range overflow/truncation/contains, in-place set ops, del of closures, lt sorting, nested next() corruption, nested generator/comprehension ForIter relocation, nested-call spread-arg count corruption, spread-arg after keyword, kwarg name colliding with *args/**kwargs param, kwarg duplicated into **kwargs, deep sync-frame resume order."
   },
   "bugs": [
     {
@@ -37,14 +37,6 @@
       "repro": "x = [1]\ndef rebind():\n    global x\n    x = []\ndef read():\n    return len(x)\nrebind()\nprint(read())",
       "expected": "0",
       "actual": "1"
-    },
-    {
-      "id": "sync_frame_deep_resume",
-      "category": "async",
-      "summary": "Resuming through two or more suspended sync helper frames replays the outer frames' remainders in reverse order, and the value delivered to the innermost call site is lost (None). One suspended sync frame works correctly.",
-      "repro": "out = []\ndef helper():\n    receive()\n    out.append('h')\ndef outer():\n    helper()\n    out.append('!')\nasync def main():\n    outer()\nrun(main())\nprint(''.join(out))",
-      "expected": "h!",
-      "actual": "!h"
     }
   ]
 }

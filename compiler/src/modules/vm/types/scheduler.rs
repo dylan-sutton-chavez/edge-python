@@ -10,4 +10,6 @@ pub enum SchedulerStatus {
     PendingEvent,
     /// Coro parked mid-`CallExtern`; host wakes via `set_host_result`.
     PendingHostCall,
+    /// Interval elapsed at a back-edge; snapshottable, resumes with no host action.
+    Preempted,
 }

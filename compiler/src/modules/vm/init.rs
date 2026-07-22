@@ -131,6 +131,12 @@ impl<'a> VM<'a> {
         self.inject_host_error_by_id(id, VmErr::Raised(message.into()))
     }
 
+    /* Yield `Preempted` every `n` loop back-edges so the host can pause anywhere; 0 disables. */
+    pub fn set_preempt_interval(&mut self, n: usize) {
+        self.preempt_every = n;
+        self.preempt_left = n;
+    }
+
     /* Push a string event onto the event queue; consumed by the next `receive()` call. Mirrors what `run_push_event` does for WASM hosts. */
     pub fn push_event(&mut self, message: &str) -> Result<(), VmErr> {
         let val = self.heap.alloc(HeapObj::Str(message.into()))?;

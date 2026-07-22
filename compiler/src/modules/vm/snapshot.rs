@@ -409,6 +409,7 @@ fn put_vm_err(w: &mut W, e: &VmErr) {
                 SchedulerStatus::PendingFrame => w.u8(2),
                 SchedulerStatus::PendingEvent => w.u8(3),
                 SchedulerStatus::PendingHostCall => w.u8(4),
+                SchedulerStatus::Preempted => w.u8(5),
             }
         }
         VmErr::HostCallDeferred => w.u8(13),
@@ -436,7 +437,8 @@ fn get_vm_err(r: &mut R) -> Result<VmErr, SnapErr> {
             1 => SchedulerStatus::PendingTimer(r.u64()?),
             2 => SchedulerStatus::PendingFrame,
             3 => SchedulerStatus::PendingEvent,
-            _ => SchedulerStatus::PendingHostCall,
+            4 => SchedulerStatus::PendingHostCall,
+            _ => SchedulerStatus::Preempted,
         }),
         _ => VmErr::HostCallDeferred,
     })

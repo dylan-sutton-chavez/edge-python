@@ -60,13 +60,13 @@ Importing `element.js` auto-registers the tag. On connect, the element reads its
 
 ### Programmatic use
 
-The element keeps its worker on `el.worker`, so you can drive the same VM from JS after `ready` fires; `run(src, opts?)`, `onOutput(cb)`, `pushEvent(msg)`, `saveState()`, `restoreState(blob)`, `stateGlobals()` and `stateStack()` proxy the worker.
+The element publishes its worker on `el.worker` once `ready` fires, so the full [`Worker`](#worker) API drives the same VM. The element itself adds no methods.
 
 ```js
 const el = document.querySelector("edge-python");
 await new Promise((r) => el.addEventListener("ready", r, { once: true }));
-el.onOutput((chunk) => process.stdout.write(chunk)); // raw chunks, no added newline
-await el.run("print(1 + 1)"); // 2
+el.worker.onOutput((chunk) => process.stdout.write(chunk)); // raw chunks, no added newline
+await el.worker.run("print(1 + 1)"); // 2
 ```
 
 ### Registration
@@ -134,11 +134,14 @@ The returned object exposes:
 | `restoreState(blob)` | `(Uint8Array) => Promise<{out, ms}>` | Boot from a saved blob and continue the program from where it was saved. Resolves like `run()` when it finishes. |
 | `stateGlobals()` | `() => Promise<object>` | `{name: repr}` of the paused program's module-level bindings. |
 | `stateStack()` | `() => Promise<array>` | Per-coroutine `{state, function, ip, frames}` of the paused program. |
+| `setPreemptInterval(n)` | `(number) => Promise<void>` | Yield every `n` loop back-edges so a program with no suspension point stays pausable. Each yield is an event-loop round trip, so a small `n` pauses sooner and costs more. Defaults to `0`, which disables it. |
+| `pause()` | `() => Promise<boolean>` | Park the running program so `saveState()` can capture it. Resolves `true` once parked, `false` when no run reached a park (already finished, or none started). Needs `setPreemptInterval` unless the program suspends on its own. |
+| `resume()` | `() => Promise<void>` | Continue a program parked by `pause()`. |
 | `dispose()` | `() => void` | Terminate the worker. Subsequent calls fail. |
 
 ### State snapshots
 
-While a program is paused (waiting on `receive()`, `sleep()`, `frame()`, or a host call), its entire interpreter state, heap, globals, suspended coroutines and call frames included, can be serialized:
+While a program is parked, its entire interpreter state, heap, globals, suspended coroutines and call frames included, can be serialized. A program parks either on its own (`receive()`, `sleep()`, `frame()`, a host call) or because the host asked it to:
 
 ```js
 const blob = await worker.saveState(); // Uint8Array, persist anywhere
@@ -149,6 +152,18 @@ await done;
 ```
 
 The blob embeds the source and a compiler fingerprint: `restoreState` re-parses, verifies both, and rejects blobs saved by a different program or compiler version. One blob can be restored any number of times, each restore is an independent copy. 
+
+A program that never suspends is snapshottable too, once the host arms preemption:
+
+```js
+await worker.setPreemptInterval(50_000); // yield every 50k loop back-edges
+worker.run("n = 0\nwhile True:\n    n += 1"); // no receive(), no sleep()
+await worker.pause();                    // resolves true, parked mid-loop
+const blob = await worker.saveState();
+worker.resume();
+```
+
+Preempts land on loop back-edges where the VM can unwind. Function and method bodies, `for` / `while` loops, comprehensions and `try` / `with` blocks all qualify; class bodies, module top level, builtin callbacks (`sort(key=...)`, a generator drained by `list()`), `__init__` / `__call__`, and single long native operations run past the interval and yield at the next reachable back-edge. That delays a pause; it never corrupts one.
 
 Host-side resources are not part of the snapshot: DOM node handles, sockets and in-flight host calls do not survive; programs that only hold Python state (plus queued but unconsumed events, which are preserved) restore exactly.
 

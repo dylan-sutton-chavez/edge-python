@@ -148,6 +148,7 @@ impl<'a> VM<'a> {
         let slots_base = self.live_slots.len();
         // `resume_coroutine` pre-pushes restored exception frames before calling us; honor its override so dispatch's handler search includes them.
         let exc_base = self.pending_exec_exc_base.take().unwrap_or(self.exception_stack.len());
+        let outer_safe = core::mem::replace(&mut self.frame_safe, core::mem::take(&mut self.pending_exec_safe));
         // Cleanup reasons belong to this frame's finally bodies; drop leftovers when it returns.
         let unwind_base = self.unwind_stack.len();
         // Drop spread-delta frames leaked by an aborted arg list on unwind.
@@ -192,7 +193,8 @@ impl<'a> VM<'a> {
                             let sub_call_yield = !self.pending_sync_frames.is_empty();
                             let child_yield = self.pending.waiting_for_children.is_some();
                             let host_yield = self.pending.host_call_request;
-                            let regular_yield = !event_yield && !sub_call_yield && !child_yield && !host_yield;
+                            let preempt_yield = self.pending.preempt_request;
+                            let regular_yield = !event_yield && !sub_call_yield && !child_yield && !host_yield && !preempt_yield;
                             let val = if regular_yield { self.pop().unwrap_or(Val::none()) } else { Val::none() };
                             let next_is_pop = ip < n && matches!(insns.get(ip), Some(ins) if ins.opcode == OpCode::PopTop);
                             self.resume_ip = if regular_yield && next_is_pop { ip + 1 } else { ip };
@@ -263,6 +265,7 @@ impl<'a> VM<'a> {
 
         self.active_const_pools.pop();
         self.active_slots.pop();
+        self.frame_safe = outer_safe;
         self.opcode_caches.insert(key, cache);
         result
     }
@@ -325,7 +328,11 @@ impl<'a> VM<'a> {
                 for a in &kw_flat { self.push(*a); }
                 let argc = (positional.len() + 1) as u16;
                 let encoded = ((kw_flat.len() as u16 / 2) << 8) | argc;
-                self.exec_call(encoded, chunk, slots)
+                // A user method body suspends through the same staging as a plain call.
+                self.pending_exec_safe = self.frame_safe;
+                let called = self.exec_call(encoded, chunk, slots);
+                self.pending_exec_safe = false;
+                called
             }
             handlers::methods::AttrLookup::BuiltinMethod(id) => {
                 // sort runs user __lt__, so it needs chunk/slots the builtin-method table can't carry.
@@ -462,9 +469,25 @@ impl<'a> VM<'a> {
             OpCode::Jump => {
                 let target = self.checked_jump(op as usize, n)?;
                 // Backward jumps are loop back-edges; charge them so `while` is bounded like `for`.
-                if target <= rip && !self.sandbox_off {
-                    if self.budget == 0 { return Err(cold_budget()); }
-                    self.budget -= 1;
+                if target <= rip {
+                    if !self.sandbox_off {
+                        if self.budget == 0 { return Err(cold_budget()); }
+                        self.budget -= 1;
+                    }
+                    // `for` also closes on a back-edge, so this is the only preempt sampling point.
+                    if self.preempt_left != 0 {
+                        self.preempt_left -= 1;
+                        if self.preempt_left == 0 {
+                            if self.frame_safe {
+                                self.preempt_left = self.preempt_every;
+                                self.pending.preempt_request = true;
+                                self.yielded = true;
+                            } else {
+                                // Unpreemptible frame: retry at the next back-edge, don't lose the tick.
+                                self.preempt_left = 1;
+                            }
+                        }
+                    }
                 }
                 *ip = target;
             }
@@ -513,7 +536,12 @@ impl<'a> VM<'a> {
             | OpCode::CallExtern => {
                 // Snapshot call-site byte_pos for the new CallFrame; falls back to enclosing stmt.
                 self.pending.call_byte_pos = chunk.resolve_call(rip as u32).or_else(|| chunk.resolve(rip as u32));
-                self.handle_function(ins.opcode, op, chunk, slots)?;
+                // Only a plain user call stages its frame on suspension; a builtin callback cannot.
+                self.pending_exec_safe = self.frame_safe && ins.opcode == OpCode::Call;
+                let dispatched = self.handle_function(ins.opcode, op, chunk, slots);
+                // Cleared on both paths so an unconsumed `true` cannot leak into a later native re-entry.
+                self.pending_exec_safe = false;
+                dispatched?;
             }
 
             OpCode::GetIter => {
