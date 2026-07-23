@@ -423,6 +423,20 @@ impl<'a> VM<'a> {
             }
             OpCode::StoreName => {
                 self.handle_store(op, slots)?;
+                // Write through the frame's closure cells so escaped children observe stores made after their definition. Operands are canonicalised, so the slot key matches the cell registry.
+                if let Some(frame) = self.call_stack.last()
+                    && !frame.cells.is_empty()
+                {
+                    let cell = frame.cells.iter().find(|(s, _)| *s == op as usize).map(|&(_, c)| c);
+                    if let Some(cell) = cell
+                        && cell.is_heap()
+                        && let HeapObj::List(rc) = self.heap.get(cell)
+                    {
+                        let v = slots[op as usize];
+                        let mut b = rc.borrow_mut();
+                        if b.is_empty() { b.push(v); } else { b[0] = v; }
+                    }
+                }
                 // Mirror entry-chunk stores into `module_state` so functions with `global X` see updates, and mirror Module values into `globals` so `import_module()` finds module aliases.
                 if core::ptr::eq(chunk, self.chunk)
                     && let Some(name) = chunk.names.get(op as usize)
@@ -959,14 +973,12 @@ impl<'a> VM<'a> {
         };
         let mut class_slots = self.fill_builtins(&body.names);
         // Class bodies can read enclosing module-level names, not only builtins.
-        let mut injected: Vec<(usize, Val)> = Vec::new();
         for (i, name) in body.names.iter().enumerate() {
             let bare = ssa_strip(name);
             if class_slots.get(i).is_some_and(|v| v.is_undef())
                 && let Some(gv) = self.module_state.get(bare).or_else(|| self.globals.get(bare)).copied()
             {
                 class_slots[i] = gv;
-                injected.push((i, gv));
             }
         }
         // Pin caller slots as GC roots so a nested class/function body can't sweep them.
@@ -975,17 +987,19 @@ impl<'a> VM<'a> {
         let exec_result = self.exec(body, &mut class_slots);
         self.live_slots.truncate(snap);
         exec_result?;
+        // Members are exactly the slots the body itself stores; loads of builtins or injected globals never leak into the class namespace.
+        let mut member_slots: crate::util::fx::FxHashSet<u16> = crate::util::fx::FxHashSet::default();
+        for ins in &body.instructions {
+            if matches!(ins.opcode, OpCode::StoreName | OpCode::Phi) {
+                member_slots.insert(ins.operand);
+            }
+        }
         let mut methods: Vec<(String, Val)> = Vec::new();
         for (i, name) in body.names.iter().enumerate() {
+            if !member_slots.contains(&(i as u16)) { continue; }
             if let Some(&v) = class_slots.get(i)
                 && !v.is_undef() {
-                    // Skip injected module globals, unless the body reassigned the slot.
-                    if injected.iter().any(|&(j, gv)| j == i && v.0 == gv.0) { continue; }
                     let base = ssa_strip(name);
-                    let is_builtin_shadow = v.is_heap()
-                        && matches!(self.heap.get(v), HeapObj::NativeFn(_))
-                        && self.globals.get(base).copied() == Some(v);
-                    if is_builtin_shadow { continue; }
                     if let Some(pos) = methods.iter().position(|(n, _)| n == base) {
                         methods[pos].1 = v;
                     } else {

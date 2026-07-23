@@ -522,6 +522,8 @@ b'\x00\xff'
 
 ### all, any
 
+Both short-circuit: a generator argument stops at the deciding element.
+
 ```python
 print(all([1, 2, 3]))
 print(all([1, 0, 3]))

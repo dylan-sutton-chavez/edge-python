@@ -78,8 +78,8 @@ impl Pending {
 /* `bare_name -> [(version, slot), ...]` for one chunk's `chunk.names`. */
 pub(crate) type NameVersionIndex = crate::util::fx::FxHashMap<String, Vec<(i64, usize)>>;
 
-/* Free-load propagation entry: (bare name, body slot, caller [(version, slot)] candidates). */
-pub(crate) type FreeLoadEntry = (String, u32, Vec<(i64, u32)>);
+/* Free-load propagation entry: (bare name, body slot, referenced version, caller [(version, slot)] candidates). */
+pub(crate) type FreeLoadEntry = (String, u32, i64, Vec<(i64, u32)>);
 
 /* Static caller->callee propagation data for one (caller chunk, callee fi) pair; built once, then per call is pure slot reads (no string hashing). */
 pub(crate) struct PropInfo {
@@ -128,8 +128,12 @@ pub struct VM<'a> {
     pub(crate) needs_caller_slots: Vec<bool>,
     /* Bitmap: slot bound to a formal parameter; protected from caller-slot propagation. */
     pub(crate) is_param_slot: Vec<Vec<bool>>,
-    /* Free-variable body slots (bare_name, slot); used for caller-chunk base-name fallback. */
-    pub(crate) body_free_loads: Vec<Vec<(String, usize)>>,
+    /* Free-variable body slots (bare_name, slot, referenced version); used for caller-chunk base-name fallback. */
+    pub(crate) body_free_loads: Vec<Vec<(String, usize, i64)>>,
+    /* Per-chunk bare names the chunk itself binds (stores, Phi, params); drives closure-cell capture. */
+    pub(crate) chunk_local_binds: HashMap<*const SSAChunk, alloc::rc::Rc<crate::util::fx::FxHashSet<String>>>,
+    /* Coroutines currently inside `resume_coroutine`; re-entry raises like CPython's already-executing guard. Transient, never snapshotted. */
+    pub(crate) executing_coros: Vec<u64>,
     pub(crate) is_async: Vec<bool>,
     pub(crate) default_slots: Vec<Vec<(usize, Val)>>,
     /* Pre-resolved `<name>_0` body slot for self-reference binding; None for lambdas. */
@@ -255,6 +259,8 @@ impl<'a> VM<'a> {
             needs_caller_slots: Vec::new(),
             is_param_slot: Vec::new(),
             body_free_loads: Vec::new(),
+            chunk_local_binds: HashMap::default(),
+            executing_coros: Vec::new(),
             is_async: Vec::new(),
             default_slots: Vec::new(),
             self_ref_slot: Vec::new(),
@@ -336,7 +342,7 @@ impl<'a> VM<'a> {
                 if param_bm.get(slot).copied().unwrap_or(false) { return None; }
                 if written.contains(&slot) { return None; }
                 let parsed = crate::modules::parser::SsaName::parse(name)?;
-                Some((parsed.bare.to_string(), slot))
+                Some((parsed.bare.to_string(), slot, parsed.version as i64))
             }).collect()
         }).collect();
 

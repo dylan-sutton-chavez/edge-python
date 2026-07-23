@@ -22,8 +22,24 @@ impl<'a> VM<'a> {
         if sync_frames.len() >= self.max_calls || self.depth >= self.max_calls {
             return Err(cold_depth());
         }
+        // Re-entrant resume (`yield from g` inside g, `next(g)` from g's own body).
+        if self.executing_coros.contains(&callee.0) {
+            return Err(VmErr::Value("generator already executing"));
+        }
         // Charge the whole cloned state (stack/slots/iters/frames), not just frame count.
         self.charge_steps(sync_frames.len() + outer_stack.len() + outer_slots.len() + outer_iters.len())?;
+
+        // Names unbound at creation resolve late, against the live module bindings.
+        if let BodyRef::Fn(fi) = outer_body {
+            for (bare, slot, _) in self.body_free_loads[fi].clone() {
+                if outer_slots.get(slot).is_some_and(|v| v.is_undef())
+                    && let Some(v) = self.resolve_free_name_fallback(fi, &bare)
+                {
+                    outer_slots[slot] = v;
+                }
+            }
+        }
+        self.executing_coros.push(callee.0);
 
         let saved_stack_len = self.stack.len();
         let saved_iter_len = self.iter_stack.len();
@@ -112,6 +128,7 @@ impl<'a> VM<'a> {
         };
 
         self.depth -= 1;
+        self.executing_coros.retain(|&id| id != callee.0);
         let result = result?;
 
         if self.yielded {

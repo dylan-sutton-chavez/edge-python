@@ -477,6 +477,21 @@ impl<'a> VM<'a> {
     fn scan_truthy(&mut self, op: u16, find: bool, arity_err: &'static str) -> Result<(), VmErr> {
         if op != 1 { return Err(cold_type(arity_err)); }
         let o = self.pop()?;
+        // Generators step lazily so evaluation stops at the deciding element (short-circuit).
+        if o.is_heap() && matches!(self.heap.get(o), HeapObj::Coroutine(..)) {
+            // Root the coroutine on the VM stack; each resume can allocate and trigger GC.
+            self.push(o);
+            let decided = loop {
+                self.charge_step()?;
+                let v = self.resume_coroutine(o)?;
+                if !self.yielded { break None; }
+                self.yielded = false;
+                if self.truthy(v) == find { break Some(find); }
+            };
+            self.pop()?;
+            self.push(Val::bool(decided.unwrap_or(!find)));
+            return Ok(());
+        }
         let mut cur = self.iter_cursor(o)?;
         while let Some(v) = cur.next(&mut self.heap)? {
             self.charge_step()?; // native iteration over a huge range must charge the op-budget

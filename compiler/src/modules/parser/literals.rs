@@ -139,8 +139,8 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             OpCode::BuildList, OpCode::ListExtend, OpCode::ListAppend, |s| s.expr());
     }
 
-    /* Emits for/if comprehension scaffolding; reinjcts body with loop-bound SSA slots. */
-    pub(super) fn comprehension_loop(&mut self, elem_bodies: &[(usize, Vec<Instruction>)], append_op: OpCode, versions_before: &HashMap<String, u32>) {
+    /* Shared comprehension scaffolding: parses the for/if clauses, returns (loop starts, ForIter patch sites, SSA remap for loop vars). */
+    fn comp_header(&mut self, versions_before: &HashMap<String, u32>) -> (Vec<u16>, Vec<usize>, Vec<(u16, u16)>) {
         let mut loop_starts: Vec<u16> = Vec::new();
         let mut for_iters: Vec<usize> = Vec::new();
         let mut all_vars: Vec<String> = Vec::new();
@@ -189,7 +189,11 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             let new_slot = self.chunk.push_name(Self::ssa_name(var, new_ver, &mut nb));
             var_map.push((old_slot, new_slot));
         }
+        (loop_starts, for_iters, var_map)
+    }
 
+    /* Re-emit captured element bodies inside the loop, remapping loop vars and shifting internal jumps. */
+    fn replay_comp_bodies(&mut self, elem_bodies: &[(usize, Vec<Instruction>)], var_map: &[(u16, u16)]) {
         for (orig_base, body) in elem_bodies {
             // Body is relocated by this delta; internal jump targets (from `or`/`and`/membership) must shift with it.
             let delta = self.chunk.instructions.len() as i64 - *orig_base as i64;
@@ -204,12 +208,39 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 self.chunk.instructions.push(Instruction { opcode: ins.opcode, operand });
             }
         }
+    }
+
+    /* Emits for/if comprehension scaffolding; reinjcts body with loop-bound SSA slots. */
+    pub(super) fn comprehension_loop(&mut self, elem_bodies: &[(usize, Vec<Instruction>)], append_op: OpCode, versions_before: &HashMap<String, u32>) {
+        let (loop_starts, for_iters, var_map) = self.comp_header(versions_before);
+        self.replay_comp_bodies(elem_bodies, &var_map);
         self.chunk.emit(append_op, 0);
 
         for i in (0..for_iters.len()).rev() {
             self.chunk.emit(OpCode::Jump, loop_starts[i]);
             self.patch(for_iters[i]);
         }
+    }
+
+    /* `any(genexpr)` / `all(genexpr)`: same scaffolding, but each element decides instead of appending, so evaluation stops at the first hit like CPython. */
+    pub(super) fn scan_comprehension(&mut self, elem_bodies: &[(usize, Vec<Instruction>)], find_true: bool, versions_before: &HashMap<String, u32>) {
+        let (loop_starts, for_iters, var_map) = self.comp_header(versions_before);
+        self.replay_comp_bodies(elem_bodies, &var_map);
+        // `all` exits on falsy: invert so one JumpIfFalse serves both.
+        if !find_true { self.chunk.emit(OpCode::Not, 0); }
+        if let Some(&ls) = loop_starts.last() {
+            self.chunk.emit(OpCode::JumpIfFalse, ls);
+        }
+        // Decided: unwind every active iterator before leaving the loops.
+        for _ in &for_iters { self.chunk.emit(OpCode::PopIter, 0); }
+        self.chunk.emit(if find_true { OpCode::LoadTrue } else { OpCode::LoadFalse }, 0);
+        let done = self.emit_jump(OpCode::Jump);
+        for i in (0..for_iters.len()).rev() {
+            self.chunk.emit(OpCode::Jump, loop_starts[i]);
+            self.patch(for_iters[i]);
+        }
+        self.chunk.emit(if find_true { OpCode::LoadFalse } else { OpCode::LoadTrue }, 0);
+        self.patch(done);
     }
 
     /* f-string: emits literal+expr parts until FstringEnd, returns the count; caller wraps in BuildString. `fs_start/fs_end` anchor unclosed-string errors. */
@@ -330,6 +361,21 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     /* Dispatches call: print/range opcodes; imported natives (shadow builtins); builtins table; else LoadName+Call. */
     pub(super) fn call(&mut self, name: String) -> bool {
         let call_pos = self.last_end as u32;
+        // A rebound builtin name must call the binding, not the fused opcode.
+        if self.current_version(&name) > 0 || self.globals_decl.contains(&name) {
+            let i = self.push_ssa_name(&name, self.current_version(&name));
+            if self.globals_decl.contains(&name) {
+                let gi = self.chunk.push_name(&name);
+                self.chunk.emit(OpCode::LoadGlobal, gi);
+            } else {
+                self.chunk.emit(OpCode::LoadName, i);
+            }
+            self.chunk.emit(OpCode::BeginArgs, 0);
+            let (pos, kw) = self.parse_args();
+            self.chunk.emit(OpCode::Call, super::pack_call(pos, kw));
+            self.chunk.record_call_pos(call_pos);
+            return true;
+        }
         if name == "print" {
             let (pos, kw) = self.parse_args();
             // Same packed layout as Call so the VM can split sep/end kwargs from positionals.
@@ -363,6 +409,38 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         } {
             let (pos, kw) = self.parse_args();
             self.chunk.emit(op, super::pack_call(pos, kw));
+            self.chunk.record_call_pos(call_pos);
+            return true;
+        }
+
+        // `any`/`all` over a genexpr lowers to a short-circuit scan; other shapes keep the fused opcode.
+        if matches!(name.as_str(), "any" | "all") {
+            let find_true = name == "any";
+            self.advance();
+            if !matches!(self.peek(), Some(TokenType::Rpar | TokenType::Star | TokenType::DoubleStar)) {
+                let versions_before = self.ssa_versions.clone();
+                let elem_start = self.chunk.instructions.len();
+                self.expr();
+                if matches!(self.peek(), Some(TokenType::For)) {
+                    let elem_ins: Vec<Instruction> = self.chunk.instructions.drain(elem_start..).collect();
+                    self.scan_comprehension(&[(elem_start, elem_ins)], find_true, &versions_before);
+                    self.eat(TokenType::Rpar);
+                    self.chunk.record_call_pos(call_pos);
+                    return true;
+                }
+                let mut count = 1u16;
+                while self.eat_if(TokenType::Comma) {
+                    if matches!(self.peek(), Some(TokenType::Rpar)) { break; }
+                    self.expr();
+                    count = count.saturating_add(1);
+                }
+                self.eat(TokenType::Rpar);
+                self.chunk.emit(if find_true { OpCode::CallAny } else { OpCode::CallAll }, count);
+                self.chunk.record_call_pos(call_pos);
+                return true;
+            }
+            let (pos, kw) = self.parse_args_body();
+            self.chunk.emit(if find_true { OpCode::CallAny } else { OpCode::CallAll }, pos + kw);
             self.chunk.record_call_pos(call_pos);
             return true;
         }

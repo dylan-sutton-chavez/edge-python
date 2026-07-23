@@ -129,24 +129,33 @@ impl<'a> VM<'a> {
         let (params, body, _, _) = self.functions[global];
         let param_names: crate::util::fx::FxHashSet<String> = params.iter().map(|p| s!(str crate::modules::parser::types::param_base_name(p), "_0")).collect();
         let mut captures: Vec<(usize, Val)> = Vec::new();
+        // Cells only make sense for variables of an enclosing FUNCTION scope. Module and class bodies are late-bound: their names resolve live at call time, never freeze.
+        let defined_in_fn = self.body_to_fi.contains_key(&chunk_ptr);
+        let parent_locals = if defined_in_fn { Some(self.chunk_locals(chunk)) } else { None };
         // Capture once per canonical slot, skipping formal params. Linear scan over `chunk.names` beats a HashMap at typical body sizes (<30) and avoids a per-call monomorphisation.
         let mut seen_canonical: crate::util::fx::FxHashSet<usize> = crate::util::fx::FxHashSet::default();
         // Root the in-progress cells: each is reachable only via this local Vec until the Func is allocated, so a GC during the loop's own allocs could otherwise sweep them.
         let roots_base = self.temp_roots.len();
-        for (bi, bname) in body.names.iter().enumerate() {
-            if param_names.contains(bname.as_str()) { continue; }
-            let canon = body.alias_groups.get(bi)
-                .and_then(|g| g.first().copied())
-                .unwrap_or(bi as u16) as usize;
-            if !seen_canonical.insert(canon) { continue; }
-            if let Some((si, _)) = chunk.names.iter().enumerate().find(|(_, n)| n.as_str() == bname.as_str())
-                && let Some(&v) = slots.get(si)
-                && !v.is_undef() {
-                    // Capture a shared cell, not the raw value, so sibling closures over the same variable see each other's nonlocal writes. Key the registry by the parent slot `si` (stable across siblings), not the callee's `canon` (which differs per closure body).
-                    let cell = self.frame_cell_for(si, v)?;
+        if let Some(locals) = parent_locals {
+            for (bi, bname) in body.names.iter().enumerate() {
+                if param_names.contains(bname.as_str()) { continue; }
+                let canon = body.alias_groups.get(bi)
+                    .and_then(|g| g.first().copied())
+                    .unwrap_or(bi as u16) as usize;
+                if !seen_canonical.insert(canon) { continue; }
+                // Only variables bound by an enclosing FUNCTION scope become cells; module names stay late-bound. A not-yet-assigned local captures an undef-seeded cell the parent's store fills later.
+                if !locals.contains(ssa_strip(bname)) && !self.lexical_ancestor_binds(chunk_ptr, ssa_strip(bname)) { continue; }
+                if let Some((si, _)) = chunk.names.iter().enumerate().find(|(_, n)| n.as_str() == bname.as_str()) {
+                    let psi = chunk.alias_groups.get(si)
+                        .and_then(|g| g.first().copied())
+                        .unwrap_or(si as u16) as usize;
+                    let v = slots.get(psi).copied().unwrap_or(Val::undef());
+                    // Capture a shared cell, not the raw value, so sibling closures over the same variable see each other's nonlocal writes. Key the registry by the canonical parent slot `psi` (stable across siblings and SSA versions), not the callee's `canon` (which differs per closure body).
+                    let cell = self.frame_cell_for(psi, v)?;
                     self.temp_roots.push(cell);
                     captures.push((canon, cell));
                 }
+            }
         }
 
         let val = self.heap.alloc(HeapObj::Func(global, defaults, captures))?;
@@ -163,6 +172,39 @@ impl<'a> VM<'a> {
 
         self.push(val);
         Ok(())
+    }
+
+    /* True when a function scope strictly above `chunk` binds `bare`; pass-through frees capture, module names do not. */
+    fn lexical_ancestor_binds(&mut self, chunk_ptr: *const SSAChunk, bare: &str) -> bool {
+        let mut anc = self.body_to_fi.get(&chunk_ptr).and_then(|&fi| self.function_parents.get(fi).copied().flatten());
+        while let Some(afi) = anc {
+            let abody = &self.functions[afi].1;
+            if self.chunk_locals(abody).contains(bare) { return true; }
+            anc = self.function_parents.get(afi).copied().flatten();
+        }
+        false
+    }
+
+    /* Bare names a chunk binds itself: StoreName/Phi targets plus formal params. Cached per chunk pointer. */
+    fn chunk_locals(&mut self, chunk: &SSAChunk) -> alloc::rc::Rc<crate::util::fx::FxHashSet<String>> {
+        let key = chunk as *const SSAChunk;
+        if let Some(s) = self.chunk_local_binds.get(&key) { return s.clone(); }
+        let mut set: crate::util::fx::FxHashSet<String> = crate::util::fx::FxHashSet::default();
+        for ins in &chunk.instructions {
+            if matches!(ins.opcode, OpCode::StoreName | OpCode::Phi)
+                && let Some(n) = chunk.names.get(ins.operand as usize)
+            {
+                set.insert(ssa_strip(n).to_string());
+            }
+        }
+        if let Some(&fi) = self.body_to_fi.get(&key) {
+            for p in &self.functions[fi].0 {
+                set.insert(crate::modules::parser::types::param_base_name(p).to_string());
+            }
+        }
+        let rc = alloc::rc::Rc::new(set);
+        self.chunk_local_binds.insert(key, rc.clone());
+        rc
     }
 
     // Closure cell: a 1-element heap list used as a shared mutable box. Sibling closures over the same enclosing variable capture the same cell, so a `nonlocal` write through one is visible in the others.
@@ -601,10 +643,26 @@ impl<'a> VM<'a> {
             }
         }
 
-        // Bare-name fallback: body refs `<base>_0` but caller may store a higher SSA version. Layer 1 (caller's latest live version) runs off the cached candidates; misses fall to the shared slow layers.
-        for (bare, bs, versions) in info.free.iter() {
+        // Free names resolve lexically: exact-version hit in the caller frame (live parent local), then the module layers (late-bound), then the latest-version net where a lexical source is plausible. Entry-chunk slots are excluded from the net: `global`/`del` writes only reach `module_state`, so those slots go stale.
+        let caller_is_module = !self.body_to_fi.contains_key(&(chunk as *const SSAChunk));
+        let caller_is_entry = core::ptr::eq(chunk, self.chunk);
+        let parent_is_fn = self.function_parents.get(fi).is_some_and(|p| p.is_some());
+        for (bare, bs, ref_ver, versions) in info.free.iter() {
             let bs = *bs as usize;
             if captured_set.contains(&bs) { continue; }
+            if !caller_is_module
+                && let Some(&(_, si)) = versions.iter().find(|&&(v, _)| v == *ref_ver)
+                && let Some(&v) = slots.get(si as usize)
+                && !v.is_undef()
+            {
+                fn_slots[bs] = v;
+                continue;
+            }
+            if let Some(v) = self.resolve_free_name_fallback(fi, bare) {
+                fn_slots[bs] = v;
+                continue;
+            }
+            if caller_is_entry || (!info.same_scope && !parent_is_fn) { continue; }
             let mut latest_ver: i64 = -1;
             let mut latest_v: Val = Val::undef();
             for &(v, si) in versions.iter() {
@@ -616,8 +674,6 @@ impl<'a> VM<'a> {
             }
             if !latest_v.is_undef() {
                 fn_slots[bs] = latest_v;
-            } else if let Some(v) = self.resolve_free_name_fallback(fi, bare) {
-                fn_slots[bs] = v;
             }
         }
     }
@@ -641,15 +697,20 @@ impl<'a> VM<'a> {
         let caller_module = caller_fi.and_then(|cf| self.fn_module.get(cf).and_then(|m| m.as_deref()));
         let callee_module = self.fn_module.get(fi).and_then(|m| m.as_deref());
         let same_scope = caller_fi == callee_parent_fi && caller_module == callee_module;
-        // Free loads with their caller-chunk (version, slot) candidates resolved once.
+        // Free loads with their caller-chunk (version, slot) candidates resolved once. Candidate slots canonicalise: operand rewriting stores values at the version chain's root.
         let name_index = self.chunk_name_versions.get(&(chunk as *const _));
         let free: Vec<super::super::FreeLoadEntry> = self.body_free_loads[fi].iter()
-            .map(|(bare, bs)| {
+            .map(|(bare, bs, ref_ver)| {
                 let versions = name_index
                     .and_then(|idx| idx.get(bare.as_str()))
-                    .map(|v| v.iter().map(|&(ver, si)| (ver, si as u32)).collect())
+                    .map(|v| v.iter().map(|&(ver, si)| {
+                        let canon = chunk.alias_groups.get(si)
+                            .and_then(|g| g.first().copied())
+                            .unwrap_or(si as u16) as u32;
+                        (ver, canon)
+                    }).collect())
                     .unwrap_or_default();
-                (bare.clone(), *bs as u32, versions)
+                (bare.clone(), *bs as u32, *ref_ver, versions)
             })
             .collect();
         let map: super::super::PropagationMap = alloc::rc::Rc::new(super::super::PropInfo { same_scope, pairs, free });
@@ -657,8 +718,8 @@ impl<'a> VM<'a> {
         map
     }
 
-    /* Slow layers for a bare free-load name after the caller-slot layer missed: callee module attrs -> entry globals -> entry module state. First hit wins. Centralised so the order is auditable. */
-    fn resolve_free_name_fallback(&self, fi: usize, bare: &str) -> Option<Val> {
+    /* Slow layers for a bare free-load name after the caller-slot layer missed: callee module attrs -> entry module state -> globals. First hit wins. Centralised so the order is auditable. */
+    pub(crate) fn resolve_free_name_fallback(&self, fi: usize, bare: &str) -> Option<Val> {
         // Layer 2: callee's module attrs, keeps `a.helper` and `b.helper` isolated.
         if let Some(Some(spec)) = self.fn_module.get(fi).cloned()
             && let Some(mod_val) = self.module_table.get(&spec).copied()
@@ -668,15 +729,15 @@ impl<'a> VM<'a> {
         {
             return Some(*v);
         }
-        // Layer 3: globals, catches forward-ref mutual recursion in the entry chunk.
-        if let Some(&v) = self.globals.get(bare) {
-            return Some(v);
-        }
-        // Layer 4: entry-module bindings; classes and plain vars never reach `globals`.
+        // Layer 3: entry-module bindings, live-mirrored on every store; beats `globals` so rebinding a def'd name is seen.
         if self.fn_module.get(fi).is_none_or(|m| m.is_none())
             && let Some(&v) = self.module_state.get(bare)
             && !v.is_undef()
         {
+            return Some(v);
+        }
+        // Layer 4: globals, catches forward-ref mutual recursion in the entry chunk.
+        if let Some(&v) = self.globals.get(bare) {
             return Some(v);
         }
         None
