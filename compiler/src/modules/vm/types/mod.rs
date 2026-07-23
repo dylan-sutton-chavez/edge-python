@@ -195,6 +195,8 @@ macro_rules! builtins {
             pub const ALL: &'static [NativeFnId] = &[ $( NativeFnId::$variant ),* ];
             // Python-visible name.
             pub fn name(self) -> &'static str { match self { $( NativeFnId::$variant => $name ),* } }
+            // Inverse of `name`; used by snapshot restore.
+            pub fn from_name(n: &str) -> Option<Self> { match n { $( $name => Some(NativeFnId::$variant), )* _ => None } }
             // Fixed positional arity; None means the handler validates the count.
             pub fn arity(self) -> Option<u16> { match self { $( NativeFnId::$variant => builtins!(@a $arity) ),* } }
         }
@@ -269,6 +271,21 @@ pub struct DictMap {
 }
 
 impl DictMap {
+    /* Entries only; `rebuild_index` once the heap lives. */
+    pub(crate) fn from_entries(entries: Vec<(Val, Val)>) -> Self {
+        Self { entries, index: hashbrown::HashTable::new() }
+    }
+
+    /* Rehash after restore; hashing reads the heap. */
+    pub(crate) fn rebuild_index(&mut self, heap: &HeapPool) {
+        self.index.clear();
+        let e = &self.entries;
+        for i in 0..e.len() {
+            let h = hash_val_with_heap(e[i].0, heap);
+            self.index.insert_unique(h, i, |&j| hash_val_with_heap(e[j].0, heap));
+        }
+    }
+
     pub fn with_capacity(cap: usize) -> Self {
         Self { entries: Vec::with_capacity(cap), index: hashbrown::HashTable::with_capacity(cap) }
     }
@@ -524,6 +541,49 @@ impl HeapPool {
             self.free_list.sort_unstable();
             self.free_list.truncate(524_288);
         }
+    }
+
+    /* One entry per slot; None when free. */
+    pub(crate) fn snapshot_objs(&self) -> impl Iterator<Item = Option<&HeapObj>> {
+        self.slots.iter().map(|s| s.obj.as_ref())
+    }
+
+    /* Replace the pool; rebuild free and intern tables. */
+    pub(crate) fn restore_objs(&mut self, objs: Vec<Option<HeapObj>>) {
+        self.slots = objs.into_iter().map(|obj| HeapSlot { obj, marked: false }).collect();
+        self.free_list.clear();
+        self.strings.clear();
+        self.bytes_intern.clear();
+        self.longints.clear();
+        self.types.clear();
+        self.ellipsis_idx = None;
+        self.notimpl_idx = None;
+        self.live = 0;
+        for idx in 0..self.slots.len() {
+            match &self.slots[idx].obj {
+                None => self.free_list.push(idx as u32),
+                Some(obj) => {
+                    self.live += 1;
+                    let idx = idx as u32;
+                    match obj {
+                        HeapObj::Str(s) if s.len() <= 128 => { self.strings.insert(s.clone(), idx); }
+                        HeapObj::Bytes(b) if b.len() <= 128 => { self.bytes_intern.insert(b.clone(), idx); }
+                        HeapObj::LongInt(i) => { self.longints.insert(*i, idx); }
+                        HeapObj::Type(name) => { self.types.insert(name.clone(), idx); }
+                        HeapObj::Ellipsis => { self.ellipsis_idx = Some(idx); }
+                        HeapObj::NotImplemented => { self.notimpl_idx = Some(idx); }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        self.gc_threshold = (self.live * 2).max(512);
+        self.alloc_count = 0;
+    }
+
+    /* Swap a live slot's object during restore. */
+    pub(crate) fn replace_obj(&mut self, idx: u32, obj: HeapObj) {
+        self.slots[idx as usize].obj = Some(obj);
     }
 
     pub fn needs_gc(&self) -> bool {

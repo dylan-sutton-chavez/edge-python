@@ -60,13 +60,13 @@ Importing `element.js` auto-registers the tag. On connect, the element reads its
 
 ### Programmatic use
 
-The element keeps its worker on `el.worker`, so you can drive the same VM from JS after `ready` fires; `run(src, opts?)` and `onOutput(cb)` proxy the worker.
+The element publishes its worker on `el.worker` once `ready` fires, so the full [`Worker`](#worker) API drives the same VM. The element itself adds no methods.
 
 ```js
 const el = document.querySelector("edge-python");
 await new Promise((r) => el.addEventListener("ready", r, { once: true }));
-el.onOutput((chunk) => process.stdout.write(chunk)); // raw chunks, no added newline
-await el.run("print(1 + 1)"); // 2
+el.worker.onOutput((chunk) => process.stdout.write(chunk)); // raw chunks, no added newline
+await el.worker.run("print(1 + 1)"); // 2
 ```
 
 ### Registration
@@ -130,7 +130,34 @@ The returned object exposes:
 | `reset()` | `() => Promise<void>` | Clear registered modules without rebooting the worker. |
 | `clearCache()` | `() => Promise<void>` | Wipe IDB CAS + lockfile (or memory cache). Next run re-fetches everything. |
 | `pushEvent(message)` | `(string) => void` | Wake a paused `receive()` in the running script with `message`. Fire-and-forget. Browser bridges fire `CustomEvent("edge-python-event")` on `window`, which `createWorker` routes through `pushEvent` automatically. |
+| `saveState()` | `() => Promise<Uint8Array>` | Snapshot the paused program (see [State snapshots](#state-snapshots)) as a portable blob. Rejects when no run is paused. |
+| `restoreState(blob)` | `(Uint8Array) => Promise<{out, ms}>` | Boot from a saved blob and continue the program from where it was saved. Resolves like `run()` when it finishes. |
+| `stateGlobals()` | `() => Promise<object>` | `{name: repr}` of the paused program's module-level bindings. |
+| `stateStack()` | `() => Promise<array>` | Per-coroutine `{state, function, ip, frames}` of the paused program. |
+| `setPreemptInterval(n)` | `(number) => Promise<void>` | Yield every `n` loop back-edges so a program with no suspension point stays pausable. Each yield is an event-loop round trip, so a small `n` pauses sooner and costs more. Defaults to `0`, which disables it. |
+| `pause()` | `() => Promise<boolean>` | Park the running program so `saveState()` can capture it. Resolves `true` once parked, `false` when no run reached a park (already finished, or none started). Needs `setPreemptInterval` unless the program suspends on its own. |
+| `resume()` | `() => Promise<void>` | Continue a program parked by `pause()`. |
 | `dispose()` | `() => void` | Terminate the worker. Subsequent calls fail. |
+
+### State snapshots
+
+While a program is parked, its entire interpreter state, heap, globals, suspended coroutines and call frames included, can be serialized. A program parks either on its own (`receive()`, `sleep()`, `frame()`, a host call) or because the host called `pause()` after arming `setPreemptInterval`:
+
+```js
+const blob = await worker.saveState(); // Uint8Array, persist anywhere
+// ... later, any page load, same runtime version ...
+const done = worker.restoreState(blob); // continues from the pause point
+worker.pushEvent("hello"); // steer the restored copy
+await done;
+```
+
+The blob embeds the source and a compiler fingerprint: `restoreState` re-parses, verifies both, and rejects blobs saved by a different program or compiler version. One blob restores any number of times, each an independent copy. Host-side resources (DOM node handles, sockets, in-flight host calls) do not survive; queued but unconsumed events do.
+
+Preempts land on loop back-edges where the VM can unwind. Class bodies, module top level, builtin callbacks (`sort(key=...)`, a generator drained by `list()`), `__init__` / `__call__`, and single long native operations run past the interval and yield at the next reachable back-edge. That delays a pause; it never corrupts one.
+
+Size ceiling: the blob holds the source **plus the entire live heap**, and `restoreState` loads it through the runtime's source buffer, capped at 1 MiB (`1 << 20`). `saveState` is uncapped, so a large live heap can produce a blob that only fails on restore with `snapshot exceeds 1048576 bytes`; keep snapshotted state well under the ceiling.
+
+See [Snapshots](https://edgepython.com/language/snapshots) for the full guide: preemption tuning, checkpoint-on-close, serving blobs from a backend, and inspecting a parked run.
 
 ## Writing a loader
 

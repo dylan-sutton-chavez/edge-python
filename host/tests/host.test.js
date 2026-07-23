@@ -106,7 +106,7 @@ async function runCapability(cap) {
             await ready;
             // Byte-stream stdout: one chunk per print() call (body + its `end`); collect verbatim.
             globalThis.chunks = [];
-            el.onOutput((chunk) => { globalThis.chunks.push(chunk); });
+            el.worker.onOutput((chunk) => { globalThis.chunks.push(chunk); });
             // DBs present once the runtime is up (its integrity cache); resetState must leave these alone.
             globalThis.baseline = indexedDB.databases ? (await indexedDB.databases()).map((d) => d.name) : [];
             globalThis.el = el;
@@ -127,7 +127,7 @@ async function runCapability(cap) {
                     })));
                 }
                 globalThis.chunks = [];
-                const { out } = await globalThis.el.run(s);
+                const { out } = await globalThis.el.worker.run(s);
                 // One entry per print() call; drop its single trailing newline (the `end`).
                 const output = globalThis.chunks.map((c) => c.replace(/\n$/, ""));
                 return { output, error: out || null };

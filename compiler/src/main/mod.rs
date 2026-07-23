@@ -78,10 +78,14 @@ pub(super) struct WasmRuntime {
     pub manifests: Vec<(String, Manifest)>,
     pub handles: HandleTable,
     pub error_stash: ErrorStash,
+    /* Last `save_state` blob, read via `snapshot_ptr`. */
+    pub snapshot: Vec<u8>,
     /* Set/cleared exclusively by `VmGuard`. The `'static` is storage-only, the pointer is dereferenced only inside the `run()` scope that built it. */
     pub current_vm: Option<NonNull<VM<'static>>>,
     /* Owned across `run_start` / `run_resume`; mutually exclusive with `current_vm`. */
     pub paused_run: Option<Box<PausedRun>>,
+    /* Back-edges between preempt yields; 0 disables. */
+    pub preempt_every: usize,
 }
 
 impl WasmRuntime {
@@ -95,8 +99,10 @@ impl WasmRuntime {
             manifests: Vec::new(),
             handles: HandleTable::new(),
             error_stash: ErrorStash::new(),
+            snapshot: Vec::new(),
             current_vm: None,
             paused_run: None,
+            preempt_every: 0,
         }
     }
 }

@@ -35,12 +35,6 @@ export class EdgePythonElement extends HTMLElement {
         if (file) await this.worker.run(await fetch(file).then(r => r.text()));
         this.dispatchEvent(new Event("ready"));
     }
-
-    // Run a Python source string on the element's worker. Resolves with { out, ms }.
-    run(src, opts) { return this.worker.run(src, opts); }
-
-    // Register a streaming stdout handler; fires per raw print() chunk (body + its `end`), no newline added.
-    onOutput(handler) { this.worker.onOutput(handler); }
 }
 
 export function defineElement( tag = 'edge-python' ) {

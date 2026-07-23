@@ -4,6 +4,7 @@ mod ops;
 mod builtins;
 pub(crate) mod handlers;
 pub mod optimizer;
+pub mod snapshot;
 
 mod dispatch;
 mod gc;
@@ -50,6 +51,8 @@ pub(crate) struct Pending {
     pub exc_val: Option<Val>,
     /* `(class, self)` for the next user-function call when it's invoked as a method; populated by method-dispatch paths and consumed by `run_body_with_frame`. */
     pub method_binding: Option<(Val, Val)>,
+    /* Set at preempt; `top_loop` yields `Preempted`. */
+    pub preempt_request: bool,
 }
 
 impl Pending {
@@ -67,6 +70,7 @@ impl Pending {
             waiting_for_children: None,
             exc_val: None,
             method_binding: None,
+            preempt_request: false,
         }
     }
 }
@@ -151,6 +155,12 @@ pub struct VM<'a> {
     pub(crate) pending_sync_frames: Vec<types::SyncFrame>,
     /* Overrides `exec`'s captured `exc_base`. Set by `resume_coroutine` to the level *before* restored exception frames so dispatch's handler search includes them; consumed once at exec entry. */
     pub(crate) pending_exec_exc_base: Option<usize>,
+    /* Back-edges until the next preempt; 0 disables. */
+    pub(crate) preempt_left: usize,
+    pub(crate) preempt_every: usize,
+    /* True while this `exec` frame can unwind. */
+    pub(crate) frame_safe: bool,
+    pub(crate) pending_exec_safe: bool,
     pub(crate) yielded: bool,
     /* Return value of the most recently exhausted iterator; read by `LoadYieldFrom` so `x = yield from it` evaluates to the subiterator's StopIteration value. */
     pub(crate) yield_from_value: Val,
@@ -206,6 +216,10 @@ impl<'a> VM<'a> {
             next_host_call_id: 0,
             pending_sync_frames: Vec::new(),
             pending_exec_exc_base: None,
+            preempt_left: 0,
+            preempt_every: 0,
+            frame_safe: false,
+            pending_exec_safe: false,
             yielded: false,
             yield_from_value: Val::none(),
             resume_ip: 0,

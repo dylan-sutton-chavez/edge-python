@@ -23,6 +23,7 @@ const STATUS_PENDING_EVENT = 3;
 const STATUS_ERROR = 4;
 const STATUS_PENDING_HOST_CALL = 5;
 const STATUS_EXIT = 6; // uncaught SystemExit: clean termination, low 8 bits = exit code
+const STATUS_PREEMPTED = 7; // preempt tick; resumes with no host action
 const ERR_RUNTIME = 2; // wasm-abi error_kind::RUNTIME, for failed deferred host calls
 
 // Worker-lifetime state
@@ -38,6 +39,15 @@ let eventWaiter = null;
 const pendingEvents = [];
 /* Deferred host calls captured by env.host_call_native, keyed by the VM-assigned call_id; drained concurrently in the PENDING_HOST_CALL branch. */
 const pendingHostCalls = new Map();
+// Back-edges between preempt yields; 0 disables.
+let preemptEvery = 0;
+let pauseRequested = false;
+// True from run entry so mid-boot pause waits.
+let running = false;
+// Resolves pause() once actually parked.
+let pauseAck = null;
+// Resolves at resume() to release a preempt hold.
+let resumeGate = null;
 /* (name, args) => Promise<value>. Set by worker.js (postMessage round-trip) or by a main-thread embedder. */
 let hostCallDelegate = null;
 /* Host modules resolvable by bare name but loaded on demand; (name) => Promise<exportNames>. */
@@ -80,11 +90,19 @@ export async function load({ wasmUrl, integrity = true, loaders: loaderUrls = []
     return { integrityActive, loadMs: performance.now() - t0 };
 }
 
-export async function run({ src, entryDir = '', baseUrl = null, onLine, incremental = false }) {
-    if (!wasmModule) throw new Error('engine.load() must be called before run()');
+export async function run(opts) {
+    running = true;
+    try {
+        const payload = TE.encode(opts.src);
+        if (payload.length > SOURCE_LIMIT) throw new Error(`source exceeds ${SOURCE_LIMIT} bytes`);
+        return await execute({ ...opts, payload, start: (e, n) => e.run_start(n) });
+    }
+    finally { running = false; }
+}
 
-    const srcBytes = TE.encode(src);
-    if (srcBytes.length > SOURCE_LIMIT) throw new Error(`source exceeds ${SOURCE_LIMIT} bytes`);
+/* Shared run/restore core: instance, host imports, prefetch, then drive `start`. */
+async function execute({ src, payload, start, entryDir = '', baseUrl = null, onLine, incremental = false }) {
+    if (!wasmModule) throw new Error('engine.load() must be called first');
 
     let lockfile = new Map();
     if (integrityActive) {
@@ -100,61 +118,16 @@ export async function run({ src, entryDir = '', baseUrl = null, onLine, incremen
     if (incremental && compilerExports) {
         exports = compilerExports;
     } else {
-        const env = makeCompilerEnv({
-            getExports: () => compilerExports,
-            onLine: onLine ?? (() => {}),
-            fetchedSources,
-            lockfile,
-            integrityActive,
-            rt,
-            captureHostCall: (id, call) => { pendingHostCalls.set(id, call); },
-        });
-        ({ exports } = await WebAssembly.instantiate(wasmModule, { env }));
-        compilerExports = exports;
-        exports.reset_modules();
-        resetNativeTable();
+        exports = await makeInstance(onLine, lockfile, rt);
     }
 
-    const writeBytes = (bytes) => {
-        const ptr = exports.wasm_alloc(Math.max(1, bytes.length));
-        new Uint8Array(exports.memory.buffer, ptr, bytes.length).set(bytes);
-        return ptr;
-    };
-
-    /* Register a main-thread module at `mt:<name>`: push a stub per export (the real call defers to the page) and tell the compiler its export names. */
-    const registerHost = (name, exportNames) => {
-        const baseId = nativeTable.length;
-        for (const fnName of exportNames) {
-            const stub = () => {};
-            stub.__edge_kind = 'capability';
-            stub.__edge_main_thread = true;
-            stub.__edge_name = fnName;
-            stub.__edge_module = name;
-            nativeTable.push(stub);
-        }
-        const specBytes = TE.encode(`mt:${name}`);
-        const namesBytes = TE.encode(exportNames.join('\n'));
-        exports.register_native_module(
-            writeBytes(specBytes), specBytes.length,
-            writeBytes(namesBytes), namesBytes.length,
-            baseId,
-        );
-    };
+    const registerHost = makeRegisterHost(exports);
 
     /* Both kinds graft `<name> -> mt:<name>` so the bare name resolves; eager ones (programmatic objects) register now, lazy ones (urls) load on first import during prefetch. In incremental mode the native table is preserved, so skip re-registration. */
-    const mainThreadSpecs = new Set();
-    const augmentedImports = { ...(importsMap || {}) }; // defaults already folded in by the embedder (index.js)
-    for (const m of mainThreadManifests) {
-        if (!incremental) registerHost(m.name, m.exports);
-        mainThreadSpecs.add(`mt:${m.name}`);
-        augmentedImports[m.name] = `mt:${m.name}`;
-    }
-    for (const name of lazyHostNames) {
-        if (!mainThreadSpecs.has(`mt:${name}`)) augmentedImports[name] = `mt:${name}`;
-    }
+    const { mainThreadSpecs, augmentedImports } = hostImportMap(registerHost, incremental);
 
-    const writeSrc = () => new Uint8Array(exports.memory.buffer).set(srcBytes, exports.src_ptr());
-    writeSrc();
+    const writePayload = () => new Uint8Array(exports.memory.buffer).set(payload, exports.src_ptr());
+    writePayload();
 
     await bfsPrefetch(src, exports, lockfile, {
         cache,
@@ -176,17 +149,98 @@ export async function run({ src, entryDir = '', baseUrl = null, onLine, incremen
         registerHost,
     });
 
-    // `wasm_alloc` during prefetch may have grown memory and detached our src view.
-    writeSrc();
+    // `wasm_alloc` during prefetch may have grown memory and detached our view.
+    writePayload();
 
-    // Driver loop: `run_start` then `run_resume` after each host wake-up until Done / Error.
     const t0 = performance.now();
     pendingHostCalls.clear(); // drop any stale captures from a prior run
-    let status = exports.run_start(srcBytes.length);
+    const result = await drive(exports, rt, start(exports, payload.length), t0);
+
+    if (integrityActive) {
+        try { await cache.saveLockfile(lockfile); }
+        catch { /* persistence failure is non-fatal; lockfile lives in-memory until next save */ }
+    }
+
+    return result;
+}
+
+/* Register a main-thread module at `mt:<name>`: push a stub per export (the real call defers to the page) and tell the compiler its export names. */
+const makeRegisterHost = (exports) => (name, exportNames) => {
+    const baseId = nativeTable.length;
+    for (const fnName of exportNames) {
+        const stub = () => {};
+        stub.__edge_kind = 'capability';
+        stub.__edge_main_thread = true;
+        stub.__edge_name = fnName;
+        stub.__edge_module = name;
+        nativeTable.push(stub);
+    }
+    const writeBytes = (bytes) => {
+        const ptr = exports.wasm_alloc(Math.max(1, bytes.length));
+        new Uint8Array(exports.memory.buffer, ptr, bytes.length).set(bytes);
+        return ptr;
+    };
+    const specBytes = TE.encode(`mt:${name}`);
+    const namesBytes = TE.encode(exportNames.join('\n'));
+    exports.register_native_module(
+        writeBytes(specBytes), specBytes.length,
+        writeBytes(namesBytes), namesBytes.length,
+        baseId,
+    );
+};
+
+/* Eager mt: registrations plus the name -> mt:<name> import grafts shared by run() and restoreState(). */
+function hostImportMap(registerHost, skipRegistration) {
+    const mainThreadSpecs = new Set();
+    const augmentedImports = { ...(importsMap || {}) }; // defaults already folded in by the embedder (index.js)
+    for (const m of mainThreadManifests) {
+        if (!skipRegistration) registerHost(m.name, m.exports);
+        mainThreadSpecs.add(`mt:${m.name}`);
+        augmentedImports[m.name] = `mt:${m.name}`;
+    }
+    for (const name of lazyHostNames) {
+        if (!mainThreadSpecs.has(`mt:${name}`)) augmentedImports[name] = `mt:${name}`;
+    }
+    return { mainThreadSpecs, augmentedImports };
+}
+
+/* Fresh instance; resets module registry and native table. */
+async function makeInstance(onLine, lockfile, rt) {
+    const env = makeCompilerEnv({
+        getExports: () => compilerExports,
+        onLine: onLine ?? (() => {}),
+        fetchedSources,
+        lockfile,
+        integrityActive,
+        rt,
+        captureHostCall: (id, call) => { pendingHostCalls.set(id, call); },
+    });
+    const { exports } = await WebAssembly.instantiate(wasmModule, { env });
+    compilerExports = exports;
+    exports.reset_modules();
+    applyPreemptInterval(exports);
+    resetNativeTable();
+    return exports;
+}
+
+function settlePause(parked) {
+    const ack = pauseAck;
+    pauseAck = null;
+    if (ack) ack(parked);
+}
+
+/* Service yields until Done / Error / Exit. */
+async function drive(exports, rt, status, t0) {
     while (true) {
         const kind = (status >>> STATUS_KIND_SHIFT) & 7;
         if (kind === STATUS_DONE || kind === STATUS_ERROR || kind === STATUS_EXIT) break;
-        if (kind === STATUS_PENDING_TIMER) {
+        // Any yield is a park; settle pause() here.
+        if (pauseRequested) settlePause(true);
+        if (kind === STATUS_PREEMPTED) {
+            // Macrotask, so queued postMessage events land.
+            await new Promise((r) => setTimeout(r, 0));
+            if (pauseRequested) await new Promise((r) => { resumeGate = r; });
+        } else if (kind === STATUS_PENDING_TIMER) {
             const deadlineNs = exports.last_yield_deadline_ns();
             const nowNs = BigInt(Date.now()) * 1_000_000n;
             const waitMs = deadlineNs > nowNs ? Number((deadlineNs - nowNs) / 1_000_000n) : 0;
@@ -228,6 +282,9 @@ export async function run({ src, entryDir = '', baseUrl = null, onLine, incremen
 
         status = exports.run_resume();
     }
+    // Run over; a parkless pause must not hang.
+    pauseRequested = false;
+    settlePause(false);
     // SystemExit: low 8 bits are the exit code, not a buffer length; finish without a traceback.
     if (((status >>> STATUS_KIND_SHIFT) & 7) === STATUS_EXIT) {
         return { out: '', ms: performance.now() - t0, exitCode: status & 0xFF };
@@ -237,13 +294,81 @@ export async function run({ src, entryDir = '', baseUrl = null, onLine, incremen
     const out = len > 0
         ? TD.decode(new Uint8Array(exports.memory.buffer, exports.out_ptr(), len))
         : '';
-
-    if (integrityActive) {
-        try { await cache.saveLockfile(lockfile); }
-        catch { /* persistence failure is non-fatal; lockfile lives in-memory until next save */ }
-    }
-
     return { out, ms };
+}
+
+/* Header layout mirrors vm/snapshot.rs `header`. */
+function snapshotSource(blob) {
+    if (blob.length < 24) throw new Error('not an edge-python snapshot');
+    const v = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
+    if (v.getUint32(0, true) !== 0x4E535045) throw new Error('not an edge-python snapshot');
+    const len = Number(v.getBigUint64(16, true));
+    if (24 + len > blob.length) throw new Error('not an edge-python snapshot');
+    return TD.decode(blob.subarray(24, 24 + len));
+}
+
+/* Older wasm lacks the export; only preemption needs it. */
+function applyPreemptInterval(exports) {
+    if (!exports.set_preempt_interval) {
+        if (preemptEvery > 0) throw new Error('preemption needs a newer compiler.wasm');
+        return;
+    }
+    exports.set_preempt_interval(preemptEvery);
+}
+
+/* Preempt every `n` back-edges; 0 disables. */
+export function setPreemptInterval(n) {
+    preemptEvery = Math.max(0, n | 0);
+    if (compilerExports) applyPreemptInterval(compilerExports);
+}
+
+/* Park the run; resolves true once parked. */
+export function pause() {
+    if (!running) return Promise.resolve(false);
+    pauseRequested = true;
+    return new Promise((r) => { pauseAck = r; });
+}
+
+/* Release a preempt-held run; no-op otherwise. */
+export function resume() {
+    pauseRequested = false;
+    const gate = resumeGate;
+    resumeGate = null;
+    if (gate) gate();
+}
+
+/* Serialize the parked run; throws when none. */
+export function saveState() {
+    if (!compilerExports) throw new Error('nothing to save: no run has started');
+    const len = Number(compilerExports.save_state());
+    if (len < 0) throw new Error('nothing to save: the program is not paused');
+    return new Uint8Array(compilerExports.memory.buffer, compilerExports.snapshot_ptr(), len).slice();
+}
+
+/* Boot from the blob's embedded source, continue from the saved state; resolves like run(). */
+export async function restoreState({ blob, onLine }) {
+    running = true;
+    try {
+        const payload = blob instanceof Uint8Array ? blob : new Uint8Array(blob);
+        if (payload.length > SOURCE_LIMIT) throw new Error(`snapshot exceeds ${SOURCE_LIMIT} bytes`);
+        // The embedded source drives prefetch so restored imports resolve.
+        return await execute({ src: snapshotSource(payload), payload, onLine, start: (e, n) => e.restore_state(n) });
+    }
+    finally { running = false; }
+}
+
+/* Parked program's module bindings as JSON. */
+export function stateGlobals() {
+    if (!compilerExports) return {};
+    const len = compilerExports.state_globals();
+    return JSON.parse(TD.decode(new Uint8Array(compilerExports.memory.buffer, compilerExports.out_ptr(), len)));
+}
+
+/* Parked program's coroutines as JSON. */
+export function stateStack() {
+    if (!compilerExports) return [];
+    const len = compilerExports.state_stack();
+    return JSON.parse(TD.decode(new Uint8Array(compilerExports.memory.buffer, compilerExports.out_ptr(), len)));
 }
 
 /* Inject directly into the paused VM. Returns false if the VM isn't ready yet (no compilerExports, or no paused run) so callers can buffer. */

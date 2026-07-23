@@ -1,0 +1,268 @@
+#[cfg(test)]
+mod test {
+
+    use compiler::modules::lexer::lex;
+    use compiler::modules::parser::{Parser, SSAChunk};
+    use compiler::modules::vm::VM;
+    use compiler::modules::vm::snapshot;
+    use compiler::modules::vm::types::{Limits, SchedulerStatus, VmErr};
+
+    #[derive(serde::Deserialize)]
+    struct Case {
+        src: String,
+        #[serde(default)]
+        output: Vec<String>,
+        #[serde(default)]
+        error: Option<String>,
+        #[serde(default)]
+        input: Vec<String>,
+        #[serde(default)]
+        events: Vec<String>,
+        #[serde(default)]
+        interactive_events: Vec<String>,
+        // Substrings required in introspection JSON at the first pause.
+        #[serde(default)]
+        globals_contains: Vec<String>,
+        #[serde(default)]
+        stack_contains: Vec<String>,
+        // Preempt every n back-edges; 0 keeps the case cooperative-only.
+        #[serde(default)]
+        preempt_interval: usize,
+        // Save/restore at this preempt count; 0 never hops.
+        #[serde(default)]
+        hop_at: usize,
+        #[serde(default)]
+        min_preempts: usize,
+        #[serde(default)]
+        max_preempts: Option<usize>,
+        // Run with `Limits::none` so preempts don't ride the budget check.
+        #[serde(default)]
+        unmetered: bool,
+    }
+
+    struct Run {
+        output: Result<Vec<String>, VmErr>,
+        preempts: usize,
+        blob_len: usize,
+    }
+
+    fn parse_static(src: &str) -> &'static SSAChunk {
+        let (tokens, lex_errs) = lex(src);
+        assert!(lex_errs.is_empty(), "lex error in {:?}", src);
+        let (mut chunk, errs) = Parser::new(src, tokens.into_iter()).parse();
+        assert!(errs.is_empty(), "parse error in {:?}: {:?}", src, errs.iter().map(|e| &e.msg).collect::<Vec<_>>());
+        compiler::modules::vm::optimizer::constant_fold(&mut chunk);
+        Box::leak(Box::new(chunk))
+    }
+
+    fn limits_for(case: &Case) -> Limits {
+        if case.unmetered { Limits::none() } else { Limits::sandbox() }
+    }
+
+    /* Restore target: bare VM, state arrives from the blob. */
+    fn fresh(case: &Case, interval: usize) -> VM<'static> {
+        let mut vm = VM::with_limits(parse_static(&case.src), limits_for(case));
+        vm.set_preempt_interval(interval);
+        vm
+    }
+
+    fn boot(case: &Case, interval: usize) -> VM<'static> {
+        let mut vm = fresh(case, interval);
+        vm.input_buffer = case.input.clone();
+        for evt in &case.events { vm.push_event(evt).expect("push_event"); }
+        vm
+    }
+
+    /* Save, chain `hops` cycles, restore twice, return the last VM. */
+    fn hop(vm: &VM, case: &Case, interval: usize, hops: u32, blob_len: &mut usize) -> VM<'static> {
+        let mut blob = snapshot::save(vm, &case.src);
+        for _ in 1..hops {
+            let mut mid = fresh(case, interval);
+            snapshot::restore(&mut mid, &blob).expect("restore hop");
+            blob = snapshot::save(&mid, &case.src);
+        }
+        assert_eq!(snapshot::source_of(&blob).expect("source_of"), case.src);
+        *blob_len = blob.len();
+        let mut scratch = fresh(case, interval);
+        snapshot::restore(&mut scratch, &blob).expect("first restore");
+        drop(scratch);
+        let mut next = fresh(case, interval);
+        snapshot::restore(&mut next, &blob).expect("second restore");
+        next
+    }
+
+    /* One driver: `hop_events` hops at each event pause, `hop_at_preempt` at that preempt. */
+    fn run_case(case: &Case, interval: usize, hop_events: u32, hop_at_preempt: usize) -> Run {
+        let mut vm = boot(case, interval);
+        let mut idx = 0;
+        let mut preempts = 0;
+        let mut blob_len = 0;
+        loop {
+            match vm.run() {
+                Ok(_) => return Run { output: Ok(vm.output.clone()), preempts, blob_len },
+                Err(VmErr::HostYield(SchedulerStatus::PendingEvent)) => {
+                    if idx >= case.interactive_events.len() {
+                        return Run { output: Ok(vm.output.clone()), preempts, blob_len };
+                    }
+                    if hop_events > 0 {
+                        if idx == 0 { check_introspection(&vm, case); }
+                        vm = hop(&vm, case, interval, hop_events, &mut blob_len);
+                    }
+                    vm.push_event(&case.interactive_events[idx]).expect("push_event");
+                    idx += 1;
+                }
+                Err(VmErr::HostYield(SchedulerStatus::Preempted)) => {
+                    preempts += 1;
+                    if hop_at_preempt != 0 && preempts == hop_at_preempt {
+                        vm = hop(&vm, case, interval, 1, &mut blob_len);
+                    }
+                }
+                Err(e) => return Run { output: Err(e), preempts, blob_len },
+            }
+        }
+    }
+
+    fn check_introspection(vm: &VM, case: &Case) {
+        if !case.globals_contains.is_empty() {
+            let json = snapshot::inspect_globals(vm);
+            for needle in &case.globals_contains {
+                assert!(json.contains(needle.as_str()), "globals JSON missing {:?} in {:?}\n  got: {}", needle, case.src, json);
+            }
+        }
+        if !case.stack_contains.is_empty() {
+            let json = snapshot::inspect_stack(vm);
+            for needle in &case.stack_contains {
+                assert!(json.contains(needle.as_str()), "stack JSON missing {:?} in {:?}\n  got: {}", needle, case.src, json);
+            }
+        }
+    }
+
+    fn check(case: &Case, label: &str, run: &Run, failures: &mut Vec<String>) {
+        match &run.output {
+            Ok(output) => {
+                if case.error.is_some() {
+                    failures.push(format!("[{label}] {:?}\n   expected error, got output {:?}", case.src, output));
+                } else if *output != case.output {
+                    failures.push(format!("[{label}] {:?}\n   got {:?}\n   want {:?}", case.src, output, case.output));
+                }
+            }
+            Err(e) => match &case.error {
+                Some(expected) if e.to_string().contains(expected.as_str()) => {}
+                Some(expected) => failures.push(format!("[{label}] {:?}\n   got error '{e}'\n   want '{expected}'", case.src)),
+                None => failures.push(format!("[{label}] {:?}\n   unexpected error: {e}", case.src)),
+            },
+        }
+    }
+
+    fn report(what: &str, failures: Vec<String>) {
+        if !failures.is_empty() {
+            let shown = failures.len().min(40);
+            panic!("{} {what}(s):\n{}", failures.len(), failures[..shown].join("\n"));
+        }
+    }
+
+    /* Cooperative cases run direct, roundtrip and double; preempt cases add a hopped preempt run. */
+    #[test]
+    fn snapshot_cases() {
+        let cases: Vec<Case> = serde_json::from_str(include_str!("cases/snapshot.json")).expect("invalid JSON");
+        let mut failures = Vec::new();
+        for case in &cases {
+            assert!(!case.interactive_events.is_empty() || case.preempt_interval > 0,
+                "snapshot case exercises no pause: {:?}", case.src);
+            let direct = run_case(case, 0, 0, 0);
+            assert_eq!(direct.preempts, 0, "interval 0 must not preempt: {:?}", case.src);
+            check(case, "direct", &direct, &mut failures);
+            if !case.interactive_events.is_empty() {
+                check(case, "roundtrip", &run_case(case, case.preempt_interval, 1, 0), &mut failures);
+                check(case, "double", &run_case(case, case.preempt_interval, 2, 0), &mut failures);
+            }
+            if case.preempt_interval > 0 {
+                let pre = run_case(case, case.preempt_interval, 0, case.hop_at);
+                check(case, "preempt", &pre, &mut failures);
+                if pre.preempts < case.min_preempts {
+                    failures.push(format!("[preempt] {:?}\n   {} preempts, expected >= {}", case.src, pre.preempts, case.min_preempts));
+                }
+                if case.max_preempts.is_some_and(|max| pre.preempts > max) {
+                    failures.push(format!("[preempt] {:?}\n   {} preempts, expected <= {:?}", case.src, pre.preempts, case.max_preempts));
+                }
+                if case.hop_at > 0 && pre.blob_len <= 100 {
+                    failures.push(format!("[preempt] {:?}\n   implausible blob length {}", case.src, pre.blob_len));
+                }
+            }
+        }
+        report("snapshot case failure", failures);
+    }
+
+    /* Property: every interactive vm.json case survives a save/restore at each pause. */
+    #[test]
+    fn vm_corpus_roundtrip() {
+        let cases: Vec<Case> = serde_json::from_str(include_str!("cases/vm.json")).expect("invalid JSON");
+        let mut failures = Vec::new();
+        for case in cases.iter().filter(|c| !c.interactive_events.is_empty() && c.error.is_none()) {
+            let direct = run_case(case, 0, 0, 0).output;
+            let cycled = run_case(case, 0, 1, 0).output;
+            match (direct, cycled) {
+                (Ok(a), Ok(b)) if a == b => {}
+                (Err(a), Err(b)) if a.to_string() == b.to_string() => {}
+                (a, b) => failures.push(format!("{:?}\n   direct {:?}\n   cycled {:?}", case.src, a, b)),
+            }
+        }
+        report("corpus roundtrip mismatch", failures);
+    }
+
+    /* Property: preempting at every back-edge changes no corpus result. */
+    #[test]
+    fn vm_corpus_preempt_equivalence() {
+        let cases: Vec<Case> = serde_json::from_str(include_str!("cases/vm.json")).expect("invalid JSON");
+        let mut failures = Vec::new();
+        for case in cases.iter().filter(|c| c.interactive_events.is_empty() && c.events.is_empty() && c.error.is_none()) {
+            let direct = run_case(case, 0, 0, 0).output;
+            let preempted = run_case(case, 1, 0, 0).output;
+            match (direct, preempted) {
+                (Ok(a), Ok(b)) if a == b => {}
+                (Err(a), Err(b)) if a.to_string() == b.to_string() => {}
+                (a, b) => failures.push(format!("{:?}\n   direct {:?}\n   preempted {:?}", case.src, a, b)),
+            }
+        }
+        report("preempt divergence", failures);
+    }
+
+    /* Corrupt, truncated and cross-program blobs fail cleanly, never panic. */
+    #[test]
+    fn corrupt_blobs() {
+        let src = "x = [1, 2, {'k': 3}]\nreceive()\nprint(x)";
+        let mut vm = VM::with_limits(parse_static(src), Limits::sandbox());
+        assert!(matches!(vm.run(), Err(VmErr::HostYield(SchedulerStatus::PendingEvent))));
+        let blob = snapshot::save(&vm, src);
+        drop(vm);
+
+        let restore_fails = |blob: &[u8]| {
+            let mut vm = VM::with_limits(parse_static(src), Limits::sandbox());
+            snapshot::restore(&mut vm, blob).is_err()
+        };
+        for cut in (0..blob.len()).step_by(97) {
+            assert!(restore_fails(&blob[..cut]), "truncated blob at {cut} restored");
+        }
+        let mut bad = blob.clone();
+        bad[0] ^= 0xFF;
+        assert!(restore_fails(&bad), "bad magic restored");
+        let mut bad = blob.clone();
+        bad[4] = 0xEE;
+        assert!(restore_fails(&bad), "bad format restored");
+        let mut bad = blob.clone();
+        bad.push(0);
+        assert!(restore_fails(&bad), "trailing garbage restored");
+
+        // Fingerprint rejects a VM booted from different source.
+        let mut other = VM::with_limits(parse_static("y = 99\nreceive()\nprint(y)"), Limits::sandbox());
+        let err = snapshot::restore(&mut other, &blob).unwrap_err();
+        assert!(err.contains("does not match"), "unexpected error: {err}");
+
+        // The pristine blob still restores and finishes.
+        let mut vm = VM::with_limits(parse_static(src), Limits::sandbox());
+        snapshot::restore(&mut vm, &blob).expect("pristine blob");
+        vm.push_event("go").unwrap();
+        vm.run().expect("finish");
+        assert_eq!(vm.output, vec!["[1, 2, {'k': 3}]"]);
+    }
+}

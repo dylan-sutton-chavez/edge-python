@@ -190,6 +190,8 @@ impl<'a> VM<'a> {
 
     /* `Call` orchestrator. Only user `Func` callees build a fresh `fn_slots` and run the body inline; every other callee kind short-circuits in `try_dispatch_non_func_callable`. */
     pub(crate) fn exec_call(&mut self, operand: u16, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+        // Taken so nested native calls see false.
+        let call_safe = core::mem::take(&mut self.pending_exec_safe);
         let (positional, kw_flat, _num_pos, num_kw) = self.parse_call_args(operand)?;
 
         if self.depth >= self.max_calls { return Err(cold_depth()); }
@@ -203,7 +205,13 @@ impl<'a> VM<'a> {
         let (fi, defaults, captures) = match self.heap.get(callee) {
             HeapObj::Func(i, d, c) => (*i, d.clone(), c.clone()),
             _ => {
-                if self.try_dispatch_non_func_callable(callee, &positional, &kw_flat, num_kw, chunk, slots)? {
+                // Bound methods re-dispatch as tail calls.
+                if matches!(self.heap.get(callee), HeapObj::BoundUserMethod(..)) {
+                    self.pending_exec_safe = call_safe;
+                }
+                let dispatched = self.try_dispatch_non_func_callable(callee, &positional, &kw_flat, num_kw, chunk, slots);
+                self.pending_exec_safe = false;
+                if dispatched? {
                     return Ok(());
                 }
                 return Err(cold_type("object is not callable"));
@@ -247,6 +255,7 @@ impl<'a> VM<'a> {
         let iter_base = self.iter_stack.len();
         let exc_base = self.exception_stack.len();
         let yields_before = self.yields.len();
+        self.pending_exec_safe = call_safe;
         let (callee_impure, exec_result) = self.run_body_with_frame(fi, body, chunk, &mut fn_slots, slots);
         self.depth -= 1;
 

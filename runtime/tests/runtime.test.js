@@ -49,6 +49,12 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
             try { return r.fulfill({ contentType: "text/javascript", body: readFileSync(HOST_DIR + repoPath) }); }
             catch { return r.continue(); } // no local host source: use the deployed module
         }
+        // Prefer in-tree wasm so new exports are testable.
+        if (u.host === CDN_HOST && u.pathname === "/compiler.wasm") {
+            const local = `${REPO}target/wasm32-unknown-unknown/release/compiler.wasm`;
+            try { return r.fulfill({ contentType: "application/wasm", body: readFileSync(local) }); }
+            catch { return r.continue(); } // no local build: use the deployed wasm
+        }
         if (u.host !== "localhost") return r.continue(); // any other CDN asset (compiler.wasm, runtime) passes through
         const ext = u.pathname.slice(u.pathname.lastIndexOf("."));
         try { return r.fulfill({ contentType: TYPES[ext] ?? "application/octet-stream", body: readFileSync(REPO + u.pathname.slice(1)) }); }
@@ -76,7 +82,7 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
             const got = await page.evaluate(async (src) => {
                 const app = document.querySelector("#app");
                 app.textContent = "";
-                const { out } = await globalThis.el.run(src);
+                const { out } = await globalThis.el.worker.run(src);
                 return { app: app.textContent, out };
             }, PRELUDE + c.script);
 
@@ -88,6 +94,85 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
                 throw new Error(`script:\n${c.script}\n  got:  ${JSON.stringify(got.app)}\n  want: ${JSON.stringify(c.expect)}\n  out: ${JSON.stringify(got.out)}\n  errors: ${errors.join(" | ") || "(none)"}`);
             }
         }
+
+        // Park on receive(), save, finish, restore, steer differently.
+        const snap = await page.evaluate(async () => {
+            const el = globalThis.el;
+            const chunks = [];
+            el.worker.onOutput((c) => chunks.push(c));
+            const src = "history = []\nwhile True:\n    m = receive()\n    if m == 'stop':\n        break\n    history.append(m)\nprint('|'.join(history))";
+            const running = el.worker.run(src);
+            const parked = async () => {
+                for (let i = 0; i < 100; i++) {
+                    if (JSON.stringify(await el.worker.stateStack()).includes("waiting_event")) return;
+                    await new Promise((r) => setTimeout(r, 20));
+                }
+                throw new Error("run never parked on receive()");
+            };
+            await parked();
+            el.worker.pushEvent("a");
+            await parked();
+            const blob = await el.worker.saveState();
+            const globalsAtSave = await el.worker.stateGlobals();
+            el.worker.pushEvent("b");
+            el.worker.pushEvent("stop");
+            await running;
+            const first = chunks.join("");
+            chunks.length = 0;
+            const resumed = el.worker.restoreState(blob);
+            el.worker.pushEvent("c");
+            el.worker.pushEvent("d");
+            el.worker.pushEvent("stop");
+            await resumed;
+            return { first, second: chunks.join(""), globalsAtSave, blobLen: blob.length };
+        });
+        if (snap.first !== "a|b\n") throw new Error(`snapshot: original run produced ${JSON.stringify(snap.first)}`);
+        if (snap.second !== "a|c|d\n") throw new Error(`snapshot: restored run produced ${JSON.stringify(snap.second)}`);
+        if (snap.globalsAtSave.history !== "['a']") throw new Error(`snapshot: stateGlobals saw ${JSON.stringify(snap.globalsAtSave)}`);
+        if (!(snap.blobLen > 100)) throw new Error(`snapshot: implausible blob length ${snap.blobLen}`);
+
+        // A suspension-free program still pauses and snapshots.
+        const pre = await page.evaluate(async () => {
+            const el = globalThis.el;
+            const chunks = [];
+            el.worker.onOutput((c) => chunks.push(c));
+            await el.worker.setPreemptInterval(50000);
+            const src = "n = 0\nwhile n < 1000000:\n    n = n + 1\nprint('done', n)";
+            const running = el.worker.run(src);
+            await el.worker.pause();
+            const globalsAtPause = await el.worker.stateGlobals();
+            const blob = await el.worker.saveState();
+            el.worker.resume();
+            await running;
+            const first = chunks.join("");
+            chunks.length = 0;
+            await el.worker.restoreState(blob);
+            await el.worker.setPreemptInterval(0);
+            return { first, second: chunks.join(""), globalsAtPause, blobLen: blob.length };
+        });
+        if (pre.first !== "done 1000000\n") throw new Error(`preempt: original run produced ${JSON.stringify(pre.first)}`);
+        if (pre.second !== "done 1000000\n") throw new Error(`preempt: restored run produced ${JSON.stringify(pre.second)}`);
+        const pausedAt = Number(pre.globalsAtPause.n);
+        if (!(pausedAt > 0 && pausedAt < 1000000)) throw new Error(`preempt: expected a mid-loop pause, n was ${JSON.stringify(pre.globalsAtPause.n)}`);
+        if (!(pre.blobLen > 100)) throw new Error(`preempt: implausible blob length ${pre.blobLen}`);
+
+        // Documented tag path: fresh element via proxy.
+        const tagged = await page.evaluate(async () => {
+            const el = document.createElement("edge-python");
+            const ready = new Promise((res) => el.addEventListener("ready", res, { once: true }));
+            document.body.appendChild(el);
+            await ready;
+            await el.worker.setPreemptInterval(50000);
+            const running = el.worker.run("n = 0\nwhile n < 1000000:\n    n = n + 1\nprint('done', n)");
+            await el.worker.pause();
+            const blobLen = (await el.worker.saveState()).length;
+            el.worker.resume();
+            const { out } = await running;
+            el.worker.dispose();
+            return { blobLen, out };
+        });
+        if (!(tagged.blobLen > 100)) throw new Error(`preempt via element: implausible blob length ${tagged.blobLen}`);
+        if (tagged.out !== "") throw new Error(`preempt via element: run reported ${JSON.stringify(tagged.out)}`);
 
         // Laziness: only what the corpus imports gets fetched; declared-but-unused stays untouched.
         if (!reqd("/app/ui.js")) throw new Error("host ui was used but ui.js never loaded");

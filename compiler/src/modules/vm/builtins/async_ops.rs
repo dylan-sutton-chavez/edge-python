@@ -9,6 +9,8 @@ impl<'a> VM<'a> {
 
     // Resume coroutine: persist state on yield, restore caller on return. Suspended sync sub-frames run innermost-first, each pushing its result onto the next frame's stack at the Call site. The coro's `exception_frames` are restored before its body runs and saved back on yield, so `try`/`except` survives suspensions.
     pub fn resume_coroutine(&mut self, callee: Val) -> Result<Val, VmErr> {
+        // Scheduler-driven resumes have nothing native above.
+        let resume_safe = core::mem::take(&mut self.pending_exec_safe);
         let (outer_ip, mut outer_slots, outer_stack, outer_body, outer_iters, mut sync_frames, outer_exc) =
             if let HeapObj::Coroutine(ip, slots, stack, body, iters, sf, ef) = self.heap.get(callee) {
                 (*ip, slots.clone(), stack.clone(), *body, iters.clone(), sf.clone(), ef.clone())
@@ -42,6 +44,7 @@ impl<'a> VM<'a> {
 
         // Walk frames inside-out, then the outer. `outer_ran` tracks whether `outer_ip` should be overwritten by `resume_ip` on save, a re-yield inside a sync frame leaves the outer pristine.
         let mut outer_ran = false;
+        let mut pending_ret: Option<Val> = None;
         let result: Result<Val, VmErr> = 'drive: loop {
             if let Some(frame) = sync_frames.pop() {
                 let SyncFrame { ip, fi, mut slots, stack_delta, iter_delta, exception_delta } = frame;
@@ -49,6 +52,8 @@ impl<'a> VM<'a> {
                 let frame_iter_base = self.iter_stack.len();
                 let frame_exc_base = self.exception_stack.len();
                 self.stack.extend(stack_delta);
+                // Inner result lands on this frame's stack.
+                if let Some(v) = pending_ret.take() { self.push(v); }
                 self.iter_stack.extend(iter_delta);
                 let mut restored = exception_delta;
                 for f in &mut restored {
@@ -57,6 +62,7 @@ impl<'a> VM<'a> {
                 }
                 self.exception_stack.extend(restored);
                 self.pending_exec_exc_base = Some(frame_exc_base);
+                self.pending_exec_safe = resume_safe;
                 let (_, body, _, _) = self.functions[fi];
                 match self.exec_from(body, &mut slots, ip) {
                     Err(e) => break 'drive Err(e),
@@ -76,15 +82,12 @@ impl<'a> VM<'a> {
                             ip: self.resume_ip, fi, slots,
                             stack_delta: new_stack, iter_delta: new_iter, exception_delta: new_exc,
                         });
-                        // Any deeper sync calls suspended during this exec come back via the VM-level buffer; chain them on top (still innermost-last).
+                        // Reverse so pop re-enters innermost first.
                         let newer = core::mem::take(&mut self.pending_sync_frames);
-                        sync_frames.extend(newer);
+                        sync_frames.extend(newer.into_iter().rev());
                         break 'drive Ok(val);
                     }
-                    Ok(val) => {
-                        // Frame completed; its return value feeds whatever frame (or outer) was waiting at the Call site.
-                        self.push(val);
-                    }
+                    Ok(val) => { pending_ret = Some(val); }
                 }
             } else {
                 let body: &SSAChunk = match outer_body {
@@ -93,12 +96,14 @@ impl<'a> VM<'a> {
                 };
                 outer_ran = true;
                 self.pending_exec_exc_base = Some(saved_exc_len);
+                self.pending_exec_safe = resume_safe;
+                if let Some(v) = pending_ret.take() { self.push(v); }
                 match self.exec_from(body, &mut outer_slots, outer_ip) {
                     Err(e) => break 'drive Err(e),
                     Ok(val) => {
                         if self.yielded {
                             let newer = core::mem::take(&mut self.pending_sync_frames);
-                            sync_frames.extend(newer);
+                            sync_frames.extend(newer.into_iter().rev());
                         }
                         break 'drive Ok(val);
                     }
@@ -352,6 +357,10 @@ impl<'a> VM<'a> {
             if !alive { return Ok(()); }
             if let Some(i) = next_ready {
                 self.scheduler_step(i)?;
+                // Coro stays Ready; re-entering resumes it.
+                if core::mem::take(&mut self.pending.preempt_request) {
+                    return Err(VmErr::HostYield(SchedulerStatus::Preempted));
+                }
                 continue;
             }
             // Yield priority: frame tick > sleep/timeout deadline > host call > event.
@@ -394,6 +403,7 @@ impl<'a> VM<'a> {
         self.pending.event_wait_request = false;
         self.pending.host_call_request = false;
         self.pending.waiting_for_children = None;
+        self.pending_exec_safe = true;
         let result = self.resume_coroutine(coro);
         let yielded = self.yielded;
         self.yielded = false;

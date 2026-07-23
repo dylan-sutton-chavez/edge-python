@@ -20,6 +20,57 @@ const STATUS_ERROR: u32 = 4 << STATUS_KIND_SHIFT;
 const STATUS_PENDING_HOST_CALL: u32 = 5 << STATUS_KIND_SHIFT;
 // Uncaught `SystemExit`: clean termination, low 8 bits carry the POSIX exit code (not a buffer length).
 const STATUS_EXIT: u32 = 6 << STATUS_KIND_SHIFT;
+// Preempt tick; resumes with no host action.
+const STATUS_PREEMPTED: u32 = 7 << STATUS_KIND_SHIFT;
+
+fn err_status(msg: &str) -> u32 {
+    let n = unsafe { write_out(msg) };
+    STATUS_ERROR | ((n as u32) & STATUS_PAYLOAD_MASK)
+}
+
+/* Lex and parse with the host resolver; Err is rendered diagnostics. */
+fn parse_source(src: &str) -> Result<SSAChunk, String> {
+    let (tokens, lex_errs) = lex(src);
+    let resolver = Box::new(WasmHostResolver { dir: String::new() });
+    let mut p = Parser::with_resolver(src, tokens.into_iter(), resolver);
+    for e in lex_errs {
+        p.errors.push(Diagnostic { start: e.start, end: e.end, msg: e.msg.into() });
+    }
+    let (mut chunk, errs) = p.parse();
+    if !errs.is_empty() {
+        let mut buf = String::new();
+        for (i, e) in errs.iter().enumerate() {
+            if i > 0 { buf.push('\n'); }
+            buf.push_str(&e.render(src, None));
+        }
+        return Err(buf);
+    }
+    crate::modules::vm::optimizer::constant_fold(&mut chunk);
+    Ok(chunk)
+}
+
+/* Leak the chunk so it survives `run_resume`, then boot with host hooks. */
+fn boot_vm(chunk: SSAChunk, limits: Limits) -> VM<'static> {
+    let chunk_static: &'static SSAChunk = Box::leak(Box::new(chunk));
+    let mut vm = VM::with_limits(chunk_static, limits);
+    vm.print_hook = Some(stream_print);
+    vm.set_time_hook(now_ns_host);
+    vm.set_preempt_interval(with_runtime(|rt| rt.preempt_every));
+    vm
+}
+
+/* Drain host-supplied stdin bytes; invalid UTF-8 degrades to empty. */
+fn take_input(vm: &mut VM) {
+    let inp_text = with_runtime(|rt| {
+        if rt.inp_len == 0 { return String::new(); }
+        let inp = core::str::from_utf8(&rt.inp[..rt.inp_len]).unwrap_or("").to_string();
+        rt.inp_len = 0;
+        inp
+    });
+    if !inp_text.is_empty() {
+        vm.input_buffer = inp_text.split('\n').map(alloc::string::String::from).collect();
+    }
+}
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn src_ptr() -> *mut u8 {
@@ -129,6 +180,7 @@ fn step_vm(mut vm: VM<'static>, src: &str, prev_paused: Option<Box<PausedRun>>) 
                 SchedulerStatus::PendingFrame => (STATUS_PENDING_FRAME, 0),
                 SchedulerStatus::PendingEvent => (STATUS_PENDING_EVENT, 0),
                 SchedulerStatus::PendingHostCall => (STATUS_PENDING_HOST_CALL, 0),
+                SchedulerStatus::Preempted => (STATUS_PREEMPTED, 0),
                 SchedulerStatus::Done => (STATUS_DONE, 0),
             };
             let mut paused = match prev_paused {
@@ -163,64 +215,26 @@ fn step_vm(mut vm: VM<'static>, src: &str, prev_paused: Option<Box<PausedRun>>) 
             );
             drop(vm);
             drop(prev_paused);
-            let n = unsafe { write_out(&traceback) };
-            STATUS_ERROR | ((n as u32) & STATUS_PAYLOAD_MASK)
+            err_status(&traceback)
         }
     }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn run_start(len: usize) -> u32 {
-    // Discard any previous paused run; a fresh `run_start` is a hard reset of execution state.
+    // A fresh `run_start` hard-resets execution state.
     with_runtime(|rt| { rt.paused_run = None; });
-
     let src = match read_src(len) {
         Ok(s) => s,
-        Err(e) => {
-            let msg = s!("input rejected: invalid utf-8 at byte ", int e.valid_up_to());
-            let n = unsafe { write_out(&msg) };
-            return STATUS_ERROR | ((n as u32) & STATUS_PAYLOAD_MASK);
-        }
+        Err(e) => return err_status(&s!("input rejected: invalid utf-8 at byte ", int e.valid_up_to())),
     };
-
-    let (tokens, lex_errs) = lex(&src);
-    let resolver = Box::new(WasmHostResolver { dir: String::new() });
-    let mut p = Parser::with_resolver(&src, tokens.into_iter(), resolver);
-    for e in lex_errs {
-        p.errors.push(Diagnostic { start: e.start, end: e.end, msg: e.msg.into() });
-    }
-    let (mut chunk, errs) = p.parse();
-
-    if !errs.is_empty() {
-        let mut buf = String::new();
-        for (i, e) in errs.iter().enumerate() {
-            if i > 0 { buf.push('\n'); }
-            buf.push_str(&e.render(&src, None));
-        }
-        let n = unsafe { write_out(&buf) };
-        return STATUS_ERROR | ((n as u32) & STATUS_PAYLOAD_MASK);
-    }
-
-    crate::modules::vm::optimizer::constant_fold(&mut chunk);
-
-    // Leak chunk so its lifetime survives across `run_resume`; reclaimed on page reload.
-    let chunk_static: &'static SSAChunk = Box::leak(Box::new(chunk));
-    let mut vm = VM::with_limits(chunk_static, Limits::sandbox());
-    vm.print_hook = Some(stream_print);
-    vm.set_time_hook(now_ns_host);
+    let chunk = match parse_source(&src) {
+        Ok(c) => c,
+        Err(rendered) => return err_status(&rendered),
+    };
+    let mut vm = boot_vm(chunk, Limits::sandbox());
     vm.strict_input = true;
-
-    let inp_text = with_runtime(|rt| {
-        if rt.inp_len == 0 { return String::new(); }
-        let bytes = &rt.inp[..rt.inp_len];
-        let inp = core::str::from_utf8(bytes).unwrap_or("").to_string();
-        rt.inp_len = 0;
-        inp
-    });
-    if !inp_text.is_empty() {
-        vm.input_buffer = inp_text.split('\n').map(alloc::string::String::from).collect();
-    }
-
+    take_input(&mut vm);
     step_vm(vm, &src, None)
 }
 
@@ -228,10 +242,7 @@ pub unsafe extern "C" fn run_start(len: usize) -> u32 {
 pub unsafe extern "C" fn run_resume() -> u32 {
     let paused = match with_runtime(|rt| rt.paused_run.take()) {
         Some(p) => p,
-        None => {
-            let n = unsafe { write_out("RuntimeError: run_resume called with no paused run") };
-            return STATUS_ERROR | ((n as u32) & STATUS_PAYLOAD_MASK);
-        }
+        None => return err_status("RuntimeError: run_resume called with no paused run"),
     };
     // Take VM out so `step_vm` owns it; recycle the empty Box for the next stash.
     let mut paused_box = paused;
@@ -299,6 +310,82 @@ pub extern "C" fn last_yield_deadline_ns() -> u64 {
     with_runtime(|rt| rt.paused_run.as_ref().map(|p| p.last_yield_deadline_ns).unwrap_or(0))
 }
 
+use crate::modules::vm::snapshot;
+
+/* Preempt every `n` loop back-edges; 0 disables. */
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn set_preempt_interval(n: u32) {
+    with_runtime(|rt| rt.preempt_every = n as usize);
+}
+
+/* Serialize the parked run; -1 when none. */
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn save_state() -> i64 {
+    let blob = with_runtime(|rt| {
+        let vm = rt.paused_run.as_ref().and_then(|p| p.vm.as_ref())?;
+        let source = vm.chunk.source.clone();
+        Some(snapshot::save(vm, &source))
+    });
+    match blob {
+        Some(b) => {
+            let len = b.len() as i64;
+            with_runtime(|rt| rt.snapshot = b);
+            len
+        }
+        None => -1,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn snapshot_ptr() -> *const u8 {
+    with_runtime(|rt| rt.snapshot.as_ptr())
+}
+
+/* Boot from the blob's embedded source, overlay its saved state. */
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn restore_state(len: usize) -> u32 {
+    with_runtime(|rt| {
+        rt.paused_run = None;
+        rt.current_vm = None;
+    });
+    let blob: alloc::vec::Vec<u8> = with_runtime(|rt| rt.src[..len.min(SZ)].to_vec());
+    let source = match snapshot::source_of(&blob) {
+        Ok(s) => s.to_string(),
+        Err(e) => return err_status(&e),
+    };
+    let limits = match snapshot::limits_of(&blob) {
+        Ok(l) => l,
+        Err(e) => return err_status(&e),
+    };
+    let chunk = match parse_source(&source) {
+        Ok(c) => c,
+        Err(_) => return err_status("snapshot source no longer parses; was it saved by another compiler version?"),
+    };
+    let mut vm = boot_vm(chunk, limits);
+    if let Err(e) = snapshot::restore(&mut vm, &blob) {
+        return err_status(&e);
+    }
+    step_vm(vm, &source, None)
+}
+
+/* Parked module bindings as JSON; `{}` when idle. */
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn state_globals() -> usize {
+    let json = with_runtime(|rt| {
+        rt.paused_run.as_ref().and_then(|p| p.vm.as_ref()).map(snapshot::inspect_globals)
+    });
+    unsafe { write_out(json.as_deref().unwrap_or("{}")) }
+}
+
+/* Parked coroutines as JSON; `[]` when idle. */
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn state_stack() -> usize {
+    let json = with_runtime(|rt| {
+        rt.paused_run.as_ref().and_then(|p| p.vm.as_ref()).map(snapshot::inspect_stack)
+    });
+    unsafe { write_out(json.as_deref().unwrap_or("[]")) }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn run(len: usize) -> usize {
     let src = match read_src(len) {
@@ -308,53 +395,31 @@ pub unsafe extern "C" fn run(len: usize) -> usize {
         },
     };
 
-    let (tokens, lex_errs) = lex(&src);
-    let resolver = Box::new(WasmHostResolver { dir: String::new() });
-    let mut p = Parser::with_resolver(&src, tokens.into_iter(), resolver);
-    for e in lex_errs {
-        p.errors.push(Diagnostic { start: e.start, end: e.end, msg: e.msg.into() });
-    }
-    let (mut chunk, errs) = p.parse();
+    // Legacy path keeps a borrowed chunk; nothing is leaked.
+    let out: String = match parse_source(&src) {
+        Err(rendered) => rendered,
+        Ok(chunk) => {
+            let mut vm = VM::with_limits(&chunk, Limits::sandbox());
+            vm.print_hook = Some(stream_print);
+            vm.set_time_hook(now_ns_host);
+            vm.strict_input = true;
+            take_input(&mut vm);
 
-    let out: String = if !errs.is_empty() {
-        let mut s = String::new();
-        for (i, e) in errs.iter().enumerate() {
-            if i > 0 { s.push('\n'); }
-            s.push_str(&e.render(&src, None));
-        }
-        s
-    } else {
-        crate::modules::vm::optimizer::constant_fold(&mut chunk);
-        let mut vm = VM::with_limits(&chunk, Limits::sandbox());
-        vm.print_hook = Some(stream_print);
-        vm.set_time_hook(now_ns_host);
-        vm.strict_input = true;
-        // Drain any host-supplied input bytes; `UTF-8` invalid bytes degrade to an empty input rather than UB.
-        let inp_text = with_runtime(|rt| {
-            if rt.inp_len == 0 { return String::new(); }
-            let bytes = &rt.inp[..rt.inp_len];
-            let inp = core::str::from_utf8(bytes).unwrap_or("").to_string();
-            rt.inp_len = 0;
-            inp
-        });
-        if !inp_text.is_empty() {
-            vm.input_buffer = inp_text.split('\n').map(alloc::string::String::from).collect();
-        }
+            // Publish VM for re-entrant host_edge_op via RAII guard so a panic or early return cannot leave a stale pointer in the runtime.
+            let _guard = VmGuard::new(&mut vm);
+            let result = vm.run();
 
-        // Publish VM for re-entrant host_edge_op via RAII guard so a panic or early return cannot leave a stale pointer in the runtime.
-        let _guard = VmGuard::new(&mut vm);
-        let result = vm.run();
-
-        match result {
-            Ok(_) => String::new(),
-            // Legacy `run` cannot suspend; embedders that need `sleep(n>0)` / `frame()` / `receive()` must drive `run_start` + `run_resume`.
-            Err(VmErr::HostYield(_)) => String::from(
-                "RuntimeError: scheduler suspended; this build's legacy `run` entry has no resume, drive `run_start` / `run_resume` instead.",
-            ),
-            Err(e) => e.render_traceback(
-                &src, vm.error_pos(), None,
-                vm.call_stack_frames(), vm.function_names_ref(),
-            ),
+            match result {
+                Ok(_) => String::new(),
+                // Legacy `run` cannot suspend; embedders that need `sleep(n>0)` / `frame()` / `receive()` must drive `run_start` + `run_resume`.
+                Err(VmErr::HostYield(_)) => String::from(
+                    "RuntimeError: scheduler suspended; this build's legacy `run` entry has no resume, drive `run_start` / `run_resume` instead.",
+                ),
+                Err(e) => e.render_traceback(
+                    &src, vm.error_pos(), None,
+                    vm.call_stack_frames(), vm.function_names_ref(),
+                ),
+            }
         }
     };
 

@@ -117,6 +117,18 @@ export async function createWorker(opts) {
         loadMs: ready.loadMs,
 
         run: (src, runOpts = {}) => send('run', { src, ...runOpts }),
+        /* Preempt every `interval` back-edges; 0 disables. */
+        setPreemptInterval: (interval) => send('set-preempt-interval', { interval }),
+        /* Park the program; resolves true when parked. */
+        pause: () => send('pause'),
+        /* Continue a program parked by pause(). */
+        resume: () => send('resume'),
+        /* Snapshot the paused program; throws when none. */
+        saveState: () => send('save-state'),
+        /* Boot from a blob; resolves like run(). */
+        restoreState: (blob) => send('restore-state', { blob }),
+        stateGlobals: () => send('state-globals'),
+        stateStack: () => send('state-stack'),
         reset: () => send('reset'),
         clearCache: () => send('clearCache'),
         pushEvent,

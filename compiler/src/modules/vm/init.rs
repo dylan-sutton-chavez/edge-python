@@ -7,7 +7,7 @@ use super::types::*;
 
 /* Collect top-level StoreName bindings as module attrs; `seen` keeps the latest per bare name. */
 // `_`-prefixed names stay: the free-name fallback resolves module functions here.
-fn collect_module_attrs(chunk: &SSAChunk, slots: &[Val]) -> Vec<(String, Val)> {
+pub(crate) fn collect_module_attrs(chunk: &SSAChunk, slots: &[Val]) -> Vec<(String, Val)> {
     let mut attrs: Vec<(String, Val)> = Vec::new();
     let mut seen: crate::util::fx::FxHashSet<String> = crate::util::fx::FxHashSet::default();
     for ins in &chunk.instructions {
@@ -129,6 +129,12 @@ impl<'a> VM<'a> {
     /* Test/host helper: raise a generic error (`VmErr::Raised(message)`) into host call `id`. */
     pub fn push_host_error_by_id(&mut self, id: u64, message: &str) -> bool {
         self.inject_host_error_by_id(id, VmErr::Raised(message.into()))
+    }
+
+    /* Yield `Preempted` every `n` back-edges; 0 disables. */
+    pub fn set_preempt_interval(&mut self, n: usize) {
+        self.preempt_every = n;
+        self.preempt_left = n;
     }
 
     /* Push a string event onto the event queue; consumed by the next `receive()` call. Mirrors what `run_push_event` does for WASM hosts. */

@@ -13,7 +13,7 @@ The `<pkg>/` folders and their `<pkg>.json` corpora stay agnostic to testing. Th
 
 ## How it works
 
-The driver serves the repo over `http://localhost` (a secure context, so the runtime's integrity check works), synthesizes a `packages.json` (the package wasm), and boots one `<edge-python packages="...">`. After its `ready` event it captures stdout with `el.onOutput(...)` and runs each snippet with `el.run(src)`, reading the trace for error cases. One worker is reused for the whole corpus, so the whole real system (runtime + `compiler.wasm` + the package wasm) is exercised end to end.
+The driver serves the repo over `http://localhost` (a secure context, so the runtime's integrity check works), synthesizes a `packages.json` (the package wasm), and boots one `<edge-python packages="...">`. After its `ready` event it captures stdout with `el.worker.onOutput(...)` and runs each snippet with `el.worker.run(src)`, reading the trace for error cases. One worker is reused for the whole corpus, so the whole real system (runtime + `compiler.wasm` + the package wasm) is exercised end to end.
 
 ```bash
 ( cd json && cargo build --release --target wasm32-unknown-unknown ) # native packages only

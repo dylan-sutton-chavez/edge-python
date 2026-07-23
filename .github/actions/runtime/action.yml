@@ -25,6 +25,14 @@ runs:
       shell: bash
       run: deno lint runtime/
 
+    # Test against this run's compiler, not the deployed CDN copy.
+    - name: Download compiler wasm
+      if: inputs.mode == 'test'
+      uses: actions/download-artifact@v8
+      with:
+        name: compiler_wasm
+        path: target/wasm32-unknown-unknown/release/
+
     # ~150MB Chromium; cached so only the first run pays the download.
     - name: Cache Playwright browsers
       if: inputs.mode == 'test'

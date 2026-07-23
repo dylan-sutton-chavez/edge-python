@@ -88,6 +88,14 @@ Coroutines carry their own `exception_frames` (7th tuple field). On entry, `resu
 
 `with` invokes `__enter__` / `__exit__(exc_type, exc_val, traceback)`. A truthy `__exit__` return suppresses. `async with` reuses sync `__enter__` / `__exit__` (no async dunders).
 
+## Snapshots
+
+`save_state` serializes a parked VM, every coroutine suspended and the Rust stack unwound, into a self-contained versioned blob; `restore_state` replays it onto a VM freshly booted from the blob's own embedded source. `Val` bits are written verbatim and heap slots restored at identical indices, so references, cycles, and interning survive with no remapping. The blob leads with a magic tag, a format version, and a structural fingerprint (FxHash) of the bytecode (instruction stream, constant and name pools, nested function / class / import chunks); restore rejects any blob whose re-parsed source does not reproduce that fingerprint, pinning each blob to one program and one compiler build.
+
+Preemption supplies the parked state when the program never suspends on its own. `set_preempt_interval(n)` makes the dispatch loop sample a counter at loop back-edges (a `for` closes on one too, so it is the single sampling point) and raise the ordinary yield path every `n` hits, which unwinds through the same `SyncFrame` staging a `receive()` uses and leaves the coroutine `Ready` while `top_loop` returns `HostYield(Preempted)`. Sampling is gated on a per-frame `frame_safe` flag that only the dispatch `Call` path and `scheduler_step` ever set, so native re-entry (class bodies, module init, `sort(key=...)`, generator drains) is unpreemptible by default and a new re-entrant path inherits that default instead of silently corrupting a blob.
+
+Chunk-derived tables (bytecode, name pools, the extern table) are not stored: they come from the re-parse, only dynamic state crosses the wire. Restore runs in two passes because hashing reads the heap: first every slot is materialised (sets and frozensets land empty), then a rehash pass rebuilds dict indexes and fills the sets, and `rebuild_mro` recomputes each class linearization. IC and format-template caches start empty and warm lazily; the MRO cache is repopulated during restore. `Extern` handles resolve by name against the re-parsed chunk's extern table; host-side resources (in-flight host calls, DOM handles) are not part of the snapshot. `state_globals` / `state_stack` introspect a parked run without resuming it. See [Snapshots](/language/snapshots) for the host-facing feature and the [WASM module ABI](/reference/wasm-abi#snapshot-exports) for the exports and blob layout.
+
 ## References
 
 1. Aho, Sethi & Ullman. *Compilers: Principles, Techniques and Tools* (1986). LUT-based lexer.

@@ -3,7 +3,7 @@
     "source": "MicroPython tests/basics differential vs CPython 3.13",
     "verified": "each repro re-run through VM + python3",
     "count": 4,
-    "fixed": "100 bugs fixed in vm.json: try/finally unwinding, yield-from expressions, range overflow/truncation/contains, in-place set ops, del of closures, lt sorting, nested next() corruption, nested generator/comprehension ForIter relocation, nested-call spread-arg count corruption, spread-arg after keyword, kwarg name colliding with *args/**kwargs param, kwarg duplicated into **kwargs."
+    "fixed": "101 bugs fixed in vm.json: try/finally unwinding, yield-from expressions, range overflow/truncation/contains, in-place set ops, del of closures, lt sorting, nested next() corruption, nested generator/comprehension ForIter relocation, nested-call spread-arg count corruption, spread-arg after keyword, kwarg name colliding with *args/**kwargs param, kwarg duplicated into **kwargs, deep sync-frame resume order."
   },
   "bugs": [
     {

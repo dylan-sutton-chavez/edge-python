@@ -14,12 +14,12 @@
     (async () => {
       // Drive the worker ourselves (no `entry`) so we attach onOutput once and reuse across evals.
       while (!el.worker) await new Promise((r) => setTimeout(r, 10));
-      el.onOutput((line) => st.lines.push(line));
+      el.worker.onOutput((line) => st.lines.push(line));
       // CLI calls this per input with replayed history; runtime recompiles each time.
       window.__edgeRun = async (src) => {
         st.lines = []; st.done = false; st.ok = false; st.err = ""; st.code = null;
         try {
-          const res = await el.run(src, { baseUrl: location.href, incremental: true });
+          const res = await el.worker.run(src, { baseUrl: location.href, incremental: true });
           // SystemExit: clean termination carrying an exit code, not an error.
           if (res && typeof res.exitCode === "number") { st.code = res.exitCode; st.ok = true; }
           else if (res && res.out) st.err = res.out;

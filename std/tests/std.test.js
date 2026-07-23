@@ -93,7 +93,7 @@ async function runPackage(pkg) {
             await ready;
             // Byte-stream stdout: one chunk per print() call (body + its `end`); collect verbatim.
             globalThis.chunks = [];
-            el.onOutput((chunk) => { globalThis.chunks.push(chunk); });
+            el.worker.onOutput((chunk) => { globalThis.chunks.push(chunk); });
             globalThis.el = el;
         }, MANIFEST);
 
@@ -101,7 +101,7 @@ async function runPackage(pkg) {
             const src = `from ${pkg} import *\n${c.src}`;
             const result = await page.evaluate(async (s) => {
                 globalThis.chunks = [];
-                const { out } = await globalThis.el.run(s);
+                const { out } = await globalThis.el.worker.run(s);
                 // One entry per print() call; drop its single trailing newline (the `end`).
                 const output = globalThis.chunks.map((c) => c.replace(/\n$/, ""));
                 return { output, error: out || null };
