@@ -159,20 +159,22 @@ print(list(Up(3)))
 
 ## Callable
 
-`__call__` makes instances invocable.
+`__call__` makes instances invocable. Positional and keyword arguments are forwarded like any method call.
 
 ```python
 class Double:
-  def __call__(self, x):
-    return x * 2
+  def __call__(self, x, times=2):
+    return x * times
 
 d = Double()
 print(d(7))
+print(d(7, times=3))
 print(callable(d))
 ```
 
 ```text Output
 14
+21
 True
 ```
 

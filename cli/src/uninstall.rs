@@ -11,7 +11,8 @@ const UNINSTALL_SH: &str = include_str!("../setup/uninstall.sh");
 
 pub fn run() -> Result<()> {
     println!("This removes the edge binary and the PATH entry from your shell rc files.");
-    print!("Remove the system Chromium that install.sh added too? [y/N] ");
+    println!("System browsers (apt/brew Chromium, Chrome) are never touched.");
+    print!("Also remove the bundled chrome-headless-shell cache at ~/.cache/edge? [y/N] ");
     std::io::stdout().flush().ok();
 
     let mut ans = String::new();

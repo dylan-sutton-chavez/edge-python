@@ -527,7 +527,7 @@ pub(super) fn push_escape(out: &mut String, chars: &mut core::iter::Peekable<cor
 // Builtin types registered as Type heap objects at VM init.
 pub const BUILTIN_TYPES: &[&str] = &[
     "int", "float", "str", "bytes", "bool", "list",
-    "tuple", "dict", "set", "frozenset", "range", "slice", "type", "NoneType",
+    "tuple", "dict", "set", "frozenset", "range", "slice", "type", "NoneType", "object",
     "Exception", "BaseException",
     "ValueError", "TypeError", "NameError", "KeyError",
     "IndexError", "AttributeError", "RuntimeError",

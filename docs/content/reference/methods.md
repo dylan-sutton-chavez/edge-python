@@ -370,7 +370,7 @@ None
 
 ### Mutation
 
-`update` accepts a `dict`, an iterable of length-2 sequences, or keyword arguments (`d.update(a=1)`). `popitem` returns the last-inserted entry; empty -> `KeyError`. `pop(key)` on a missing key -> `KeyError` unless a default is given. The `dict.fromkeys(iterable[, value])` classmethod builds a new dict mapping each key to `value` (default `None`). No `clear`.
+`update` accepts a `dict`, an iterable of length-2 sequences, or keyword arguments (`d.update(a=1)`). `popitem` returns the last-inserted entry; empty -> `KeyError`. `pop(key)` on a missing key -> `KeyError` unless a default is given. The `dict.fromkeys(iterable[, value])` classmethod builds a new dict mapping each key to `value` (default `None`). `clear` empties the dict in place, so shared references see it.
 
 ```python
 d = {"a": 1}
@@ -402,10 +402,15 @@ d = {}
 d.setdefault("a", 1)
 d.setdefault("a", 999) # second call ignored
 print(d)
+
+alias = d
+d.clear()
+print(d, alias)
 ```
 
 ```text Output
 {'a': 1}
+{} {}
 ```
 
 ## Set methods

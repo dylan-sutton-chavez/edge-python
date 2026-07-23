@@ -165,6 +165,10 @@ pub static ALL_METHODS: &[MethodDesc] = methods! {
     "float" {
         "is_integer" => numeric::is_integer, ro, 0..0;
     }
+    // Appended group: keeps snapshot method ids stable.
+    "dict" {
+        "clear" => dict::clear, rw, 0..0;
+    }
 };
 
 #[inline]

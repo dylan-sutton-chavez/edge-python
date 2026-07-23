@@ -318,6 +318,11 @@ impl DictMap {
     pub fn len(&self) -> usize { self.entries.len() }
     pub fn is_empty(&self) -> bool { self.entries.is_empty() }
 
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.index.clear();
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (Val, Val)> + '_ {
         self.entries.iter().map(|&(k, v)| (k, v))
     }

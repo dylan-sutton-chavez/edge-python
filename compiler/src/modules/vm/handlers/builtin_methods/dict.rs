@@ -34,6 +34,14 @@ pub fn copy(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
     vm.alloc_and_push_dict(dm)
 }
 
+// `dict.clear()`, remove all entries in place.
+pub fn clear(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
+    dict_mut(vm, recv, "clear: receiver is not a dict", |dict, _heap| {
+        dict.clear(); Ok(())
+    })?;
+    vm.push(Val::none()); Ok(())
+}
+
 // `dict.popitem()`, pop the last (k, v); KeyError on empty dict.
 pub fn popitem(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
     let pair = dict_mut(vm, recv, "popitem: receiver is not a dict", |dict, heap| {

@@ -73,11 +73,15 @@ install_browser() {
   echo "installed: $CHROME_BIN"
 }
 
+echo "downloading edge (${target})..."
 mkdir -p "$INSTALL_DIR"
 curl -fsSL "${BASE}/edge-${target}.tar.gz" | tar -xz -C "$INSTALL_DIR" edge
 chmod +x "$INSTALL_DIR/edge"
+echo "installed $INSTALL_DIR/edge"
 
-if ! have_browser; then
+if have_browser; then
+  echo "browser: found an existing Chrome/Chromium, skipping chrome-headless-shell download"
+else
   install_browser
 fi
 
@@ -93,14 +97,16 @@ if [ -n "$rc" ] && [ -n "$chrome_platform" ] && [ -x "$CHROME_BIN" ] && ! grep -
   echo "added EDGE_CHROME_PATH to $rc"
 fi
 
-case ":$PATH:" in
-  *":$INSTALL_DIR:"*) ;;
-  *)
-    if [ -n "$rc" ] && ! grep -qs "$INSTALL_DIR" "$rc" 2>/dev/null; then
-      printf '\nexport PATH="%s:$PATH"\n' "$INSTALL_DIR" >> "$rc"
-      echo "added $INSTALL_DIR to PATH in $rc; run 'source $rc' or open a new shell"
-    fi
-    ;;
-esac
+# Check the rc file, not the live $PATH: after an uninstall the old shell still has the dir in $PATH, but new shells would not.
+rc_has_path() {
+  grep -qs "$INSTALL_DIR" "$rc" 2>/dev/null && return 0
+  # The default dir is often already on PATH via a $HOME-spelled rc/profile line.
+  [ "$INSTALL_DIR" = "$HOME/.local/bin" ] && grep -qs '\$HOME/.local/bin' "$rc" 2>/dev/null
+}
+
+if [ -n "$rc" ] && ! rc_has_path; then
+  printf '\nexport PATH="%s:$PATH"\n' "$INSTALL_DIR" >> "$rc"
+  echo "added $INSTALL_DIR to PATH in $rc; run 'source $rc' or open a new shell"
+fi
 
 "$INSTALL_DIR/edge" --version

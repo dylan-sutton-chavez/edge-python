@@ -386,6 +386,15 @@ impl<'a> VM<'a> {
                 self.dispatch_native(id, positional, kw_flat, chunk, slots)?; // int/set/list/... construct
                 return Ok(true);
             }
+            // `object()`: unique featureless instance.
+            if name == "object" {
+                if !positional.is_empty() || !kw_flat.is_empty() {
+                    return Err(cold_type("object() takes no arguments"));
+                }
+                let inst = self.heap.alloc(HeapObj::Instance(callee, Rc::new(RefCell::new(DictMap::new()))))?;
+                self.push(inst);
+                return Ok(true);
+            }
             // Other Type objects are exception classes: build an ExcInstance for `raise X("msg")`.
             if !kw_flat.is_empty() {
                 return Err(cold_type("exception class takes no keyword arguments"));
@@ -457,14 +466,15 @@ impl<'a> VM<'a> {
                 match self.heap.get(callee) { HeapObj::Instance(c, _) => *c, _ => unreachable!() },
                 "__call__")
         {
-            if !kw_flat.is_empty() { return Err(cold_type("__call__ does not accept keyword arguments")); }
             if self.depth >= self.max_calls { return Err(cold_depth()); }
             self.pending.method_binding = Some((class, callee));
             self.push(func);
             self.push(callee);
             for a in positional { self.push(*a); }
+            for k in kw_flat { self.push(*k); }
             let argc = (positional.len() + 1) as u16;
-            self.exec_call(argc, chunk, slots)?;
+            let encoded = ((num_kw as u16) << 8) | argc;
+            self.exec_call(encoded, chunk, slots)?;
             return Ok(true);
         }
 

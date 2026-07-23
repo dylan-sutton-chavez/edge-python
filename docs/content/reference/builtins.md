@@ -595,9 +595,34 @@ Box
 ZeroDivisionError
 ```
 
+### object
+
+`object()` builds a unique featureless instance — the classic sentinel idiom. `type(x) is object` holds for it, and every value is an instance of `object`. A lone `object` base in a class statement is a no-op (`class C(object)` equals `class C`).
+
+```python
+SENTINEL = object()
+
+print(SENTINEL is object())
+print(type(SENTINEL) is object)
+print(isinstance(SENTINEL, object))
+print(isinstance(42, object))
+
+class C(object):
+  pass
+print(isinstance(C(), object))
+```
+
+```text Output
+False
+True
+True
+True
+True
+```
+
 ### isinstance
 
-`isinstance(obj, X)`: `X` is a built-in type, exception class, user-defined `Class`, or tuple of any of those. String `X` (`isinstance(x, "str")`) -> `TypeError`. `bool` is a subtype of `int`. Exception classes walk the standard hierarchy (`isinstance(e, Exception)` matches any built-in exception). User classes walk the inheritance chain.
+`isinstance(obj, X)`: `X` is a built-in type, exception class, user-defined `Class`, or tuple of any of those. String `X` (`isinstance(x, "str")`) -> `TypeError`. `bool` is a subtype of `int`. Exception classes walk the standard hierarchy (`isinstance(e, Exception)` matches any built-in exception). User classes walk the inheritance chain. `object` matches every value.
 
 ```python
 print(isinstance(42, int))

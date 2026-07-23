@@ -16,7 +16,6 @@ tiny_http = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
-owo-colors = "4"
 # Catches Ctrl+C in non-REPL commands so they shut down cleanly.
 ctrlc = "3"
 # Drives a system-installed Chrome/Chromium via CDP; the install.sh provisions the browser.

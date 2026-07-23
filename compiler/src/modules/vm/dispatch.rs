@@ -938,7 +938,9 @@ impl<'a> VM<'a> {
         let class_idx = (op & 0xFF) as usize;
         let num_bases = (op >> 8) as usize;
         // Pop bases first so a misencoded operand fails before we touch the body.
-        let bases = self.pop_n(num_bases)?;
+        let mut bases = self.pop_n(num_bases)?;
+        // An `object` base is a no-op.
+        bases.retain(|&b| !(b.is_heap() && matches!(self.heap.get(b), HeapObj::Type(n) if n == "object")));
         for &b in &bases {
             if !b.is_heap() || !matches!(self.heap.get(b), HeapObj::Class(..)) {
                 return Err(cold_type("base class must be a class object"));

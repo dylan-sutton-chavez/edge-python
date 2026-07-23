@@ -170,7 +170,6 @@ Removes the binary and its `PATH` entry. Asks before removing the bundled `chrom
 | Flag | Effect |
 |------|--------|
 | `--packages <file>` | Use a specific manifest instead of `./packages.json` |
-| `--no-color` | Disable colored output |
 | `--version` / `-V` | Print version |
 
 `Ctrl+C` cancels any running command cleanly.

@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use pkg::Manifest;
 
 #[derive(Parser)]
-#[command(name = "edge", version, about = "The Edge Python developer command line interface.", after_help = "Press Ctrl+C at any time to exit cleanly.", after_long_help = "Docs: https://edgepython.com/")]
+#[command(name = "edge", version, about = "The Edge Python developer command line interface.", after_help = "Press Ctrl+C at any time to exit cleanly.", after_long_help = "Docs: https://edgepython.com/", color = clap::ColorChoice::Never)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -27,10 +27,6 @@ struct Cli {
     /// Use a specific manifest instead of ./packages.json.
     #[arg(long, global = true)]
     packages: Option<PathBuf>,
-
-    /// Disable colored output.
-    #[arg(long, global = true)]
-    no_color: bool,
 }
 
 #[derive(Subcommand)]
@@ -63,13 +59,12 @@ enum Cmd {
         #[arg(long)]
         out: Option<PathBuf>,
     },
-    /// Remove the edge binary, its PATH entry, and optionally Chromium.
+    /// Remove the edge binary, its PATH entry, and optionally the bundled browser cache.
     Uninstall,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    ui::init(cli.no_color);
     ctrlc::set_handler(|| std::process::exit(130)).ok();
 
     let manifest_path = cli.packages.unwrap_or_else(|| PathBuf::from("packages.json"));

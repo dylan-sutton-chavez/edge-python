@@ -147,7 +147,8 @@ impl<'a> VM<'a> {
             };
             match heap.get(t) {
                 HeapObj::Type(name) => Ok(
-                    matches_exc_class(obj_ty, name)
+                    name == "object" // everything is an object
+                    || matches_exc_class(obj_ty, name)
                     || (obj_ty == "bool" && name == "int")
                     || exc_match(name)
                 ),

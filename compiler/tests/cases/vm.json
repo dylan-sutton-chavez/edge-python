@@ -3727,5 +3727,20 @@
   {"src":"class C:\n    def __init__(self):\n        self.a = 5\nx = C()\nprint(f\"{x.a=}\")","output":["x.a=5"]},
   {"src":"print(\"a\" \"b\".upper())","output":["AB"]},
   {"src":"v = 7\nprint(f\"\" f\"{v}\" \"x\" f\"{v}\")","output":["7x7"]},
-  {"src":"class E:\n    def __enter__(self):\n        return self\nwith E():\n    pass","output":[],"error":"context manager protocol"}
+  {"src":"class E:\n    def __enter__(self):\n        return self\nwith E():\n    pass","output":[],"error":"context manager protocol"},
+  {"src":"class F:\n    def __call__(self, a, b=0):\n        return a + b\nprint(F()(1, b=2))","output":["3"]},
+  {"src":"class F:\n    def __call__(self, a, b=0):\n        return a + b\nprint(F()(a=5, b=1))","output":["6"]},
+  {"src":"class F:\n    def __call__(self, a, b=0, c=1):\n        return a + b + c\nprint(F()(1, b=2, c=3))","output":["6"]},
+  {"src":"class F:\n    def __call__(self, a, b, c=0):\n        return (a, b, c)\nprint(F()(1, c=5, b=2))","output":["(1, 2, 5)"]},
+  {"src":"class F:\n    def __call__(self, **kw):\n        return kw[\"x\"] + kw[\"y\"]\nprint(F()(x=3, y=4))","output":["7"]},
+  {"src":"print(type(object()) is object)","output":["True"]},
+  {"src":"a = object()\nb = object()\nprint(a is b, a is a)","output":["False True"]},
+  {"src":"print(isinstance(object(), object))\nprint(isinstance(1, object), isinstance(\"s\", object), isinstance(None, object))","output":["True","True True True"]},
+  {"src":"SENTINEL = object()\ndef f(x=SENTINEL):\n    return x is SENTINEL\nprint(f(), f(1))","output":["True False"]},
+  {"src":"class C(object):\n    def m(self):\n        return 7\nprint(C().m())\nprint(isinstance(C(), object))","output":["7","True"]},
+  {"src":"d = {\"a\": 1}\nd.clear()\nprint(d)","output":["{}"]},
+  {"src":"d = {1: 2, 3: 4}\nd.clear()\nprint(len(d))","output":["0"]},
+  {"src":"d = {\"a\": 1}\ne = d\nd.clear()\nprint(e)","output":["{}"]},
+  {"src":"d = {\"a\": 1}\nd.clear()\nd[\"b\"] = 2\nprint(d)","output":["{'b': 2}"]},
+  {"src":"print({\"a\": 1}.clear())","output":["None"]}
 ]
