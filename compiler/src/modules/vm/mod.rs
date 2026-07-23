@@ -51,7 +51,7 @@ pub(crate) struct Pending {
     pub exc_val: Option<Val>,
     /* `(class, self)` for the next user-function call when it's invoked as a method; populated by method-dispatch paths and consumed by `run_body_with_frame`. */
     pub method_binding: Option<(Val, Val)>,
-    /* Set when the preempt interval elapses; read by `top_loop` to yield `Preempted`. */
+    /* Set at preempt; `top_loop` yields `Preempted`. */
     pub preempt_request: bool,
 }
 
@@ -155,10 +155,10 @@ pub struct VM<'a> {
     pub(crate) pending_sync_frames: Vec<types::SyncFrame>,
     /* Overrides `exec`'s captured `exc_base`. Set by `resume_coroutine` to the level *before* restored exception frames so dispatch's handler search includes them; consumed once at exec entry. */
     pub(crate) pending_exec_exc_base: Option<usize>,
-    /* Back-edges left before the next preempt; 0 disables. Reloaded from `preempt_every`. */
+    /* Back-edges until the next preempt; 0 disables. */
     pub(crate) preempt_left: usize,
     pub(crate) preempt_every: usize,
-    /* True while this `exec` frame can unwind; only the Call path and `scheduler_step` set it. */
+    /* True while this `exec` frame can unwind. */
     pub(crate) frame_safe: bool,
     pub(crate) pending_exec_safe: bool,
     pub(crate) yielded: bool,

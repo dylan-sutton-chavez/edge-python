@@ -23,7 +23,7 @@ const STATUS_PENDING_EVENT = 3;
 const STATUS_ERROR = 4;
 const STATUS_PENDING_HOST_CALL = 5;
 const STATUS_EXIT = 6; // uncaught SystemExit: clean termination, low 8 bits = exit code
-const STATUS_PREEMPTED = 7; // interval elapsed at a loop back-edge; snapshottable, resumes with no host action
+const STATUS_PREEMPTED = 7; // preempt tick; resumes with no host action
 const ERR_RUNTIME = 2; // wasm-abi error_kind::RUNTIME, for failed deferred host calls
 
 // Worker-lifetime state
@@ -39,14 +39,14 @@ let eventWaiter = null;
 const pendingEvents = [];
 /* Deferred host calls captured by env.host_call_native, keyed by the VM-assigned call_id; drained concurrently in the PENDING_HOST_CALL branch. */
 const pendingHostCalls = new Map();
-// Back-edges between preempt yields; 0 leaves the VM cooperative-only.
+// Back-edges between preempt yields; 0 disables.
 let preemptEvery = 0;
 let pauseRequested = false;
-// Set before a run's first await so a mid-boot `pause` still waits for a park.
+// True from run entry so mid-boot pause waits.
 let running = false;
-// Resolves the caller's `pause()` once the run is actually parked.
+// Resolves pause() once actually parked.
 let pauseAck = null;
-// Resolves at `resume()` to un-park a run held at a preempt.
+// Resolves at resume() to release a preempt hold.
 let resumeGate = null;
 /* (name, args) => Promise<value>. Set by worker.js (postMessage round-trip) or by a main-thread embedder. */
 let hostCallDelegate = null;
@@ -92,15 +92,17 @@ export async function load({ wasmUrl, integrity = true, loaders: loaderUrls = []
 
 export async function run(opts) {
     running = true;
-    try { return await runProgram(opts); }
+    try {
+        const payload = TE.encode(opts.src);
+        if (payload.length > SOURCE_LIMIT) throw new Error(`source exceeds ${SOURCE_LIMIT} bytes`);
+        return await execute({ ...opts, payload, start: (e, n) => e.run_start(n) });
+    }
     finally { running = false; }
 }
 
-async function runProgram({ src, entryDir = '', baseUrl = null, onLine, incremental = false }) {
-    if (!wasmModule) throw new Error('engine.load() must be called before run()');
-
-    const srcBytes = TE.encode(src);
-    if (srcBytes.length > SOURCE_LIMIT) throw new Error(`source exceeds ${SOURCE_LIMIT} bytes`);
+/* Shared run/restore core: instance, host imports, prefetch, then drive `start`. */
+async function execute({ src, payload, start, entryDir = '', baseUrl = null, onLine, incremental = false }) {
+    if (!wasmModule) throw new Error('engine.load() must be called first');
 
     let lockfile = new Map();
     if (integrityActive) {
@@ -124,8 +126,8 @@ async function runProgram({ src, entryDir = '', baseUrl = null, onLine, incremen
     /* Both kinds graft `<name> -> mt:<name>` so the bare name resolves; eager ones (programmatic objects) register now, lazy ones (urls) load on first import during prefetch. In incremental mode the native table is preserved, so skip re-registration. */
     const { mainThreadSpecs, augmentedImports } = hostImportMap(registerHost, incremental);
 
-    const writeSrc = () => new Uint8Array(exports.memory.buffer).set(srcBytes, exports.src_ptr());
-    writeSrc();
+    const writePayload = () => new Uint8Array(exports.memory.buffer).set(payload, exports.src_ptr());
+    writePayload();
 
     await bfsPrefetch(src, exports, lockfile, {
         cache,
@@ -147,13 +149,12 @@ async function runProgram({ src, entryDir = '', baseUrl = null, onLine, incremen
         registerHost,
     });
 
-    // `wasm_alloc` during prefetch may have grown memory and detached our src view.
-    writeSrc();
+    // `wasm_alloc` during prefetch may have grown memory and detached our view.
+    writePayload();
 
-    // Driver loop: `run_start` then `run_resume` after each host wake-up until Done / Error.
     const t0 = performance.now();
     pendingHostCalls.clear(); // drop any stale captures from a prior run
-    const result = await drive(exports, rt, exports.run_start(srcBytes.length), t0);
+    const result = await drive(exports, rt, start(exports, payload.length), t0);
 
     if (integrityActive) {
         try { await cache.saveLockfile(lockfile); }
@@ -203,7 +204,7 @@ function hostImportMap(registerHost, skipRegistration) {
     return { mainThreadSpecs, augmentedImports };
 }
 
-/* Fresh wasm instance wired to this run's env; resets module registry and native table. */
+/* Fresh instance; resets module registry and native table. */
 async function makeInstance(onLine, lockfile, rt) {
     const env = makeCompilerEnv({
         getExports: () => compilerExports,
@@ -228,15 +229,15 @@ function settlePause(parked) {
     if (ack) ack(parked);
 }
 
-/* Shared driver: services each yield kind until Done / Error / Exit, then decodes the out buffer. */
+/* Service yields until Done / Error / Exit. */
 async function drive(exports, rt, status, t0) {
     while (true) {
         const kind = (status >>> STATUS_KIND_SHIFT) & 7;
         if (kind === STATUS_DONE || kind === STATUS_ERROR || kind === STATUS_EXIT) break;
-        // Every other kind leaves the VM parked, so a waiting pause() can settle here.
+        // Any yield is a park; settle pause() here.
         if (pauseRequested) settlePause(true);
         if (kind === STATUS_PREEMPTED) {
-            // A macrotask, not a microtask: queued postMessage events only land between tasks.
+            // Macrotask, so queued postMessage events land.
             await new Promise((r) => setTimeout(r, 0));
             if (pauseRequested) await new Promise((r) => { resumeGate = r; });
         } else if (kind === STATUS_PENDING_TIMER) {
@@ -281,7 +282,7 @@ async function drive(exports, rt, status, t0) {
 
         status = exports.run_resume();
     }
-    // The run is over; a pause that never found a park must not hang.
+    // Run over; a parkless pause must not hang.
     pauseRequested = false;
     settlePause(false);
     // SystemExit: low 8 bits are the exit code, not a buffer length; finish without a traceback.
@@ -296,7 +297,7 @@ async function drive(exports, rt, status, t0) {
     return { out, ms };
 }
 
-/* Blob layout prefix (see vm/snapshot.rs): magic u32, format u32, fingerprint u64, source len u64, source bytes. */
+/* Header layout mirrors vm/snapshot.rs `header`. */
 function snapshotSource(blob) {
     if (blob.length < 24) throw new Error('not an edge-python snapshot');
     const v = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
@@ -306,7 +307,7 @@ function snapshotSource(blob) {
     return TD.decode(blob.subarray(24, 24 + len));
 }
 
-/* An older compiler.wasm has no preempt export: cooperative-only is fine, preemption is not. */
+/* Older wasm lacks the export; only preemption needs it. */
 function applyPreemptInterval(exports) {
     if (!exports.set_preempt_interval) {
         if (preemptEvery > 0) throw new Error('preemption needs a newer compiler.wasm');
@@ -315,20 +316,20 @@ function applyPreemptInterval(exports) {
     exports.set_preempt_interval(preemptEvery);
 }
 
-/* Yield every `n` loop back-edges so any program can be paused; 0 disables. */
+/* Preempt every `n` back-edges; 0 disables. */
 export function setPreemptInterval(n) {
     preemptEvery = Math.max(0, n | 0);
     if (compilerExports) applyPreemptInterval(compilerExports);
 }
 
-/* Park the run for saveState(). Resolves true once parked, false when no run reached a park. */
+/* Park the run; resolves true once parked. */
 export function pause() {
     if (!running) return Promise.resolve(false);
     pauseRequested = true;
     return new Promise((r) => { pauseAck = r; });
 }
 
-/* Release a run held at a preempt; a no-op when parked on an event. */
+/* Release a preempt-held run; no-op otherwise. */
 export function resume() {
     pauseRequested = false;
     const gate = resumeGate;
@@ -336,7 +337,7 @@ export function resume() {
     if (gate) gate();
 }
 
-/* Serialize the currently parked run into a portable blob. Only valid while the program is suspended (waiting on events / timers / frames). */
+/* Serialize the parked run; throws when none. */
 export function saveState() {
     if (!compilerExports) throw new Error('nothing to save: no run has started');
     const len = Number(compilerExports.save_state());
@@ -344,62 +345,26 @@ export function saveState() {
     return new Uint8Array(compilerExports.memory.buffer, compilerExports.snapshot_ptr(), len).slice();
 }
 
-/* Boot a fresh instance from the blob's embedded source and continue it from the saved state. Resolves like run() when the restored program finishes. */
-export async function restoreState(opts) {
+/* Boot from the blob's embedded source, continue from the saved state; resolves like run(). */
+export async function restoreState({ blob, onLine }) {
     running = true;
-    try { return await restoreProgram(opts); }
+    try {
+        const payload = blob instanceof Uint8Array ? blob : new Uint8Array(blob);
+        if (payload.length > SOURCE_LIMIT) throw new Error(`snapshot exceeds ${SOURCE_LIMIT} bytes`);
+        // The embedded source drives prefetch so restored imports resolve.
+        return await execute({ src: snapshotSource(payload), payload, onLine, start: (e, n) => e.restore_state(n) });
+    }
     finally { running = false; }
 }
 
-async function restoreProgram({ blob, onLine }) {
-    if (!wasmModule) throw new Error('engine.load() must be called before restoreState()');
-    const bytes = blob instanceof Uint8Array ? blob : new Uint8Array(blob);
-    if (bytes.length > SOURCE_LIMIT) throw new Error(`snapshot exceeds ${SOURCE_LIMIT} bytes`);
-    const src = snapshotSource(bytes);
-
-    let lockfile = new Map();
-    if (integrityActive) {
-        try { lockfile = await cache.loadLockfile(); }
-        catch { /* non-fatal, same as run() */ }
-    }
-    const rt = makeRt(() => compilerExports);
-    const exports = await makeInstance(onLine, lockfile, rt);
-
-    // Same module registration as run(): the re-parse inside restore_state must resolve the source's imports.
-    const registerHost = makeRegisterHost(exports);
-    const { mainThreadSpecs, augmentedImports } = hostImportMap(registerHost, false);
-    await bfsPrefetch(src, exports, lockfile, {
-        cache,
-        baseUrl: null,
-        entryDir: '',
-        knownMissing,
-        importsMap: augmentedImports,
-        mainThreadSpecs,
-        integrityActive,
-        fetchedSources,
-        compilerExports: exports,
-        rt,
-        loadHost: (name, url) => {
-            if (!loadHostDelegate) throw new Error(`host '${name}' imported but no main-thread loader is wired`);
-            return loadHostDelegate(name, url);
-        },
-        registerHost,
-    });
-
-    new Uint8Array(exports.memory.buffer).set(bytes, exports.src_ptr());
-    const t0 = performance.now();
-    pendingHostCalls.clear();
-    return drive(exports, rt, exports.restore_state(bytes.length), t0);
-}
-
-/* JSON of the parked program's module-level bindings and their reprs. */
+/* Parked program's module bindings as JSON. */
 export function stateGlobals() {
     if (!compilerExports) return {};
     const len = compilerExports.state_globals();
     return JSON.parse(TD.decode(new Uint8Array(compilerExports.memory.buffer, compilerExports.out_ptr(), len)));
 }
 
-/* JSON array describing the parked program's coroutines: state, function, ip, suspended frames. */
+/* Parked program's coroutines as JSON. */
 export function stateStack() {
     if (!compilerExports) return [];
     const len = compilerExports.state_stack();

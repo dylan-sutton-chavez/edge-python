@@ -1,17 +1,24 @@
-use alloc::borrow::ToOwned;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cell::RefCell;
+use core::hash::Hasher;
 
 use crate::modules::parser::types::{ImportKind, SSAChunk};
-use super::VM;
+use crate::util::fx::{FxHashMap, FxHasher};
+use super::{Pending, VM};
 use super::types::*;
 
 const MAGIC: u32 = 0x4E53_5045;
 const FORMAT: u32 = 1;
 
 pub type SnapErr = String;
+
+type ExternMap = FxHashMap<String, ExternFn>;
+
+fn s_err(what: &str, detail: &str) -> SnapErr {
+    crate::s!("snapshot: ", str what, " '", str detail, "'")
+}
 
 struct W {
     b: Vec<u8>,
@@ -31,16 +38,18 @@ impl W {
     fn bytes(&mut self, v: &[u8]) { self.usz(v.len()); self.b.extend_from_slice(v); }
     fn str(&mut self, v: &str) { self.bytes(v.as_bytes()); }
     fn val(&mut self, v: Val) { self.u64(v.0); }
-    fn vals(&mut self, v: &[Val]) { self.usz(v.len()); for x in v { self.val(*x); } }
-    fn opt_val(&mut self, v: Option<Val>) {
-        match v { Some(x) => { self.u8(1); self.val(x); } None => self.u8(0) }
+    fn seq<T>(&mut self, items: &[T], f: impl Fn(&mut Self, &T)) {
+        self.usz(items.len());
+        for x in items { f(self, x); }
     }
-    fn opt_u64(&mut self, v: Option<u64>) {
-        match v { Some(x) => { self.u8(1); self.u64(x); } None => self.u8(0) }
+    fn vals(&mut self, v: &[Val]) { self.seq(v, |w, x| w.val(*x)); }
+    fn opt<T>(&mut self, v: Option<T>, f: impl Fn(&mut Self, T)) {
+        match v { Some(x) => { self.u8(1); f(self, x); } None => self.u8(0) }
     }
-    fn opt_usz(&mut self, v: Option<usize>) {
-        match v { Some(x) => { self.u8(1); self.usz(x); } None => self.u8(0) }
-    }
+    fn opt_val(&mut self, v: Option<Val>) { self.opt(v, Self::val); }
+    fn opt_u32(&mut self, v: Option<u32>) { self.opt(v, Self::u32); }
+    fn opt_u64(&mut self, v: Option<u64>) { self.opt(v, Self::u64); }
+    fn opt_usz(&mut self, v: Option<usize>) { self.opt(v, Self::usz); }
 }
 
 struct R<'a> {
@@ -65,10 +74,9 @@ impl<'a> R<'a> {
     fn i32v(&mut self) -> Result<i32, SnapErr> { Ok(self.u32()? as i32) }
     fn i128v(&mut self) -> Result<i128, SnapErr> { Ok(i128::from_le_bytes(self.take(16)?.try_into().unwrap())) }
     fn usz(&mut self) -> Result<usize, SnapErr> {
-        let v = self.u64()?;
-        usize::try_from(v).map_err(|_| "snapshot value out of range".to_string())
+        usize::try_from(self.u64()?).map_err(|_| "snapshot value out of range".to_string())
     }
-    /* Bounded count: rejects lengths beyond the remaining payload so corrupt blobs cannot force huge allocations. */
+    /* Rejects counts beyond the remaining payload. */
     fn count(&mut self) -> Result<usize, SnapErr> {
         let n = self.usz()?;
         if n > self.b.len() - self.p { return Err("snapshot truncated".to_string()); }
@@ -82,59 +90,238 @@ impl<'a> R<'a> {
     fn str(&mut self) -> Result<String, SnapErr> {
         String::from_utf8(self.bytes()?).map_err(|_| "snapshot string not utf-8".to_string())
     }
+    /* Static-str decode leaks; stored errors are rare. */
+    fn leakstr(&mut self) -> Result<&'static str, SnapErr> {
+        Ok(alloc::boxed::Box::leak(self.str()?.into_boxed_str()))
+    }
     fn val(&mut self) -> Result<Val, SnapErr> { Ok(Val(self.u64()?)) }
-    fn vals(&mut self) -> Result<Vec<Val>, SnapErr> {
+    fn seq<T>(&mut self, f: impl Fn(&mut Self) -> Result<T, SnapErr>) -> Result<Vec<T>, SnapErr> {
         let n = self.count()?;
         let mut v = Vec::with_capacity(n);
-        for _ in 0..n { v.push(self.val()?); }
+        for _ in 0..n { v.push(f(self)?); }
         Ok(v)
     }
-    fn opt_val(&mut self) -> Result<Option<Val>, SnapErr> {
-        Ok(if self.u8()? == 1 { Some(self.val()?) } else { None })
+    fn vals(&mut self) -> Result<Vec<Val>, SnapErr> { self.seq(Self::val) }
+    fn opt<T>(&mut self, f: impl Fn(&mut Self) -> Result<T, SnapErr>) -> Result<Option<T>, SnapErr> {
+        Ok(if self.u8()? == 1 { Some(f(self)?) } else { None })
     }
-    fn opt_u64(&mut self) -> Result<Option<u64>, SnapErr> {
-        Ok(if self.u8()? == 1 { Some(self.u64()?) } else { None })
-    }
-    fn opt_usz(&mut self) -> Result<Option<usize>, SnapErr> {
-        Ok(if self.u8()? == 1 { Some(self.usz()?) } else { None })
+    fn opt_val(&mut self) -> Result<Option<Val>, SnapErr> { self.opt(Self::val) }
+    fn opt_u32(&mut self) -> Result<Option<u32>, SnapErr> { self.opt(Self::u32) }
+    fn opt_u64(&mut self) -> Result<Option<u64>, SnapErr> { self.opt(Self::u64) }
+    fn opt_usz(&mut self) -> Result<Option<usize>, SnapErr> { self.opt(Self::usz) }
+}
+
+/* One declaration emits both codec sides. */
+macro_rules! codec {
+    (struct $T:ident, $put:ident, $get:ident { $($f:ident: $s:tt),* $(,)? }) => {
+        fn $put(w: &mut W, x: &$T) { $( codec!(@put w, (&x.$f), $s); )* }
+        fn $get(r: &mut R) -> Result<$T, SnapErr> { Ok($T { $($f: codec!(@get r, $s)),* }) }
+    };
+    (enum $T:ident, $put:ident, $get:ident {
+        $($tag:literal $V:ident $({ $($sf:ident: $ss:tt),* })? $(( $($tf:ident: $ts:tt),* ))?),* $(,)?
+    }) => {
+        fn $put(w: &mut W, x: &$T) {
+            match x {
+                $( $T::$V $({ $($sf),* })? $(( $($tf),* ))? => {
+                    w.u8($tag);
+                    $($( codec!(@put w, ($sf), $ss); )*)?
+                    $($( codec!(@put w, ($tf), $ts); )*)?
+                } )*
+            }
+        }
+        fn $get(r: &mut R) -> Result<$T, SnapErr> {
+            Ok(match r.u8()? {
+                $( $tag => $T::$V $({ $($sf: codec!(@get r, $ss)),* })? $(( $(codec!(@get r, $ts)),* ))?, )*
+                t => return Err(s_err("unknown tag", itoa::Buffer::new().format(t))),
+            })
+        }
+    };
+    (@put $w:ident, ($x:expr), str) => { $w.str($x) };
+    (@put $w:ident, ($x:expr), vals) => { $w.vals($x) };
+    (@put $w:ident, ($x:expr), leakstr) => { $w.str($x) };
+    (@put $w:ident, ($x:expr), default) => { let _ = $x; };
+    (@put $w:ident, ($x:expr), [str]) => { $w.seq($x, |w, v| w.str(v)) };
+    (@put $w:ident, ($x:expr), [$m:ident]) => { $w.seq($x, |w, v| w.$m(*v)) };
+    (@put $w:ident, ($x:expr), [$p:ident, $g:ident]) => { $w.seq($x, $p) };
+    (@put $w:ident, ($x:expr), ($p:ident, $g:ident)) => { $p($w, $x) };
+    (@put $w:ident, ($x:expr), $m:ident) => { $w.$m(*$x) };
+    (@get $r:ident, str) => { $r.str()? };
+    (@get $r:ident, vals) => { $r.vals()? };
+    (@get $r:ident, leakstr) => { $r.leakstr()? };
+    (@get $r:ident, default) => { Default::default() };
+    (@get $r:ident, [str]) => { $r.seq(|r| r.str())? };
+    (@get $r:ident, [$m:ident]) => { $r.seq(|r| r.$m())? };
+    (@get $r:ident, [$p:ident, $g:ident]) => { $r.seq($g)? };
+    (@get $r:ident, ($p:ident, $g:ident)) => { $g($r)? };
+    (@get $r:ident, $m:ident) => { $r.$m()? };
+}
+
+fn put_val_pair(w: &mut W, p: &(Val, Val)) { w.val(p.0); w.val(p.1); }
+fn get_val_pair(r: &mut R) -> Result<(Val, Val), SnapErr> { Ok((r.val()?, r.val()?)) }
+fn put_slot_val(w: &mut W, p: &(usize, Val)) { w.usz(p.0); w.val(p.1); }
+fn get_slot_val(r: &mut R) -> Result<(usize, Val), SnapErr> { Ok((r.usz()?, r.val()?)) }
+fn put_name_val(w: &mut W, p: &(String, Val)) { w.str(&p.0); w.val(p.1); }
+fn get_name_val(r: &mut R) -> Result<(String, Val), SnapErr> { Ok((r.str()?, r.val()?)) }
+fn put_i32_pair(w: &mut W, p: &(i32, i32)) { w.i32v(p.0); w.i32v(p.1); }
+fn get_i32_pair(r: &mut R) -> Result<(i32, i32), SnapErr> { Ok((r.i32v()?, r.i32v()?)) }
+
+codec!(enum BlockKind, put_block_kind, get_block_kind { 0 Except, 1 Finally });
+
+codec!(enum BodyRef, put_body_ref, get_body_ref { 0 Fn(fi: usz), 1 Module });
+
+codec!(enum IterFrame, put_iter_frame, get_iter_frame {
+    0 Seq { items: vals, idx: usz },
+    1 Range { cur: i64, end: i64, step: i64 },
+    2 Coroutine(v: val),
+    3 UserDefined(v: val),
+});
+
+codec!(struct ExceptionFrame, put_exc_frame, get_exc_frame {
+    kind: (put_block_kind, get_block_kind),
+    handler_ip: usz,
+    stack_depth: usz,
+    iter_depth: usz,
+    with_depth: usz,
+    unwind_depth: usz,
+});
+
+codec!(struct SyncFrame, put_sync_frame, get_sync_frame {
+    ip: usz,
+    fi: usz,
+    slots: vals,
+    stack_delta: vals,
+    iter_delta: [put_iter_frame, get_iter_frame],
+    exception_delta: [put_exc_frame, get_exc_frame],
+});
+
+codec!(enum SchedulerStatus, put_sched, get_sched {
+    0 Done,
+    1 PendingTimer(d: u64),
+    2 PendingFrame,
+    3 PendingEvent,
+    4 PendingHostCall,
+    5 Preempted,
+});
+
+codec!(enum VmErr, put_vm_err, get_vm_err {
+    0 CallDepth,
+    1 Heap,
+    2 Budget,
+    3 ZeroDiv,
+    4 Overflow,
+    5 Name(s: str),
+    6 Type(s: leakstr),
+    7 TypeMsg(s: str),
+    8 Value(s: leakstr),
+    9 Runtime(s: leakstr),
+    10 Attribute(s: str),
+    11 Raised(s: str),
+    12 HostYield(st: (put_sched, get_sched)),
+    13 HostCallDeferred,
+});
+
+codec!(enum Unwind, put_unwind, get_unwind {
+    0 Normal,
+    1 Return(v: val),
+    2 Goto { target: usz, remaining: u16 },
+    3 Reraise(e: (put_vm_err, get_vm_err)),
+});
+
+codec!(enum WaitKind, put_wait_kind, get_wait_kind {
+    0 Run(v: val),
+    1 Gather,
+    2 Timeout { deadline_ns: u64, target: val },
+});
+
+codec!(enum CoroState, put_coro_state, get_coro_state {
+    0 Ready,
+    1 Sleeping(d: u64),
+    2 WaitingFrame,
+    3 WaitingEvent,
+    4 WaitingHostCall(id: u64),
+    5 WaitingForChildren { tasks: vals, kind: (put_wait_kind, get_wait_kind) },
+    6 CancelPending,
+    7 Done(v: val),
+    8 Errored(e: (put_vm_err, get_vm_err)),
+    9 Cancelled,
+});
+
+codec!(struct CoroutineHandle, put_handle, get_handle {
+    coro: val,
+    state: (put_coro_state, get_coro_state),
+});
+
+fn put_wfc(w: &mut W, v: &Option<(Vec<Val>, WaitKind)>) {
+    match v {
+        Some((tasks, kind)) => { w.u8(1); w.vals(tasks); put_wait_kind(w, kind); }
+        None => w.u8(0),
     }
 }
 
-/* Structural chunk fingerprint (FNV-1a): pins the blob to bytecode the restore-side re-parse must reproduce. */
-pub fn fingerprint(chunk: &SSAChunk) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    fp_chunk(chunk, &mut h);
-    h
+fn get_wfc(r: &mut R) -> Result<Option<(Vec<Val>, WaitKind)>, SnapErr> {
+    Ok(if r.u8()? == 1 { Some((r.vals()?, get_wait_kind(r)?)) } else { None })
 }
 
-fn fp_mix(h: &mut u64, v: u64) {
-    for b in v.to_le_bytes() {
-        *h ^= b as u64;
-        *h = h.wrapping_mul(0x0000_0100_0000_01b3);
+fn put_binding(w: &mut W, v: &Option<(Val, Val)>) {
+    match v {
+        Some((a, b)) => { w.u8(1); w.val(*a); w.val(*b); }
+        None => w.u8(0),
     }
 }
 
-fn fp_chunk(chunk: &SSAChunk, h: &mut u64) {
-    fp_mix(h, chunk.instructions.len() as u64);
-    for ins in &chunk.instructions {
-        fp_mix(h, ((ins.opcode as u64) << 16) | ins.operand as u64);
+fn get_binding(r: &mut R) -> Result<Option<(Val, Val)>, SnapErr> {
+    Ok(if r.u8()? == 1 { Some((r.val()?, r.val()?)) } else { None })
+}
+
+codec!(struct Pending, put_pending, get_pending {
+    pos_delta: i32v,
+    kw_delta: i32v,
+    delta_save: [put_i32_pair, get_i32_pair],
+    call_byte_pos: opt_u32,
+    sleep_until_ns: opt_u64,
+    host_frame_request: boolean,
+    event_wait_request: boolean,
+    host_call_request: boolean,
+    host_call_id: u64,
+    waiting_for_children: (put_wfc, get_wfc),
+    exc_val: opt_val,
+    method_binding: (put_binding, get_binding),
+    preempt_request: default,
+});
+
+fn put_dict(w: &mut W, d: &DictMap) { w.seq(&d.entries, put_val_pair); }
+
+fn get_dict(r: &mut R) -> Result<DictMap, SnapErr> {
+    Ok(DictMap::from_entries(r.seq(get_val_pair)?))
+}
+
+fn put_set(w: &mut W, s: &ValSet) {
+    let items: Vec<Val> = s.iter().copied().collect();
+    w.vals(&items);
+}
+
+/* Sorted so identical states produce identical blobs. */
+fn put_map(w: &mut W, m: &FxHashMap<String, Val>) {
+    let mut pairs: Vec<(&String, &Val)> = m.iter().collect();
+    pairs.sort_by(|a, b| a.0.cmp(b.0));
+    w.usz(pairs.len());
+    for (k, v) in pairs { w.str(k); w.val(*v); }
+}
+
+fn get_map(r: &mut R) -> Result<FxHashMap<String, Val>, SnapErr> {
+    let n = r.count()?;
+    let mut m = FxHashMap::default();
+    for _ in 0..n {
+        let k = r.str()?;
+        m.insert(k, r.val()?);
     }
-    fp_mix(h, chunk.constants.len() as u64);
-    fp_mix(h, chunk.names.len() as u64);
-    fp_mix(h, chunk.extern_table.len() as u64);
-    fp_mix(h, chunk.functions.len() as u64);
-    for (params, body, defaults, name_slot) in &chunk.functions {
-        fp_mix(h, params.len() as u64);
-        fp_mix(h, ((*defaults as u64) << 16) | *name_slot as u64);
-        fp_chunk(body, h);
-    }
-    fp_mix(h, chunk.classes.len() as u64);
-    for body in &chunk.classes { fp_chunk(body, h); }
-    fp_mix(h, chunk.imports.len() as u64);
-    for entry in &chunk.imports {
-        fp_mix(h, entry.spec.len() as u64);
-        if let ImportKind::Code(sub) = &entry.kind { fp_chunk(sub, h); }
-    }
+    Ok(m)
+}
+
+/* Set items are inserted in the rehash pass. */
+enum SetFill {
+    Mutable(Vec<Val>),
+    Frozen(Vec<Val>),
 }
 
 fn put_obj(w: &mut W, obj: &HeapObj) {
@@ -147,9 +334,7 @@ fn put_obj(w: &mut W, obj: &HeapObj) {
         HeapObj::FrozenSet(rc) => { w.u8(5); put_set(w, rc); }
         HeapObj::Tuple(v) => { w.u8(6); w.vals(v); }
         HeapObj::Func(fi, captures, defaults) => {
-            w.u8(7); w.usz(*fi); w.vals(captures);
-            w.usz(defaults.len());
-            for (slot, v) in defaults { w.usz(*slot); w.val(*v); }
+            w.u8(7); w.usz(*fi); w.vals(captures); w.seq(defaults, put_slot_val);
         }
         HeapObj::Range(s, e, st) => { w.u8(8); w.i64(*s); w.i64(*e); w.i64(*st); }
         HeapObj::Slice(a, b, c) => { w.u8(9); w.val(*a); w.val(*b); w.val(*c); }
@@ -161,10 +346,7 @@ fn put_obj(w: &mut W, obj: &HeapObj) {
         HeapObj::BoundMethod(recv, id) => { w.u8(15); w.val(*recv); w.u8(id.raw()); }
         HeapObj::NativeFn(id) => { w.u8(16); w.str(id.name()); }
         HeapObj::Class(n, bases, members) => {
-            w.u8(17); w.str(n); w.vals(bases);
-            let m = members.borrow();
-            w.usz(m.len());
-            for (name, v) in m.iter() { w.str(name); w.val(*v); }
+            w.u8(17); w.str(n); w.vals(bases); w.seq(&members.borrow(), put_name_val);
         }
         HeapObj::Instance(cls, dict) => { w.u8(18); w.val(*cls); put_dict(w, &dict.borrow()); }
         HeapObj::BoundUserMethod(a, b, c) => { w.u8(19); w.val(*a); w.val(*b); w.val(*c); }
@@ -173,28 +355,12 @@ fn put_obj(w: &mut W, obj: &HeapObj) {
         HeapObj::PropertySetter(a) => { w.u8(22); w.val(*a); }
         HeapObj::StaticMethod(a) => { w.u8(23); w.val(*a); }
         HeapObj::Coroutine(ip, slots, stack, body, iters, syncs, excs) => {
-            w.u8(24); w.usz(*ip); w.vals(slots); w.vals(stack);
-            put_body_ref(w, body);
-            w.usz(iters.len());
-            for f in iters { put_iter_frame(w, f); }
-            w.usz(syncs.len());
-            for f in syncs { put_sync_frame(w, f); }
-            w.usz(excs.len());
-            for f in excs { put_exc_frame(w, f); }
+            w.u8(24); w.usz(*ip); w.vals(slots); w.vals(stack); put_body_ref(w, body);
+            w.seq(iters, put_iter_frame); w.seq(syncs, put_sync_frame); w.seq(excs, put_exc_frame);
         }
-        HeapObj::Module(spec, attrs) => {
-            w.u8(25); w.str(spec);
-            w.usz(attrs.len());
-            for (name, v) in attrs { w.str(name); w.val(*v); }
-        }
+        HeapObj::Module(spec, attrs) => { w.u8(25); w.str(spec); w.seq(attrs, put_name_val); }
         HeapObj::Extern(f) => { w.u8(26); w.str(&f.name); }
     }
-}
-
-/* Sets decode empty; their items are stashed and inserted in the rehash pass once the heap exists. */
-enum SetFill {
-    Mutable(Vec<Val>),
-    Frozen(Vec<Val>),
 }
 
 fn get_obj(r: &mut R, externs: &ExternMap, fills: &mut Vec<(u32, SetFill)>, slot: u32) -> Result<HeapObj, SnapErr> {
@@ -212,14 +378,7 @@ fn get_obj(r: &mut R, externs: &ExternMap, fills: &mut Vec<(u32, SetFill)>, slot
             HeapObj::FrozenSet(Rc::new(ValSet::default()))
         }
         6 => HeapObj::Tuple(r.vals()?),
-        7 => {
-            let fi = r.usz()?;
-            let captures = r.vals()?;
-            let n = r.count()?;
-            let mut defaults = Vec::with_capacity(n);
-            for _ in 0..n { defaults.push((r.usz()?, r.val()?)); }
-            HeapObj::Func(fi, captures, defaults)
-        }
+        7 => HeapObj::Func(r.usz()?, r.vals()?, r.seq(get_slot_val)?),
         8 => HeapObj::Range(r.i64()?, r.i64()?, r.i64()?),
         9 => HeapObj::Slice(r.val()?, r.val()?, r.val()?),
         10 => HeapObj::Ellipsis,
@@ -234,278 +393,107 @@ fn get_obj(r: &mut R, externs: &ExternMap, fills: &mut Vec<(u32, SetFill)>, slot
         }
         16 => {
             let name = r.str()?;
-            let id = NativeFnId::from_name(&name).ok_or_else(|| s_err("unknown builtin", &name))?;
-            HeapObj::NativeFn(id)
+            HeapObj::NativeFn(NativeFnId::from_name(&name).ok_or_else(|| s_err("unknown builtin", &name))?)
         }
-        17 => {
-            let n = r.str()?;
-            let bases = r.vals()?;
-            let count = r.count()?;
-            let mut members = Vec::with_capacity(count);
-            for _ in 0..count { members.push((r.str()?, r.val()?)); }
-            HeapObj::Class(n, bases, Rc::new(RefCell::new(members)))
-        }
+        17 => HeapObj::Class(r.str()?, r.vals()?, Rc::new(RefCell::new(r.seq(get_name_val)?))),
         18 => HeapObj::Instance(r.val()?, Rc::new(RefCell::new(get_dict(r)?))),
         19 => HeapObj::BoundUserMethod(r.val()?, r.val()?, r.val()?),
         20 => HeapObj::Super(r.val()?, r.val()?),
         21 => HeapObj::Property(r.val()?, r.val()?),
         22 => HeapObj::PropertySetter(r.val()?),
         23 => HeapObj::StaticMethod(r.val()?),
-        24 => {
-            let ip = r.usz()?;
-            let slots = r.vals()?;
-            let stack = r.vals()?;
-            let body = get_body_ref(r)?;
-            let n = r.count()?;
-            let mut iters = Vec::with_capacity(n);
-            for _ in 0..n { iters.push(get_iter_frame(r)?); }
-            let n = r.count()?;
-            let mut syncs = Vec::with_capacity(n);
-            for _ in 0..n { syncs.push(get_sync_frame(r)?); }
-            let n = r.count()?;
-            let mut excs = Vec::with_capacity(n);
-            for _ in 0..n { excs.push(get_exc_frame(r)?); }
-            HeapObj::Coroutine(ip, slots, stack, body, iters, syncs, excs)
-        }
-        25 => {
-            let spec = r.str()?;
-            let n = r.count()?;
-            let mut attrs = Vec::with_capacity(n);
-            for _ in 0..n { attrs.push((r.str()?, r.val()?)); }
-            HeapObj::Module(spec, attrs)
-        }
+        24 => HeapObj::Coroutine(
+            r.usz()?, r.vals()?, r.vals()?, get_body_ref(r)?,
+            r.seq(get_iter_frame)?, r.seq(get_sync_frame)?, r.seq(get_exc_frame)?,
+        ),
+        25 => HeapObj::Module(r.str()?, r.seq(get_name_val)?),
         26 => {
             let name = r.str()?;
-            let f = externs.get(&name).ok_or_else(|| s_err("unknown native binding", &name))?;
-            HeapObj::Extern(f.clone())
+            HeapObj::Extern(externs.get(&name).ok_or_else(|| s_err("unknown native binding", &name))?.clone())
         }
-        t => return Err(s_err("unknown heap tag", &t.to_string())),
+        t => return Err(s_err("unknown heap tag", itoa::Buffer::new().format(t))),
     })
 }
 
-fn s_err(what: &str, detail: &str) -> SnapErr {
-    let mut s = String::from("snapshot: ");
-    s.push_str(what);
-    s.push_str(" '");
-    s.push_str(detail);
-    s.push('\'');
-    s
+/* Structural fingerprint pins the blob to its bytecode. */
+pub fn fingerprint(chunk: &SSAChunk) -> u64 {
+    let mut h = FxHasher::default();
+    fp_chunk(chunk, &mut h);
+    h.finish()
 }
 
-fn put_dict(w: &mut W, d: &DictMap) {
-    w.usz(d.entries.len());
-    for (k, v) in &d.entries { w.val(*k); w.val(*v); }
-}
-
-fn get_dict(r: &mut R) -> Result<DictMap, SnapErr> {
-    let n = r.count()?;
-    let mut entries = Vec::with_capacity(n);
-    for _ in 0..n { entries.push((r.val()?, r.val()?)); }
-    Ok(DictMap::from_entries(entries))
-}
-
-fn put_set(w: &mut W, s: &ValSet) {
-    let items: Vec<Val> = s.iter().copied().collect();
-    w.vals(&items);
-}
-
-fn put_body_ref(w: &mut W, b: &BodyRef) {
-    match b {
-        BodyRef::Fn(fi) => { w.u8(0); w.usz(*fi); }
-        BodyRef::Module => w.u8(1),
+fn fp_chunk(chunk: &SSAChunk, h: &mut FxHasher) {
+    h.write_u64(chunk.instructions.len() as u64);
+    for ins in &chunk.instructions {
+        h.write_u64(((ins.opcode as u64) << 16) | ins.operand as u64);
+    }
+    h.write_u64(chunk.constants.len() as u64);
+    h.write_u64(chunk.names.len() as u64);
+    h.write_u64(chunk.extern_table.len() as u64);
+    h.write_u64(chunk.functions.len() as u64);
+    for (params, body, defaults, name_slot) in &chunk.functions {
+        h.write_u64(params.len() as u64);
+        h.write_u64(((*defaults as u64) << 16) | *name_slot as u64);
+        fp_chunk(body, h);
+    }
+    h.write_u64(chunk.classes.len() as u64);
+    for body in &chunk.classes { fp_chunk(body, h); }
+    h.write_u64(chunk.imports.len() as u64);
+    for entry in &chunk.imports {
+        h.write_u64(entry.spec.len() as u64);
+        if let ImportKind::Code(sub) = &entry.kind { fp_chunk(sub, h); }
     }
 }
 
-fn get_body_ref(r: &mut R) -> Result<BodyRef, SnapErr> {
-    Ok(match r.u8()? {
-        0 => BodyRef::Fn(r.usz()?),
-        _ => BodyRef::Module,
-    })
+/* Single field list drives save and restore. */
+macro_rules! vm_state {
+    ($($f:ident: $s:tt),* $(,)?) => {
+        fn put_vm_state(w: &mut W, vm: &VM) { $( codec!(@put w, (&vm.$f), $s); )* }
+        fn get_vm_state(r: &mut R, vm: &mut VM) -> Result<(), SnapErr> {
+            $( vm.$f = codec!(@get r, $s); )*
+            Ok(())
+        }
+    };
 }
 
-fn put_iter_frame(w: &mut W, f: &IterFrame) {
-    match f {
-        IterFrame::Seq { items, idx } => { w.u8(0); w.vals(items); w.usz(*idx); }
-        IterFrame::Range { cur, end, step } => { w.u8(1); w.i64(*cur); w.i64(*end); w.i64(*step); }
-        IterFrame::Coroutine(v) => { w.u8(2); w.val(*v); }
-        IterFrame::UserDefined(v) => { w.u8(3); w.val(*v); }
-    }
+vm_state! {
+    stack: vals,
+    iter_stack: [put_iter_frame, get_iter_frame],
+    yields: vals,
+    live_slots: vals,
+    with_stack: vals,
+    temp_roots: vals,
+    event_queue: vals,
+    globals: (put_map, get_map),
+    module_state: (put_map, get_map),
+    module_table: (put_map, get_map),
+    observed_impure: [boolean],
+    is_async: [boolean], // Filled by MakeCoroutine, not chunk-derivable.
+    exception_stack: [put_exc_frame, get_exc_frame],
+    unwind_stack: [put_unwind, get_unwind],
+    handling_exc: opt_val,
+    pending_sync_frames: [put_sync_frame, get_sync_frame],
+    pending_exec_exc_base: opt_usz,
+    pending: (put_pending, get_pending),
+    scheduler: [put_handle, get_handle],
+    next_host_call_id: u64,
+    yielded: boolean,
+    yield_from_value: val,
+    resume_ip: usz,
+    virtual_clock_ns: u64,
+    error_byte_pos: opt_u32,
+    output: [str],
+    output_open: boolean,
+    input_buffer: [str],
 }
 
-fn get_iter_frame(r: &mut R) -> Result<IterFrame, SnapErr> {
-    Ok(match r.u8()? {
-        0 => IterFrame::Seq { items: r.vals()?, idx: r.usz()? },
-        1 => IterFrame::Range { cur: r.i64()?, end: r.i64()?, step: r.i64()? },
-        2 => IterFrame::Coroutine(r.val()?),
-        _ => IterFrame::UserDefined(r.val()?),
-    })
-}
-
-fn put_sync_frame(w: &mut W, f: &SyncFrame) {
-    w.usz(f.ip);
+fn put_call_frame(w: &mut W, f: &CallFrame) {
     w.usz(f.fi);
-    w.vals(&f.slots);
-    w.vals(&f.stack_delta);
-    w.usz(f.iter_delta.len());
-    for it in &f.iter_delta { put_iter_frame(w, it); }
-    w.usz(f.exception_delta.len());
-    for e in &f.exception_delta { put_exc_frame(w, e); }
-}
-
-fn get_sync_frame(r: &mut R) -> Result<SyncFrame, SnapErr> {
-    let ip = r.usz()?;
-    let fi = r.usz()?;
-    let slots = r.vals()?;
-    let stack_delta = r.vals()?;
-    let n = r.count()?;
-    let mut iter_delta = Vec::with_capacity(n);
-    for _ in 0..n { iter_delta.push(get_iter_frame(r)?); }
-    let n = r.count()?;
-    let mut exception_delta = Vec::with_capacity(n);
-    for _ in 0..n { exception_delta.push(get_exc_frame(r)?); }
-    Ok(SyncFrame { ip, fi, slots, stack_delta, iter_delta, exception_delta })
-}
-
-fn put_exc_frame(w: &mut W, f: &ExceptionFrame) {
-    w.u8(matches!(f.kind, BlockKind::Finally) as u8);
-    w.usz(f.handler_ip);
-    w.usz(f.stack_depth);
-    w.usz(f.iter_depth);
-    w.usz(f.with_depth);
-    w.usz(f.unwind_depth);
-}
-
-fn get_exc_frame(r: &mut R) -> Result<ExceptionFrame, SnapErr> {
-    let kind = if r.u8()? == 1 { BlockKind::Finally } else { BlockKind::Except };
-    Ok(ExceptionFrame {
-        kind,
-        handler_ip: r.usz()?,
-        stack_depth: r.usz()?,
-        iter_depth: r.usz()?,
-        with_depth: r.usz()?,
-        unwind_depth: r.usz()?,
-    })
-}
-
-fn put_vm_err(w: &mut W, e: &VmErr) {
-    match e {
-        VmErr::CallDepth => w.u8(0),
-        VmErr::Heap => w.u8(1),
-        VmErr::Budget => w.u8(2),
-        VmErr::ZeroDiv => w.u8(3),
-        VmErr::Overflow => w.u8(4),
-        VmErr::Name(s) => { w.u8(5); w.str(s); }
-        VmErr::Type(s) => { w.u8(6); w.str(s); }
-        VmErr::TypeMsg(s) => { w.u8(7); w.str(s); }
-        VmErr::Value(s) => { w.u8(8); w.str(s); }
-        VmErr::Runtime(s) => { w.u8(9); w.str(s); }
-        VmErr::Attribute(s) => { w.u8(10); w.str(s); }
-        VmErr::Raised(s) => { w.u8(11); w.str(s); }
-        VmErr::HostYield(st) => {
-            w.u8(12);
-            match st {
-                SchedulerStatus::Done => w.u8(0),
-                SchedulerStatus::PendingTimer(d) => { w.u8(1); w.u64(*d); }
-                SchedulerStatus::PendingFrame => w.u8(2),
-                SchedulerStatus::PendingEvent => w.u8(3),
-                SchedulerStatus::PendingHostCall => w.u8(4),
-                SchedulerStatus::Preempted => w.u8(5),
-            }
-        }
-        VmErr::HostCallDeferred => w.u8(13),
-    }
-}
-
-/* Static-str variants leak their decoded message; stored errors are rare, so the cost is a few bytes per restore. */
-fn get_vm_err(r: &mut R) -> Result<VmErr, SnapErr> {
-    fn leak(s: String) -> &'static str { alloc::boxed::Box::leak(s.into_boxed_str()) }
-    Ok(match r.u8()? {
-        0 => VmErr::CallDepth,
-        1 => VmErr::Heap,
-        2 => VmErr::Budget,
-        3 => VmErr::ZeroDiv,
-        4 => VmErr::Overflow,
-        5 => VmErr::Name(r.str()?),
-        6 => VmErr::Type(leak(r.str()?)),
-        7 => VmErr::TypeMsg(r.str()?),
-        8 => VmErr::Value(leak(r.str()?)),
-        9 => VmErr::Runtime(leak(r.str()?)),
-        10 => VmErr::Attribute(r.str()?),
-        11 => VmErr::Raised(r.str()?),
-        12 => VmErr::HostYield(match r.u8()? {
-            0 => SchedulerStatus::Done,
-            1 => SchedulerStatus::PendingTimer(r.u64()?),
-            2 => SchedulerStatus::PendingFrame,
-            3 => SchedulerStatus::PendingEvent,
-            4 => SchedulerStatus::PendingHostCall,
-            _ => SchedulerStatus::Preempted,
-        }),
-        _ => VmErr::HostCallDeferred,
-    })
-}
-
-fn put_unwind(w: &mut W, u: &Unwind) {
-    match u {
-        Unwind::Normal => w.u8(0),
-        Unwind::Return(v) => { w.u8(1); w.val(*v); }
-        Unwind::Goto { target, remaining } => { w.u8(2); w.usz(*target); w.u16(*remaining); }
-        Unwind::Reraise(e) => { w.u8(3); put_vm_err(w, e); }
-    }
-}
-
-fn get_unwind(r: &mut R) -> Result<Unwind, SnapErr> {
-    Ok(match r.u8()? {
-        0 => Unwind::Normal,
-        1 => Unwind::Return(r.val()?),
-        2 => Unwind::Goto { target: r.usz()?, remaining: r.u16()? },
-        _ => Unwind::Reraise(get_vm_err(r)?),
-    })
-}
-
-fn put_wait_kind(w: &mut W, k: &WaitKind) {
-    match k {
-        WaitKind::Run(v) => { w.u8(0); w.val(*v); }
-        WaitKind::Gather => w.u8(1),
-        WaitKind::Timeout { deadline_ns, target } => { w.u8(2); w.u64(*deadline_ns); w.val(*target); }
-    }
-}
-
-fn get_wait_kind(r: &mut R) -> Result<WaitKind, SnapErr> {
-    Ok(match r.u8()? {
-        0 => WaitKind::Run(r.val()?),
-        1 => WaitKind::Gather,
-        _ => WaitKind::Timeout { deadline_ns: r.u64()?, target: r.val()? },
-    })
-}
-
-fn put_coro_state(w: &mut W, s: &CoroState) {
-    match s {
-        CoroState::Ready => w.u8(0),
-        CoroState::Sleeping(d) => { w.u8(1); w.u64(*d); }
-        CoroState::WaitingFrame => w.u8(2),
-        CoroState::WaitingEvent => w.u8(3),
-        CoroState::WaitingHostCall(id) => { w.u8(4); w.u64(*id); }
-        CoroState::WaitingForChildren { tasks, kind } => { w.u8(5); w.vals(tasks); put_wait_kind(w, kind); }
-        CoroState::CancelPending => w.u8(6),
-        CoroState::Done(v) => { w.u8(7); w.val(*v); }
-        CoroState::Errored(e) => { w.u8(8); put_vm_err(w, e); }
-        CoroState::Cancelled => w.u8(9),
-    }
-}
-
-fn get_coro_state(r: &mut R) -> Result<CoroState, SnapErr> {
-    Ok(match r.u8()? {
-        0 => CoroState::Ready,
-        1 => CoroState::Sleeping(r.u64()?),
-        2 => CoroState::WaitingFrame,
-        3 => CoroState::WaitingEvent,
-        4 => CoroState::WaitingHostCall(r.u64()?),
-        5 => CoroState::WaitingForChildren { tasks: r.vals()?, kind: get_wait_kind(r)? },
-        6 => CoroState::CancelPending,
-        7 => CoroState::Done(r.val()?),
-        8 => CoroState::Errored(get_vm_err(r)?),
-        _ => CoroState::Cancelled,
-    })
+    w.u32(f.call_byte_pos);
+    w.str(&f.caller_path);
+    w.opt_val(f.current_class);
+    w.opt_val(f.current_self);
+    w.seq(&f.cells, put_slot_val);
 }
 
 pub fn save(vm: &VM, source: &str) -> Vec<u8> {
@@ -514,118 +502,21 @@ pub fn save(vm: &VM, source: &str) -> Vec<u8> {
     w.u32(FORMAT);
     w.u64(fingerprint(vm.chunk));
     w.str(source);
-
     w.usz(vm.budget);
     w.usz(vm.max_calls);
     w.usz(vm.heap.limit());
     w.boolean(vm.sandbox_off);
     w.boolean(vm.strict_input);
-
-    let objs: Vec<Option<&HeapObj>> = vm.heap.snapshot_objs().collect();
-    w.usz(objs.len());
-    for obj in objs {
+    w.usz(vm.heap.snapshot_objs().count());
+    for obj in vm.heap.snapshot_objs() {
         match obj {
             None => w.u8(0),
             Some(o) => { w.u8(1); put_obj(&mut w, o); }
         }
     }
-
-    w.vals(&vm.stack);
-    w.usz(vm.iter_stack.len());
-    for f in &vm.iter_stack { put_iter_frame(&mut w, f); }
-    w.vals(&vm.yields);
-    w.vals(&vm.live_slots);
-    w.vals(&vm.with_stack);
-    w.vals(&vm.temp_roots);
-    w.vals(&vm.event_queue);
-
-    put_str_val_map(&mut w, vm.globals.iter());
-    put_str_val_map(&mut w, vm.module_state.iter());
-    put_str_val_map(&mut w, vm.module_table.iter());
-
-    w.usz(vm.observed_impure.len());
-    for &b in &vm.observed_impure { w.boolean(b); }
-    // Filled by the MakeCoroutine opcode, not derivable from the chunk.
-    w.usz(vm.is_async.len());
-    for &b in &vm.is_async { w.boolean(b); }
-
-    w.usz(vm.exception_stack.len());
-    for f in &vm.exception_stack { put_exc_frame(&mut w, f); }
-    w.usz(vm.unwind_stack.len());
-    for u in &vm.unwind_stack { put_unwind(&mut w, u); }
-    w.opt_val(vm.handling_exc);
-
-    w.usz(vm.pending_sync_frames.len());
-    for f in &vm.pending_sync_frames { put_sync_frame(&mut w, f); }
-    w.opt_usz(vm.pending_exec_exc_base);
-
-    let p = &vm.pending;
-    w.i32v(p.pos_delta);
-    w.i32v(p.kw_delta);
-    w.usz(p.delta_save.len());
-    for (a, b) in &p.delta_save { w.i32v(*a); w.i32v(*b); }
-    match p.call_byte_pos { Some(v) => { w.u8(1); w.u32(v); } None => w.u8(0) }
-    w.opt_u64(p.sleep_until_ns);
-    w.boolean(p.host_frame_request);
-    w.boolean(p.event_wait_request);
-    w.boolean(p.host_call_request);
-    w.u64(p.host_call_id);
-    match &p.waiting_for_children {
-        Some((tasks, kind)) => { w.u8(1); w.vals(tasks); put_wait_kind(&mut w, kind); }
-        None => w.u8(0),
-    }
-    w.opt_val(p.exc_val);
-    match p.method_binding { Some((a, b)) => { w.u8(1); w.val(a); w.val(b); } None => w.u8(0) }
-
-    w.usz(vm.call_stack.len());
-    for f in &vm.call_stack {
-        w.usz(f.fi);
-        w.u32(f.call_byte_pos);
-        w.str(&f.caller_path);
-        w.opt_val(f.current_class);
-        w.opt_val(f.current_self);
-        w.usz(f.cells.len());
-        for (slot, v) in &f.cells { w.usz(*slot); w.val(*v); }
-    }
-
-    w.usz(vm.scheduler.len());
-    for h in &vm.scheduler {
-        w.val(h.coro);
-        put_coro_state(&mut w, &h.state);
-    }
-
-    w.u64(vm.next_host_call_id);
-    w.boolean(vm.yielded);
-    w.val(vm.yield_from_value);
-    w.usz(vm.resume_ip);
-    w.u64(vm.virtual_clock_ns);
-    match vm.error_byte_pos { Some(v) => { w.u8(1); w.u32(v); } None => w.u8(0) }
-
-    w.usz(vm.output.len());
-    for line in &vm.output { w.str(line); }
-    w.boolean(vm.output_open);
-    w.usz(vm.input_buffer.len());
-    for line in &vm.input_buffer { w.str(line); }
-
+    put_vm_state(&mut w, vm);
+    w.seq(&vm.call_stack, put_call_frame);
     w.b
-}
-
-/* Sorted by key so identical states produce identical blobs. */
-fn put_str_val_map<'m>(w: &mut W, it: impl Iterator<Item = (&'m String, &'m Val)>) {
-    let mut pairs: Vec<(&String, &Val)> = it.collect();
-    pairs.sort_by(|a, b| a.0.cmp(b.0));
-    w.usz(pairs.len());
-    for (k, v) in pairs { w.str(k); w.val(*v); }
-}
-
-fn get_str_val_map(r: &mut R) -> Result<crate::util::fx::FxHashMap<String, Val>, SnapErr> {
-    let n = r.count()?;
-    let mut m = crate::util::fx::FxHashMap::default();
-    for _ in 0..n {
-        let k = r.str()?;
-        m.insert(k, r.val()?);
-    }
-    Ok(m)
 }
 
 struct Header<'a> {
@@ -645,12 +536,12 @@ fn header(blob: &[u8]) -> Result<Header<'_>, SnapErr> {
     Ok(Header { source, fingerprint: fp, body: start + source.len() })
 }
 
-/* Embedded source; the host re-parses it and boots the VM the restore is applied onto. */
+/* Host re-parses the embedded source before restoring. */
 pub fn source_of(blob: &[u8]) -> Result<&str, SnapErr> {
     Ok(header(blob)?.source)
 }
 
-/* Sandbox profile recorded at save time; boot the restore VM with it. */
+/* Sandbox profile recorded at save time. */
 pub fn limits_of(blob: &[u8]) -> Result<Limits, SnapErr> {
     let h = header(blob)?;
     let mut r = R::new(blob);
@@ -661,8 +552,6 @@ pub fn limits_of(blob: &[u8]) -> Result<Limits, SnapErr> {
     let sandbox_off = r.boolean()?;
     Ok(Limits { calls, ops: if sandbox_off { usize::MAX } else { 1 }, heap })
 }
-
-type ExternMap = crate::util::fx::FxHashMap<String, ExternFn>;
 
 fn collect_externs(chunk: &SSAChunk, map: &mut ExternMap) {
     for f in &chunk.extern_table {
@@ -694,7 +583,7 @@ fn source_index<'c>(chunk: &'c SSAChunk, out: &mut Vec<&'c SSAChunk>) {
     }
 }
 
-/* Overwrite `vm`'s dynamic state from `blob`. `vm` must be freshly booted (`with_limits`) from the blob's own source; chunk-derived tables stay, caches stay empty and rebuild lazily. */
+/* Overlay saved state onto a freshly booted VM. */
 pub fn restore(vm: &mut VM, blob: &[u8]) -> Result<(), SnapErr> {
     let h = header(blob)?;
     if h.fingerprint != fingerprint(vm.chunk) {
@@ -705,13 +594,13 @@ pub fn restore(vm: &mut VM, blob: &[u8]) -> Result<(), SnapErr> {
 
     vm.budget = r.usz()?;
     vm.max_calls = r.usz()?;
+    // Boot limits win over the recorded value.
     let _heap_limit = r.usz()?;
     vm.sandbox_off = r.boolean()?;
     vm.strict_input = r.boolean()?;
 
     let mut externs = ExternMap::default();
     collect_externs(vm.chunk, &mut externs);
-
     let nslots = r.count()?;
     let mut objs: Vec<Option<HeapObj>> = Vec::with_capacity(nslots);
     let mut fills: Vec<(u32, SetFill)> = Vec::new();
@@ -723,72 +612,23 @@ pub fn restore(vm: &mut VM, blob: &[u8]) -> Result<(), SnapErr> {
     }
     vm.heap.restore_objs(objs);
 
-    vm.stack = r.vals()?;
-    let n = r.count()?;
-    vm.iter_stack = Vec::with_capacity(n);
-    for _ in 0..n { vm.iter_stack.push(get_iter_frame(&mut r)?); }
-    vm.yields = r.vals()?;
-    vm.live_slots = r.vals()?;
-    vm.with_stack = r.vals()?;
-    vm.temp_roots = r.vals()?;
-    vm.event_queue = r.vals()?;
+    get_vm_state(&mut r, vm)?;
+    vm.waiting_for_children_count = vm.scheduler.iter()
+        .filter(|h| matches!(h.state, CoroState::WaitingForChildren { .. }))
+        .count();
 
-    vm.globals = get_str_val_map(&mut r)?;
-    vm.module_state = get_str_val_map(&mut r)?;
-    vm.module_table = get_str_val_map(&mut r)?;
-
-    let n = r.count()?;
-    vm.observed_impure = Vec::with_capacity(n);
-    for _ in 0..n { vm.observed_impure.push(r.boolean()?); }
-    let n = r.count()?;
-    vm.is_async = Vec::with_capacity(n);
-    for _ in 0..n { vm.is_async.push(r.boolean()?); }
-
-    let n = r.count()?;
-    vm.exception_stack = Vec::with_capacity(n);
-    for _ in 0..n { vm.exception_stack.push(get_exc_frame(&mut r)?); }
-    let n = r.count()?;
-    vm.unwind_stack = Vec::with_capacity(n);
-    for _ in 0..n { vm.unwind_stack.push(get_unwind(&mut r)?); }
-    vm.handling_exc = r.opt_val()?;
-
-    let n = r.count()?;
-    vm.pending_sync_frames = Vec::with_capacity(n);
-    for _ in 0..n { vm.pending_sync_frames.push(get_sync_frame(&mut r)?); }
-    vm.pending_exec_exc_base = r.opt_usz()?;
-
-    vm.pending.pos_delta = r.i32v()?;
-    vm.pending.kw_delta = r.i32v()?;
-    let n = r.count()?;
-    vm.pending.delta_save = Vec::with_capacity(n);
-    for _ in 0..n { vm.pending.delta_save.push((r.i32v()?, r.i32v()?)); }
-    vm.pending.call_byte_pos = if r.u8()? == 1 { Some(r.u32()?) } else { None };
-    vm.pending.sleep_until_ns = r.opt_u64()?;
-    vm.pending.host_frame_request = r.boolean()?;
-    vm.pending.event_wait_request = r.boolean()?;
-    vm.pending.host_call_request = r.boolean()?;
-    vm.pending.host_call_id = r.u64()?;
-    vm.pending.waiting_for_children = if r.u8()? == 1 {
-        Some((r.vals()?, get_wait_kind(&mut r)?))
-    } else { None };
-    vm.pending.exc_val = r.opt_val()?;
-    vm.pending.method_binding = if r.u8()? == 1 { Some((r.val()?, r.val()?)) } else { None };
-
+    let chunk = vm.chunk;
     let mut sources: Vec<&SSAChunk> = Vec::new();
-    source_index(vm.chunk, &mut sources);
-    let n = r.count()?;
-    let mut call_stack = Vec::with_capacity(n);
-    for _ in 0..n {
+    source_index(chunk, &mut sources);
+    vm.call_stack = r.seq(|r| {
         let fi = r.usz()?;
         let call_byte_pos = r.u32()?;
         let path = r.str()?;
         let current_class = r.opt_val()?;
         let current_self = r.opt_val()?;
-        let cn = r.count()?;
-        let mut cells = Vec::with_capacity(cn);
-        for _ in 0..cn { cells.push((r.usz()?, r.val()?)); }
-        let owner = sources.iter().find(|c| c.path.as_str() == path).copied().unwrap_or(vm.chunk);
-        call_stack.push(CallFrame {
+        let cells = r.seq(get_slot_val)?;
+        let owner = sources.iter().find(|c| c.path.as_str() == path).copied().unwrap_or(chunk);
+        Ok(CallFrame {
             fi,
             call_byte_pos,
             caller_source: owner.source.clone(),
@@ -796,44 +636,15 @@ pub fn restore(vm: &mut VM, blob: &[u8]) -> Result<(), SnapErr> {
             current_class,
             current_self,
             cells,
-        });
-    }
-    vm.call_stack = call_stack;
-
-    let n = r.count()?;
-    vm.scheduler = Vec::with_capacity(n);
-    for _ in 0..n {
-        let coro = r.val()?;
-        let state = get_coro_state(&mut r)?;
-        vm.scheduler.push(CoroutineHandle { coro, state });
-    }
-    vm.waiting_for_children_count = vm.scheduler.iter()
-        .filter(|h| matches!(h.state, CoroState::WaitingForChildren { .. }))
-        .count();
-
-    vm.next_host_call_id = r.u64()?;
-    vm.yielded = r.boolean()?;
-    vm.yield_from_value = r.val()?;
-    vm.resume_ip = r.usz()?;
-    vm.virtual_clock_ns = r.u64()?;
-    vm.error_byte_pos = if r.u8()? == 1 { Some(r.u32()?) } else { None };
-
-    let n = r.count()?;
-    vm.output = Vec::with_capacity(n);
-    for _ in 0..n { vm.output.push(r.str()?); }
-    vm.output_open = r.boolean()?;
-    let n = r.count()?;
-    vm.input_buffer = Vec::with_capacity(n);
-    for _ in 0..n { vm.input_buffer.push(r.str()?); }
+        })
+    })?;
 
     if r.p != r.b.len() { return Err("snapshot has trailing bytes".to_string()); }
-
     rehash(vm, fills)?;
-    rebuild_mro(vm)?;
-    Ok(())
+    rebuild_mro(vm)
 }
 
-/* The uncached lookup path is a plain DFS, not C3, so every restored class recomputes its linearization. Slot order is creation order, so bases are always cached before their subclasses. */
+/* Slot order caches bases before their subclasses. */
 fn rebuild_mro(vm: &mut VM) -> Result<(), SnapErr> {
     let nslots = vm.heap.snapshot_objs().count();
     for idx in 0..nslots {
@@ -851,7 +662,7 @@ fn rebuild_mro(vm: &mut VM) -> Result<(), SnapErr> {
     Ok(())
 }
 
-/* Second pass: hashing reads the heap, so dict indexes and set tables can only be built once every slot is live. */
+/* Hashing reads the heap, so index once slots are live. */
 fn rehash(vm: &mut VM, fills: Vec<(u32, SetFill)>) -> Result<(), SnapErr> {
     let nslots = vm.heap.snapshot_objs().count();
     for idx in 0..nslots {
@@ -902,7 +713,7 @@ fn json_escape(out: &mut String, s: &str) {
     }
 }
 
-/* JSON object of module-level bindings and their reprs, read from the parked module-body coroutine. */
+/* Module bindings as a {name: repr} JSON object. */
 pub fn inspect_globals(vm: &VM) -> String {
     let mut out = String::from("{");
     let mut first = true;
@@ -924,7 +735,7 @@ pub fn inspect_globals(vm: &VM) -> String {
     out
 }
 
-/* JSON array describing each scheduled coroutine: state, function, ip, and suspended sync frames. */
+/* Scheduled coroutines as a JSON array. */
 pub fn inspect_stack(vm: &VM) -> String {
     let fn_name = |fi: usize| -> &str {
         match vm.function_names.get(fi) {
@@ -936,19 +747,19 @@ pub fn inspect_stack(vm: &VM) -> String {
     for (i, h) in vm.scheduler.iter().enumerate() {
         if i > 0 { out.push(','); }
         let state = match &h.state {
-            CoroState::Ready => "ready".to_owned(),
-            CoroState::Sleeping(_) => "sleeping".to_owned(),
-            CoroState::WaitingFrame => "waiting_frame".to_owned(),
-            CoroState::WaitingEvent => "waiting_event".to_owned(),
-            CoroState::WaitingHostCall(_) => "waiting_host_call".to_owned(),
-            CoroState::WaitingForChildren { .. } => "waiting_for_children".to_owned(),
-            CoroState::CancelPending => "cancel_pending".to_owned(),
-            CoroState::Done(_) => "done".to_owned(),
-            CoroState::Errored(_) => "errored".to_owned(),
-            CoroState::Cancelled => "cancelled".to_owned(),
+            CoroState::Ready => "ready",
+            CoroState::Sleeping(_) => "sleeping",
+            CoroState::WaitingFrame => "waiting_frame",
+            CoroState::WaitingEvent => "waiting_event",
+            CoroState::WaitingHostCall(_) => "waiting_host_call",
+            CoroState::WaitingForChildren { .. } => "waiting_for_children",
+            CoroState::CancelPending => "cancel_pending",
+            CoroState::Done(_) => "done",
+            CoroState::Errored(_) => "errored",
+            CoroState::Cancelled => "cancelled",
         };
         out.push_str("{\"state\":\"");
-        out.push_str(&state);
+        out.push_str(state);
         out.push_str("\",\"function\":\"");
         match vm.heap.try_get(h.coro) {
             Some(HeapObj::Coroutine(ip, _, _, body, _, syncs, _)) => {

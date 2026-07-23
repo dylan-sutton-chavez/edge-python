@@ -117,15 +117,15 @@ export async function createWorker(opts) {
         loadMs: ready.loadMs,
 
         run: (src, runOpts = {}) => send('run', { src, ...runOpts }),
-        /* Yield every `interval` loop back-edges so any program stays pausable; 0 disables. */
+        /* Preempt every `interval` back-edges; 0 disables. */
         setPreemptInterval: (interval) => send('set-preempt-interval', { interval }),
-        /* Park the running program for saveState(); resolves true when parked, false if none was. */
+        /* Park the program; resolves true when parked. */
         pause: () => send('pause'),
         /* Continue a program parked by pause(). */
         resume: () => send('resume'),
-        /* Snapshot of the paused program as a portable Uint8Array; throws when nothing is paused. */
+        /* Snapshot the paused program; throws when none. */
         saveState: () => send('save-state'),
-        /* Boot from a saved blob and continue it; resolves like run() when the program finishes. */
+        /* Boot from a blob; resolves like run(). */
         restoreState: (blob) => send('restore-state', { blob }),
         stateGlobals: () => send('state-globals'),
         stateStack: () => send('state-stack'),

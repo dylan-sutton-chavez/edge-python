@@ -271,12 +271,12 @@ pub struct DictMap {
 }
 
 impl DictMap {
-    /* Restore constructor: entries only; call `rebuild_index` once the heap is fully populated. */
+    /* Entries only; `rebuild_index` once the heap lives. */
     pub(crate) fn from_entries(entries: Vec<(Val, Val)>) -> Self {
         Self { entries, index: hashbrown::HashTable::new() }
     }
 
-    /* Rehash all entries; needed after a snapshot restore since hashing reads the heap. */
+    /* Rehash after restore; hashing reads the heap. */
     pub(crate) fn rebuild_index(&mut self, heap: &HeapPool) {
         self.index.clear();
         let e = &self.entries;
@@ -543,12 +543,12 @@ impl HeapPool {
         }
     }
 
-    /* Snapshot view: one entry per slot, None for free slots. */
+    /* One entry per slot; None when free. */
     pub(crate) fn snapshot_objs(&self) -> impl Iterator<Item = Option<&HeapObj>> {
         self.slots.iter().map(|s| s.obj.as_ref())
     }
 
-    /* Replace the whole pool with `objs` at identical slot positions; rebuilds free list and intern tables. */
+    /* Replace the pool; rebuild free and intern tables. */
     pub(crate) fn restore_objs(&mut self, objs: Vec<Option<HeapObj>>) {
         self.slots = objs.into_iter().map(|obj| HeapSlot { obj, marked: false }).collect();
         self.free_list.clear();
@@ -581,7 +581,7 @@ impl HeapPool {
         self.alloc_count = 0;
     }
 
-    /* Swap a slot's object during restore passes; slot must be live. */
+    /* Swap a live slot's object during restore. */
     pub(crate) fn replace_obj(&mut self, idx: u32, obj: HeapObj) {
         self.slots[idx as usize].obj = Some(obj);
     }

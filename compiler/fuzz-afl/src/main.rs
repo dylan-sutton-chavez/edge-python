@@ -6,9 +6,9 @@ use compiler::modules::vm::snapshot;
 use compiler::modules::vm::types::{SchedulerStatus, VmErr};
 use compiler::modules::vm::{Limits, VM};
 
-// Tight enough that any fuzzed loop preempts and exercises the unwind path.
+// Tight so fuzzed loops preempt and unwind.
 const PREEMPT_EVERY: usize = 7;
-// Caps the cooperative wake-ups so a `while True: receive()` cannot stall an exec.
+// Caps wake-ups so receive loops terminate.
 const MAX_WAKEUPS: u32 = 16;
 
 fn main() {
@@ -31,7 +31,7 @@ fn main() {
         vm.strict_input = true;
         vm.set_preempt_interval(PREEMPT_EVERY);
 
-        // Drive every park kind; snapshot the first, preempted or cooperative.
+        // Drive every park kind; snapshot the first.
         let mut hopped = false;
         let mut wakeups = 0;
         loop {
@@ -56,7 +56,7 @@ fn main() {
             }
 
             if matches!(park, SchedulerStatus::Preempted) { continue; }
-            // A `receive()` waiter needs an event; a `frame()` waiter is woken by re-entering `run`.
+            // receive() needs an event; frame() re-enters.
             if wakeups >= MAX_WAKEUPS { break; }
             wakeups += 1;
             if matches!(park, SchedulerStatus::PendingEvent) && vm.push_event("e").is_err() { break; }

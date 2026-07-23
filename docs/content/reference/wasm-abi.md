@@ -448,7 +448,7 @@ Little-endian, self-contained, versioned.
 |---|---|---|
 | 0 | 4 | magic, `0x4E535045` |
 | 4 | 4 | format version, currently `1` |
-| 8 | 8 | fingerprint, FNV-1a of the bytecode structure |
+| 8 | 8 | fingerprint, structural hash of the bytecode |
 | 16 | 8 | source length in bytes |
 | 24 | N | source, UTF-8 |
 | 24+N | rest | serialised VM state (heap, stacks, scheduler, pending) |

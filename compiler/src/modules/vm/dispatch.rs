@@ -328,7 +328,7 @@ impl<'a> VM<'a> {
                 for a in &kw_flat { self.push(*a); }
                 let argc = (positional.len() + 1) as u16;
                 let encoded = ((kw_flat.len() as u16 / 2) << 8) | argc;
-                // A user method body suspends through the same staging as a plain call.
+                // Method bodies stage like plain calls.
                 self.pending_exec_safe = self.frame_safe;
                 let called = self.exec_call(encoded, chunk, slots);
                 self.pending_exec_safe = false;
@@ -474,7 +474,7 @@ impl<'a> VM<'a> {
                         if self.budget == 0 { return Err(cold_budget()); }
                         self.budget -= 1;
                     }
-                    // `for` also closes on a back-edge, so this is the only preempt sampling point.
+                    // Back-edges are the only preempt sampling point.
                     if self.preempt_left != 0 {
                         self.preempt_left -= 1;
                         if self.preempt_left == 0 {
@@ -483,7 +483,7 @@ impl<'a> VM<'a> {
                                 self.pending.preempt_request = true;
                                 self.yielded = true;
                             } else {
-                                // Unpreemptible frame: retry at the next back-edge, don't lose the tick.
+                                // Unpreemptible here; retry next back-edge.
                                 self.preempt_left = 1;
                             }
                         }
@@ -536,10 +536,10 @@ impl<'a> VM<'a> {
             | OpCode::CallExtern => {
                 // Snapshot call-site byte_pos for the new CallFrame; falls back to enclosing stmt.
                 self.pending.call_byte_pos = chunk.resolve_call(rip as u32).or_else(|| chunk.resolve(rip as u32));
-                // Only a plain user call stages its frame on suspension; a builtin callback cannot.
+                // Only plain user calls stage frames.
                 self.pending_exec_safe = self.frame_safe && ins.opcode == OpCode::Call;
                 let dispatched = self.handle_function(ins.opcode, op, chunk, slots);
-                // Cleared on both paths so an unconsumed `true` cannot leak into a later native re-entry.
+                // Cleared so `true` cannot leak onward.
                 self.pending_exec_safe = false;
                 dispatched?;
             }

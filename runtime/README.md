@@ -141,7 +141,7 @@ The returned object exposes:
 
 ### State snapshots
 
-While a program is parked, its entire interpreter state, heap, globals, suspended coroutines and call frames included, can be serialized. A program parks either on its own (`receive()`, `sleep()`, `frame()`, a host call) or because the host asked it to:
+While a program is parked, its entire interpreter state, heap, globals, suspended coroutines and call frames included, can be serialized. A program parks either on its own (`receive()`, `sleep()`, `frame()`, a host call) or because the host called `pause()` after arming `setPreemptInterval`:
 
 ```js
 const blob = await worker.saveState(); // Uint8Array, persist anywhere
@@ -151,23 +151,13 @@ worker.pushEvent("hello"); // steer the restored copy
 await done;
 ```
 
-The blob embeds the source and a compiler fingerprint: `restoreState` re-parses, verifies both, and rejects blobs saved by a different program or compiler version. One blob can be restored any number of times, each restore is an independent copy. 
+The blob embeds the source and a compiler fingerprint: `restoreState` re-parses, verifies both, and rejects blobs saved by a different program or compiler version. One blob restores any number of times, each an independent copy. Host-side resources (DOM node handles, sockets, in-flight host calls) do not survive; queued but unconsumed events do.
 
-A program that never suspends is snapshottable too, once the host arms preemption:
+Preempts land on loop back-edges where the VM can unwind. Class bodies, module top level, builtin callbacks (`sort(key=...)`, a generator drained by `list()`), `__init__` / `__call__`, and single long native operations run past the interval and yield at the next reachable back-edge. That delays a pause; it never corrupts one.
 
-```js
-await worker.setPreemptInterval(50_000); // yield every 50k loop back-edges
-worker.run("n = 0\nwhile True:\n    n += 1"); // no receive(), no sleep()
-await worker.pause();                    // resolves true, parked mid-loop
-const blob = await worker.saveState();
-worker.resume();
-```
+Size ceiling: the blob holds the source **plus the entire live heap**, and `restoreState` loads it through the runtime's source buffer, capped at 1 MiB (`1 << 20`). `saveState` is uncapped, so a large live heap can produce a blob that only fails on restore with `snapshot exceeds 1048576 bytes`; keep snapshotted state well under the ceiling.
 
-Preempts land on loop back-edges where the VM can unwind. Function and method bodies, `for` / `while` loops, comprehensions and `try` / `with` blocks all qualify; class bodies, module top level, builtin callbacks (`sort(key=...)`, a generator drained by `list()`), `__init__` / `__call__`, and single long native operations run past the interval and yield at the next reachable back-edge. That delays a pause; it never corrupts one.
-
-Host-side resources are not part of the snapshot: DOM node handles, sockets and in-flight host calls do not survive; programs that only hold Python state (plus queued but unconsumed events, which are preserved) restore exactly.
-
-Size ceiling: the blob holds the source **plus the entire live heap and coroutine state**, and `restoreState` loads it through the runtime's source buffer, capped at 1 MiB (`1 << 20`). `saveState` is uncapped, so a program with a large live heap can produce a blob it returns happily but `restoreState` later rejects with `snapshot exceeds 1048576 bytes`. The limit bites only on restore; keep snapshotted state well under the ceiling.
+See [Snapshots](https://edgepython.com/language/snapshots) for the full guide: preemption tuning, checkpoint-on-close, serving blobs from a backend, and inspecting a parked run.
 
 ## Writing a loader
 

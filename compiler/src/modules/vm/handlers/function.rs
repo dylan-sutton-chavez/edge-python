@@ -190,7 +190,7 @@ impl<'a> VM<'a> {
 
     /* `Call` orchestrator. Only user `Func` callees build a fresh `fn_slots` and run the body inline; every other callee kind short-circuits in `try_dispatch_non_func_callable`. */
     pub(crate) fn exec_call(&mut self, operand: u16, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
-        // Taken here so any nested call from a native helper below sees `false`.
+        // Taken so nested native calls see false.
         let call_safe = core::mem::take(&mut self.pending_exec_safe);
         let (positional, kw_flat, _num_pos, num_kw) = self.parse_call_args(operand)?;
 
@@ -205,7 +205,7 @@ impl<'a> VM<'a> {
         let (fi, defaults, captures) = match self.heap.get(callee) {
             HeapObj::Func(i, d, c) => (*i, d.clone(), c.clone()),
             _ => {
-                // A bound method re-dispatches as a tail call; every other shape resumes native work afterwards.
+                // Bound methods re-dispatch as tail calls.
                 if matches!(self.heap.get(callee), HeapObj::BoundUserMethod(..)) {
                     self.pending_exec_safe = call_safe;
                 }

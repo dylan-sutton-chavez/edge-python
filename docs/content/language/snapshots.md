@@ -184,26 +184,13 @@ await fetch("/saves/cart", { method: "PUT", body: await worker.saveState() }); /
 
 ## Restore if present, else start fresh
 
-The common pattern resumes a saved session when one exists and otherwise begins a new run.
+The common pattern resumes a saved session when one exists and otherwise begins a new run. A backend works the same way as a local store: it only holds bytes and never runs the VM.
 
 ```js
-const saved = await store.get("cart"); // Uint8Array or undefined
-if (saved) {
-  worker.restoreState(saved); // resume exactly where the user left off
-} else {
-  worker.run(cartSrc); // brand-new session
-}
-```
-
-## Serve a snapshot
-
-A backend can hand a client a blob and let it continue locally, so the server only stores bytes and never runs the VM.
-
-```js
-const res = await fetch(`/saves/${userId}`);
+const res = await fetch(`/saves/${userId}`); // or any local store
 if (res.ok) {
   const blob = new Uint8Array(await res.arrayBuffer());
-  worker.restoreState(blob); // continue the user's server-held session
+  worker.restoreState(blob); // continue the user's held session
 } else {
   worker.run(cartSrc); // no save yet, so start fresh
 }

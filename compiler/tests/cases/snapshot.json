@@ -91,5 +91,17 @@
   {"src": "m = {'fn': lambda x: x + 1}\nreceive()\nprint(m['fn'](41))", "interactive_events": ["go"], "output": ["42"]},
   {"src": "pairs = sorted([(3, 'c'), (1, 'a'), (2, 'b')])\nreceive()\nprint(pairs)", "interactive_events": ["go"], "output": ["[(1, 'a'), (2, 'b'), (3, 'c')]"]},
   {"src": "xs = [5, 3, 1]\nxs.sort(key=lambda v: -v)\nreceive()\nprint(xs)", "interactive_events": ["go"], "output": ["[5, 3, 1]"]},
-  {"src": "seen = set()\nfor _ in range(3):\n    seen.add(receive())\nprint('b' in seen, len(seen))", "interactive_events": ["a", "b", "a"], "output": ["True 2"]}
+  {"src": "seen = set()\nfor _ in range(3):\n    seen.add(receive())\nprint('b' in seen, len(seen))", "interactive_events": ["a", "b", "a"], "output": ["True 2"]},
+
+  {"src": "n = 0\nwhile n < 4000:\n    n = n + 1\n    if n % 2000 == 0:\n        print(n)\nprint('done', n)", "preempt_interval": 500, "min_preempts": 7, "output": ["2000", "4000", "done 4000"]},
+  {"src": "n = 0\nwhile n < 4000:\n    n = n + 1\n    if n % 2000 == 0:\n        print(n)\nprint('done', n)", "preempt_interval": 500, "min_preempts": 7, "unmetered": true, "output": ["2000", "4000", "done 4000"]},
+  {"src": "def level3(n):\n    t = 0\n    while t < 3000:\n        t = t + 1\n    return t + n\ndef level2(n):\n    return '[' + str(level3(n)) + ']'\ndef level1(n):\n    return level2(n) + '!'\nprint(level1(7))", "preempt_interval": 400, "hop_at": 2, "min_preempts": 5, "output": ["[3007]!"]},
+  {"src": "class Counter:\n    def __init__(self):\n        self.n = 0\n    def spin(self, limit):\n        while self.n < limit:\n            self.n = self.n + 1\n        return self.n\nc = Counter()\nc.spin(2000)\nprint(c.spin(4000))", "preempt_interval": 300, "hop_at": 2, "min_preempts": 5, "output": ["4000"]},
+  {"src": "class C:\n    n = 0\n    while n < 3000:\n        n = n + 1\nprint(C.n)", "preempt_interval": 50, "max_preempts": 0, "output": ["3000"]},
+  {"src": "def key(x):\n    t = 0\n    while t < 2000:\n        t = t + 1\n    return -x\nitems = [3, 1, 2]\nitems.sort(key=key)\nprint(items)", "preempt_interval": 50, "max_preempts": 0, "output": ["[3, 2, 1]"]},
+  {"src": "def key(x):\n    t = 0\n    while t < 2000:\n        t = t + 1\n    return -x\nprint(sorted([3, 1, 2], key=key))", "preempt_interval": 50, "max_preempts": 0, "output": ["[3, 2, 1]"]},
+  {"src": "def gen():\n    for i in range(4):\n        t = 0\n        while t < 2000:\n            t = t + 1\n        yield i\nprint(sum(list(gen())))", "preempt_interval": 50, "max_preempts": 0, "output": ["6"]},
+  {"src": "seen = []\nwhile True:\n    spin = 0\n    while spin < 1500:\n        spin = spin + 1\n    m = receive()\n    if m == 'stop':\n        break\n    seen.append(m)\nprint(','.join(seen))", "preempt_interval": 300, "hop_at": 1, "min_preempts": 1, "interactive_events": ["a", "b", "stop"], "output": ["a,b"]},
+  {"src": "spin = 0\nwhile spin < 1500:\n    spin = spin + 1\na = receive()\nb = receive()\nprint(a, b)", "events": ["x", "y"], "preempt_interval": 100, "hop_at": 1, "min_preempts": 1, "output": ["x y"]},
+  {"src": "acc = []\nfor i in range(3000):\n    acc.append(str(i))\n    if len(acc) > 40:\n        acc = acc[-2:]\nprint(len(acc), acc[-1])", "preempt_interval": 200, "hop_at": 3, "min_preempts": 3, "output": ["36 2999"]}
 ]

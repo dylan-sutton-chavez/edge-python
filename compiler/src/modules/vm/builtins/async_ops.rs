@@ -9,7 +9,7 @@ impl<'a> VM<'a> {
 
     // Resume coroutine: persist state on yield, restore caller on return. Suspended sync sub-frames run innermost-first, each pushing its result onto the next frame's stack at the Call site. The coro's `exception_frames` are restored before its body runs and saved back on yield, so `try`/`except` survives suspensions.
     pub fn resume_coroutine(&mut self, callee: Val) -> Result<Val, VmErr> {
-        // Only the scheduler drives a coro with nothing native waiting above it.
+        // Scheduler-driven resumes have nothing native above.
         let resume_safe = core::mem::take(&mut self.pending_exec_safe);
         let (outer_ip, mut outer_slots, outer_stack, outer_body, outer_iters, mut sync_frames, outer_exc) =
             if let HeapObj::Coroutine(ip, slots, stack, body, iters, sf, ef) = self.heap.get(callee) {
@@ -52,7 +52,7 @@ impl<'a> VM<'a> {
                 let frame_iter_base = self.iter_stack.len();
                 let frame_exc_base = self.exception_stack.len();
                 self.stack.extend(stack_delta);
-                // The inner call's result belongs on top of this frame's operands.
+                // Inner result lands on this frame's stack.
                 if let Some(v) = pending_ret.take() { self.push(v); }
                 self.iter_stack.extend(iter_delta);
                 let mut restored = exception_delta;
@@ -82,7 +82,7 @@ impl<'a> VM<'a> {
                             ip: self.resume_ip, fi, slots,
                             stack_delta: new_stack, iter_delta: new_iter, exception_delta: new_exc,
                         });
-                        // Deeper sync calls arrive innermost-first; reverse so `pop` re-enters innermost.
+                        // Reverse so pop re-enters innermost first.
                         let newer = core::mem::take(&mut self.pending_sync_frames);
                         sync_frames.extend(newer.into_iter().rev());
                         break 'drive Ok(val);
@@ -357,7 +357,7 @@ impl<'a> VM<'a> {
             if !alive { return Ok(()); }
             if let Some(i) = next_ready {
                 self.scheduler_step(i)?;
-                // The coro stays Ready, so resuming needs no host action beyond re-entering.
+                // Coro stays Ready; re-entering resumes it.
                 if core::mem::take(&mut self.pending.preempt_request) {
                     return Err(VmErr::HostYield(SchedulerStatus::Preempted));
                 }

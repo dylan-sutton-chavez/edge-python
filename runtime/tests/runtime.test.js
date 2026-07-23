@@ -49,7 +49,7 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
             try { return r.fulfill({ contentType: "text/javascript", body: readFileSync(HOST_DIR + repoPath) }); }
             catch { return r.continue(); } // no local host source: use the deployed module
         }
-        // Prefer an in-tree compiler.wasm so a test can exercise exports that are not deployed yet.
+        // Prefer in-tree wasm so new exports are testable.
         if (u.host === CDN_HOST && u.pathname === "/compiler.wasm") {
             const local = `${REPO}target/wasm32-unknown-unknown/release/compiler.wasm`;
             try { return r.fulfill({ contentType: "application/wasm", body: readFileSync(local) }); }
@@ -95,7 +95,7 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
             }
         }
 
-        // Snapshot API: park a run on receive(), save + inspect, finish it, then restore the blob and steer the copy differently.
+        // Park on receive(), save, finish, restore, steer differently.
         const snap = await page.evaluate(async () => {
             const el = globalThis.el;
             const chunks = [];
@@ -131,7 +131,7 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
         if (snap.globalsAtSave.history !== "['a']") throw new Error(`snapshot: stateGlobals saw ${JSON.stringify(snap.globalsAtSave)}`);
         if (!(snap.blobLen > 100)) throw new Error(`snapshot: implausible blob length ${snap.blobLen}`);
 
-        // Preemption: a program with no suspension point is still pausable, snapshottable and resumable.
+        // A suspension-free program still pauses and snapshots.
         const pre = await page.evaluate(async () => {
             const el = globalThis.el;
             const chunks = [];
@@ -156,7 +156,7 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
         if (!(pausedAt > 0 && pausedAt < 1000000)) throw new Error(`preempt: expected a mid-loop pause, n was ${JSON.stringify(pre.globalsAtPause.n)}`);
         if (!(pre.blobLen > 100)) throw new Error(`preempt: implausible blob length ${pre.blobLen}`);
 
-        // Documented tag path: a fresh element armed through its own proxy.
+        // Documented tag path: fresh element via proxy.
         const tagged = await page.evaluate(async () => {
             const el = document.createElement("edge-python");
             const ready = new Promise((res) => el.addEventListener("ready", res, { once: true }));

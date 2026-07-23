@@ -32,7 +32,7 @@ pub struct BuiltinMethodId(u8);
 impl BuiltinMethodId {
     #[inline] pub fn name(self) -> &'static str { ALL_METHODS[self.0 as usize].name }
     pub(crate) fn raw(self) -> u8 { self.0 }
-    /* Bounds-checked decode for snapshot restore; index stability is guaranteed by the blob's fingerprint. */
+    /* Bounds-checked decode for snapshot restore. */
     pub(crate) fn from_raw(i: u8) -> Option<Self> {
         ((i as usize) < ALL_METHODS.len()).then_some(Self(i))
     }
