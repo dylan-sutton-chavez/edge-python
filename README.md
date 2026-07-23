@@ -14,6 +14,7 @@ Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Pyt
 - Around 200 KB footprint. The full compiler and runtime ship as a single WASM binary.
 - Compile-time imports. Every module resolves at parse time, no dynamic loading, no runtime surprises.
 - No AST. Source compiles directly to bytecode in a single pass: O(n).
+- Snapshots. Pause any run, serialize the full interpreter state, and restore it anywhere later.
 
 ## More about it
 
