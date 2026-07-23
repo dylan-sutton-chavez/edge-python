@@ -416,9 +416,12 @@ impl<'a> VM<'a> {
                     let v = slots.get(op as usize).copied().unwrap_or(Val::undef());
                     if v.is_undef() {
                         let name = chunk.names.get(op as usize).map(|n| ssa_strip(n)).unwrap_or_default();
-                        return Err(VmErr::Name(name.into()));
+                        // A deleted rebind falls back to the builtin, the outermost scope.
+                        if let Some(bv) = self.builtin_binding(name) { self.push(bv); }
+                        else { return Err(VmErr::Name(name.into())); }
+                    } else {
+                        self.push(v);
                     }
-                    self.push(v);
                 }
             }
             OpCode::StoreName => {
@@ -443,6 +446,7 @@ impl<'a> VM<'a> {
                 {
                     let v = slots[op as usize];
                     let bare = ssa_strip(name).to_string();
+                    if NativeFnId::from_name(&bare).is_some() { self.builtins_rebound = true; }
                     self.module_state.insert(bare.clone(), v);
                     if v.is_heap() && matches!(self.heap.get(v), HeapObj::Module(..)) {
                         self.globals.insert(bare, v);
@@ -453,6 +457,7 @@ impl<'a> VM<'a> {
                 let name = chunk.names.get(op as usize).ok_or(cold_runtime("LoadGlobal: name index out of bounds"))?;
                 let v = self.module_state.get(name.as_str()).copied()
                     .or_else(|| self.globals.get(name.as_str()).copied())
+                    .or_else(|| self.builtin_binding(name))
                     .unwrap_or(Val::undef());
                 if v.is_undef() {
                     return Err(VmErr::Name(name.clone()));
@@ -462,6 +467,7 @@ impl<'a> VM<'a> {
             OpCode::StoreGlobal => {
                 let v = self.pop()?;
                 let name = chunk.names.get(op as usize).ok_or(cold_runtime("StoreGlobal: name index out of bounds"))?;
+                if NativeFnId::from_name(name).is_some() { self.builtins_rebound = true; }
                 self.module_state.insert(name.clone(), v);
             }
             OpCode::LoadConst => {
@@ -952,6 +958,14 @@ impl<'a> VM<'a> {
             }
         }
         Ok(())
+    }
+
+    /* The pre-registered value for a genuine builtin name; None for user names, so deleted user bindings stay deleted. */
+    fn builtin_binding(&self, bare: &str) -> Option<Val> {
+        if NativeFnId::from_name(bare).is_none() && !crate::modules::parser::BUILTIN_TYPES.contains(&bare) {
+            return None;
+        }
+        self.globals.get(bare).copied()
     }
 
     #[inline(never)]

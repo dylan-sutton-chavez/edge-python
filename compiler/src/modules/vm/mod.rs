@@ -134,6 +134,8 @@ pub struct VM<'a> {
     pub(crate) chunk_local_binds: HashMap<*const SSAChunk, alloc::rc::Rc<crate::util::fx::FxHashSet<String>>>,
     /* Coroutines currently inside `resume_coroutine`; re-entry raises like CPython's already-executing guard. Transient, never snapshotted. */
     pub(crate) executing_coros: Vec<u64>,
+    /* True once any builtin name is rebound at module scope; fused call sites then consult `module_state` first. */
+    pub(crate) builtins_rebound: bool,
     pub(crate) is_async: Vec<bool>,
     pub(crate) default_slots: Vec<Vec<(usize, Val)>>,
     /* Pre-resolved `<name>_0` body slot for self-reference binding; None for lambdas. */
@@ -261,6 +263,7 @@ impl<'a> VM<'a> {
             body_free_loads: Vec::new(),
             chunk_local_binds: HashMap::default(),
             executing_coros: Vec::new(),
+            builtins_rebound: false,
             is_async: Vec::new(),
             default_slots: Vec::new(),
             self_ref_slot: Vec::new(),

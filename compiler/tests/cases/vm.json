@@ -3800,5 +3800,12 @@
   {"src":"seen = []\ndef probe(i):\n    seen.append(i)\n    return i == 2\nprint(any(probe(i) for i in range(10)))\nprint(seen)","output":["True","[0, 1, 2]"]},
   {"src":"x = 1\ndef f():\n    return x\ndel x\ntry:\n    print(f())\nexcept NameError:\n    print(\"NameError\")","output":["NameError"]},
   {"src":"print(len(\"ab\"))\nlen = lambda s: 99\nprint(len(\"ab\"))","output":["2","99"]},
-  {"src":"def f():\n    x = 1\n    def get():\n        return x\n    def bump():\n        nonlocal x\n        x += 1\n    return get, bump\ng, b = f()\nb()\nprint(g())","output":["2"]}
+  {"src":"def f():\n    x = 1\n    def get():\n        return x\n    def bump():\n        nonlocal x\n        x += 1\n    return get, bump\ng, b = f()\nb()\nprint(g())","output":["2"]},
+  {"src":"def f(s):\n    return len(s)\nlen = lambda s: 99\nprint(f(\"ab\"))","output":["99"]},
+  {"src":"def f(s):\n    return len(s)\nlen = lambda s: 99\nprint(f(\"ab\"))\ndel len\nprint(f(\"ab\"))","output":["99","2"]},
+  {"src":"def shadow():\n    global abs\n    abs = lambda x: 0\ndef use(x):\n    return abs(x)\nshadow()\nprint(use(-5))","output":["0"]},
+  {"src":"len = len\nprint(len(\"abc\"))","output":["3"]},
+  {"src":"def f(x):\n    return int(x)\nint = lambda x: 7\nprint(f(\"5\"))","output":["7"]},
+  {"src":"def f():\n    out = []\n    for i in range(3):\n        out.append(i)\n    return out\nrange = lambda n: [5, 6]\nprint(f())","output":["[5, 6]"]},
+  {"src":"def f():\n    print(\"x\")\nprint = lambda *a: None\nf()\ndel print\nprint(\"back\")","output":["back"]}
 ]

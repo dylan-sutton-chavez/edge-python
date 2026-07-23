@@ -30,6 +30,17 @@ fn native_is_impure(id: super::super::types::NativeFnId) -> bool {
     )
 }
 
+/* Every fused call opcode -> its builtin name; extends `fused_native` with the packed-operand family. `sorted` stays out: its fused kwarg layout is not decodable for a redirect. */
+fn fused_builtin_name(op: OpCode) -> Option<&'static str> {
+    if let Some(id) = fused_native(op) { return Some(id.name()); }
+    Some(match op {
+        OpCode::CallPrint => "print", OpCode::CallRange => "range",
+        OpCode::CallDict => "dict", OpCode::CallMin => "min", OpCode::CallMax => "max",
+        OpCode::CallEnumerate => "enumerate",
+        _ => return None,
+    })
+}
+
 // Fused builtin opcode -> its id (plain-`pos+kw` operand ops); powers the shared arity guard.
 fn fused_native(op: OpCode) -> Option<super::super::types::NativeFnId> {
     use super::super::types::NativeFnId as F;
@@ -49,6 +60,17 @@ fn fused_native(op: OpCode) -> Option<super::super::types::NativeFnId> {
 impl<'a> VM<'a> {
     /* Dispatch every function-shaped opcode (Call, MakeFunction, builtins). */
     pub(crate) fn handle_function(&mut self, op: OpCode, operand: u16, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+        // A module-scope rebind of a builtin name must win over call sites fused before it existed. Plain fused operands are a bare count, so counts past one byte fall back to the native (they cannot round-trip through `exec_call`'s packing).
+        let packed_operand = matches!(op, OpCode::CallPrint | OpCode::CallDict | OpCode::CallMin | OpCode::CallMax | OpCode::CallEnumerate);
+        if self.builtins_rebound
+            && (packed_operand || operand <= 0xFF)
+            && let Some(name) = fused_builtin_name(op)
+            && let Some(&bound) = self.module_state.get(name)
+            && !bound.is_undef()
+            && !(bound.is_heap() && matches!(self.heap.get(bound), HeapObj::NativeFn(id) if id.name() == name))
+        {
+            return self.call_rebound(bound, operand, chunk, slots);
+        }
         // Fused builtins skip dispatch_native's arity check; validate fixed-arity ones so a wrong count is a clean TypeError.
         if let Some(id) = fused_native(op)
             && let Some(n) = id.arity()
@@ -228,6 +250,15 @@ impl<'a> VM<'a> {
         let cell = self.make_cell(v)?;
         if let Some(frame) = self.call_stack.last_mut() { frame.cells.push((si, cell)); }
         Ok(cell)
+    }
+
+    /* Route a fused call site's stacked args to a rebound callable via the generic call path: slot the callee under the args, then `exec_call` decodes the same packed operand. */
+    fn call_rebound(&mut self, callee: Val, operand: u16, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+        let pos = ((operand & 0xFF) as i32 + self.pending.pos_delta).max(0) as usize;
+        let kw = (((operand >> 8) & 0xFF) as i32 + self.pending.kw_delta).max(0) as usize;
+        let at = self.stack.len().checked_sub(pos + 2 * kw).ok_or(cold_runtime("stack underflow"))?;
+        self.stack.insert(at, callee);
+        self.exec_call(operand, chunk, slots)
     }
 
     /* `Call` orchestrator. Only user `Func` callees build a fresh `fn_slots` and run the body inline; every other callee kind short-circuits in `try_dispatch_non_func_callable`. */
