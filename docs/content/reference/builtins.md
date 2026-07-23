@@ -19,7 +19,7 @@ p("aliased")
 aliased
 ```
 
-Edge Python is multi-paradigm. Introspection helpers (`eval`, `exec`, `compile`, `dir`, `ascii`, `help`, `__import__`, `breakpoint`, `open`) are absent by design. The static-import contract and the lack of a writable global module table make them impossible or inconsistent with the paradigm. `classmethod` is omitted; use the namespace pattern or free functions. `super`, `property`, and `staticmethod` are supported. See [`/language/classes`](/language/classes), [`/language/dunders`](/language/dunders).
+Edge Python is multi-paradigm. Introspection helpers (`eval`, `exec`, `compile`, `dir`, `ascii`, `help`, `__import__`, `breakpoint`, `open`) are absent by design. The static-import contract and the lack of a writable global module table make them impossible or inconsistent with the paradigm. `super`, `property`, `staticmethod`, and `classmethod` are supported. See [`/language/classes`](/language/classes), [`/language/dunders`](/language/dunders).
 
 ## Output
 
@@ -933,6 +933,10 @@ print(Math().add(4, 5))
 5
 9
 ```
+
+### classmethod
+
+`classmethod(func)`: wraps a class member so it receives the class as its first argument. Usually applied via `@classmethod`. Full model in [Class methods](/language/classes#class-methods).
 
 ## Async
 

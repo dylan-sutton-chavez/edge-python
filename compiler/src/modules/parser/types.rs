@@ -51,6 +51,10 @@ pub enum OpCode {
     BeginArgs,
     /* Consume the staged `__exit__` result; truthy suppresses a pending re-raise. */
     WithJudge,
+    // Swap the top two stack values.
+    Swap,
+    // Lift the third stack value to the top.
+    Rot3,
 }
 
 // Python builtin name -> (specialised OpCode, `leaves_value_on_stack`).
@@ -182,6 +186,12 @@ impl SSAChunk {
             return;
         }
         self.instructions.push(Instruction { opcode: op, operand });
+    }
+
+    /* Truncate instructions and drop call positions past the cut, keeps `call_byte_pos` sorted. */
+    pub(super) fn truncate_to(&mut self, start: usize) {
+        self.instructions.truncate(start);
+        self.call_byte_pos.retain(|&(ip, _)| (ip as usize) < start);
     }
 
     /* Records (ip, `byte_pos`) for the last emitted call so traceback caret lands on it. */

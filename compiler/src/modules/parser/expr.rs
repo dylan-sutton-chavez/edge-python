@@ -51,7 +51,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     }
 
     /* Re-append drained instructions, shifting internal jump targets by `delta`. */
-    fn push_shifted(&mut self, ins: Vec<Instruction>, delta: i64) {
+    pub(super) fn push_shifted(&mut self, ins: Vec<Instruction>, delta: i64) {
         for i in ins {
             let operand = if matches!(i.opcode, OpCode::Jump | OpCode::JumpIfFalse | OpCode::JumpIfFalseOrPop | OpCode::JumpIfTrueOrPop | OpCode::ForIter) {
                 (i.operand as i64 + delta) as u16
@@ -304,7 +304,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         let name = self.lexeme(&t).to_string();
         match self.peek() {
             // In f-string context, `=` is the debug marker `f"{x=}"`, not assignment.
-            Some(TokenType::Equal) if !self.in_fstring_expr => {
+            Some(TokenType::Equal) if !self.in_fstring_expr && !self.in_target_list => {
                 self.assign(name.clone());
                 self.emit_load_ssa(name);
             }
@@ -413,7 +413,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     self.advance();
                     self.parse_subscript();
                     // Subscript assignment: StoreItem; for slices runtime replaces the range.
-                    if matches!(self.peek(), Some(TokenType::Equal)) {
+                    if !self.in_target_list && matches!(self.peek(), Some(TokenType::Equal)) {
                         self.advance();
                         self.expr();
                         self.chunk.emit(OpCode::StoreItem, 0);
@@ -433,7 +433,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     let (start, end) = (t.start, t.end);
                     let idx = self.chunk.push_name(&self.source[start..end]);
                     // Attribute assignment: StoreAttr, mirroring the subscript case. In f-strings `=` is the debug marker.
-                    if !self.in_fstring_expr && matches!(self.peek(), Some(TokenType::Equal)) {
+                    if !self.in_fstring_expr && !self.in_target_list && matches!(self.peek(), Some(TokenType::Equal)) {
                         self.advance();
                         self.expr();
                         self.chunk.emit(OpCode::StoreAttr, idx);

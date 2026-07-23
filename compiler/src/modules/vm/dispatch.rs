@@ -638,6 +638,14 @@ impl<'a> VM<'a> {
                 let b = self.pop()?; let a = self.pop()?;
                 self.push(a); self.push(b); self.push(a); self.push(b);
             }
+            OpCode::Swap => {
+                let b = self.pop()?; let a = self.pop()?;
+                self.push(b); self.push(a);
+            }
+            OpCode::Rot3 => {
+                let c = self.pop()?; let b = self.pop()?; let a = self.pop()?;
+                self.push(b); self.push(c); self.push(a);
+            }
             OpCode::Assert | OpCode::Del | OpCode::Global | OpCode::Nonlocal
             | OpCode::Raise | OpCode::RaiseFrom | OpCode::Await => {
                 self.handle_side(opcode, operand, chunk, slots)?;

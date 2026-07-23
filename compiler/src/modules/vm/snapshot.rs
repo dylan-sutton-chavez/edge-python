@@ -354,6 +354,7 @@ fn put_obj(w: &mut W, obj: &HeapObj) {
         HeapObj::Property(a, b) => { w.u8(21); w.val(*a); w.val(*b); }
         HeapObj::PropertySetter(a) => { w.u8(22); w.val(*a); }
         HeapObj::StaticMethod(a) => { w.u8(23); w.val(*a); }
+        HeapObj::ClassMethod(a) => { w.u8(27); w.val(*a); }
         HeapObj::Coroutine(ip, slots, stack, body, iters, syncs, excs) => {
             w.u8(24); w.usz(*ip); w.vals(slots); w.vals(stack); put_body_ref(w, body);
             w.seq(iters, put_iter_frame); w.seq(syncs, put_sync_frame); w.seq(excs, put_exc_frame);
@@ -411,6 +412,7 @@ fn get_obj(r: &mut R, externs: &ExternMap, fills: &mut Vec<(u32, SetFill)>, slot
             let name = r.str()?;
             HeapObj::Extern(externs.get(&name).ok_or_else(|| s_err("unknown native binding", &name))?.clone())
         }
+        27 => HeapObj::ClassMethod(r.val()?),
         t => return Err(s_err("unknown heap tag", itoa::Buffer::new().format(t))),
     })
 }

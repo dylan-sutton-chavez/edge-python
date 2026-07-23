@@ -1,11 +1,25 @@
 use crate::s;
 
 use super::Parser;
-use super::types::OpCode;
+use super::types::{Instruction, OpCode};
 
 use crate::modules::lexer::{Token, TokenType};
 
 use alloc::{string::{String, ToString}, vec, vec::Vec};
+
+/* Assignment-target shapes for sequence unpacking; complex ones carry their captured load prefix plus its original offset for jump-shifted replay. */
+pub(super) enum UnpackTarget {
+    Name(String),
+    Attr(Vec<Instruction>, usize, u16),
+    Item(Vec<Instruction>, usize),
+    Nested(Vec<UnpackTarget>),
+}
+
+/* One element of a comma-led statement; plain names defer their load until proven expression. */
+enum TupleElem {
+    Named(String, bool),
+    Range(usize, usize),
+}
 
 impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
@@ -195,7 +209,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     targets.push(self.advance_text());
                 }
                 self.eat(TokenType::Equal);
-                self.expr();
+                self.rhs_tuple();
                 // Leading star: equivalent to star at position 0.
                 self.emit_unpack_stores(&targets, Some(0));
                 false
@@ -235,26 +249,19 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 self.tokens.next();
                 false
             }
-            Some(TokenType::Lsqb) => {
-                // `[a, b] = rhs`: a list display followed by `=` is a sequence-unpack target.
+            _ => {
+                // `(a, b) = rhs` / `[a, b] = rhs`: a display followed by `=` is a sequence-unpack target.
                 let start = self.chunk.instructions.len();
                 self.expr();
                 if matches!(self.peek(), Some(TokenType::Equal))
-                    && let Some(targets) = self.list_display_targets(start) {
+                    && let Some(targets) = self.display_targets(start) {
                     self.advance();
-                    self.chunk.instructions.truncate(start); // drop the display's loads + BuildList
-                    self.expr();
-                    let count = self.tuple_rest(1, |s| matches!(s.peek(), Some(TokenType::Newline | TokenType::Endmarker) | None));
-                    if count > 1 { self.chunk.emit(OpCode::BuildTuple, count); }
+                    self.chunk.truncate_to(start);
+                    self.rhs_tuple();
                     self.chunk.emit(OpCode::UnpackSequence, targets.len() as u16);
-                    for t in targets { self.store_name(t); }
-                    false
-                } else {
-                    true // plain list display / comprehension statement
+                    self.emit_target_stores(&targets);
+                    return false;
                 }
-            }
-            _ => {
-                self.expr();
                 self.diag_stray_colon();
                 true
             }
@@ -284,6 +291,13 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             }
             if !self.eat_if(TokenType::Comma) { break; }
         }
+    }
+
+    /* Assignment RHS: one expression or a comma tuple, ends at the line boundary. */
+    fn rhs_tuple(&mut self) {
+        self.expr();
+        let count = self.tuple_rest(1, |s| matches!(s.peek(), Some(TokenType::Newline | TokenType::Endmarker) | None));
+        if count > 1 { self.chunk.emit(OpCode::BuildTuple, count); }
     }
 
     /* Eats `, expr` until `stop`; returns the element count. */
@@ -343,27 +357,196 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         matches!(self.peek(), Some(TokenType::Equal))
     }
 
-    /* Decodes a just-emitted `[a, b, ...]` display into bare target names; None unless every element is a plain name load. */
-    fn list_display_targets(&self, start: usize) -> Option<Vec<String>> {
-        let (last, loads) = self.chunk.instructions[start..].split_last()?;
-        if last.opcode != OpCode::BuildList { return None; }
-        let n = last.operand as usize;
-        if n == 0 || loads.len() != n { return None; }
-        let mut names = Vec::with_capacity(n);
-        for ld in loads {
-            let raw = self.chunk.names.get(ld.operand as usize)?;
-            match ld.opcode {
-                OpCode::LoadName => names.push(super::types::ssa_strip(raw).to_string()),
-                OpCode::LoadGlobal => names.push(raw.clone()),
-                _ => return None,
+    /* Per-opcode stack effect for target segmentation; None = shape unknown, caller bails. */
+    fn stack_delta(op: OpCode, operand: u16) -> Option<i32> {
+        use OpCode::*;
+        Some(match op {
+            LoadConst | LoadName | LoadGlobal | LoadTrue | LoadFalse | LoadNone | LoadEllipsis => 1,
+            LoadAttr | Minus | Not | BitNot | Pos => 0,
+            Add | Sub | Mul | Div | Mod | Pow | FloorDiv | Eq | NotEq | Lt | Gt | LtEq | GtEq
+            | BitAnd | BitOr | BitXor | Shl | Shr | In | NotIn | Is | IsNot | GetItem => -1,
+            BuildTuple | BuildList | BuildSet | BuildString | BuildSlice => 1 - operand as i32,
+            BuildDict => 1 - 2 * (operand as i32),
+            _ => return None,
+        })
+    }
+
+    /* Split an n-element display body into per-element ranges. Scans backward: each element is the minimal suffix with net stack effect +1, which is unambiguous even for nested displays. */
+    fn split_display(&self, lo: usize, hi: usize, n: usize) -> Option<Vec<(usize, usize)>> {
+        let mut ranges = vec![(0usize, 0usize); n];
+        let mut end = hi;
+        for k in (0..n).rev() {
+            let mut need = 1i32;
+            let mut i = end;
+            while need > 0 {
+                if i == lo { return None; }
+                i -= 1;
+                let ins = self.chunk.instructions[i];
+                need -= Self::stack_delta(ins.opcode, ins.operand)?;
+            }
+            ranges[k] = (i, end);
+            end = i;
+        }
+        (end == lo).then_some(ranges)
+    }
+
+    /* Reinterpret emitted load instructions as one assignment target; None if not assignable. */
+    fn range_target(&self, lo: usize, hi: usize) -> Option<UnpackTarget> {
+        if hi <= lo || hi > self.chunk.instructions.len() { return None; }
+        let (last, prefix) = self.chunk.instructions[lo..hi].split_last()?;
+        // Jumps relocate via `push_shifted`; Phi cannot move, it is anchored by `phi_map`.
+        let relocatable = !prefix.iter().any(|i| matches!(i.opcode, OpCode::Phi));
+        match last.opcode {
+            OpCode::LoadName if prefix.is_empty() => {
+                let raw = self.chunk.names.get(last.operand as usize)?;
+                Some(UnpackTarget::Name(super::types::ssa_strip(raw).to_string()))
+            }
+            OpCode::LoadGlobal if prefix.is_empty() => {
+                Some(UnpackTarget::Name(self.chunk.names.get(last.operand as usize)?.clone()))
+            }
+            OpCode::LoadAttr if relocatable => Some(UnpackTarget::Attr(prefix.to_vec(), lo, last.operand)),
+            OpCode::GetItem if relocatable => Some(UnpackTarget::Item(prefix.to_vec(), lo)),
+            OpCode::BuildTuple | OpCode::BuildList => {
+                let n = last.operand as usize;
+                if n == 0 { return None; }
+                let ranges = self.split_display(lo, hi - 1, n)?;
+                let ts: Option<Vec<UnpackTarget>> = ranges.iter()
+                    .map(|&(a, b)| self.range_target(a, b)).collect();
+                Some(UnpackTarget::Nested(ts?))
+            }
+            _ => None,
+        }
+    }
+
+    /* Decodes a just-emitted `(a, b)` / `[a, b]` display into unpack targets. */
+    fn display_targets(&self, start: usize) -> Option<Vec<UnpackTarget>> {
+        match self.range_target(start, self.chunk.instructions.len())? {
+            UnpackTarget::Nested(ts) => Some(ts),
+            _ => None,
+        }
+    }
+
+    /* Re-emit a captured target prefix at the current position, shifting its jumps. */
+    fn replay_prefix(&mut self, prefix: &[Instruction], lo: usize) {
+        let delta = self.chunk.instructions.len() as i64 - lo as i64;
+        self.push_shifted(prefix.to_vec(), delta);
+    }
+
+    /* One store per target; values arrive top-first, complex targets replay their captured loads. */
+    fn emit_target_stores(&mut self, targets: &[UnpackTarget]) {
+        for t in targets {
+            match t {
+                UnpackTarget::Name(n) => self.store_name(n.clone()),
+                UnpackTarget::Attr(prefix, lo, attr_idx) => {
+                    self.replay_prefix(prefix, *lo);
+                    self.chunk.emit(OpCode::Swap, 0);
+                    self.chunk.emit(OpCode::StoreAttr, *attr_idx);
+                }
+                UnpackTarget::Item(prefix, lo) => {
+                    self.replay_prefix(prefix, *lo);
+                    self.chunk.emit(OpCode::Rot3, 0);
+                    self.chunk.emit(OpCode::StoreItem, 0);
+                }
+                UnpackTarget::Nested(ts) => {
+                    self.chunk.emit(OpCode::UnpackSequence, ts.len() as u16);
+                    self.emit_target_stores(ts);
+                }
             }
         }
-        Some(names)
+    }
+
+    /* Emit deferred loads for plain-name elements still pending; keeps tuple element order. */
+    fn flush_named(&mut self, elems: &mut [TupleElem]) {
+        for e in elems.iter_mut() {
+            if let TupleElem::Named(n, emitted) = e
+                && !*emitted {
+                    self.emit_load_ssa(n.clone());
+                    *emitted = true;
+                }
+        }
+    }
+
+    /* Comma after one element: unpack assignment or tuple expression. `first` carries a plain leading name whose load is deferred; None means the element is already emitted at `start`. */
+    pub(super) fn unpack_or_tuple(&mut self, start: usize, first: Option<String>) -> bool {
+        let mut elems: Vec<TupleElem> = Vec::new();
+        match first {
+            Some(n) => elems.push(TupleElem::Named(n, false)),
+            None => elems.push(TupleElem::Range(start, self.chunk.instructions.len())),
+        }
+        let mut star_pos: Option<usize> = None;
+        // Elements may be targets: `=` must not parse as embedded assignment.
+        self.in_target_list = true;
+        while self.eat_if(TokenType::Comma) {
+            if matches!(self.peek(), Some(TokenType::Newline | TokenType::Endmarker | TokenType::Equal) | None) { break; }
+            if self.eat_if(TokenType::Star) {
+                star_pos = Some(elems.len());
+                let nm = self.advance_text();
+                if matches!(self.peek(), Some(TokenType::Dot | TokenType::Lsqb)) {
+                    self.error("starred assignment target must be a name");
+                }
+                elems.push(TupleElem::Named(nm, false));
+                continue;
+            }
+            if matches!(self.peek(), Some(TokenType::Name)) {
+                let t = self.advance();
+                let nm = self.lexeme(&t).to_string();
+                if matches!(self.peek(), Some(TokenType::Comma | TokenType::Equal | TokenType::Newline | TokenType::Endmarker) | None) {
+                    // Plain name element: defer the load, no phantom SSA slot on assignment.
+                    elems.push(TupleElem::Named(nm, false));
+                    continue;
+                }
+                // Name-led complex element: flush deferred loads, then continue its expression.
+                self.flush_named(&mut elems);
+                let lo = self.chunk.instructions.len();
+                self.emit_load_ssa(nm);
+                self.expr_tails();
+                elems.push(TupleElem::Range(lo, self.chunk.instructions.len()));
+                continue;
+            }
+            self.flush_named(&mut elems);
+            let lo = self.chunk.instructions.len();
+            self.expr();
+            elems.push(TupleElem::Range(lo, self.chunk.instructions.len()));
+        }
+        self.in_target_list = false;
+        if !matches!(self.peek(), Some(TokenType::Equal)) {
+            if star_pos.is_some() { self.error("cannot use starred expression here"); }
+            self.flush_named(&mut elems);
+            self.chunk.emit(OpCode::BuildTuple, elems.len() as u16);
+            return true;
+        }
+        let targets: Option<Vec<UnpackTarget>> = elems.iter().map(|e| match e {
+            TupleElem::Named(n, _) => Some(UnpackTarget::Name(n.clone())),
+            TupleElem::Range(lo, hi) => self.range_target(*lo, *hi),
+        }).collect();
+        let eq = self.advance();
+        self.chunk.truncate_to(start);
+        self.rhs_tuple();
+        let Some(targets) = targets else {
+            self.error_at(eq.start, eq.end, "cannot assign to this expression");
+            return true;
+        };
+        if let Some(sp) = star_pos {
+            // Starred lists keep the historic name-only path through UnpackEx.
+            let names: Option<Vec<String>> = targets.iter().map(|t| match t {
+                UnpackTarget::Name(n) => Some(n.clone()),
+                _ => None,
+            }).collect();
+            match names {
+                Some(ns) => self.emit_unpack_stores(&ns, Some(sp)),
+                None => self.error("starred assignment supports only plain name targets"),
+            }
+        } else {
+            self.chunk.emit(OpCode::UnpackSequence, targets.len() as u16);
+            self.emit_target_stores(&targets);
+        }
+        false
     }
 
     /* Name-led statement: assign, augmented-op, attr, index, call, or tuple unpack. */
     pub(super) fn name_stmt(&mut self, t: Token) -> bool {
         let name = self.lexeme(&t).to_string();
+        let start = self.chunk.instructions.len();
 
     if self.eat_if(TokenType::Colon) && !self.skip_annotation() {
         return false;
@@ -404,6 +587,9 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     }
                     self.chunk.emit(OpCode::GetItem, 0);
                     self.expr_tails();
+                    if matches!(self.peek(), Some(TokenType::Comma)) {
+                        return self.unpack_or_tuple(start, None);
+                    }
                     return true;
                 }
                 if matches!(self.peek(), Some(TokenType::Equal)) {
@@ -417,6 +603,9 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 } else {
                     self.chunk.emit(OpCode::GetItem, 0);
                     self.expr_tails();
+                    if matches!(self.peek(), Some(TokenType::Comma)) {
+                        return self.unpack_or_tuple(start, None);
+                    }
                     true
                 }
             }
@@ -479,44 +668,24 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                         }
                     }
                     self.expr_tails();
+                    if matches!(self.peek(), Some(TokenType::Comma)) {
+                        return self.unpack_or_tuple(start, None);
+                    }
                     true
                 }
             }
             Some(TokenType::Comma) => {
-                let mut targets = vec![name];
-                let mut star_pos: Option<usize> = None;
-                while self.eat_if(TokenType::Comma) {
-                    if self.eat_if(TokenType::Star) {
-                        star_pos = Some(targets.len());
-                        let nm = self.advance_text();
-                        targets.push(s!("*", str &nm));
-                    } else if matches!(self.peek(), Some(TokenType::Name)) {
-                        targets.push(self.advance_text());
-                    } else {
-                        break;
-                    }
-                }
-                if matches!(self.peek(), Some(TokenType::Equal)) {
-                    self.advance();
-                    self.expr();
-                    let count = self.tuple_rest(1, |s| matches!(s.peek(), Some(TokenType::Newline | TokenType::Endmarker) | None));
-                    if count > 1 {
-                        self.chunk.emit(OpCode::BuildTuple, count);
-                    }
-                    self.emit_unpack_stores(&targets, star_pos);
-                    false
-                } else {
-                    for t in &targets {
-                        self.emit_load_ssa(t.clone());
-                    }
-                    self.chunk.emit(OpCode::BuildTuple, targets.len() as u16);
-                    true
-                }
+                self.unpack_or_tuple(start, Some(name))
             }
             Some(TokenType::Lpar) => {
                 // `name(...)` at statement level: allow postfix chains like `super().__init__(x)`.
                 let leaves = self.call(name);
-                if leaves { self.expr_tails(); }
+                if leaves {
+                    self.expr_tails();
+                    if matches!(self.peek(), Some(TokenType::Comma)) {
+                        return self.unpack_or_tuple(start, None);
+                    }
+                }
                 leaves
             }
             _ => {

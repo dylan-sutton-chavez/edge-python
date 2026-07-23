@@ -66,6 +66,11 @@ impl<'a> VM<'a> {
             match self.heap.get(mv) {
                 HeapObj::Property(getter, _) => return AttrLookup::PropertyGet { recv, getter: *getter },
                 HeapObj::StaticMethod(func) => return AttrLookup::ClassMember(*func),
+                HeapObj::ClassMethod(func) => {
+                    // Bind the receiver's class, not the instance.
+                    let cls = if recv.is_heap() && let HeapObj::Instance(c, _) = self.heap.get(recv) { *c } else { recv };
+                    return AttrLookup::InstanceMethod { recv: cls, func: *func, class: defining };
+                }
                 HeapObj::Func(..) => return AttrLookup::InstanceMethod { recv, func: mv, class: defining },
                 _ => {}
             }
@@ -151,10 +156,14 @@ impl<'a> VM<'a> {
         // Class attr: `MyClass.method` returns the unbound function (no `self` prepended).
         if obj.is_heap()
             && let HeapObj::Class(cls_name, _, _) = self.heap.get(obj) {
-                if let Some((v, _)) = self.lookup_class_member(obj, bare) {
+                if let Some((v, defining)) = self.lookup_class_member(obj, bare) {
                     // `staticmethod` accessed on the class itself unwraps to the plain function.
                     if v.is_heap() && let HeapObj::StaticMethod(func) = self.heap.get(v) {
                         return Ok(AttrLookup::ClassMember(*func));
+                    }
+                    // `classmethod` binds the accessed class, derived included.
+                    if v.is_heap() && let HeapObj::ClassMethod(func) = self.heap.get(v) {
+                        return Ok(AttrLookup::InstanceMethod { recv: obj, func: *func, class: defining });
                     }
                     return Ok(AttrLookup::ClassMember(v));
                 }

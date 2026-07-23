@@ -898,6 +898,7 @@ impl<'a> VM<'a> {
             Super => self.call_super(),
             Property => self.call_property(argc),
             StaticMethod => self.call_staticmethod(argc),
+            ClassMethod => self.call_classmethod(argc),
         }
     }
 }

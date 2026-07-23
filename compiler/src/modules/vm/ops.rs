@@ -102,7 +102,7 @@ impl<'a> VM<'a> {
             HeapObj::Type(_) | HeapObj::Func(..) | HeapObj::Slice(..) | HeapObj::BoundMethod(..)
             | HeapObj::NativeFn(_) | HeapObj::Class(..) | HeapObj::BoundUserMethod(..)
             | HeapObj::Super(..) | HeapObj::Property(..) | HeapObj::PropertySetter(..)
-            | HeapObj::StaticMethod(..) | HeapObj::Instance(..) | HeapObj::Coroutine(..)
+            | HeapObj::StaticMethod(..) | HeapObj::ClassMethod(..) | HeapObj::Instance(..) | HeapObj::Coroutine(..)
             | HeapObj::Module(..) | HeapObj::Extern(_) | HeapObj::ExcInstance(..)
             | HeapObj::Ellipsis | HeapObj::NotImplemented => true,
         }
@@ -219,6 +219,7 @@ impl<'a> VM<'a> {
             HeapObj::Super(..) => "super",
             HeapObj::Property(..) | HeapObj::PropertySetter(..) => "property",
             HeapObj::StaticMethod(..) => "staticmethod",
+            HeapObj::ClassMethod(..) => "classmethod",
             HeapObj::Instance(..) => "object",
             HeapObj::Coroutine(..) => "coroutine",
             HeapObj::Module(..) => "module",
@@ -276,6 +277,7 @@ impl<'a> VM<'a> {
             HeapObj::Property(..) => "<property object>".into(),
             HeapObj::PropertySetter(..) => "<property.setter>".into(),
             HeapObj::StaticMethod(..) => "<staticmethod object>".into(),
+            HeapObj::ClassMethod(..) => "<classmethod object>".into(),
             HeapObj::Coroutine(..) => "<coroutine>".into(),
             HeapObj::Module(name, _) => s!("<module '", str name, "'>"),
             HeapObj::Extern(f) => s!("<extern function ", str &f.name, ">"),

@@ -173,6 +173,8 @@ pub enum HeapObj {
     PropertySetter(Val),
     // `staticmethod(func)`: wraps a function so attribute lookup returns it unbound.
     StaticMethod(Val),
+    // `classmethod(func)`: attribute lookup binds the class.
+    ClassMethod(Val),
     // Trailing `Vec<SyncFrame>` stacks suspended sync sub-calls (innermost-last); resume walks inside-out, each return lands on next frame's Call site. `BodyRef` discriminates user-fn coros from the implicit module-body coro. Final `Vec<ExceptionFrame>` carries try/except across yields.
     Coroutine(usize, Vec<Val>, Vec<Val>, BodyRef, Vec<IterFrame>, Vec<SyncFrame>, Vec<ExceptionFrame>),
     /* Produced by `import m`; attr access via LoadAttr, calls fuse through CallMethod. */
@@ -227,6 +229,7 @@ builtins! {
     Property => "property", var;
     StaticMethod => "staticmethod", 1;
     Frame => "frame", var;
+    ClassMethod => "classmethod", 1;
 }
 
 /* Content-hashed set: equal-by-content values dedup in O(1) regardless of heap identity. */
@@ -385,6 +388,7 @@ pub(crate) fn for_each_val(obj: &HeapObj, mut f: impl FnMut(Val)) {
         HeapObj::Property(g, s) => { f(*g); f(*s); }
         HeapObj::PropertySetter(p) => f(*p),
         HeapObj::StaticMethod(func) => f(*func),
+        HeapObj::ClassMethod(func) => f(*func),
         HeapObj::Instance(cls, attrs) => {
             f(*cls);
             for (k, v) in attrs.borrow().iter() { f(k); f(v); }
@@ -656,6 +660,7 @@ impl HeapPool {
                 Some(HeapObj::Property(..)) => 29,
                 Some(HeapObj::PropertySetter(..)) => 30,
                 Some(HeapObj::StaticMethod(..)) => 31,
+                Some(HeapObj::ClassMethod(..)) => 32,
                 None => 0,
             }
         } else { 0 }

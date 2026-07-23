@@ -30,6 +30,17 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
+    // `classmethod(func)`: wraps a function so attribute lookup binds the class.
+    pub fn call_classmethod(&mut self, argc: u16) -> Result<(), VmErr> {
+        let args = self.pop_n(argc as usize)?;
+        let [func] = args.as_slice() else {
+            return Err(cold_type("classmethod() takes exactly one argument"));
+        };
+        let wrapped = self.heap.alloc(HeapObj::ClassMethod(*func))?;
+        self.push(wrapped);
+        Ok(())
+    }
+
     // `super()` zero-arg: reads the running method's `(class, self)` off the top frame and returns a Super proxy.
     pub fn call_super(&mut self) -> Result<(), VmErr> {
         let binding = self.call_stack.last()

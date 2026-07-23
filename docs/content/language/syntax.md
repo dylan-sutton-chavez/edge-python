@@ -55,6 +55,30 @@ print(x, y)
 10 20
 ```
 
+Targets can also be attributes, subscripts, parenthesized lists, or nested:
+
+```python
+class Point:
+  def __init__(self, x, y):
+    self.x, self.y = x, y
+
+p = Point(1, 2)
+lst = [0]
+lst[0], p.x = p.x, lst[0]
+print(lst, p.x)
+
+(a, b) = (3, 4)
+h, (i, j) = 5, (6, 7)
+print(a, b, h, i, j)
+```
+
+```text Output
+[1] 0
+3 4 5 6 7
+```
+
+Starred targets (`first, *rest = ...`) must be plain names.
+
 ### Walrus operator
 
 Assignment as expression. Useful in conditions and comprehensions.

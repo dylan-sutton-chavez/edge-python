@@ -65,6 +65,8 @@ pub struct Parser<'src, I: Iterator<Item = Token>> {
     pub(super) saw_newline: bool,
     /* True inside f-string brace expr; disables `=` assignment so `f"{x=}"` parses as debug form. */
     pub(super) in_fstring_expr: bool,
+    /* True while parsing unpack-target elements; disables `=` assignment inside expressions. */
+    pub(super) in_target_list: bool,
     /* Unclosed brackets with error count at open; anchors "never closed" and drops cascade errors. */
     pub(super) bracket_stack: Vec<(TokenType, usize, usize, usize)>,
     pub errors: Vec<Diagnostic>,
@@ -517,6 +519,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             loop_cleanup_base: Vec::new(),
             saw_newline: false,
             in_fstring_expr: false,
+            in_target_list: false,
             expr_depth: 0,
             last_line: 0,
             last_end: 0,

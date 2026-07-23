@@ -12,7 +12,7 @@ Supported:
 
 - Single and multiple inheritance (C3 MRO) with `super()`.
 - `@property` / `@x.setter`.
-- `@staticmethod`.
+- `@staticmethod` and `@classmethod`.
 - A curated dunder protocol: operators, indexing, iteration, hashing, context managers, attribute fallback (see [Dunder methods](/language/dunders)).
 
 Out of scope: descriptors, metaclasses, `__slots__`.
@@ -188,7 +188,37 @@ print(Geometry().triangle_area(10, 4))
 20.0
 ```
 
-Functional form `staticmethod(func)` also works without decorator syntax. `classmethod` is not supported; reach for the namespace pattern or a free function instead.
+Functional form `staticmethod(func)` also works without decorator syntax.
+
+## Class methods
+
+`@classmethod` binds the class — not the instance — as the first argument. Accessed through a subclass, `cls` is the subclass, so alternate constructors return the right type down the hierarchy.
+
+```python
+class Color:
+  def __init__(self, r, g):
+    self.r, self.g = r, g
+  @classmethod
+  def rgb(cls, r, g=0):
+    return cls(r, g)
+  @classmethod
+  def which(cls):
+    return cls.__name__
+
+class Bright(Color):
+  pass
+
+c = Color.rgb(1, g=2)
+print(c.r, c.g)
+print(Color.which(), Bright.which())
+```
+
+```text Output
+1 2
+Color Bright
+```
+
+Functional form `classmethod(func)` also works without decorator syntax.
 
 ## Operator overloading and protocols
 
@@ -207,7 +237,6 @@ See [Dunder methods](/language/dunders) for the full matrix.
 ## What is not supported
 
 * Metaclasses, descriptors (`__get__` / `__set__`), `__slots__`, ABCs, `__init_subclass__`.
-* `@classmethod`: use the namespace pattern or free functions (`@staticmethod` is supported).
 * Async dunders; see [Dunders, What's not dispatched](/language/dunders#whats-not-dispatched).
 
 Reuse behaviour through free functions and composition by default. Dispatch is fast and aligns with the multi-paradigm identity. Reach for inheritance and operator overloading when the abstraction genuinely calls for them.

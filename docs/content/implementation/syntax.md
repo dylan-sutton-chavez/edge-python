@@ -42,6 +42,7 @@ The operand is a 16-bit slot. Its meaning depends on the opcode. Common shapes:
 | `Jump` / `JumpIfFalse` | target instruction index |
 | `ForIter` | jump target on iterator exhaustion |
 | `Phi` | target slot; sources stored in `chunk.phi_sources` |
+| `UnpackSequence` | element count |
 | `UnpackEx` | `(before << 8) \| after` |
 | `MakeFunction` | function index in `chunk.functions` |
 
