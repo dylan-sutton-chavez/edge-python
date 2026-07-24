@@ -236,13 +236,13 @@ fn serve(packages: String) -> Result<u16> {
     Ok(port)
 }
 
-/* Test hook: EDGE_FAKE_CONTRACT plants the runtime marker before any module runs, so the handshake path is testable without the CDN. */
+/* Test hook: EDGE_FAKE_CONTRACT lands after element.js, so the fake wins. */
 fn harness_page() -> String {
     match std::env::var("EDGE_FAKE_CONTRACT") {
         Ok(v) => {
             // Non-numeric sentinels inject as strings, still unequal to any contract.
             let lit = if v.parse::<i64>().is_ok() { v } else { format!("{v:?}") };
-            HARNESS.replacen("<head>", &format!("<head><script>window.__edgeContract = {lit};</script>"), 1)
+            HARNESS.replacen("const CONTRACT", &format!("window.__edgeContract = {lit}; const CONTRACT"), 1)
         }
         Err(_) => HARNESS.to_string(),
     }
