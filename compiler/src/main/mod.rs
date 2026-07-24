@@ -3,7 +3,6 @@ WASM bridge: wires parser/VM to host via the handle ABI.
 Wire contract lives in `crate::abi`; extend there, never here.
 */
 
-use lol_alloc::{AssumeSingleThreaded, FreeListAllocator};
 use crate::abi::{ErrorStash, HandleTable};
 use crate::modules::vm::VM;
 use crate::modules::vm::types::{Val, VmErr};
@@ -39,9 +38,9 @@ pub(super) fn now_ns_host() -> u64 {
     unsafe { host_now_ns() }
 }
 
-/* Free-list (not leaking): reclaims Rust allocs so long-lived embeds don't grow monotonically. VM GC only recycles its own Python heap. */
+/* dlmalloc: binned O(1) alloc/free, so cost stays flat as live Rust blocks grow. The old free-list allocator degraded linearly per op on large live heaps. */
 #[global_allocator]
-static A: AssumeSingleThreaded<FreeListAllocator> = unsafe { AssumeSingleThreaded::new(FreeListAllocator::new()) };
+static A: dlmalloc::GlobalDlmalloc = dlmalloc::GlobalDlmalloc;
 
 /* Best-effort panic-to-stash so the host gets a typed message instead of an opaque trap. Re-entry during the format alloc falls through to unreachable(), same trap as before. */
 #[panic_handler]

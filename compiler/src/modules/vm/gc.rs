@@ -31,9 +31,7 @@ impl<'a> VM<'a> {
         for &v in &self.live_slots { self.heap.mark(v); }
         // Closure cells live on the active call frames until the closures that capture them are built.
         for frame in &self.call_stack { for &(_, c) in &frame.cells { self.heap.mark(c); } }
-        for tpl in &self.slot_templates {
-            for &v in tpl { self.heap.mark(v); }
-        }
+        for &v in &self.template_roots { self.heap.mark(v); }
         for &v in self.globals.values() { self.heap.mark(v); }
         for &v in self.module_state.values() { self.heap.mark(v); }
         let heap = &mut self.heap; // split borrow: lets closures take &mut heap while iterating other fields

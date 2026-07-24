@@ -33,7 +33,7 @@ libm = { workspace = true }
 
 # WASM-only global allocator. Pulled into wasm32 builds automatically; absent on host builds (where std's allocator is fine and `compiler.wasm` is just a library artifact, not the runtime target).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-lol_alloc = { workspace = true }
+dlmalloc = { version = "0.2", default-features = false, features = ["global"] }
 
 # Test-only deps for the JSON-driven test runner. None of these are pulled into the release `compiler.wasm`.
 [dev-dependencies]

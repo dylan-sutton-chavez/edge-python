@@ -361,7 +361,7 @@ pub(crate) fn set_member(members: &Rc<RefCell<Vec<(String, Val)>>>, name: &str, 
     let mut m = members.borrow_mut();
     match m.iter_mut().find(|(n, _)| n == name) {
         Some(slot) => slot.1 = value,
-        None => m.push((name.to_string(), value)),
+        None => m.push((String::from(name), value)),
     }
 }
 

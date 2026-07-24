@@ -122,6 +122,8 @@ pub struct VM<'a> {
     pub(crate) body_maps: Vec<HashMap<String, usize>>,
     pub(crate) param_slots: Vec<Vec<(ParamKind, usize)>>,
     pub(crate) slot_templates: Vec<Vec<Val>>,
+    /* Deduped template values; templates are static after init, so the GC marks this flat list instead of every per-function template. */
+    pub(crate) template_roots: Vec<Val>,
     pub(crate) nonlocal_tables: Vec<Vec<(usize, usize)>>,
     /* Recycled fn_slots buffers; popped in exec_call, pushed back on normal return. Never a GC root (entries are cleared before reuse). */
     pub(crate) slot_pool: Vec<Vec<Val>>,
@@ -256,6 +258,7 @@ impl<'a> VM<'a> {
             body_maps: Vec::new(),
             param_slots: Vec::new(),
             slot_templates: Vec::new(),
+            template_roots: Vec::new(),
             nonlocal_tables: Vec::new(),
             slot_pool: Vec::new(),
             needs_caller_slots: Vec::new(),
@@ -396,6 +399,11 @@ impl<'a> VM<'a> {
         vm.slot_templates = vm.functions.iter().map(|(_, body, _, _)| {
             vm.fill_builtins(&body.names)
         }).collect();
+        let mut seen: crate::util::fx::FxHashSet<u64> = crate::util::fx::FxHashSet::default();
+        vm.template_roots = vm.slot_templates.iter().flatten()
+            .filter(|v| !v.is_undef() && seen.insert(v.0))
+            .copied()
+            .collect();
         vm
     }
 }
