@@ -53,6 +53,13 @@ runs:
       shell: bash
       run: deno run -A npm:playwright install --with-deps chromium
 
+    # Test against this run's compiler, not the deployed CDN copy.
+    - name: Download compiler wasm
+      uses: actions/download-artifact@v8
+      with:
+        name: compiler_wasm
+        path: target/wasm32-unknown-unknown/release/
+
     # apt ships an old binaryen, so fetch the upstream release.
     - name: Install wasm-opt
       if: inputs.package != 'test'

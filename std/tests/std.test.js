@@ -6,6 +6,7 @@ import { DEFAULT_IMPORTS } from "../../runtime/src/defaults.js";
 
 const ROOT = new URL("../", import.meta.url).pathname;
 const RUNTIME = new URL("../../runtime/", import.meta.url).pathname;
+const REPO = new URL("../../", import.meta.url).pathname;
 const CDN_HOST = new URL(Object.values(DEFAULT_IMPORTS)[0]).host;
 const MANIFEST = "/_packages.json"; // synthesized; keeps the agnostic <pkg>/ folder free of test artifacts
 
@@ -61,6 +62,12 @@ async function runPackage(pkg) {
     /* Serve repo files from disk; synthesize the manifest. External CDNs (cdn.edgepython.com) pass through. */
     await page.route("**/*", (route) => {
         const url = new URL(route.request().url());
+        // Prefer in-tree wasm so new exports are testable.
+        if (url.host === CDN_HOST && url.pathname === "/compiler.wasm") {
+            const local = `${REPO}target/wasm32-unknown-unknown/release/compiler.wasm`;
+            try { return route.fulfill({ contentType: "application/wasm", body: readFileSync(local) }); }
+            catch { return route.continue(); } // no local build: use the deployed wasm
+        }
         // In-tree runtime first; CI must test the checkout, not the deploy.
         if (url.host === CDN_HOST && url.pathname.startsWith("/runtime/")) {
             const path = RUNTIME + url.pathname.slice("/runtime/".length);
