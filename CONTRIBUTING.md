@@ -19,6 +19,13 @@ Run the following commands before sending a pull request to ensure code quality:
 
 *Other packages have their own build and test setup — see the `README.md` in the relevant path. Code comments must be a single line of fewer than 30 words; if a change is too large, add a short section to the corresponding part of the `./docs` file instead.*
 
+`cli/` tests hit the CDN runtime by default; `EDGE_RUNTIME_DIR` and `EDGE_COMPILER_WASM` swap in local copies for end-to-end validation before a deploy:
+
+```bash
+cargo wasm && cd cli
+EDGE_RUNTIME_DIR=../runtime EDGE_COMPILER_WASM=../target/wasm32-unknown-unknown/release/compiler.wasm cargo test
+```
+
 A CI job will be run by the maintainer after the PR has been created.
 
 PRs that introduce new behavior without test coverage, or that update documentation without reflecting the actual code change, will not be accepted.

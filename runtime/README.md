@@ -51,7 +51,7 @@ Declarative alternative to `createWorker`: include the script, drop a tag, and a
 <edge-python entry="./app/main.py" packages="./app/packages.json"></edge-python>
 ```
 
-Importing `element.js` auto-registers the tag. On connect, the element reads its attributes and `packages.json`, spawns the worker, runs `entry` if present, then fires a `ready` event. `compiler.wasm` loads from the CDN automatically. Modules load lazily: only what a run actually imports is fetched, host libraries included.
+Importing `element.js` auto-registers the tag. On connect, the element reads its attributes and `packages.json`, spawns the worker, runs `entry` if present, then fires a `ready` event. `compiler.wasm` loads from the CDN automatically; an optional `wasm="<url>"` attribute overrides that with an absolute URL, for self-hosting or pinning a specific build. Modules load lazily: only what a run actually imports is fetched, host libraries included.
 
 | Attribute | Description |
 |---|---|

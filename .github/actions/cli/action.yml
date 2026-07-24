@@ -81,9 +81,20 @@ runs:
       with:
         workspaces: cli -> cli/target
 
+    # Test against this run's runtime and compiler, not the deployed CDN copies.
+    - name: Download compiler wasm
+      if: inputs.mode == 'test'
+      uses: actions/download-artifact@v8
+      with:
+        name: compiler_wasm
+        path: target/wasm32-unknown-unknown/release/
+
     # Drives a real Chromium; ubuntu-latest ships google-chrome-stable.
     - name: Test
       if: inputs.mode == 'test'
       shell: bash
       working-directory: cli
+      env:
+        EDGE_RUNTIME_DIR: ${{ github.workspace }}/runtime
+        EDGE_COMPILER_WASM: ${{ github.workspace }}/target/wasm32-unknown-unknown/release/compiler.wasm
       run: cargo test

@@ -95,6 +95,10 @@ export async function run(opts) {
     try {
         const payload = TE.encode(opts.src);
         if (payload.length > SOURCE_LIMIT) throw new Error(`source exceeds ${SOURCE_LIMIT} bytes`);
+        // REPL inputs keep the interpreter alive in the wasm instance; implies incremental so the instance itself persists too.
+        if (opts.repl) {
+            return await execute({ ...opts, payload, incremental: true, start: (e, n) => e.repl_eval(n) });
+        }
         return await execute({ ...opts, payload, start: (e, n) => e.run_start(n) });
     }
     finally { running = false; }

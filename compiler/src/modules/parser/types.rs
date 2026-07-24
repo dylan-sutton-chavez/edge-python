@@ -160,7 +160,7 @@ pub struct SSAChunk {
     pub path: alloc::sync::Arc<alloc::string::String>,
     /* Native bindings from `from <pkg> import`. CallExtern `operand=(idx<<8)|argc`; per-chunk. */
     pub extern_table: Vec<ExternFn>,
-    pub(super) extern_index: HashMap<String, u16>,
+    pub(crate) extern_index: HashMap<String, u16>,
     /* Chunk's import list; LoadModule operands index here; each spec becomes one Module Val at init. */
     pub imports: Vec<ImportEntry>,
 }

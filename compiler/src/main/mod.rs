@@ -83,6 +83,9 @@ pub(super) struct WasmRuntime {
     pub current_vm: Option<NonNull<VM<'static>>>,
     /* Owned across `run_start` / `run_resume`; mutually exclusive with `current_vm`. */
     pub paused_run: Option<Box<PausedRun>>,
+    /* REPL: the interpreter kept alive between `repl_eval` inputs. */
+    pub repl_vm: Option<Box<VM<'static>>>,
+    pub repl_mode: bool,
     /* Back-edges between preempt yields; 0 disables. */
     pub preempt_every: usize,
 }
@@ -101,6 +104,8 @@ impl WasmRuntime {
             snapshot: Vec::new(),
             current_vm: None,
             paused_run: None,
+            repl_vm: None,
+            repl_mode: false,
             preempt_every: 0,
         }
     }

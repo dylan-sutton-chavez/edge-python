@@ -128,9 +128,15 @@
     "stdout": ["done"]
   },
   {
+    "run": ["repl"],
+    "stdin": "x = 1\nx = 2; 1 / 0\nprint(x)\n.exit\n",
+    "stdout": ["2"],
+    "stderr": ["ZeroDivisionError"]
+  },
+  {
     "given": {"main.py": "print(1)"},
     "env": {"EDGE_FAKE_CONTRACT": "inf"},
     "run": ["run", "main.py"],
-    "fails": ["cli built for runtime contract 1, the CDN serves contract inf", "install.sh"]
+    "fails": ["cli built for runtime contract 0.1.0, the CDN serves contract inf", "install.sh"]
   }
 ]

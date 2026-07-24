@@ -8,7 +8,7 @@ The `edge` developer CLI. Write `.py`, run it, serve it, ship it. You never comp
 ```bash
 edge run app.py     # run a script
 edge serve          # dev server with live reload
-edge repl           # interactive shell (demo)
+edge repl           # interactive shell
 edge test           # run *_test.py files (not implemented yet)
 edge init my-app    # scaffold a project
 edge add network    # add a package to packages.json
@@ -69,7 +69,7 @@ $ edge serve
 
 Flags: `--port <n>` (default `5173`), `--open` (open the browser).
 
-## `edge repl`: interactive shell (demo)
+## `edge repl`: interactive shell
 
 An interactive Edge Python shell for quick experiments.
 
@@ -84,19 +84,9 @@ Edge Python 0.1.0  ·  .exit, Ctrl+C or Ctrl+D to quit
 >>> .exit
 ```
 
-History (arrow keys) and multi-line blocks (a line ending in `:` continues until a blank line) are supported. `.exit`, `Ctrl+C`, or `Ctrl+D` quit. `.reset` wipes the accumulated session. Expression results are not auto-printed. Use `print()` explicitly.
+History (arrow keys) and multi-line blocks (a line ending in `:` continues until a blank line) are supported. `.exit`, `Ctrl+C`, or `Ctrl+D` quit. `.reset` wipes the session state. Expression results are not auto-printed. Use `print()` explicitly.
 
-State is preserved by **recompiling and rerunning the accumulated session on every prompt**. The runtime resets its VM on each `run_start`, so imports and definitions only persist by replay.
-
-Trade-offs:
-
-- Side effects (`time()`, `random()`, network, IO) re-fire on every input.
-- The chunk heap grows linearly with session length.
-- Each eval pays the recompile cost.
-
-For long sessions or side-effect-heavy code, prefer `edge run` on a script.
-
-> This is a demo: actual cost is O(n²). A first-class incremental compile path in the VM is the proper fix and is tracked for a future runtime change.
+The worker keeps one interpreter alive across prompts: each input compiles and runs **once**, and imports, definitions, and mutations persist in place. Side effects never re-fire, and an input that raises keeps the effects it made before the error.
 
 ## `edge test`: test runner
 

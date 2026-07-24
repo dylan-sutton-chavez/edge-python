@@ -6,7 +6,7 @@
 import { createWorker } from "./index.js";
 
 // Bump together with the CLI harness.
-globalThis.__edgeContract = 1;
+globalThis.__edgeContract = "0.1.0";
 
 export class EdgePythonElement extends HTMLElement { 
     async connectedCallback() {
@@ -30,7 +30,7 @@ export class EdgePythonElement extends HTMLElement {
 
         // Kept on the element so callers can drive the same worker after the declarative run.
         this.worker = await createWorker({
-            wasmUrl: "https://cdn.edgepython.com/compiler.wasm",
+            wasmUrl: this.getAttribute("wasm") ?? "https://cdn.edgepython.com/compiler.wasm",
             hostModules,
             imports,
         });

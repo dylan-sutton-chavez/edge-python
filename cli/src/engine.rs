@@ -43,12 +43,10 @@ pub struct Outcome {
     pub exit_code: Option<i32>,
 }
 
-/// A live session: each eval recompiles + reruns the accumulated history so imports/defs persist.
+/// A live session: the worker keeps the interpreter alive, so each eval runs its input exactly once.
 pub struct Session {
     _browser: Browser,
     tab: Arc<headless_chrome::Tab>,
-    history: String,
-    history_lines: usize,
 }
 
 impl Session {
@@ -65,37 +63,19 @@ impl Session {
         tab.navigate_to(&url).map_err(|e| anyhow!("navigating to the harness: {e}"))?;
         tab.wait_until_navigated().map_err(|e| anyhow!("waiting for page load: {e}"))?;
         wait_ready(&tab)?;
-        Ok(Self { _browser: browser, tab, history: String::new(), history_lines: 0 })
+        Ok(Self { _browser: browser, tab })
     }
 
-    /// Recompile prior history with `src` so imports and defs persist; only new lines reach `on_line`.
+    /// Run one input; state persists in the worker's interpreter between evals.
     pub fn eval<F: FnMut(&str)>(&mut self, src: &str, mut on_line: F) -> Result<Outcome> {
-        let full = if self.history.is_empty() {
-            src.to_string()
-        } else {
-            format!("{}\n{}", self.history, src)
-        };
-        let literal = serde_json::to_string(&full)?;
+        let literal = serde_json::to_string(src)?;
         let expr = format!("__edgeRun({literal})");
         self.tab.evaluate(&expr, false).map_err(|e| anyhow!("starting eval: {e}"))?;
-
-        let mut all: Vec<String> = Vec::new();
-        let outcome = drain(&self.tab, &mut |line| all.push(line.to_string()))?;
-        for line in all.iter().skip(self.history_lines) {
-            on_line(line);
-        }
-        if outcome.err.is_none() {
-            if !self.history.is_empty() { self.history.push('\n'); }
-            self.history.push_str(src);
-            self.history_lines = all.len();
-        }
-        Ok(outcome)
+        drain(&self.tab, &mut |line| on_line(line))
     }
 
-    /// Wipe accumulated history and runtime modules; next eval starts in a fresh namespace.
+    /// Wipe the runtime's interpreter and modules; next eval starts in a fresh namespace.
     pub fn reset(&mut self) -> Result<()> {
-        self.history.clear();
-        self.history_lines = 0;
         self.tab.evaluate("__edgeReset()", false).map_err(|e| anyhow!("resetting runtime: {e}"))?;
         Ok(())
     }
@@ -228,7 +208,10 @@ fn serve(packages: String) -> Result<u16> {
             let resp = match path {
                 "/" => Response::from_string(harness_page()).with_header(ctype("text/html; charset=utf-8")),
                 "/packages.json" => Response::from_string(packages.clone()).with_header(ctype("application/json")),
-                _ => Response::from_string("not found").with_status_code(404),
+                _ => match local_stack_file(path) {
+                    Some((body, mime)) => Response::from_data(body).with_header(ctype(mime)),
+                    None => Response::from_string("not found").with_status_code(404),
+                },
             };
             let _ = req.respond(resp);
         }
@@ -236,16 +219,39 @@ fn serve(packages: String) -> Result<u16> {
     Ok(port)
 }
 
-/* Test hook: EDGE_FAKE_CONTRACT lands after element.js, so the fake wins. */
+/* Test hooks: EDGE_FAKE_CONTRACT lands after element.js, so the fake wins; EDGE_RUNTIME_DIR swaps the CDN runtime and compiler for locally served copies. */
 fn harness_page() -> String {
-    match std::env::var("EDGE_FAKE_CONTRACT") {
-        Ok(v) => {
-            // Non-numeric sentinels inject as strings, still unequal to any contract.
-            let lit = if v.parse::<i64>().is_ok() { v } else { format!("{v:?}") };
-            HARNESS.replacen("const CONTRACT", &format!("window.__edgeContract = {lit}; const CONTRACT"), 1)
-        }
-        Err(_) => HARNESS.to_string(),
+    let mut page = HARNESS.to_string();
+    if let Ok(v) = std::env::var("EDGE_FAKE_CONTRACT") {
+        // Non-numeric sentinels inject as strings, still unequal to any contract.
+        let lit = if v.parse::<i64>().is_ok() { v } else { format!("{v:?}") };
+        page = page.replacen("const CONTRACT", &format!("window.__edgeContract = {lit}; const CONTRACT"), 1);
     }
+    if std::env::var("EDGE_RUNTIME_DIR").is_ok() {
+        page = page
+            .replacen("https://cdn.edgepython.com/runtime/src/element.js", "/runtime/src/element.js", 1)
+            // The worker resolves no relative URLs, so the wasm override must be absolute.
+            .replacen(
+                "<script type=\"module\">",
+                "<script>document.getElementById(\"ep\").setAttribute(\"wasm\", location.origin + \"/compiler.wasm\");</script><script type=\"module\">",
+                1,
+            );
+    }
+    page
+}
+
+/* Test hook: with EDGE_RUNTIME_DIR set, the harness swaps the CDN for these local routes. */
+fn local_stack_file(path: &str) -> Option<(Vec<u8>, &'static str)> {
+    let dir = std::env::var("EDGE_RUNTIME_DIR").ok()?;
+    if path == "/compiler.wasm" {
+        let wasm = std::env::var("EDGE_COMPILER_WASM").ok()?;
+        return Some((std::fs::read(wasm).ok()?, "application/wasm"));
+    }
+    let rel = path.strip_prefix("/runtime/")?;
+    if rel.contains("..") { return None; }
+    let body = std::fs::read(std::path::Path::new(&dir).join(rel)).ok()?;
+    let mime = if rel.ends_with(".js") { "text/javascript" } else { "application/octet-stream" };
+    Some((body, mime))
 }
 
 fn ctype(value: &str) -> Header {

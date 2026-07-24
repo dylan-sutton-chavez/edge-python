@@ -127,6 +127,8 @@ pub unsafe extern "C" fn reset_modules() {
         rt.error_stash.clear();
         // Paused run references the now-stale module table; drop it for a clean reset.
         rt.paused_run = None;
+        rt.repl_vm = None;
+        rt.repl_mode = false;
         // current_vm may have pointed into the dropped paused VM; clear it so a stray host_edge_* sees None instead of dangling.
         rt.current_vm = None;
     });
@@ -170,7 +172,7 @@ fn step_vm(mut vm: VM<'static>, src: &str, prev_paused: Option<Box<PausedRun>>) 
     };
     match result {
         Ok(_) => {
-            drop(vm);
+            park_repl_or_drop(vm);
             drop(prev_paused);
             STATUS_DONE
         }
@@ -205,7 +207,7 @@ fn step_vm(mut vm: VM<'static>, src: &str, prev_paused: Option<Box<PausedRun>>) 
         Err(e) => {
             // An uncaught `SystemExit` with an integer code is clean termination, not a crash.
             if let Some(code) = vm.system_exit_code() {
-                drop(vm);
+                park_repl_or_drop(vm);
                 drop(prev_paused);
                 return STATUS_EXIT | ((code as u32) & 0xFF);
             }
@@ -213,17 +215,68 @@ fn step_vm(mut vm: VM<'static>, src: &str, prev_paused: Option<Box<PausedRun>>) 
                 src, vm.error_pos(), None,
                 vm.call_stack_frames(), vm.function_names_ref(),
             );
-            drop(vm);
+            // A failed input keeps its partial effects.
+            park_repl_or_drop(vm);
             drop(prev_paused);
             err_status(&traceback)
         }
     }
 }
 
+/* Terminal-state VM: the REPL keeps it for the next input, one-shot runs drop it. */
+fn park_repl_or_drop(mut vm: VM<'static>) {
+    with_runtime(|rt| {
+        if rt.repl_mode {
+            vm.clear_error_state();
+            rt.current_vm = None;
+            rt.repl_vm = Some(Box::new(vm));
+        }
+    });
+}
+
+/* REPL entry: first call boots the interpreter, later calls adopt each input as a new entry chunk on the SAME interpreter, so history never re-executes. */
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn repl_eval(len: usize) -> u32 {
+    let src = match read_src(len) {
+        Ok(s) => s,
+        Err(e) => return err_status(&s!("input rejected: invalid utf-8 at byte ", int e.valid_up_to())),
+    };
+    let chunk = match parse_source(&src) {
+        Ok(c) => c,
+        Err(rendered) => return err_status(&rendered),
+    };
+    let existing = with_runtime(|rt| {
+        rt.repl_mode = true;
+        rt.paused_run = None;
+        rt.repl_vm.take()
+    });
+    let mut vm = match existing {
+        Some(boxed) => {
+            let mut vm = *boxed;
+            vm.adopt_entry_chunk(Box::leak(Box::new(chunk)));
+            vm.reset_budget(Limits::sandbox().ops);
+            vm
+        }
+        None => {
+            let mut vm = boot_vm(chunk, Limits::sandbox());
+            vm.strict_input = true;
+            vm
+        }
+    };
+    // Named native imports live only in the chunk's extern table; mirror them so later inputs resolve them.
+    if let Err(e) = vm.bind_chunk_externs() {
+        let traceback = e.render_traceback(&src, vm.error_pos(), None, vm.call_stack_frames(), vm.function_names_ref());
+        park_repl_or_drop(vm);
+        return err_status(&traceback);
+    }
+    take_input(&mut vm);
+    step_vm(vm, &src, None)
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn run_start(len: usize) -> u32 {
     // A fresh `run_start` hard-resets execution state.
-    with_runtime(|rt| { rt.paused_run = None; });
+    with_runtime(|rt| { rt.paused_run = None; rt.repl_vm = None; rt.repl_mode = false; });
     let src = match read_src(len) {
         Ok(s) => s,
         Err(e) => return err_status(&s!("input rejected: invalid utf-8 at byte ", int e.valid_up_to())),

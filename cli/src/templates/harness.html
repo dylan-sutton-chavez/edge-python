@@ -12,7 +12,7 @@
     window.__edge = st;
     const el = document.getElementById("ep");
     // Bump together with runtime element.js.
-    const CONTRACT = 1;
+    const CONTRACT = "0.1.0";
     (async () => {
       // Missing marker means older runtime, plain wait.
       if (window.__edgeContract !== undefined && window.__edgeContract !== CONTRACT) {
@@ -24,11 +24,11 @@
       // Drive the worker ourselves (no `entry`) so we attach onOutput once and reuse across evals.
       while (!el.worker) await new Promise((r) => setTimeout(r, 10));
       el.worker.onOutput((line) => st.lines.push(line));
-      // CLI calls this per input with replayed history; runtime recompiles each time.
+      // Each input runs once; the worker keeps the interpreter alive between evals.
       window.__edgeRun = async (src) => {
         st.lines = []; st.done = false; st.ok = false; st.err = ""; st.code = null;
         try {
-          const res = await el.worker.run(src, { baseUrl: location.href, incremental: true });
+          const res = await el.worker.run(src, { baseUrl: location.href, repl: true });
           // SystemExit: clean termination carrying an exit code, not an error.
           if (res && typeof res.exitCode === "number") { st.code = res.exitCode; st.ok = true; }
           else if (res && res.out) st.err = res.out;
