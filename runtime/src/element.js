@@ -5,6 +5,9 @@
 
 import { createWorker } from "./index.js";
 
+// Bump together with the CLI harness.
+globalThis.__edgeContract = 1;
+
 export class EdgePythonElement extends HTMLElement { 
     async connectedCallback() {
         const file = this.getAttribute('entry');

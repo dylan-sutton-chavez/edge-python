@@ -11,7 +11,16 @@
     const st = { lines: [], done: false, ok: false, err: "", code: null };
     window.__edge = st;
     const el = document.getElementById("ep");
+    // Bump together with runtime element.js.
+    const CONTRACT = 1;
     (async () => {
+      // Missing marker means older runtime, plain wait.
+      if (window.__edgeContract !== undefined && window.__edgeContract !== CONTRACT) {
+        window.__edgeMismatch = "cli built for runtime contract " + CONTRACT
+          + ", the CDN serves contract " + window.__edgeContract
+          + ". update with — curl -fsSL https://cdn.edgepython.com/cli/install.sh | sh";
+        return;
+      }
       // Drive the worker ourselves (no `entry`) so we attach onOutput once and reuse across evals.
       while (!el.worker) await new Promise((r) => setTimeout(r, 10));
       el.worker.onOutput((line) => st.lines.push(line));

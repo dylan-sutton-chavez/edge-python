@@ -11,6 +11,7 @@ use std::process::{Command, Stdio};
 #[derive(Deserialize)]
 struct Case {
     #[serde(default)] given: BTreeMap<String, String>,
+    #[serde(default)] env: BTreeMap<String, String>,
     run: Vec<String>,
     #[serde(default)] stdin: String,
     #[serde(default)] stdout: Vec<String>,
@@ -38,7 +39,7 @@ fn check(bin: &str, c: &Case) -> Result<(), String> {
         if let Some(d) = path.parent() { let _ = std::fs::create_dir_all(d); }
         std::fs::write(path, v).map_err(|e| e.to_string())?;
     }
-    let mut child = Command::new(bin).args(&c.run).current_dir(&dir)
+    let mut child = Command::new(bin).args(&c.run).current_dir(&dir).envs(&c.env)
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
         .spawn().map_err(|e| e.to_string())?;
     if !c.stdin.is_empty() {

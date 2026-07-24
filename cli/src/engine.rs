@@ -19,6 +19,7 @@ const HARNESS: &str = include_str!("templates/harness.html");
 // The runtime is async, so we poll state instead of blocking on one CDP call.
 const POLL_JS: &str = "window.__edge ? JSON.stringify(window.__edge) : ''";
 const READY_JS: &str = "!!window.__edgeReady";
+const MISMATCH_JS: &str = "window.__edgeMismatch || ''";
 
 // Hard ceiling so a hung script or a failed CDN fetch can't wedge the CLI.
 const READY_TIMEOUT: Duration = Duration::from_secs(120);
@@ -165,11 +166,21 @@ fn wait_ready(tab: &headless_chrome::Tab) -> Result<()> {
     let deadline = Instant::now() + READY_TIMEOUT;
     loop {
         if Instant::now() > deadline {
-            bail!("timed out after {}s waiting for the runtime to load", READY_TIMEOUT.as_secs());
+            bail!(
+                "timed out after {}s waiting for the runtime to load\nhelp: the installed CLI may be out of sync with the CDN runtime; re-run install.sh (curl -fsSL https://cdn.edgepython.com/cli/install.sh | sh)",
+                READY_TIMEOUT.as_secs()
+            );
         }
         let raw = tab.evaluate(READY_JS, false).map_err(|e| anyhow!("polling runtime ready: {e}"))?;
         if raw.value.as_ref().and_then(|v| v.as_bool()) == Some(true) {
             return Ok(());
+        }
+        // Mismatch is terminal, not a timeout.
+        let mm = tab.evaluate(MISMATCH_JS, false).map_err(|e| anyhow!("polling runtime ready: {e}"))?;
+        if let Some(msg) = mm.value.as_ref().and_then(|v| v.as_str())
+            && !msg.is_empty()
+        {
+            bail!("{msg}");
         }
         thread::sleep(Duration::from_millis(60));
     }
@@ -215,7 +226,7 @@ fn serve(packages: String) -> Result<u16> {
         for req in server.incoming_requests() {
             let path = req.url().split('?').next().unwrap_or("/");
             let resp = match path {
-                "/" => Response::from_string(HARNESS).with_header(ctype("text/html; charset=utf-8")),
+                "/" => Response::from_string(harness_page()).with_header(ctype("text/html; charset=utf-8")),
                 "/packages.json" => Response::from_string(packages.clone()).with_header(ctype("application/json")),
                 _ => Response::from_string("not found").with_status_code(404),
             };
@@ -223,6 +234,18 @@ fn serve(packages: String) -> Result<u16> {
         }
     });
     Ok(port)
+}
+
+/* Test hook: EDGE_FAKE_CONTRACT plants the runtime marker before any module runs, so the handshake path is testable without the CDN. */
+fn harness_page() -> String {
+    match std::env::var("EDGE_FAKE_CONTRACT") {
+        Ok(v) => {
+            // Non-numeric sentinels inject as strings, still unequal to any contract.
+            let lit = if v.parse::<i64>().is_ok() { v } else { format!("{v:?}") };
+            HARNESS.replacen("<head>", &format!("<head><script>window.__edgeContract = {lit};</script>"), 1)
+        }
+        Err(_) => HARNESS.to_string(),
+    }
 }
 
 fn ctype(value: &str) -> Header {

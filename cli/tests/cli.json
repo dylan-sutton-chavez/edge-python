@@ -126,5 +126,11 @@
     "run": ["repl"],
     "stdin": "from time import sleep\nsleep(0.05)\nprint(\"done\")\n.exit\n",
     "stdout": ["done"]
+  },
+  {
+    "given": {"main.py": "print(1)"},
+    "env": {"EDGE_FAKE_CONTRACT": "inf"},
+    "run": ["run", "main.py"],
+    "fails": ["cli built for runtime contract 1, the CDN serves contract inf", "install.sh"]
   }
 ]
