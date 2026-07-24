@@ -754,7 +754,7 @@ print(format("hi", ">10"))
 
 ## Attribute access
 
-`getattr` / `hasattr` / `delattr` consult the instance `__dict__` first, then the user class chain (including inherited methods), then the built-in method table for primitives (str/bytes/list/dict/set, plus the small int/float method set), class attributes on a class object, and attributes stored on functions. So `hasattr(MyClass(), 'my_method')` is `True` for a defined method, and `delattr` on a missing attribute raises `AttributeError`.
+`getattr` / `hasattr` / `delattr` consult the instance `__dict__` first, then the user class chain (including inherited methods), then the built-in method table for primitives (str/bytes/list/dict/set, plus the small int/float method set), class attributes on a class object, and attributes stored on functions. Bound methods expose `__self__`, and user methods also `__func__`. So `hasattr(MyClass(), 'my_method')` is `True` for a defined method, and `delattr` on a missing attribute raises `AttributeError`.
 
 ### getattr
 

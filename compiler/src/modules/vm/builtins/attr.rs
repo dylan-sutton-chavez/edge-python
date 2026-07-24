@@ -47,6 +47,21 @@ impl<'a> VM<'a> {
             self.push(v);
             return Ok(());
         }
+        let bound_attr = if obj.is_heap() {
+            match self.heap.get(obj) {
+                HeapObj::BoundUserMethod(recv, func, _) => match name.as_str() {
+                    "__self__" => Some(*recv),
+                    "__func__" => Some(*func),
+                    _ => None,
+                },
+                HeapObj::BoundMethod(recv, _) if name == "__self__" => Some(*recv),
+                _ => None,
+            }
+        } else { None };
+        if let Some(v) = bound_attr {
+            self.push(v);
+            return Ok(());
+        }
         let ty = self.type_name(obj);
         if let Some(method_id) = super::super::handlers::methods::lookup_method(ty, &name) {
             let bound = self.heap.alloc(HeapObj::BoundMethod(obj, method_id))?;
@@ -78,8 +93,13 @@ impl<'a> VM<'a> {
             && self.lookup_class_member(obj, &name).is_some();
         let is_func_attr = obj.is_heap()
             && matches!(self.heap.get(obj), HeapObj::Func(_, _, _, attrs) if attrs.borrow().iter().any(|(n, _)| *n == name));
+        let is_bound_attr = obj.is_heap() && match self.heap.get(obj) {
+            HeapObj::BoundUserMethod(..) => matches!(name.as_str(), "__self__" | "__func__"),
+            HeapObj::BoundMethod(..) => name == "__self__",
+            _ => false,
+        };
         let ty = self.type_name(obj);
-        let exists = is_class_attr || is_func_attr || super::super::handlers::methods::lookup_method(ty, &name).is_some();
+        let exists = is_class_attr || is_func_attr || is_bound_attr || super::super::handlers::methods::lookup_method(ty, &name).is_some();
         self.push(Val::bool(exists));
         Ok(())
     }

@@ -144,6 +144,21 @@ impl<'a> VM<'a> {
                 return Err(VmErr::Attribute(s!("'", str ty, "' object has no attribute '", str bare, "'")));
             }
 
+        // Bound methods expose their receiver; user methods also their function. Builtin bound methods have no `__func__`, like CPython.
+        if obj.is_heap() {
+            match self.heap.get(obj) {
+                HeapObj::BoundUserMethod(recv, func, _) => match bare {
+                    "__self__" => return Ok(AttrLookup::ClassMember(*recv)),
+                    "__func__" => return Ok(AttrLookup::ClassMember(*func)),
+                    _ => {}
+                },
+                HeapObj::BoundMethod(recv, _) if bare == "__self__" => {
+                    return Ok(AttrLookup::ClassMember(*recv));
+                }
+                _ => {}
+            }
+        }
+
         // Function attributes; a stored attr wins over the derived `__name__`.
         if obj.is_heap()
             && let HeapObj::Func(_, _, _, attrs) = self.heap.get(obj)

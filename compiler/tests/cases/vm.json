@@ -3838,5 +3838,12 @@
   {"src":"def main():\n    return 0\nlayout = {'k': 1}\nmain.__pyne_layout__ = layout\nprint(getattr(main, '__pyne_layout__', None) is layout)","output":["True"]},
   {"src":"def f():\n    pass\nprint(getattr(f, '__pyne_bind__', None))","output":["None"]},
   {"src":"def tag(fn):\n    fn.tagged = True\n    return fn\n@tag\ndef h():\n    return 5\nprint(h.tagged, h())","output":["True 5"]},
-  {"src":"class C:\n    pass\ndef f():\n    pass\nf.v = 8\nc = C()\nc.fn = f\nprint(c.fn.v)","output":["8"]}
+  {"src":"class C:\n    pass\ndef f():\n    pass\nf.v = 8\nc = C()\nc.fn = f\nprint(c.fn.v)","output":["8"]},
+  {"src":"class C:\n    def m(self):\n        return 1\nc = C()\nprint(c.m.__self__ is c)","output":["True"]},
+  {"src":"class C:\n    def m(self, k):\n        return k * 2\nc = C()\nf = c.m.__func__\nprint(f(c, 4))","output":["8"]},
+  {"src":"class Base:\n    @classmethod\n    def make(cls):\n        return cls\nclass Sub(Base):\n    pass\nprint(Sub.make.__self__ is Sub)\nprint(isinstance(Sub.make.__self__, type))","output":["True","True"]},
+  {"src":"class C:\n    def m(self):\n        return 1\nc = C()\nprint(hasattr(c.m, '__self__'), hasattr(c.m, '__func__'), hasattr(c.m, '__other__'))","output":["True True False"]},
+  {"src":"lst = [1]\nap = lst.append\nprint(ap.__self__ is lst)\nap.__self__.append(2)\nprint(lst)","output":["True","[1, 2]"]},
+  {"src":"lst = [1]\nprint(hasattr(lst.append, '__self__'), hasattr(lst.append, '__func__'))\nprint(getattr(lst.append, '__func__', 'absent'))","output":["True False","absent"]},
+  {"src":"class C:\n    def m(self):\n        return 1\nc = C()\nprint(getattr(c.m, '__self__') is c, getattr(c.m, 'zz', 'dflt'))","output":["True dflt"]}
 ]
