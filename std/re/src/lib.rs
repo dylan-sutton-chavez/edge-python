@@ -14,6 +14,8 @@ pub mod main;
 
 /* Exports compile only for wasm32 so the engine stays native testable. */
 #[cfg(target_arch = "wasm32")]
+// Class exports follow the `__class_<Name>_<method>` ABI convention, not snake case.
+#[allow(non_snake_case)]
 mod wasm_api {
     use alloc::string::String;
     use alloc::vec::Vec;
