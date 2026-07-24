@@ -27,8 +27,8 @@ text = "the quick brown fox"
 words = {w: len(w) for w in text.split()}
 
 for w, n in words.items():
-    print(f"{w:>6} -> {n}")
-    time.sleep(0.2)
+  print(f"{w:>6} -> {n}")
+  time.sleep(0.2)
 ```
 
 ```text Output

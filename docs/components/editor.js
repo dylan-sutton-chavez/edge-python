@@ -6,7 +6,7 @@ import { CodeJar } from 'codejar';
 import { escapeHtml } from './shiki';
 
 const MAX_LINES = 999;
-const TAB_SIZE = 4;
+const TAB_SIZE = 2;
 
 // `highlight(text) -> html` is injected (Shiki in the docs); CodeJar calls it on every render.
 export function createEditor({ ed, defaultCode, onRun, highlight }) {
