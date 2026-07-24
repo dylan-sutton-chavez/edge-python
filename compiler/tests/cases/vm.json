@@ -3807,5 +3807,6 @@
   {"src":"len = len\nprint(len(\"abc\"))","output":["3"]},
   {"src":"def f(x):\n    return int(x)\nint = lambda x: 7\nprint(f(\"5\"))","output":["7"]},
   {"src":"def f():\n    out = []\n    for i in range(3):\n        out.append(i)\n    return out\nrange = lambda n: [5, 6]\nprint(f())","output":["[5, 6]"]},
-  {"src":"def f():\n    print(\"x\")\nprint = lambda *a: None\nf()\ndel print\nprint(\"back\")","output":["back"]}
+  {"src":"def f():\n    print(\"x\")\nprint = lambda *a: None\nf()\ndel print\nprint(\"back\")","output":["back"]},
+  {"src":"def fn():\n    return (1, 2)\n(y, m) = fn()\nprint(y, m)","output":["1 2"]}
 ]
