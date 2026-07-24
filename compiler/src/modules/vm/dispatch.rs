@@ -1068,12 +1068,11 @@ impl<'a> VM<'a> {
         }
         // Class attribute: insert or replace in the mutable members store.
         if let HeapObj::Class(_, _, members) = self.heap.get(obj) {
-            let bare = ssa_strip(&name).to_string();
-            let mut m = members.borrow_mut();
-            match m.iter_mut().find(|(n, _)| *n == bare) {
-                Some(slot) => slot.1 = value,
-                None => m.push((bare, value)),
-            }
+            set_member(members, ssa_strip(&name), value);
+            return Ok(());
+        }
+        if let HeapObj::Func(_, _, _, attrs) = self.heap.get(obj) {
+            set_member(attrs, ssa_strip(&name), value);
             return Ok(());
         }
         let key = self.heap.alloc(HeapObj::Str(name))?;

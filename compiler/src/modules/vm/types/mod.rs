@@ -145,7 +145,8 @@ pub enum HeapObj {
     /* Immutable, hashable counterpart of Set; built via `frozenset(iter)`. */
     FrozenSet(Rc<ValSet>),
     Tuple(Vec<Val>),
-    Func(usize, Vec<Val>, Vec<(usize, Val)>),
+    // (fi, defaults, captures, attrs); attrs share the Class member shape.
+    Func(usize, Vec<Val>, Vec<(usize, Val)>, Rc<RefCell<Vec<(String, Val)>>>),
     Range(i64, i64, i64),
     Slice(Val, Val, Val),
     // True `...` singleton, distinct from any string.
@@ -355,6 +356,15 @@ impl Default for DictMap {
     fn default() -> Self { Self::new() }
 }
 
+/* Insert-or-replace in a named-member list; shared by Class members and Func attrs. */
+pub(crate) fn set_member(members: &Rc<RefCell<Vec<(String, Val)>>>, name: &str, value: Val) {
+    let mut m = members.borrow_mut();
+    match m.iter_mut().find(|(n, _)| n == name) {
+        Some(slot) => slot.1 = value,
+        None => m.push((name.to_string(), value)),
+    }
+}
+
 impl DictMap {
     pub fn new() -> Self { Self { entries: Vec::new(), index: hashbrown::HashTable::new() } }
 
@@ -399,7 +409,8 @@ pub(crate) fn for_each_val(obj: &HeapObj, mut f: impl FnMut(Val)) {
             for fr in iters { fr.for_each_val(&mut f); }
             for sf in sub_frames { sf.for_each_val(&mut f); }
         }
-        HeapObj::Func(_, defaults, captures) => {
+        HeapObj::Func(_, defaults, captures, attrs) => {
+            for (_, v) in attrs.borrow().iter() { f(*v); }
             for &v in defaults { f(v); }
             for &(_, v) in captures { f(v); }
         }
@@ -639,7 +650,7 @@ impl HeapPool {
                 Some(HeapObj::Set(_)) => 8,
                 Some(HeapObj::FrozenSet(_)) => 25,
                 Some(HeapObj::Tuple(_)) => 9,
-                Some(HeapObj::Func(_, _, _)) => 10,
+                Some(HeapObj::Func(..)) => 10,
                 Some(HeapObj::Range(..)) => 11,
                 Some(HeapObj::Slice(..)) => 12,
                 Some(HeapObj::Type(_)) => 13,

@@ -180,7 +180,7 @@ impl<'a> VM<'a> {
             }
         }
 
-        let val = self.heap.alloc(HeapObj::Func(global, defaults, captures))?;
+        let val = self.heap.alloc(HeapObj::Func(global, defaults, captures, Rc::new(RefCell::new(Vec::new()))))?;
         self.temp_roots.truncate(roots_base);
 
         // Entry-chunk top-level defs go into `globals` so forward refs resolve at call time. Module-level defs stay in the module's bindings (via `fn_module[fi]`) to keep cross-module helpers with the same name isolated.
@@ -276,7 +276,7 @@ impl<'a> VM<'a> {
 
         // Snapshot defaults/captures once, both are tiny (<10), and cloning beats the 3+ heap re-reads later phases would do. Back-prop still uses `get_mut` since it writes. Probing Func first skips the 9-shape non-func walk on the hottest (user function) path.
         let (fi, defaults, captures) = match self.heap.get(callee) {
-            HeapObj::Func(i, d, c) => (*i, d.clone(), c.clone()),
+            HeapObj::Func(i, d, c, _) => (*i, d.clone(), c.clone()),
             _ => {
                 // Bound methods re-dispatch as tail calls.
                 if matches!(self.heap.get(callee), HeapObj::BoundUserMethod(..)) {
@@ -836,7 +836,7 @@ impl<'a> VM<'a> {
                         }
                     }
                     // Write into the shared cell so sibling closures over this variable observe the nonlocal write. Access `self.heap` directly (not via &mut self helpers) so it stays disjoint from the `name_index` borrow above.
-                    let cell = if let HeapObj::Func(_, _, caps) = self.heap.get(callee) {
+                    let cell = if let HeapObj::Func(_, _, caps, _) = self.heap.get(callee) {
                         caps.iter().find(|(ci, _)| *ci == canon_body).map(|(_, c)| *c)
                     } else { None };
                     match cell {
@@ -846,7 +846,7 @@ impl<'a> VM<'a> {
                         },
                         // Nonlocal target not captured at MakeFunction (rare): attach a fresh cell so the next call sees it.
                         None => if let Ok(c) = self.heap.alloc(HeapObj::List(Rc::new(RefCell::new(vec![val]))))
-                            && let HeapObj::Func(_, _, caps) = self.heap.get_mut(callee) {
+                            && let HeapObj::Func(_, _, caps, _) = self.heap.get_mut(callee) {
                                 caps.push((canon_body, c));
                             },
                     }

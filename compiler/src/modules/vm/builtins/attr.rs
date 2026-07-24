@@ -40,6 +40,13 @@ impl<'a> VM<'a> {
             self.push(v);
             return Ok(());
         }
+        let func_attr = if obj.is_heap() && let HeapObj::Func(_, _, _, attrs) = self.heap.get(obj) {
+            attrs.borrow().iter().find(|(n, _)| *n == name).map(|(_, v)| *v)
+        } else { None };
+        if let Some(v) = func_attr {
+            self.push(v);
+            return Ok(());
+        }
         let ty = self.type_name(obj);
         if let Some(method_id) = super::super::handlers::methods::lookup_method(ty, &name) {
             let bound = self.heap.alloc(HeapObj::BoundMethod(obj, method_id))?;
@@ -69,8 +76,10 @@ impl<'a> VM<'a> {
         let is_class_attr = obj.is_heap()
             && matches!(self.heap.get(obj), HeapObj::Class(..))
             && self.lookup_class_member(obj, &name).is_some();
+        let is_func_attr = obj.is_heap()
+            && matches!(self.heap.get(obj), HeapObj::Func(_, _, _, attrs) if attrs.borrow().iter().any(|(n, _)| *n == name));
         let ty = self.type_name(obj);
-        let exists = is_class_attr || super::super::handlers::methods::lookup_method(ty, &name).is_some();
+        let exists = is_class_attr || is_func_attr || super::super::handlers::methods::lookup_method(ty, &name).is_some();
         self.push(Val::bool(exists));
         Ok(())
     }
@@ -81,19 +90,18 @@ impl<'a> VM<'a> {
         let name = self.expect_str_arg("setattr() name must be a string")?;
         let obj = self.pop()?;
         // Class target: insert or replace in the mutable members store.
-        if obj.is_heap() && matches!(self.heap.get(obj), HeapObj::Class(..)) {
-            if let HeapObj::Class(_, _, members) = self.heap.get(obj) {
-                let mut m = members.borrow_mut();
-                match m.iter_mut().find(|(n, _)| *n == name) {
-                    Some(slot) => slot.1 = value,
-                    None => m.push((name, value)),
-                }
-            }
+        if obj.is_heap() && let HeapObj::Class(_, _, members) = self.heap.get(obj) {
+            set_member(members, &name, value);
+            self.push(Val::none());
+            return Ok(());
+        }
+        if obj.is_heap() && let HeapObj::Func(_, _, _, attrs) = self.heap.get(obj) {
+            set_member(attrs, &name, value);
             self.push(Val::none());
             return Ok(());
         }
         if !obj.is_heap() || !matches!(self.heap.get(obj), HeapObj::Instance(..)) {
-            return Err(cold_type("setattr() target must be an instance or class"));
+            return Err(cold_type("setattr() target must be an instance, class, or function"));
         }
         let key = self.heap.alloc(HeapObj::Str(name))?;
         if let HeapObj::Instance(_, attrs) = self.heap.get(obj) {
@@ -125,6 +133,15 @@ impl<'a> VM<'a> {
             if let HeapObj::Class(_, _, members) = self.heap.get(obj) {
                 members.borrow_mut().retain(|(n, _)| n != name);
             }
+            return Ok(());
+        }
+        if obj.is_heap() && let HeapObj::Func(_, _, _, attrs) = self.heap.get(obj) {
+            let attrs = attrs.clone();
+            let had = attrs.borrow().iter().any(|(n, _)| n == name);
+            if !had {
+                return Err(VmErr::Attribute(s!("'function' object has no attribute '", str name, "'")));
+            }
+            attrs.borrow_mut().retain(|(n, _)| n != name);
             return Ok(());
         }
         if !obj.is_heap() || !matches!(self.heap.get(obj), HeapObj::Instance(..)) {

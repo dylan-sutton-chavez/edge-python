@@ -333,8 +333,14 @@ fn put_obj(w: &mut W, obj: &HeapObj) {
         HeapObj::Set(rc) => { w.u8(4); put_set(w, &rc.borrow()); }
         HeapObj::FrozenSet(rc) => { w.u8(5); put_set(w, rc); }
         HeapObj::Tuple(v) => { w.u8(6); w.vals(v); }
-        HeapObj::Func(fi, captures, defaults) => {
-            w.u8(7); w.usz(*fi); w.vals(captures); w.seq(defaults, put_slot_val);
+        HeapObj::Func(fi, captures, defaults, attrs) => {
+            // Attr-free functions keep the historic tag so old blobs stay readable.
+            let a = attrs.borrow();
+            if a.is_empty() {
+                w.u8(7); w.usz(*fi); w.vals(captures); w.seq(defaults, put_slot_val);
+            } else {
+                w.u8(28); w.usz(*fi); w.vals(captures); w.seq(defaults, put_slot_val); w.seq(&a, put_name_val);
+            }
         }
         HeapObj::Range(s, e, st) => { w.u8(8); w.i64(*s); w.i64(*e); w.i64(*st); }
         HeapObj::Slice(a, b, c) => { w.u8(9); w.val(*a); w.val(*b); w.val(*c); }
@@ -379,7 +385,7 @@ fn get_obj(r: &mut R, externs: &ExternMap, fills: &mut Vec<(u32, SetFill)>, slot
             HeapObj::FrozenSet(Rc::new(ValSet::default()))
         }
         6 => HeapObj::Tuple(r.vals()?),
-        7 => HeapObj::Func(r.usz()?, r.vals()?, r.seq(get_slot_val)?),
+        7 => HeapObj::Func(r.usz()?, r.vals()?, r.seq(get_slot_val)?, Rc::new(RefCell::new(Vec::new()))),
         8 => HeapObj::Range(r.i64()?, r.i64()?, r.i64()?),
         9 => HeapObj::Slice(r.val()?, r.val()?, r.val()?),
         10 => HeapObj::Ellipsis,
@@ -413,6 +419,7 @@ fn get_obj(r: &mut R, externs: &ExternMap, fills: &mut Vec<(u32, SetFill)>, slot
             HeapObj::Extern(externs.get(&name).ok_or_else(|| s_err("unknown native binding", &name))?.clone())
         }
         27 => HeapObj::ClassMethod(r.val()?),
+        28 => HeapObj::Func(r.usz()?, r.vals()?, r.seq(get_slot_val)?, Rc::new(RefCell::new(r.seq(get_name_val)?))),
         t => return Err(s_err("unknown heap tag", itoa::Buffer::new().format(t))),
     })
 }

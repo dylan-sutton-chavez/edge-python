@@ -144,10 +144,18 @@ impl<'a> VM<'a> {
                 return Err(VmErr::Attribute(s!("'", str ty, "' object has no attribute '", str bare, "'")));
             }
 
+        // Function attributes; a stored attr wins over the derived `__name__`.
+        if obj.is_heap()
+            && let HeapObj::Func(_, _, _, attrs) = self.heap.get(obj)
+            && let Some(v) = attrs.borrow().iter().find(|(n, _)| n == bare).map(|(_, v)| *v)
+        {
+            return Ok(AttrLookup::ClassMember(v));
+        }
+
         // `__name__` on callables and types resolves to their declared name.
         if obj.is_heap() && bare == "__name__" {
             let resolved = match self.heap.get(obj) {
-                HeapObj::Func(fi, _, _) => self.function_names.get(*fi).cloned(),
+                HeapObj::Func(fi, ..) => self.function_names.get(*fi).cloned(),
                 HeapObj::Type(n) => Some(n.clone()),
                 HeapObj::Class(n, _, _) => Some(n.clone()),
                 _ => None,

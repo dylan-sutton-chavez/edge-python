@@ -754,7 +754,7 @@ print(format("hi", ">10"))
 
 ## Attribute access
 
-`getattr` / `hasattr` / `delattr` consult the instance `__dict__` first, then the user class chain (including inherited methods), then the built-in method table for primitives (str/bytes/list/dict/set, plus the small int/float method set), and class attributes on a class object. So `hasattr(MyClass(), 'my_method')` is `True` for a defined method, and `delattr` on a missing attribute raises `AttributeError`.
+`getattr` / `hasattr` / `delattr` consult the instance `__dict__` first, then the user class chain (including inherited methods), then the built-in method table for primitives (str/bytes/list/dict/set, plus the small int/float method set), class attributes on a class object, and attributes stored on functions. So `hasattr(MyClass(), 'my_method')` is `True` for a defined method, and `delattr` on a missing attribute raises `AttributeError`.
 
 ### getattr
 
@@ -818,7 +818,7 @@ Dicts are copies. Mutation doesn't change VM bindings.
 
 ### setattr, delattr
 
-`setattr(obj, name, value)` / `delattr(obj, name)` store/remove on user instances and on user classes (`cls.attr = ...` works too). Builtin types have no writable attribute table.
+`setattr(obj, name, value)` / `delattr(obj, name)` store/remove on user instances, on user classes (`cls.attr = ...` works too), and on functions. Builtin types have no writable attribute table.
 
 ```python
 class Box:

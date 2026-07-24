@@ -172,6 +172,34 @@ print(handlers["max"](3, 4))
 4
 ```
 
+## Function attributes
+
+Functions carry writable attributes, like any object. `getattr` / `hasattr` / `setattr` / `delattr` work on them, and an assigned `__name__` wins over the declared one. The usual home for decorator metadata.
+
+```python
+def sma(source, length):
+  return sum(source) / length
+
+sma.window = 10
+print(sma.window)
+print(getattr(sma, "missing", "n/a"))
+
+def tag(fn):
+  fn.tagged = True
+  return fn
+
+@tag
+def step():
+  pass
+print(step.tagged)
+```
+
+```text Output
+10
+n/a
+True
+```
+
 ## Higher-order functions
 
 Functions that take or return functions.
