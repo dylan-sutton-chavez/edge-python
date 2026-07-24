@@ -262,6 +262,29 @@ fn pick(_: &mut HeapPool, args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr> 
     Ok(if args[0].as_bool() { args[2] } else { args[1] })
 }
 
+/* Native class fixtures: `Box(v)` stores v on self, `get` reads it back; exercises the Extern-method self convention end to end. */
+fn class_box_init(heap: &mut HeapPool, args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr> {
+    let [inst, v] = args else { return Err(VmErr::Type("Box: expected (self, value)")); };
+    let HeapObj::Instance(_, attrs) = heap.get(*inst) else {
+        return Err(VmErr::Type("Box: self is not an instance"));
+    };
+    let attrs = attrs.clone();
+    let key = heap.alloc(HeapObj::Str("v".into()))?;
+    attrs.borrow_mut().insert(key, *v, heap);
+    Ok(Val::none())
+}
+
+fn class_box_get(heap: &mut HeapPool, args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr> {
+    let [inst] = args else { return Err(VmErr::Type("Box.get: expected (self)")); };
+    let HeapObj::Instance(_, attrs) = heap.get(*inst) else {
+        return Err(VmErr::Type("Box.get: self is not an instance"));
+    };
+    let attrs = attrs.clone();
+    let key = heap.alloc(HeapObj::Str("v".into()))?;
+    let out = attrs.borrow().get(&key, heap).copied();
+    out.ok_or(VmErr::Attribute("Box.get: 'v' not set".into()))
+}
+
 /* Fixture-name -> (fn ptr, purity); the runner turns each into a NativeBinding. */
 type NativeFn = fn(&mut HeapPool, &[Val], Option<Val>) -> Result<Val, VmErr>;
 
@@ -278,6 +301,8 @@ pub fn test_native(name: &str) -> Option<NativeBinding> {
         "pick" => (pick, true),
         "host_defer" => (host_defer, false),
         "__const_pi" => (const_pi, true),
+        "__class_Box___init__" => (class_box_init, false),
+        "__class_Box_get" => (class_box_get, false),
         // Registered under a builtin name to assert imported natives shadow builtins.
         "abs" => (const_42, true),
         _ => return None,

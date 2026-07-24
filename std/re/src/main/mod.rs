@@ -46,7 +46,11 @@ impl Regex {
 
 /* Single match in the requested mode. */
 pub fn find(pattern: &str, text: &str, mode: Mode) -> Result<Option<Found>, ReError> {
-    let re = Regex::compile(pattern)?;
+    find_rx(&Regex::compile(pattern)?, text, mode)
+}
+
+/* `find` over an already-compiled regex. */
+pub fn find_rx(re: &Regex, text: &str, mode: Mode) -> Result<Option<Found>, ReError> {
     let chars: Vec<char> = text.chars().collect();
     let m = Matcher::new(&chars, re.prog.flags);
     let caps = match mode {
@@ -63,7 +67,11 @@ pub fn find(pattern: &str, text: &str, mode: Mode) -> Result<Option<Found>, ReEr
 
 /* All non overlapping matches, plus the group count for output shaping. */
 pub fn find_all(pattern: &str, text: &str) -> Result<(Vec<Found>, usize), ReError> {
-    let re = Regex::compile(pattern)?;
+    find_all_rx(&Regex::compile(pattern)?, text)
+}
+
+/* `find_all` over an already-compiled regex. */
+pub fn find_all_rx(re: &Regex, text: &str) -> Result<(Vec<Found>, usize), ReError> {
     let chars: Vec<char> = text.chars().collect();
     let m = Matcher::new(&chars, re.prog.flags);
     let mut out = Vec::new();
@@ -86,7 +94,11 @@ pub fn find_all(pattern: &str, text: &str) -> Result<(Vec<Found>, usize), ReErro
 
 /* Replace every match, expanding backreferences in the template. */
 pub fn sub(pattern: &str, repl: &str, text: &str) -> Result<String, ReError> {
-    let re = Regex::compile(pattern)?;
+    sub_rx(&Regex::compile(pattern)?, repl, text)
+}
+
+/* `sub` over an already-compiled regex. */
+pub fn sub_rx(re: &Regex, repl: &str, text: &str) -> Result<String, ReError> {
     let chars: Vec<char> = text.chars().collect();
     let repl_chars: Vec<char> = repl.chars().collect();
     let m = Matcher::new(&chars, re.prog.flags);

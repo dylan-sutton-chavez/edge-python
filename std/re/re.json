@@ -102,5 +102,21 @@
   {
     "src": "search('(a+)+$', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!')",
     "error": "catastrophic backtracking"
+  },
+  {
+    "src": "p = compile(r'\\d+')\nprint(p.findall('a1 b22 c333'))\nprint(p.search('abc123def'))\nprint(p.match('123abc'))\nprint(p.match('abc123'))",
+    "output": ["['1', '22', '333']", "123", "123", "None"]
+  },
+  {
+    "src": "p = compile(r'(\\d+)-(\\d+)')\nprint(p.groups('x 12-34 y'))\nprint(p.fullmatch('12-34'))\nprint(p.sub(r'\\2.\\1', 'a 12-34 b'))",
+    "output": ["['12', '34']", "12-34", "a 34.12 b"]
+  },
+  {
+    "src": "p = compile(r'\\d+')\nprint(p.span('áé123'))\nq = compile(r'\\d+')\nprint(q.findall('7 8'))\nprint(fullmatch(r'\\d+', '55'))",
+    "output": ["[2, 5]", "['7', '8']", "55"]
+  },
+  {
+    "src": "compile('(')",
+    "error": "missing closing parenthesis"
   }
 ]

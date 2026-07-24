@@ -66,6 +66,8 @@ impl<'a> VM<'a> {
             match self.heap.get(mv) {
                 HeapObj::Property(getter, _) => return AttrLookup::PropertyGet { recv, getter: *getter },
                 HeapObj::StaticMethod(func) => return AttrLookup::ClassMember(*func),
+                // Native-class methods take self as their first argument.
+                HeapObj::Extern(_) => return AttrLookup::InstanceMethod { recv, func: mv, class: defining },
                 HeapObj::ClassMethod(func) => {
                     // Bind the receiver's class, not the instance.
                     let cls = if recv.is_heap() && let HeapObj::Instance(c, _) = self.heap.get(recv) { *c } else { recv };

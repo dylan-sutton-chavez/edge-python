@@ -616,5 +616,10 @@
     "modules": { "m": { "native": ["host_defer"] } },
     "host_results": ["x", "y"],
     "output": ["in", "exit:2", "exit:1", "out"]
+  },
+  {
+    "src": "import boxmod\nb = boxmod.Box(7)\nc = boxmod.Box(9)\nprint(b.get(), c.get())",
+    "modules": { "boxmod": { "native": ["__class_Box___init__", "__class_Box_get"] } },
+    "output": ["7 9"]
   }
 ]

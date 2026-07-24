@@ -29,11 +29,17 @@ All functions take the pattern first. Flags are written inline, `(?i)` ignorecas
 | `groups(pattern, string)` | capture groups of the first match as a list, or `None` |
 | `span(pattern, string)` | `[start, end]` codepoint offsets of the first match, or `None` |
 | `sub(pattern, repl, string)` | string with every match replaced, `\1` and `\g<name>` expand groups |
+| `compile(pattern)` | pattern object exposing the functions above as methods, without the pattern argument |
 
 ```python
 print(groups(r'(\w+)@(\w+)', 'a@b')) # ['a', 'b']
 print(span(r'\d+', 'áé123')) # [2, 5], codepoint offsets
+
+p = compile(r'\d+') # bad patterns raise here, at compile time
+print(p.findall('a1 b22')) # ['1', '22']
 ```
+
+Every pattern compiles once regardless of entry point: `compile` and the module-level functions share one compiled-pattern cache, so hot loops pay parsing a single time.
 
 ## Pattern syntax
 
