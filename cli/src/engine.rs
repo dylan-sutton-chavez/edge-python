@@ -5,7 +5,7 @@ The runtime engine: drive Edge Python in a headless browser, one-shot via `run` 
 use anyhow::{anyhow, bail, Context, Result};
 use headless_chrome::{Browser, LaunchOptions};
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -111,10 +111,13 @@ fn launch() -> Result<Browser> {
     Browser::new(options).map_err(|e| anyhow!("{e}"))
 }
 
-/// Prefer env override, then any Chrome on PATH, then a Playwright-cached Chromium.
+/// Env override, bundled shell, system Chrome, Playwright.
 fn resolve_chrome() -> Result<PathBuf> {
     if let Some(p) = std::env::var_os("EDGE_CHROME_PATH") {
         return Ok(PathBuf::from(p));
+    }
+    if let Some(p) = bundled_chrome() {
+        return Ok(p);
     }
     if let Ok(p) = headless_chrome::browser::default_executable() {
         return Ok(p);
@@ -123,6 +126,26 @@ fn resolve_chrome() -> Result<PathBuf> {
         return Ok(p);
     }
     bail!("no Chrome/Chromium found; re-run install.sh or set EDGE_CHROME_PATH");
+}
+
+/// Bundled chrome-headless-shell that install.sh downloads.
+fn bundled_chrome() -> Option<PathBuf> {
+    let root = match std::env::var_os("EDGE_CHROME_DIR") {
+        Some(dir) => PathBuf::from(dir),
+        None => PathBuf::from(std::env::var_os("HOME")?).join(".cache/edge"),
+    };
+    bundled_chrome_in(&root)
+}
+
+fn bundled_chrome_in(root: &Path) -> Option<PathBuf> {
+    for entry in std::fs::read_dir(root).ok()?.flatten() {
+        let name = entry.file_name();
+        let name = name.to_str()?;
+        if !name.starts_with("chrome-headless-shell-") { continue; }
+        let candidate = entry.path().join("chrome-headless-shell");
+        if candidate.is_file() { return Some(candidate); }
+    }
+    None
 }
 
 /// Best-effort lookup of a Playwright-installed Chromium under `~/.cache/ms-playwright/chromium-*/chrome-linux/chrome`.
@@ -256,4 +279,19 @@ fn local_stack_file(path: &str) -> Option<(Vec<u8>, &'static str)> {
 
 fn ctype(value: &str) -> Header {
     Header::from_bytes(&b"Content-Type"[..], value.as_bytes()).expect("static header is valid")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundled_probe_finds_headless_shell() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("chrome-headless-shell-linux64/chrome-headless-shell");
+        std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+        std::fs::write(&bin, "").unwrap();
+        assert_eq!(bundled_chrome_in(dir.path()), Some(bin));
+        assert_eq!(bundled_chrome_in(&dir.path().join("missing")), None);
+    }
 }

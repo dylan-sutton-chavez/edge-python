@@ -91,10 +91,13 @@ case "$(basename "${SHELL:-bash}")" in
   *) rc="" ;;
 esac
 
+rc_changed=""
+
 # Persist EDGE_CHROME_PATH so the CLI finds the bundled headless shell across shells.
 if [ -n "$rc" ] && [ -n "$chrome_platform" ] && [ -x "$CHROME_BIN" ] && ! grep -qs 'EDGE_CHROME_PATH=' "$rc" 2>/dev/null; then
   printf '\nexport EDGE_CHROME_PATH="%s"\n' "$CHROME_BIN" >> "$rc"
   echo "added EDGE_CHROME_PATH to $rc"
+  rc_changed=1
 fi
 
 # Check the rc file, not the live $PATH: after an uninstall the old shell still has the dir in $PATH, but new shells would not.
@@ -106,7 +109,12 @@ rc_has_path() {
 
 if [ -n "$rc" ] && ! rc_has_path; then
   printf '\nexport PATH="%s:$PATH"\n' "$INSTALL_DIR" >> "$rc"
-  echo "added $INSTALL_DIR to PATH in $rc; run 'source $rc' or open a new shell"
+  echo "added $INSTALL_DIR to PATH in $rc"
+  rc_changed=1
 fi
 
 "$INSTALL_DIR/edge" --version
+
+if [ -n "$rc_changed" ]; then
+  echo "run 'source $rc' or open a new shell to pick up the new environment"
+fi
