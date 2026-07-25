@@ -494,6 +494,7 @@ impl<'a> VM<'a> {
                         if self.budget == 0 { return Err(cold_budget()); }
                         self.budget -= 1;
                     }
+                    if self.heap.needs_gc() { self.collect(slots); }
                     // Back-edges are the only preempt sampling point.
                     if self.preempt_left != 0 {
                         self.preempt_left -= 1;

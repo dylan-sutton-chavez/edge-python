@@ -3845,5 +3845,11 @@
   {"src":"class C:\n    def m(self):\n        return 1\nc = C()\nprint(hasattr(c.m, '__self__'), hasattr(c.m, '__func__'), hasattr(c.m, '__other__'))","output":["True True False"]},
   {"src":"lst = [1]\nap = lst.append\nprint(ap.__self__ is lst)\nap.__self__.append(2)\nprint(lst)","output":["True","[1, 2]"]},
   {"src":"lst = [1]\nprint(hasattr(lst.append, '__self__'), hasattr(lst.append, '__func__'))\nprint(getattr(lst.append, '__func__', 'absent'))","output":["True False","absent"]},
-  {"src":"class C:\n    def m(self):\n        return 1\nc = C()\nprint(getattr(c.m, '__self__') is c, getattr(c.m, 'zz', 'dflt'))","output":["True dflt"]}
+  {"src":"class C:\n    def m(self):\n        return 1\nc = C()\nprint(getattr(c.m, '__self__') is c, getattr(c.m, 'zz', 'dflt'))","output":["True dflt"]},
+  {"src":"i = 0\nwhile i < 120000:\n    x = [i]\n    i = i + 1\nprint(i)","output":["120000"]},
+  {"src":"i = 0\nwhile i < 120000:\n    d = {\"k\": i}\n    i = i + 1\nprint(d[\"k\"])","output":["119999"]},
+  {"src":"class C:\n    def __init__(self, v):\n        self.v = v\ni = 0\nwhile i < 120000:\n    o = C(i)\n    i = i + 1\nprint(o.v)","output":["119999"]},
+  {"src":"i = 0\nwhile i < 120000:\n    s = {i}\n    i = i + 1\nprint(s)","output":["{119999}"]},
+  {"src":"i = 0\nwhile i < 120000:\n    t = f\"v{i}\"\n    i = i + 1\nprint(t)","output":["v119999"]},
+  {"src":"def make(n):\n    return [n, n + 1]\ni = 0\nwhile i < 120000:\n    x = make(i)\n    i = i + 1\nprint(x[1])","output":["120000"]}
 ]
