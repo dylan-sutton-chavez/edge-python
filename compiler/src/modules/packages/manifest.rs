@@ -198,3 +198,27 @@ impl<'a> Reader<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn join_relative_routes() {
+        assert_eq!(join_relative("lib/test/", "./helper.py"), "lib/test/helper.py");
+        assert_eq!(join_relative("lib/test/", "../parse.py"), "lib/parse.py");
+        assert_eq!(join_relative("lib/test/", "../../main.py"), "main.py");
+        assert_eq!(join_relative("lib/", "../../escape.py"), "escape.py"); // clamped at root
+        assert_eq!(join_relative("lib/test/", "/std/x.py"), "/std/x.py");
+        assert_eq!(join_relative("", "https://x/y.py"), "https://x/y.py");
+    }
+
+    #[test]
+    fn dir_walk_routes() {
+        assert_eq!(dir_of("lib/test/a.py"), "lib/test/");
+        assert_eq!(dir_of("a.py"), "");
+        assert_eq!(parent_dir("lib/test/"), Some("lib/".into()));
+        assert_eq!(parent_dir("lib/"), Some("".into()));
+        assert_eq!(parent_dir(""), None);
+    }
+}

@@ -31,7 +31,8 @@ fn err_status(msg: &str) -> u32 {
 /* Lex and parse with the host resolver; Err is rendered diagnostics. */
 fn parse_source(src: &str) -> Result<SSAChunk, String> {
     let (tokens, lex_errs) = lex(src);
-    let resolver = Box::new(WasmHostResolver { dir: String::new() });
+    let dir = with_runtime(|rt| rt.entry_dir.clone());
+    let resolver = Box::new(WasmHostResolver { dir });
     let mut p = Parser::with_resolver(src, tokens.into_iter(), resolver);
     for e in lex_errs {
         p.errors.push(Diagnostic { start: e.start, end: e.end, msg: e.msg.into() });
@@ -140,6 +141,13 @@ fn read_src(len: usize) -> Result<String, core::str::Utf8Error> {
         let len = len.min(SZ);
         core::str::from_utf8(&rt.src[..len]).map(|s| s.to_string())
     })
+}
+
+/* Entry dir for the next parse; host writes it into SRC. */
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn set_entry_dir(len: usize) {
+    let dir = read_src(len).unwrap_or_default();
+    with_runtime(|rt| rt.entry_dir = dir);
 }
 
 /* Pre-fetch feed: each import as `b<TAB>name` (bare, resolve via manifest) or `q<TAB>spec` (quoted URL/path), one per line. */

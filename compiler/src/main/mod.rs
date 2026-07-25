@@ -75,6 +75,8 @@ pub(super) struct WasmRuntime {
     pub inp_len: usize,
     pub registry: Vec<(String, ModuleEntry)>,
     pub manifests: Vec<(String, Manifest)>,
+    /* Entry dir rooting the source's quoted imports. */
+    pub entry_dir: String,
     pub handles: HandleTable,
     pub error_stash: ErrorStash,
     /* Last `save_state` blob, read via `snapshot_ptr`. */
@@ -99,6 +101,7 @@ impl WasmRuntime {
             inp_len: 0,
             registry: Vec::new(),
             manifests: Vec::new(),
+            entry_dir: String::new(),
             handles: HandleTable::new(),
             error_stash: ErrorStash::new(),
             snapshot: Vec::new(),

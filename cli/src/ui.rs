@@ -64,6 +64,21 @@ pub fn error(e: &anyhow::Error) {
     eprintln!("error: {e:#}");
 }
 
+/// Per-file verdict line for `edge test`.
+pub fn test_verdict(ok: bool, file: &str, reason: Option<&str>) {
+    let tag = if ok { "(successful)" } else { "(unsuccessful)" };
+    match reason {
+        Some(r) => println!("  {tag} {file}: {r}"),
+        None => println!("  {tag} {file}"),
+    }
+}
+
+/// The `edge test` closing summary.
+pub fn test_summary(passed: usize, total: usize, secs: f64) {
+    println!();
+    println!("  {passed}/{total} files passed · {secs:.1}s");
+}
+
 // Braille frames used by the spinner; match the rest of the UI's unicode style.
 const SPIN_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 

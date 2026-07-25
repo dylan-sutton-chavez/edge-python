@@ -9,7 +9,7 @@ The `edge` developer CLI. Write `.py`, run it, serve it, ship it. You never comp
 edge run app.py     # run a script
 edge serve          # dev server with live reload
 edge repl           # interactive shell
-edge test           # run *_test.py files (not implemented yet)
+edge test           # run *_test.py files
 edge init my-app    # scaffold a project
 edge add network    # add a package to packages.json
 edge remove network # remove a package from packages.json
@@ -35,7 +35,7 @@ cargo install --path cli
 
 ## `edge run`: run a Python file
 
-Runs a script and streams its output to the terminal. Imports resolve through [`packages.json`](/reference/imports#packagesjson). Uncaught errors print a traceback to stderr and exit with code 1.
+Runs a script and streams its output to the terminal. Bare imports resolve through [`packages.json`](/reference/imports#packagesjson); quoted relative imports load from your project files, resolved against the script's own directory. Uncaught errors print a traceback to stderr and exit with code 1.
 
 ```text
 $ edge run hello.py
@@ -90,7 +90,44 @@ The worker keeps one interpreter alive across prompts: each input compiles and r
 
 ## `edge test`: test runner
 
-Not implemented yet. The `test` package itself (the harness you import) is available. `edge add test` writes it to `packages.json`, and both `edge run` and `edge serve` resolve it by default. A script can already `from test import fixture, test, raises, run` and call `run()` itself.
+Discovers `*_test.py` files (recursively, skipping `dist/` and hidden directories), runs each in a fresh interpreter inside one shared browser session, and prints a verdict per file. `edge test path/` narrows discovery to a directory; `edge test file.py` runs one file.
+
+```text
+my-app/
+├─ packages.json
+├─ main.py
+├─ main_test.py
+├─ lib/
+│  ├─ parse.py
+│  ├─ fixtures.py
+│  └─ parse_test.py
+└─ dist/
+```
+
+`edge test` from the root runs both test files; `edge test lib/` scopes discovery to that subtree. Each file's quoted imports resolve from its own directory (`"./parse.py"`, `"../lib/parse.py"`), clamped at the project root. Bare names (`test`, `math`, the rest of the [registry](/reference/packages)) resolve everywhere. State never leaks between files: every file starts in a fresh interpreter.
+
+```text
+$ edge test
+PASS - adds
+1 passed, 0 failed
+  (successful) sub/s_test.py
+
+  1/1 files passed · 1.6s
+```
+
+Test files declare tests with the [`test` package](/reference/packages#test) and don't need to call `run()` — the runner drives it after the file loads:
+
+```python
+from test import test
+
+@test("adds")
+def t_add():
+    assert 1 + 1 == 2
+```
+
+A file that calls `run()` itself also works: either way its `SystemExit` code is the file's verdict, so the reported result never depends on parsing printed output. A file that registers no tests fails.
+
+Exit codes: `0` every file passed, `1` a file failed or no `*_test.py` was found, `2` the browser session could not start.
 
 ## `edge init`: scaffold a workspace
 

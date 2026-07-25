@@ -25,10 +25,10 @@
       while (!el.worker) await new Promise((r) => setTimeout(r, 10));
       el.worker.onOutput((line) => st.lines.push(line));
       // Each input runs once; the worker keeps the interpreter alive between evals.
-      window.__edgeRun = async (src) => {
+      window.__edgeRun = async (src, base) => {
         st.lines = []; st.done = false; st.ok = false; st.err = ""; st.code = null;
         try {
-          const res = await el.worker.run(src, { baseUrl: location.href, repl: true });
+          const res = await el.worker.run(src, { baseUrl: location.href, entryDir: base || "", repl: true });
           // SystemExit: clean termination carrying an exit code, not an error.
           if (res && typeof res.exitCode === "number") { st.code = res.exitCode; st.ok = true; }
           else if (res && res.out) st.err = res.out;

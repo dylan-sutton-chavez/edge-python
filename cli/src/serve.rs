@@ -55,7 +55,7 @@ fn serve_file(req: tiny_http::Request, dir: &Path, url: &str) {
     }
 }
 
-fn content_type(path: &Path) -> &'static str {
+pub(crate) fn content_type(path: &Path) -> &'static str {
     match path.extension().and_then(|e| e.to_str()) {
         Some("html") => "text/html",
         Some("js") | Some("mjs") => "text/javascript",

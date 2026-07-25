@@ -5,7 +5,7 @@ CAS-backed fetch keyed by lockfile hash; else fetch + hash + store. Null on 404 
 import { sha256Hex } from './specs.js';
 
 export async function fetchWithLockfile(spec, lockfile, ctx) {
-    const { cache, baseUrl, entryDir, knownMissing, integrityActive } = ctx;
+    const { cache, baseUrl, knownMissing, integrityActive } = ctx;
 
     if (integrityActive) {
         const expected = lockfile.get(spec);
@@ -17,9 +17,8 @@ export async function fetchWithLockfile(spec, lockfile, ctx) {
 
     let resp;
     try {
-        const absolute = spec.includes('://') || spec.startsWith('/');
-        const path = absolute ? spec : entryDir + spec;
-        const url = path.includes('://') ? path : new URL(path, baseUrl ?? self.location.href).toString();
+        // Specs are root-relative; the URL join clamps escapes at the origin.
+        const url = spec.includes('://') ? spec : new URL(spec, baseUrl ?? self.location.href).toString();
         resp = await fetch(url);
     } catch (e) {
         console.warn(`[edge-python] fetch failed for '${spec}':`, e);

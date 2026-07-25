@@ -107,6 +107,7 @@ export async function run(opts) {
 /* Shared run/restore core: instance, host imports, prefetch, then drive `start`. */
 async function execute({ src, payload, start, entryDir = '', baseUrl = null, onLine, incremental = false }) {
     if (!wasmModule) throw new Error('engine.load() must be called first');
+    entryDir = entryDir.replace(/^(\.\/)+/, ''); // specs never carry ./
 
     let lockfile = new Map();
     if (integrityActive) {
@@ -152,6 +153,13 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
         },
         registerHost,
     });
+
+    // Compiler roots the entry's quoted imports at this directory.
+    if (exports.set_entry_dir) {
+        const dirBytes = TE.encode(entryDir);
+        new Uint8Array(exports.memory.buffer).set(dirBytes, exports.src_ptr());
+        exports.set_entry_dir(dirBytes.length);
+    }
 
     // `wasm_alloc` during prefetch may have grown memory and detached our view.
     writePayload();

@@ -43,7 +43,7 @@ pub fn run(manifest_path: &Path) -> Result<()> {
             _ => {}
         }
 
-        let outcome = session.eval(&block, crate::engine::emit_chunk)?;
+        let outcome = session.eval(&block, None, crate::engine::emit_chunk)?;
         // `raise SystemExit` quits the session with its code, matching the one-shot runner.
         if let Some(code) = outcome.exit_code {
             std::process::exit(code);

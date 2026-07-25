@@ -9,6 +9,7 @@ mod serve;
 mod engine;
 mod repl;
 mod build;
+mod test;
 mod uninstall;
 
 use anyhow::{bail, Context, Result};
@@ -78,8 +79,7 @@ fn main() -> Result<()> {
         Cmd::Repl => repl::run(&manifest_path),
         Cmd::Build { out } => build::run(&manifest_path, out.unwrap_or_else(|| PathBuf::from("dist"))),
         Cmd::Uninstall => uninstall::run(),
-        // Last one standing: needs a `test` module + discovery + reporter on top of the engine.
-        Cmd::Test { .. } => bail!("not wired yet: edge test"),
+        Cmd::Test { path } => test::run(&manifest_path, path.as_deref()),
     };
 
     if let Err(e) = result {
@@ -104,7 +104,8 @@ fn run_script(manifest_path: &Path, file: Option<&Path>) -> Result<()> {
         }
     };
     let manifest = Manifest::load(manifest_path)?;
-    let code = engine::run(&src, &manifest)?;
+    let base = file.and_then(engine::base_dir);
+    let code = engine::run(&src, &manifest, base.as_deref())?;
     if code != 0 {
         std::process::exit(code);
     }

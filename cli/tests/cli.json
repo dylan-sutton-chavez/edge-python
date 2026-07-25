@@ -91,7 +91,32 @@
   },
   {
     "run": ["test"],
-    "fails": ["not wired yet"]
+    "fails": ["no *_test.py files found"]
+  },
+  {
+    "given": {
+      "sub/util.py": "def add(a, b):\n    return a + b\n",
+      "sub/s_test.py": "from \"./util.py\" import add\nfrom test import test\n\n@test(\"adds\")\ndef t_add():\n    assert add(2, 3) == 5\n"
+    },
+    "run": ["test"],
+    "stdout": ["PASS - adds", "(successful) sub/s_test.py", "1/1 files passed"]
+  },
+  {
+    "given": { "f_test.py": "from test import test\n\n@test(\"breaks\")\ndef t():\n    assert 1 == 2\n" },
+    "run": ["test"],
+    "fails": [],
+    "stdout": ["FAIL - breaks", "(unsuccessful) f_test.py", "0/1 files passed"]
+  },
+  {
+    "given": { "e_test.py": "x = 1\n" },
+    "run": ["test"],
+    "fails": [],
+    "stdout": ["(unsuccessful) e_test.py: no tests registered"]
+  },
+  {
+    "given": { "u.py": "val = 5\n", "t.py": "from \"./u.py\" import val\nprint(\"got\", val)\n" },
+    "run": ["run", "t.py"],
+    "stdout": ["got 5"]
   },
   {
     "run": ["--version"],

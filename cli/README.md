@@ -6,7 +6,7 @@ The Edge Python developer command line interface. Write `.py`, run it, serve it,
 edge run app.py     # run a script
 edge serve          # dev server with live reload
 edge repl           # interactive shell
-edge test           # run your *_test.py files (not implemented yet)
+edge test           # run your *_test.py files
 edge init my-app    # scaffold a project
 edge add network    # add a package to packages.json
 edge remove network # remove a package

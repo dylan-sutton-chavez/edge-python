@@ -107,7 +107,7 @@ def test_div():
 run() # prints PASS/FAIL lines and a summary, then raises SystemExit(0 if all passed, else 1)
 ```
 
-`@fixture` registers a `def` under its name and injects it by keyword into the tests that ask for it. `@test(description, *uses)` registers a test plus the fixtures it pulls. `raises(ExcType)` is a context manager asserting the block raises `ExcType` (a subclass, or any type in a tuple). `run()` executes every registered test, prints `PASS` / `FAIL` / `ERROR` and a summary, then raises `SystemExit(1 if any failed, else 0)` so a host can read the result as a process exit code.
+`@fixture` registers a `def` under its name and injects it by keyword into the tests that ask for it. `@test(description, *uses)` registers a test plus the fixtures it pulls. `raises(ExcType)` is a context manager asserting the block raises `ExcType` (a subclass, or any type in a tuple). `run()` executes every registered test, prints `PASS` / `FAIL` / `ERROR` and a summary, then raises `SystemExit(1 if any failed, else 0)` so a host can read the result as a process exit code. [`edge test`](/reference/cli) drives `run()` for you across every `*_test.py` file.
 
 Unlike the other standard packages, `test` ships as **pure Edge Python source** (`src/entry.py`), not a compiled `.wasm`, so there is no `cargo` build. It is served from `https://cdn.edgepython.com/std/test.py`. The browser runtime resolves it by default, importing the `.py` directly (see [Defaults](#defaults)). Full API: [`std/test/README.md`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/std/test).
 

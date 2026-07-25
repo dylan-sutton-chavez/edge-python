@@ -43,7 +43,7 @@ function scanImports(src, exports) {
 }
 
 export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
-    const { fetchedSources, knownMissing, importsMap, mainThreadSpecs } = ctx;
+    const { fetchedSources, knownMissing, importsMap, mainThreadSpecs, entryDir } = ctx;
     const visited = new Set();
     const queue = [];
     // Module specs that never registered; thrown together at the end so the user sees a clear cause.
@@ -60,8 +60,8 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
         return ptr;
     };
     // Probe every ancestor manifest, mirroring the compiler walk-up.
-    const enqueueManifestChain = (forSpec) => {
-        for (let dir = dirOf(forSpec); dir != null; dir = parentDir(dir)) {
+    const enqueueManifestChain = (dir) => {
+        for (; dir != null; dir = parentDir(dir)) {
             const m = dir + 'packages.json';
             if (!knownMissing.has(m)) queue.push(m);
         }
@@ -87,8 +87,9 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
         knownMissing.delete('packages.json');
     }
 
-    for (const imp of scanImports(rootSrc, exports)) enqueueImport(imp, '');
-    if (!knownMissing.has('packages.json')) queue.push('packages.json');
+    // Root imports resolve from the entry's directory, like any module.
+    for (const imp of scanImports(rootSrc, exports)) enqueueImport(imp, entryDir);
+    enqueueManifestChain(entryDir);
 
     while (queue.length) {
         const spec = queue.shift();
@@ -163,7 +164,7 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
                 writeBytes(namesBytes), namesBytes.length,
                 baseId,
             );
-            enqueueManifestChain(spec);
+            enqueueManifestChain(dirOf(spec));
             continue;
         }
 
@@ -173,7 +174,7 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
 
         const dir = dirOf(spec);
         for (const imp of scanImports(TD.decode(bytes), exports)) enqueueImport(imp, dir);
-        enqueueManifestChain(spec);
+        enqueueManifestChain(dir);
     }
 
     if (failures.length) {

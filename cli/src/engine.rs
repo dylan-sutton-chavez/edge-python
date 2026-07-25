@@ -67,9 +67,11 @@ impl Session {
     }
 
     /// Run one input; state persists in the worker's interpreter between evals.
-    pub fn eval<F: FnMut(&str)>(&mut self, src: &str, mut on_line: F) -> Result<Outcome> {
+    /// `base` repositions relative imports; None means the project root.
+    pub fn eval<F: FnMut(&str)>(&mut self, src: &str, base: Option<&str>, mut on_line: F) -> Result<Outcome> {
         let literal = serde_json::to_string(src)?;
-        let expr = format!("__edgeRun({literal})");
+        let base = serde_json::to_string(&base)?;
+        let expr = format!("__edgeRun({literal}, {base})");
         self.tab.evaluate(&expr, false).map_err(|e| anyhow!("starting eval: {e}"))?;
         drain(&self.tab, &mut |line| on_line(line))
     }
@@ -90,9 +92,9 @@ pub fn emit_chunk(chunk: &str) {
 }
 
 /// One-shot: open a session, eval `src`, stream stdout, tear down. Returns the process exit code (0 clean, 1 on error, or the script's `SystemExit` code).
-pub fn run(src: &str, manifest: &Manifest) -> Result<i32> {
+pub fn run(src: &str, manifest: &Manifest, base: Option<&str>) -> Result<i32> {
     let mut session = Session::open(manifest)?;
-    let outcome = session.eval(src, emit_chunk)?;
+    let outcome = session.eval(src, base, emit_chunk)?;
     if let Some(err) = outcome.err {
         crate::ui::traceback(&err);
         return Ok(1);
@@ -216,7 +218,7 @@ fn drain<F: FnMut(&str)>(tab: &headless_chrome::Tab, on_line: &mut F) -> Result<
     }
 }
 
-/// Serve the harness at `/` and the manifest at `/packages.json` on a free loopback port. The thread is a daemon.
+/// Serve the harness at `/`, the manifest at `/packages.json`, and project files on a free loopback port. The thread is a daemon.
 fn serve(packages: String) -> Result<u16> {
     let server = Server::http("127.0.0.1:0").map_err(|e| anyhow!("starting local server: {e}"))?;
     let port = server
@@ -224,6 +226,7 @@ fn serve(packages: String) -> Result<u16> {
         .to_ip()
         .ok_or_else(|| anyhow!("local server has no TCP address"))?
         .port();
+    let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     thread::spawn(move || {
         for req in server.incoming_requests() {
@@ -231,7 +234,7 @@ fn serve(packages: String) -> Result<u16> {
             let resp = match path {
                 "/" => Response::from_string(harness_page()).with_header(ctype("text/html; charset=utf-8")),
                 "/packages.json" => Response::from_string(packages.clone()).with_header(ctype("application/json")),
-                _ => match local_stack_file(path) {
+                _ => match local_stack_file(path).or_else(|| project_file(&root, path)) {
                     Some((body, mime)) => Response::from_data(body).with_header(ctype(mime)),
                     None => Response::from_string("not found").with_status_code(404),
                 },
@@ -240,6 +243,23 @@ fn serve(packages: String) -> Result<u16> {
         }
     });
     Ok(port)
+}
+
+/// Read a project file so the worker can import it.
+fn project_file(root: &Path, path: &str) -> Option<(Vec<u8>, &'static str)> {
+    let rel = path.trim_start_matches('/');
+    if rel.is_empty() || rel.split('/').any(|seg| seg == "..") { return None; }
+    let full = root.join(rel);
+    Some((std::fs::read(&full).ok()?, crate::serve::content_type(&full)))
+}
+
+/// Directory of `file` as an eval base, when inside the project.
+pub fn base_dir(file: &Path) -> Option<String> {
+    let parent = file.parent()?.to_str()?;
+    // A leading ./ would fork the spec-space with phantom dirs.
+    let parent = parent.trim_start_matches("./");
+    if parent.is_empty() || parent == "." || parent.starts_with("..") || parent.starts_with('/') { return None; }
+    Some(format!("{parent}/"))
 }
 
 /* Test hooks: EDGE_FAKE_CONTRACT lands after element.js, so the fake wins; EDGE_RUNTIME_DIR swaps the CDN runtime and compiler for locally served copies. */
