@@ -429,11 +429,15 @@ pub unsafe extern "C" fn restore_state(len: usize) -> u32 {
     step_vm(vm, &source, None)
 }
 
-/* Parked module bindings as JSON; `{}` when idle. */
+/* Parked or REPL module bindings as JSON. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn state_globals() -> usize {
     let json = with_runtime(|rt| {
-        rt.paused_run.as_ref().and_then(|p| p.vm.as_ref()).map(snapshot::inspect_globals)
+        rt.paused_run
+            .as_ref()
+            .and_then(|p| p.vm.as_ref())
+            .or(rt.repl_vm.as_deref())
+            .map(snapshot::inspect_globals)
     });
     unsafe { write_out(json.as_deref().unwrap_or("{}")) }
 }

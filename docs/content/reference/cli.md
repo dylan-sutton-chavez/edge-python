@@ -67,7 +67,16 @@ $ edge serve
   watching .
 ```
 
-Flags: `--port <n>` (default `5173`), `--open` (open the browser).
+Flags: `--port <n>` (default `5173`), `--open` (open the browser), `--host <addr>` (bind address, default `127.0.0.1`).
+
+`--host 0.0.0.0` exposes the server on your LAN — the banner adds the network URL, so you can open the app from a phone on the same network:
+
+```text
+$ edge serve --host 0.0.0.0
+  http://localhost:5173
+  http://192.168.1.34:5173
+  watching .
+```
 
 ## `edge repl`: interactive shell
 
@@ -75,7 +84,7 @@ An interactive Edge Python shell for quick experiments.
 
 ```text
 $ edge repl
-Edge Python 0.1.0  ·  .exit, Ctrl+C or Ctrl+D to quit
+Edge Python 0.1.0  ·  Tab to autocomplete  ·  .reset to start fresh  ·  .exit, Ctrl+C or Ctrl+D to quit
 >>> from math import sqrt, pi
 >>> print(sqrt(2))
 1.4142135623730951
@@ -84,7 +93,7 @@ Edge Python 0.1.0  ·  .exit, Ctrl+C or Ctrl+D to quit
 >>> .exit
 ```
 
-History (arrow keys) and multi-line blocks (a line ending in `:` continues until a blank line) are supported. `.exit`, `Ctrl+C`, or `Ctrl+D` quit. `.reset` wipes the session state. Expression results are not auto-printed. Use `print()` explicitly.
+History (arrow keys) and `Tab` autocompletion are supported. Each line runs as one input, so compound statements go on a single line (`def double(n): return n * 2`). `.exit`, `Ctrl+C`, or `Ctrl+D` quit. `.reset` wipes the session state and clears the screen. Expression results are not auto-printed. Use `print()` explicitly.
 
 The worker keeps one interpreter alive across prompts: each input compiles and runs **once**, and imports, definitions, and mutations persist in place. Side effects never re-fire, and an input that raises keeps the effects it made before the error.
 

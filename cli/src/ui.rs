@@ -36,9 +36,12 @@ pub fn scaffolded(dir: &str, items: &[&str], next: &str) {
     note(next);
 }
 
-/// The `edge serve` banner.
-pub fn serve_banner(port: u16, dir: &Path) {
+/// The `edge serve` banner; `lan` adds a network URL.
+pub fn serve_banner(port: u16, dir: &Path, lan: Option<&str>) {
     println!("  http://localhost:{port}");
+    if let Some(ip) = lan {
+        println!("  http://{ip}:{port}");
+    }
     println!("  watching {}", dir.display());
 }
 

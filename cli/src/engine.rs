@@ -5,6 +5,7 @@ The runtime engine: drive Edge Python in a headless browser, one-shot via `run` 
 use anyhow::{anyhow, bail, Context, Result};
 use headless_chrome::{Browser, LaunchOptions};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
@@ -80,6 +81,13 @@ impl Session {
     pub fn reset(&mut self) -> Result<()> {
         self.tab.evaluate("__edgeReset()", false).map_err(|e| anyhow!("resetting runtime: {e}"))?;
         Ok(())
+    }
+
+    /// Module bindings of the live interpreter, as `name -> repr`.
+    pub fn globals(&mut self) -> Result<BTreeMap<String, String>> {
+        let raw = self.tab.evaluate("__edgeGlobals()", true).map_err(|e| anyhow!("reading globals: {e}"))?;
+        let json = raw.value.as_ref().and_then(|v| v.as_str()).unwrap_or("{}");
+        serde_json::from_str(json).context("parsing globals")
     }
 }
 

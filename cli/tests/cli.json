@@ -139,7 +139,7 @@
   },
   {
     "run": ["repl"],
-    "stdin": "from math import sqrt\ndef double(n):\n    return sqrt(n) * 2\n\nprint(double(4))\n.exit\n",
+    "stdin": "from math import sqrt\ndef double(n): return sqrt(n) * 2\nprint(double(4))\n.exit\n",
     "stdout": ["4.0"]
   },
   {

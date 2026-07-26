@@ -9,14 +9,20 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tiny_http::{Header, Response, Server};
 
-pub fn run(dir: PathBuf, port: u16, open: bool) -> Result<()> {
-    let server = Server::http(("127.0.0.1", port)).map_err(|e| anyhow!("could not bind port {port}: {e}"))?;
+pub fn run(dir: PathBuf, host: &str, port: u16, open: bool) -> Result<()> {
+    let server = Server::http((host, port)).map_err(|e| anyhow!("could not bind {host}:{port}: {e}"))?;
 
     // Bumped by the watcher; the injected client polls it and reloads on change.
     let version = Arc::new(AtomicU64::new(0));
     spawn_watcher(dir.clone(), version.clone());
 
-    crate::ui::serve_banner(port, &dir);
+    // A LAN bind also advertises the network URL.
+    let lan = match host {
+        "127.0.0.1" | "localhost" => None,
+        "0.0.0.0" => lan_ip(),
+        h => Some(h.to_string()),
+    };
+    crate::ui::serve_banner(port, &dir, lan.as_deref());
     if open {
         let _ = open_url(&format!("http://localhost:{port}"));
     }
@@ -88,6 +94,13 @@ fn inject_livereload(html: &str) -> String {
         Some(i) => format!("{}{}{}", &html[..i], LIVERELOAD, &html[i..]),
         None => format!("{html}{LIVERELOAD}"),
     }
+}
+
+/// Outbound interface IP via a connected UDP probe; no packets are sent.
+fn lan_ip() -> Option<String> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    Some(socket.local_addr().ok()?.ip().to_string())
 }
 
 /// Bump `version` whenever any file under `dir` changes. Mtime poll, no watcher dependency.

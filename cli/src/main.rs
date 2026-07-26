@@ -38,6 +38,9 @@ enum Cmd {
     Repl,
     /// Dev server with live reload.
     Serve {
+        /// Bind address; use 0.0.0.0 to expose on your LAN.
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
         #[arg(long, default_value_t = 5173)]
         port: u16,
         #[arg(long)]
@@ -74,7 +77,7 @@ fn main() -> Result<()> {
         Cmd::Init { name, bare } => init::run(name.as_deref(), bare),
         Cmd::Add { pkgs } => pkg::add(&manifest_path, &pkgs),
         Cmd::Remove { pkgs } => pkg::remove(&manifest_path, &pkgs),
-        Cmd::Serve { port, open } => serve::run(PathBuf::from("."), port, open),
+        Cmd::Serve { host, port, open } => serve::run(PathBuf::from("."), &host, port, open),
         Cmd::Run { file } => run_script(&manifest_path, file.as_deref()),
         Cmd::Repl => repl::run(&manifest_path),
         Cmd::Build { out } => build::run(&manifest_path, out.unwrap_or_else(|| PathBuf::from("dist"))),
