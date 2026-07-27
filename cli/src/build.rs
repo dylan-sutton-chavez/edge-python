@@ -49,7 +49,12 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
     }
 
     let sp = crate::ui::spinner("fetching compiler.wasm");
-    let compiler_bytes = match fetch(COMPILER_WASM).context("fetching compiler.wasm") {
+    // Test hook: local compiler instead of CDN.
+    let compiler_result = match std::env::var("EDGE_COMPILER_WASM") {
+        Ok(p) => fs::read(&p).with_context(|| format!("reading {p}")),
+        Err(_) => fetch(COMPILER_WASM).context("fetching compiler.wasm"),
+    };
+    let compiler_bytes = match compiler_result {
         Ok(b) => b,
         Err(e) => { sp.fail("failed to fetch compiler.wasm"); return Err(e); }
     };
@@ -86,9 +91,19 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
 
 /// Fetch the runtime JS modules into `dist/runtime/` mirroring their CDN layout.
 fn vendor_runtime(out_dir: &Path) -> Result<()> {
+    // Test hook: local runtime instead of CDN.
+    let local = std::env::var("EDGE_RUNTIME_DIR").ok();
     for rel in RUNTIME_FILES {
-        let url = format!("{RUNTIME_BASE}{rel}");
-        let bytes = fetch(&url).with_context(|| format!("fetching {url}"))?;
+        let bytes = match &local {
+            Some(dir) => {
+                let path = Path::new(dir).join(rel);
+                fs::read(&path).with_context(|| format!("reading {}", path.display()))?
+            }
+            None => {
+                let url = format!("{RUNTIME_BASE}{rel}");
+                fetch(&url).with_context(|| format!("fetching {url}"))?
+            }
+        };
         let path = out_dir.join("runtime").join(rel);
         if let Some(p) = path.parent() {
             fs::create_dir_all(p)?;
