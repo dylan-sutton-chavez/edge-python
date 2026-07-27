@@ -17,7 +17,7 @@ Two profiles via `VM::with_limits`. The same `compiler.wasm` runs unsandboxed in
 
 Two-tier:
 
-* **Inline (fast)**: 47-bit signed in a NaN-boxed `Val`. Range `+/-2^47` (`+/-140_737_488_355_327`). One ALU op per arithmetic, no allocation.
+* **Inline (fast)**: 47-bit signed in a NaN-boxed `Val`. Range `-2^47 .. 2^47-1` (`-140_737_488_355_328 .. 140_737_488_355_327`). One ALU op per arithmetic, no allocation.
 * **Wide (slow)**: i128 in `HeapObj::LongInt`. Range `+/-2^127 - 1`. Auto-used when a literal exceeds 47-bit or inline arithmetic overflows.
 
 Outside `+/-2^127` raises `OverflowError`. Promotion is automatic. User code doesn't see the boundary.

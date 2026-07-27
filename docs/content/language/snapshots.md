@@ -21,7 +21,7 @@ Either way `saveState` rejects while the run is executing, because a snapshot is
 
 A preempt lands at a loop back-edge and only where the VM can unwind, so three cases keep running past their interval and yield at the next reachable back-edge instead.
 
-A class body and a module's top level are not preemptible, so `while` loops there run to the end. Neither is user code a builtin re-enters: a `sort(key=...)` or `sorted(key=...)` callback, a generator body being drained by `list()` or `sum()`, and the `__init__` / `__call__` that run while an object is being constructed or invoked. And a single long native operation has no back-edge inside it, so sorting a huge list or `"x" * 10**8` runs to completion before the next yield.
+A class body and an imported module's init are not preemptible, so `while` loops there run to the end (the entry script's top level runs as the module-body coroutine and preempts normally). Neither is user code a builtin re-enters: a `sort(key=...)` or `sorted(key=...)` callback, a generator body being drained by `list()` or `sum()`, and the `__init__` / `__call__` that run while an object is being constructed or invoked. And a single long native operation has no back-edge inside it, so sorting a huge list or `"x" * 10**8` runs to completion before the next yield.
 
 Everything else preempts, including function and method bodies at any call depth, `for` and `while` loops, comprehensions, and loops inside `try` or `with` blocks.
 

@@ -19,6 +19,7 @@ Full rationale, NaN-box patterns, IC thresholds, GC roots, and intentional omiss
 ## Layout
 
 ```text
+├── fuzz-afl
 ├── src
 │   ├── main
 │   ├── modules
@@ -26,6 +27,10 @@ Full rationale, NaN-box patterns, IC thresholds, GC roots, and intentional omiss
 │   │   ├── packages
 │   │   ├── parser
 │   │   └── vm
+│   │       ├── builtins
+│   │       ├── handlers
+│   │       │   └── builtin_methods
+│   │       └── types
 │   └── util
 └── tests
     └── cases
@@ -42,23 +47,23 @@ cargo test --release --no-default-features # host-side test suite (skips the pre
 
 The test suite (`tests/`, fixtures in `tests/cases/vm.json`) runs every case under `Limits::sandbox()`, not the default `none()`. The budget, heap, and call-depth guards short-circuit under `none` (`sandbox_off`), so only the bounded profile exercises them — that way a regression that lets a loop run unbounded, recurse without limit, or materialise an oversized collection becomes a failing `MemoryError` / `RecursionError` assertion instead of a hang. Every fixture must stay within the sandbox budget.
 
-The host runtime owns I/O, network, and module fetching; there is no native CLI. Browser hosts use the [`runtime/`](../runtime/) JS package; Rust embedders instantiate `compiler.wasm` directly.
+The host runtime owns I/O, network, and module fetching. Browser hosts use the [`runtime/`](../runtime/) JS package; the [`cli/`](../cli/) `edge` binary drives that same runtime through headless Chromium; Rust embedders instantiate `compiler.wasm` directly.
 
 ### Consuming the release from another Rust crate
 
-This crate declares `links = "compiler"` and its `build.rs` downloads the matching `compiler.wasm` from the GitHub Release for `CARGO_PKG_VERSION` into `OUT_DIR`. Downstream crates read the absolute path through `DEP_COMPILER_LIB_WASM`.
+This crate declares `links = "compiler"` and its `build.rs` downloads the matching `compiler.wasm` from the GitHub Release for `CARGO_PKG_VERSION` into `OUT_DIR`. Downstream crates read the absolute path through `DEP_COMPILER_WASM`.
 
 ```toml
 # Downstream Cargo.toml
 [dependencies]
-edge-python = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.1.5" }
+edge-python = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.2.4" }
 ```
 
 ```rust
 // Downstream build.rs
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");
-    let wasm = std::env::var("DEP_COMPILER_LIB_WASM").expect("`DEP_COMPILER_LIB_WASM` unset, upstream `edge-python` must declare `links = \"compiler\"`");
+    let wasm = std::env::var("DEP_COMPILER_WASM").expect("`DEP_COMPILER_WASM` unset, upstream `edge-python` must declare `links = \"compiler\"`");
     std::fs::copy(&wasm, "runtime/compiler.wasm").expect("copy failed");
 }
 ```
@@ -71,7 +76,7 @@ Coverage-guided fuzzing of the lex -> parse -> VM pipeline lives in [`fuzz-afl/`
 
 ```bash
 cd compiler/fuzz-afl
-./seeds.sh # generate corpus + dictionary from vm.json (once)
+./seeds.sh # generate corpus from vm.json, copy dict.txt -> edge.dict (once)
 cargo afl build --release # instrument on stable, no nightly
 cargo afl fuzz -i in -o out -x edge.dict target/release/afl-pipeline # runs until Ctrl-C; add -V 300 to stop after 300s
 
@@ -80,7 +85,7 @@ cargo afl whatsup out # status summary of the ./out campaign; run in another ter
 
 `./deploy.sh` runs a parallel campaign across the host cores (one instance per logical core by default; override with `JOBS`; one `-M` plus N-1 `-S` instances sharing `out/`), `compose.yml` runs the same in a container with findings persisted in a volume, and `.github/workflows/fuzzer.yml` runs the target daily in CI. `deploy.sh`/compose/CI write findings to `out/m0/`, `out/s1/`, etc. (a bare `cargo afl fuzz` uses `out/default/`).
 
-Seeds and the dictionary are generated from `tests/cases/vm.json`, so they are gitignored. Reusing the same `out/` resumes the campaign: AFL recalibrates the saved queue (the dry-run pass) before fuzzing, so `execs` sits at 0 for a while; delete it with `rm -rf out` for a clean start. `deploy.sh` exports the WSL bypass vars itself; for a bare `cargo afl fuzz` under WSL, prefix it with `AFL_SKIP_CPUFREQ=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1`. See [Fuzzing](https://edgepython.com/implementation/fuzzing) for details.
+Seeds are generated from `tests/cases/vm.json` and the dictionary artifact `edge.dict` is copied from the committed `dict.txt`, so both are gitignored. Reusing the same `out/` resumes the campaign: AFL recalibrates the saved queue (the dry-run pass) before fuzzing, so `execs` sits at 0 for a while; delete it with `rm -rf out` for a clean start. `deploy.sh` exports the WSL bypass vars itself; for a bare `cargo afl fuzz` under WSL, prefix it with `AFL_SKIP_CPUFREQ=1 AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1`. See [Fuzzing](https://edgepython.com/implementation/fuzzing) for details.
 
 ## References
 

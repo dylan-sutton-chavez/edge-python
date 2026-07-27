@@ -15,9 +15,11 @@ Run the following commands before sending a pull request to ensure code quality:
 - `cargo wasm` Build the `compiler.wasm`.
 - `cargo test --release --no-default-features` Run the compiler test suite.
 - `cargo clippy --all-targets --no-default-features -- -D warnings` Lint the Rust code.
+- `cargo clippy --lib --target wasm32-unknown-unknown -p edge-python -p slugify-mod -- -D warnings` Lint the wasm build.
+- `cargo shear` Detect unused dependencies.
 - For significant changes, execute the [fuzzer](https://edgepython.com/implementation/fuzzing/) to check for new crashes or performance regressions.
 
-*Other packages have their own build and test setup — see the `README.md` in the relevant path. Code comments must be a single line of fewer than 30 words; if a change is too large, add a short section to the corresponding part of the `./docs` file instead.*
+*Other packages have their own build and test setup — see the `README.md` in the relevant path. Code comments must be a single line of fewer than 30 words; if a change is too large, add a short section to the corresponding page under `./docs/content` instead.*
 
 `cli/` tests hit the CDN runtime by default; `EDGE_RUNTIME_DIR` and `EDGE_COMPILER_WASM` swap in local copies for end-to-end validation before a deploy:
 

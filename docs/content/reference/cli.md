@@ -17,7 +17,7 @@ edge build          # bundle to dist/
 edge uninstall      # remove the binary, PATH entry, optionally the bundled browser
 ```
 
-The runtime does the actual work. `edge` is the loop around it. It launches the headless browser, serves the runtime alongside your code, runs everything in that browser, and streams output back to your terminal. `edge serve` opens the same setup in your own browser.
+The runtime does the actual work. `edge` is the loop around it. It launches the headless browser, serves the runtime alongside your code, runs everything in that browser, and streams output back to your terminal. `edge serve` instead serves your project directory to your own browser, with live reload.
 
 ## Install
 
@@ -29,13 +29,13 @@ curl -fsSL https://cdn.edgepython.com/cli/install.sh | sh
 cargo install --path cli
 ```
 
-`install.sh` drops the binary at `~/.local/bin/edge` and appends that directory to your `~/.bashrc` or `~/.zshrc` if it isn't already on `PATH`. Open a new shell (or `source` the file it printed) and `edge --version` should work. Re-run the same `curl … | sh` line any time to upgrade. To remove everything: `curl -fsSL https://cdn.edgepython.com/cli/uninstall.sh | sh` (asks before removing the bundled browser cache).
+`install.sh` drops the binary at `~/.local/bin/edge` and appends that directory (plus `EDGE_CHROME_PATH`, when the bundled browser is downloaded) to your `~/.bashrc` or `~/.zshrc` unless the file already has it. Open a new shell (or `source` the file it printed) and `edge --version` should work. Re-run the same `curl … | sh` line any time to upgrade. To remove everything: `curl -fsSL https://cdn.edgepython.com/cli/uninstall.sh | sh` (non-interactive: it leaves the bundled browser cache in place; `edge uninstall` asks before removing it).
 
 `install.sh` also downloads a pinned `chrome-headless-shell` into `~/.cache/edge` when no browser is already reachable. This needs `unzip`, with no package manager and no `sudo`. An existing browser on `PATH`, or an `EDGE_CHROME_PATH` you set, is used as-is. Linux arm64 has no such build: install Chrome/Chromium manually and set `EDGE_CHROME_PATH`. See [Bring your own browser](#bring-your-own-browser).
 
 ## `edge run`: run a Python file
 
-Runs a script and streams its output to the terminal. Bare imports resolve through [`packages.json`](/reference/imports#packagesjson); quoted relative imports load from your project files, resolved against the script's own directory. Uncaught errors print a traceback to stderr and exit with code 1.
+Runs a script and streams its output to the terminal. Bare imports resolve through [`packages.json`](/reference/imports#packagesjson); quoted relative imports load from your project files, resolved against the script's own directory (for a script outside the working directory — an absolute path or `../` — they resolve against the working directory instead). Uncaught errors print a traceback to stderr and exit with code 1.
 
 ```text
 $ edge run hello.py
@@ -149,15 +149,14 @@ $ edge init my-app
     ├─ main.py
     └─ packages.json
 
-  next:
-    cd my-app && edge serve
+  cd my-app && edge serve
 ```
 
 `--bare` skips `index.html` for script-only projects.
 
 ## `edge add` / `edge remove`: package manager
 
-Manage [`packages.json`](/reference/imports#packagesjson) by name. `edge` knows the official std (`json`, `re`, `math`, `test`) and host (`dom`, `network`, `storage`, `time`) packages, so you don't paste URLs. Most std packages are `.wasm`. `test` is pure Edge Python, so it resolves to `test.py`. See [Official packages](/reference/packages) for the full catalog.
+Manage [`packages.json`](/reference/imports#packagesjson) by name. `edge` knows the official std (`json`, `re`, `math`, `struct`, `test`) and host (`dom`, `network`, `storage`, `time`) packages, so you don't paste URLs. Most std packages are `.wasm`. `test` is pure Edge Python, so it resolves to `test.py`. See [Official packages](/reference/packages) for the full catalog.
 
 ```text
 $ edge add math network
@@ -178,7 +177,7 @@ Point a package at a custom URL with `edge add foo=https://example.com/foo.wasm`
 
 ## `edge build`: portable bundle
 
-Bundles your app into a self-contained `dist/` for offline use or self-hosting. It vendors the runtime, the `compiler.wasm`, your scripts, and every package locally, so nothing is fetched at runtime.
+Bundles your app into a self-contained `dist/` for offline use or self-hosting. It vendors the runtime, the `compiler.wasm`, your scripts, and every package your scripts import, so nothing is fetched at runtime.
 
 ```text
 $ edge build
@@ -199,13 +198,13 @@ Flags: `--out <dir>` (default `dist/`).
 
 ## `edge uninstall`
 
-Removes the binary and its `PATH` entry. Asks before removing the bundled `chrome-headless-shell` cache (never touches system Chromium). Equivalent to the `uninstall.sh` one-liner in [Install](#install).
+Removes the binary and its `PATH` entry. Asks before removing the bundled `chrome-headless-shell` cache (never touches system Chromium). The `uninstall.sh` one-liner in [Install](#install) does the same non-interactively, leaving the cache in place.
 
 ## Global flags
 
 | Flag | Effect |
 |------|--------|
-| `--packages <file>` | Use a specific manifest instead of `./packages.json` |
+| `--packages <file>` | Use a specific manifest instead of `./packages.json` (read by `run`, `repl`, `test`, `add`, `remove`, `build`) |
 | `--version` / `-V` | Print version |
 
 `Ctrl+C` cancels any running command cleanly.
@@ -215,7 +214,8 @@ Removes the binary and its `PATH` entry. Asks before removing the bundled `chrom
 `edge` uses, in order:
 
 1. `EDGE_CHROME_PATH` if set.
-2. A system `google-chrome` / `chromium` / `chrome` on `PATH` (or the `CHROME` env var).
-3. The bundled `chrome-headless-shell` in `~/.cache/edge`.
+2. The bundled `chrome-headless-shell` in `~/.cache/edge` (override the root with `EDGE_CHROME_DIR`).
+3. A system `google-chrome` / `chromium` / `chrome` on `PATH` (or the `CHROME` env var).
+4. Playwright's Chromium, if installed.
 
 `install.sh` downloads `chrome-headless-shell` when none is present. Linux arm64 has no build, so install Chrome/Chromium manually and point `EDGE_CHROME_PATH=/path/to/chrome` at it.

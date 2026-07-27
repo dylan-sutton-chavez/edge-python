@@ -59,7 +59,7 @@ curl -fsSL https://cdn.edgepython.com/cli/install.sh | sh
 edge -h # List all commands
 ```
 
-`edge` hosts the runtime in a headless Chromium provisioned by `install.sh` (apt, dnf, pacman, zypper, apk, or brew on macOS) for `serve`, `repl`, `build` and `uninstall`.
+`edge` hosts the runtime in a headless Chromium for `run`, `repl` and `test`; `install.sh` downloads a pinned `chrome-headless-shell` into `~/.cache/edge` unless a system Chrome/Chromium is already installed.
 
 ### Browser
 

@@ -62,7 +62,7 @@ Complex literals unsupported: `1j` lexes as `Int(1)` + `Name("j")`.
 
 ```python
 'plain' # str
-b'bytes' # bytes (lexed as String)
+b'bytes' # bytes (distinct Bytes token)
 r'raw\n' # raw
 u'unicode' # unicode
 br'rawbytes' # raw bytes

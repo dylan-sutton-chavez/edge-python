@@ -41,7 +41,7 @@ pub enum Kind {
     Host,
 }
 
-const STD: [&str; 4] = ["json", "re", "math", "test"];
+const STD: [&str; 5] = ["json", "re", "math", "struct", "test"];
 const HOST: [&str; 4] = ["dom", "network", "storage", "time"];
 
 /// Resolve a bare name against the official registry; user manifest overrides go through `resolve`.

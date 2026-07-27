@@ -37,6 +37,7 @@ Dunders are looked up on the class chain. The instance dict is skipped. Subclass
 | `a % b` | `__mod__` | `__rmod__` |
 | `a ** b` | `__pow__` | `__rpow__` |
 | `-a` | `__neg__` | - |
+| `+a` | `__pos__` | - |
 
 Return `NotImplemented` from the forward op to make the VM try the reflected op on the other operand. Both `NotImplemented` (or neither defined) -> `TypeError`.
 
@@ -214,7 +215,7 @@ Built-in dict/set compare instance keys by identity (`Val` bits). User `__hash__
 | `f"{x:spec}"` | `__format__` | built-in format spec engine |
 | `f"{x!r}"` | `__repr__` | - |
 
-`__format__(spec)` receives the spec string and must return `str`.
+`__format__(spec)` receives the spec string and must return `str`. `int(x)` on an instance calls `__int__`, also used by `%d` / `%x` / `%X` / `%o` formatting.
 
 ## Attribute access fallback
 

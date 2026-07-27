@@ -7,7 +7,7 @@ description: "Compiler architecture, dispatch model, and runtime layout."
 
 The release build is around 200 KB on `wasm32-unknown-unknown` (`panic=abort`, `opt-level=z`, `lto=true`, `codegen-units=1`). The pipeline: LUT-driven lexer -> single-pass Pratt parser emitting SSA-versioned bytecode directly -> peephole constant-folding optimiser -> token-threaded interpreter with two layers of adaptive specialisation.
 
-No AST, no IR. Bytecode is the only intermediate representation. Around 19,000 lines of Rust. Production deps are `hashbrown`, `itoa`, and `libm` (SHA-256 in-tree). The WASM build adds `dlmalloc` as the global allocator: binned O(1) alloc/free, so cost stays flat as live blocks grow.
+No AST, no IR. Bytecode is the only intermediate representation. Around 20,000 lines of Rust. Production deps are `hashbrown`, `itoa`, and `libm` (SHA-256 in-tree). The WASM build adds `dlmalloc` as the global allocator: binned O(1) alloc/free, so cost stays flat as live blocks grow.
 
 Classes support single and multiple inheritance (C3 MRO), `super()`, full dunder dispatch, `@property` / `@x.setter`. Multi-paradigm: composition preferred, monomorphic dispatch optimised via instance-dunder IC.
 
@@ -64,7 +64,7 @@ For arith/compare opcodes, the loop checks `cache.get_fast(ip)`. If a `FastOp` i
 
 Heap is a `Vec<HeapSlot>` arena with a free list (capped 524,288, sorted to prefer low indices). Strings, bytes (<=128 B), and LongInts are interned in side hashes. So equal values collapse to one slot and short literals short-circuit through identity (`is`); dict/set lookups stay correct across allocations via content hashing, not interning. Live-object cap is `Limits.heap` (default 10M, sandbox 100K). Single-colour mark-and-sweep, no refcount, cycles reclaimed natively.
 
-`HeapObj` variants: `Str`, `Bytes`, `List` (`Rc<RefCell<Vec<Val>>>`), `Dict` (insertion-ordered), `Set`, `FrozenSet`, `Tuple`, `Func(fn_idx, defaults, captures)`, `Range`, `Slice`, `Ellipsis` (singleton, distinct from `'...'`), `Type`, `ExcInstance`, `BoundMethod`, `NativeFn`, `Class(name, members)`, `Instance(class, attrs)`, `BoundUserMethod(recv, fn)`, `Coroutine(ip, slots, stack, body, iter_stack, sync_frames, exception_frames)` (shared by generators, `async def`, and the implicit module-body coro; `body` is `BodyRef::Fn(usize)` or `BodyRef::Module`; `sync_frames` stacks suspended sync sub-calls so a plain `def` hitting a yielding builtin can resume mid-body; `exception_frames` carries the coro's own `try`/`except` blocks across yields), `Module(spec, attrs)`, `Extern(Arc<dyn Fn>)`.
+`HeapObj` variants: `Str`, `Bytes`, `LongInt`, `List` (`Rc<RefCell<Vec<Val>>>`), `Dict` (insertion-ordered), `Set`, `FrozenSet`, `Tuple`, `Func(fn_idx, defaults, captures, attrs)`, `Range`, `Slice`, `Ellipsis` (singleton, distinct from `'...'`), `NotImplemented`, `Type`, `ExcInstance`, `BoundMethod`, `NativeFn`, `Class(name, bases, members)`, `Instance(class, attrs)`, `BoundUserMethod(recv, fn, class)`, `Super`, `Property`, `PropertySetter`, `StaticMethod`, `ClassMethod`, `Coroutine(ip, slots, stack, body, iter_stack, sync_frames, exception_frames)` (shared by generators, `async def`, and the implicit module-body coro; `body` is `BodyRef::Fn(usize)` or `BodyRef::Module`; `sync_frames` stacks suspended sync sub-calls so a plain `def` hitting a yielding builtin can resume mid-body; `exception_frames` carries the coro's own `try`/`except` blocks across yields), `Module(spec, attrs)`, `Extern(ExternFn)`.
 
 ## What the compiler intentionally does not do
 

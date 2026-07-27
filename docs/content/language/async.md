@@ -101,7 +101,7 @@ b step 2
 
 ## gather
 
-`gather(*coros)` runs each concurrently and returns a list of results in argument order. If any raises, an error propagates after all peers terminate — currently the last one raised, not necessarily the first in argument order. Survivors are not auto-cancelled.
+`gather(*coros)` runs each concurrently and returns a list of results in argument order. If any raises, an error propagates after all peers terminate — the first errored coroutine in argument order. Survivors are not auto-cancelled.
 
 ```python
 async def fetch(name, delay):

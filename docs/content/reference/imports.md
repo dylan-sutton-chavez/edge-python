@@ -81,7 +81,7 @@ Schema:
 - Top-level value is a JSON object. Empty `{}` is valid.
 - `imports` (optional): alias -> spec string.
 - `extends` (optional): directory whose `packages.json` is consulted when an alias isn't found locally.
-- `host` (optional): name -> JS module URL. Read by the browser runtime's `<edge-python>` element to load [host libraries](/reference/packages#host-libraries) on the main thread (DOM, network, storage…). The compiler itself ignores it (it's one of the silently-ignored keys below). The runtime consumes it. See the [runtime README](https://github.com/dylan-sutton-chavez/edge-python/tree/main/runtime).
+- `host` (optional): name -> JS module URL. Read by the browser runtime's `<edge-python>` element to load [host libraries](/reference/packages#host-libraries) on the main thread (DOM, network, storage…). The compiler folds each `host` name into the import table as a main-thread spec (`mt:<name>`); loading the module is the runtime's job. See the [runtime README](https://github.com/dylan-sutton-chavez/edge-python/tree/main/runtime).
 - Unknown top-level keys silently ignored (forward-compatible).
 - Booleans, numbers, arrays at any level are rejected.
 - String escapes: `\"`, `\\`, `\/`, `\n`, `\t`, `\r`. `\uXXXX` not supported. Paste UTF-8 literally.
@@ -104,7 +104,7 @@ my_app/
 └── ...
 ```
 
-- **Bare-name imports** (`from utils import x`) walk up looking for `packages.json`. The first one declaring the name wins; following its `extends` chain is capped at 32 hops. Over that: `packages.json walk-up exceeded <cap> hops resolving '<name>'`.
+- **Bare-name imports** (`from utils import x`) walk up looking for `packages.json`. The nearest manifest found wins; following its `extends` chain is capped at 32 hops. Over that: `packages.json walk-up exceeded <cap> hops resolving '<name>'`.
 - **Hermetic by default**: if the nearest manifest doesn't declare the alias, compilation fails (`alias '<name>' not declared in '<manifest>'`). No silent fall-through. This prevents a deep transitive dep from borrowing parent aliases.
 - **`host` entries declare too**: a manifest's `host` field ([Path C](/reference/writing-modules#path-c-js-host-module)) grants those bare names to the files under it, same walk-up rules.
 - **`extends` opts in to inheritance**: `"extends": ".."` re-runs the search from the extended directory when the alias isn't local. Cycles detected at compile time (`circular extends chain in packages.json`).
@@ -147,7 +147,7 @@ The compiler is a WebAssembly module. Fetching bytes is the host's job:
 |---|---|
 | Browser playground | `runtime/` package, pre-fetches every spec the script imports. `.py` files register via `register_code_module`; `.wasm` files instantiate via `WebAssembly.instantiate` and register exports via `register_native_module`. |
 | WASI runtime | Host program reads `.py` files from disk / network using `wasi_snapshot_preview1`. `.wasm` modules can be loaded via the runtime's WebAssembly engine. |
-| Production deploy | `edge compile` (planned) will seal all imports into a single `.epy` artifact. |
+| Production deploy | `edge build` bundles the runtime, `compiler.wasm`, scripts, and imported packages into a self-contained `dist/` ([CLI](/reference/cli)). |
 
 URL imports work for both `.py` and `.wasm` modules as long as your host supports them:
 

@@ -20,7 +20,7 @@ doctest = false
 name = "tests"
 path = "tests/main.rs"
 
-# `prebuilt` (default on) gates the `build.rs` download of `compiler.wasm`. Consumers get the wasm transparently; this repo's own producer-side commands pass `--no-default-features` to skip the fetch (nothing here reads `DEP_COMPILER_LIB_WASM`).
+# `prebuilt` (default on) gates the `build.rs` download of `compiler.wasm`. Consumers get the wasm transparently; this repo's own producer-side commands pass `--no-default-features` to skip the fetch (nothing here reads `DEP_COMPILER_WASM`).
 [features]
 default = ["prebuilt"]
 prebuilt = []

@@ -114,7 +114,7 @@ Spawns a Web Worker, loads `compiler.wasm` inside it, returns a proxy.
 | `loaders` | `string[]` | `[]` | URLs of module loader plugins. Each loader is a `.js` file with a default export `{ match, load }`. See [Writing a loader](#writing-a-loader). |
 | `mainThreadModules` | `Record<string, factory \| object>` | `{}` | Main-thread modules supplied as in-memory factories/objects, registered eagerly. Use `hostModules` instead when you have URLs and want lazy loading. See [Main-thread modules](#main-thread-modules). |
 | `hostModules` | `Record<string, string>` | `{}` | Main-thread host libraries by URL (`name -> ESM url`), `import()`ed lazily the first time a run imports the name. The `<edge-python>` element fills this from the `host` field. |
-| `defaults` | `boolean` | `true` | Seed the resolution table with the official packages so they resolve by bare name without a `packages.json`: std `json` / `re` (worker `.wasm`) and host `dom` / `network` / `storage` / `time` (main-thread ESM). Lazy, an unused default is never fetched. Set `false` to opt out. URLs live in `src/defaults.js`. |
+| `defaults` | `boolean` | `true` | Seed the resolution table with the official packages so they resolve by bare name without a `packages.json`: worker imports `json` / `re` / `math` / `struct` (`.wasm`) plus `test` and the `dom` façade (`.py`), and main-thread host modules `_dom` / `network` / `storage` / `time` (ESM). Lazy, an unused default is never fetched. Set `false` to opt out. URLs live in `src/defaults.js`. |
 | `version` | `string` | `null` | Optional lockfile version key. When present, mismatches with the stored version invalidate the cache before run. Useful to pin cache to a deploy/commit. |
 
 ### `Worker`
@@ -125,7 +125,7 @@ The returned object exposes:
 |---|---|---|
 | `integrityActive` | `boolean` | `true` iff IDB cache opened successfully. Inspect after `createWorker` to detect silent fallback. |
 | `loadMs` | `number` | Wall time to load + compile `compiler.wasm`. |
-| `run(src, opts?)` | `(string, {entryDir?, baseUrl?}) => Promise<{out, ms}>` | Execute a Python source string. The runtime does not auto-invoke `main`, scripts that define `async def main()` must drive it themselves with a trailing `run(main())`. Top-level scripts (no `main`) execute under the implicit module-body coroutine, so `receive()`, `sleep()`, etc. still work without wrapping. `entryDir` is a prefix joined to relative import specs; `baseUrl` overrides the base for URL resolution (defaults to the worker's `location.href`). Resolves with stdout (concatenated `print()` lines if no `onOutput`) and wall time. |
+| `run(src, opts?)` | `(string, {entryDir?, baseUrl?, repl?}) => Promise<{out, ms}>` | Execute a Python source string. `repl: true` keeps the interpreter and its globals alive across runs (incremental evaluation). The runtime does not auto-invoke `main`, scripts that define `async def main()` must drive it themselves with a trailing `run(main())`. Top-level scripts (no `main`) execute under the implicit module-body coroutine, so `receive()`, `sleep()`, etc. still work without wrapping. `entryDir` is a prefix joined to relative import specs; `baseUrl` overrides the base for URL resolution (defaults to the worker's `location.href`). Resolves with stdout (concatenated `print()` lines if no `onOutput`) and wall time. |
 | `onOutput(handler)` | `(chunk: string) => void` | Streaming output callback fired once per `print()`, with the raw bytes (body + its `end`, no newline added). Concatenate chunks; don't join with `\n`. |
 | `reset()` | `() => Promise<void>` | Clear registered modules without rebooting the worker. |
 | `clearCache()` | `() => Promise<void>` | Wipe IDB CAS + lockfile (or memory cache). Next run re-fetches everything. |
@@ -153,7 +153,7 @@ await done;
 
 The blob embeds the source and a compiler fingerprint: `restoreState` re-parses, verifies both, and rejects blobs saved by a different program or compiler version. One blob restores any number of times, each an independent copy. Host-side resources (DOM node handles, sockets, in-flight host calls) do not survive; queued but unconsumed events do.
 
-Preempts land on loop back-edges where the VM can unwind. Class bodies, module top level, builtin callbacks (`sort(key=...)`, a generator drained by `list()`), `__init__` / `__call__`, and single long native operations run past the interval and yield at the next reachable back-edge. That delays a pause; it never corrupts one.
+Preempts land on loop back-edges where the VM can unwind. Class bodies, imported-module init, builtin callbacks (`sort(key=...)`, a generator drained by `list()`), `__init__` / `__call__`, and single long native operations run past the interval and yield at the next reachable back-edge. That delays a pause; it never corrupts one.
 
 Size ceiling: the blob holds the source **plus the entire live heap**, and `restoreState` loads it through the runtime's source buffer, capped at 1 MiB (`1 << 20`). `saveState` is uncapped, so a large live heap can produce a blob that only fails on restore with `snapshot exceeds 1048576 bytes`; keep snapshotted state well under the ceiling.
 
@@ -217,7 +217,7 @@ const dom = ({ pushEvent }) => {
 const worker = await createWorker({ wasmUrl: "...", mainThreadModules: { dom } });
 ```
 
-Supported values: `None`, `bool`, `int` (i64, range-limited by JS Number), `float`, `str`, `bytes` (`Uint8Array`), plus nested `list` / `dict` (str keys) of these. Opaque references (DOM nodes, files, observers) to integer IDs in a main-thread registry (the `alloc` / `node` pattern).
+Supported values: `None`, `bool`, `int` (i128; decoded as a JS `Number` within ±2^53, `BigInt` beyond), `float`, `str`, `bytes` (`Uint8Array`), plus nested `list` / `dict` (str keys) of these. Opaque references (DOM nodes, files, observers) to integer IDs in a main-thread registry (the `alloc` / `node` pattern).
 
 Per-call overhead: one `postMessage` round-trip (around 0.1 to 0.4 ms in modern browsers). Fine for UI-rate workloads. For tight per-frame loops over thousands of fine-grained ops, prefer a Worker-side capability (Path A `.wasm`).
 

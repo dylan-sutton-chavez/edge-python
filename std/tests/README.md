@@ -31,7 +31,7 @@ The synthesized manifest follows the package's structure: a `src/entry.py` is im
 | `src/entry.py` | the `.py` (code module) | no |
 | `Cargo.toml` + `src/lib.rs` (no `.py`) | the `<pkg>.wasm` | yes |
 
-A pure-Python package (e.g. `test`) ships its source; native packages (`re`, `math`, `json`) build to wasm first.
+A pure-Python package (e.g. `test`) ships its source; native packages (`json`, `re`, `math`, `struct`) build to wasm first.
 
 ## Corpus shape
 

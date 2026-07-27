@@ -25,8 +25,8 @@ extern "C" fn <name>(argv: *const u32, argc: u32, out: *mut u32) -> i32;
 
 | Field | Meaning |
 |---|---|
-| `argv` | Pointer (in **guest** linear memory) to an array of `argc` host-managed handles, one per positional argument. |
-| `argc` | Positional argument count. |
+| `argv` | Pointer (in **guest** linear memory) to an array of `argc` host-managed handles: one per positional argument, plus a trailing kwargs slot. |
+| `argc` | Positional argument count plus one — the trailing kwargs slot (handle `0` when no `name=value` arguments were passed). |
 | `out` | Pointer (in **guest** linear memory) where the guest writes ONE handle for the return value. |
 | return | `0` = success, `1` = error (host pulls the error via `edge_take_error` immediately). |
 
@@ -355,7 +355,7 @@ pub extern "C" fn __edge_free(ptr: *mut u8, size: u32) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn slugify(argv: *const u32, argc: u32, out: *mut u32) -> i32 {
-  if argc != 1 { return 1; }
+  if argc != 2 { return 1; } // 1 positional + trailing kwargs slot
   let input = unsafe { *argv };
 
   // 1) input.lower()
@@ -388,12 +388,12 @@ For `from "<url>" import <names>` with a `.wasm` URL, the host:
 4. Marshals args as handles.
 5. Propagates results.
 
-Reference browser shim: [`runtime/worker/worker.js`](https://github.com/dylan-sutton-chavez/edge-python/blob/main/runtime/worker/worker.js). WASI hosts and Rust embedders mirror the shape.
+Reference browser shim: [`runtime/src/native.js`](https://github.com/dylan-sutton-chavez/edge-python/blob/main/runtime/src/native.js) (the `edge_*` guest imports and the built-in Path A loader). WASI hosts and Rust embedders mirror the shape.
 
 ## Constraints and caveats
 
 - **Refcounted handles.** Guest releases every handle it creates via `edge_encode` / `edge_op` except the one returned through `*out`. Host releases argv.
-- **`edge_decode` is primitives-only.** For `list`, `dict`, `set`, instances, use `edge_op` (e.g. `Call recv "items"`, `GetItem recv idx`).
+- **`edge_decode` covers primitives plus `list` / `tuple` / `dict`** (TLV-encoded). `set`, instances, and cyclic values return `TAG_INVALID`; walk those with `edge_op` (e.g. `Call recv "items"`, `GetItem recv idx`).
 - **Trailing kwargs slot.** Every plugin call carries one extra `u32` after the user's positional argv: handle `0` when the caller passed no `name=value` arguments, otherwise a `dict` handle holding the pairs. The `#[plugin_fn]` macro folds it into a `Kwargs` parameter if declared (`fn foo(a: Handle, kw: Kwargs)`). Otherwise it is silently absorbed and the function sees only its positional args.
 - **Invoking a caller-supplied callable.** From the guest, `edge_op Call recv "__call__" argv` invokes `recv` directly. Lambdas, builtins, classes, and bound methods all route through the same dispatch the language uses. Use this to wire Python hooks like `default`, `object_hook`, `parse_int`.
 - **Reentrance supported.** A guest's `edge_op` runs while the VM is paused on the script's `CallExtern`. Method dispatch routes through the same `vm/handlers/builtin_methods/` descriptor table the language uses internally. Adding a method there makes it visible to existing modules with no recompile.

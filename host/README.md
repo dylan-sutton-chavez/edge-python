@@ -39,7 +39,7 @@ One folder per capability. Each ships a `<name>/<name>.json` corpus; the shared 
         wasmUrl: "https://cdn.edgepython.com/compiler.wasm",
         // JS handlers register as `_dom`; scripts import the `dom` façade (see dom/packages.json).
         mainThreadModules: { _dom: dom },
-        imports: { dom: "https://cdn.edgepython.com/host/dom/src/entry.py" },
+        imports: { dom: "https://cdn.edgepython.com/host/dom/entry.py" },
     });
     await worker.run(await (await fetch("./script.py")).text());
 </script>
@@ -50,7 +50,7 @@ One folder per capability. Each ships a `<name>/<name>.json` corpus; the shared 
 | Folder | Description |
 |--------|-------------|
 | `dom`     | Browser DOM access with opt-in `batch()` mutation batching, see [`dom/README.md`](dom/README.md) |
-| `network` | HTTP fetch, WebSocket, SEE, see [`network/README.md`](network/README.md) |
+| `network` | HTTP fetch, WebSocket, SSE, see [`network/README.md`](network/README.md) |
 | `storage` | localStorage, sessionStorage, IndexedDB, see [`storage/README.md`](storage/README.md) |
 | `time`    | Clocks, sleep, calendar formatting, see [`time/README.md`](time/README.md) |
 

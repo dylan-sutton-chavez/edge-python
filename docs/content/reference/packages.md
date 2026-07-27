@@ -46,7 +46,7 @@ print(sub(r'\s+', '_', 'a  b   c')) # a_b_c
 print(findall(r'\w+', 'one two three')) # ['one', 'two', 'three']
 ```
 
-Functions: `match`, `search`, `fullmatch`, `findall`, `groups`, `span`, `sub`. Flags go inline (`(?i)`, `(?s)`, `(?m)`). Pre-built `.wasm` is served from `https://cdn.edgepython.com/std/re.wasm`. Full API: [`std/re/README.md`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/std/re).
+Functions: `match`, `search`, `fullmatch`, `findall`, `groups`, `span`, `sub`; `compile(pattern)` pre-parses a pattern and exposes the same operations as methods. Flags go inline (`(?i)`, `(?s)`, `(?m)`). Pre-built `.wasm` is served from `https://cdn.edgepython.com/std/re.wasm`. Full API: [`std/re/README.md`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/std/re).
 
 ### `struct`
 

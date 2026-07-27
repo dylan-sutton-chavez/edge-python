@@ -36,7 +36,7 @@ The CLI is a standalone Cargo workspace under `cli/`. Commands run from there:
 cd cli
 cargo clippy --all-targets -- -D warnings # lint
 cargo check # type-check
-cargo test # run tests (requires google-chrome-stable on PATH)
+cargo test # run tests (needs any Chrome/Chromium: the bundled shell, a system browser, or EDGE_CHROME_PATH)
 ```
 
 ## License

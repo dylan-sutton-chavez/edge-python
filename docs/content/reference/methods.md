@@ -91,7 +91,7 @@ Not provided: `isascii`, `isidentifier`, `isnumeric`, `isdecimal`, `isprintable`
 
 ### Search and count
 
-`find` / `rfind` return a code-point index (not a byte offset), `-1` if missing. `index` / `rindex` raise `ValueError` instead of returning `-1`. `find`, `rfind`, `index`, `rindex`, `count` take optional `start` / `end` code-point positions. `startswith` / `endswith` accept a single string or a tuple of strings.
+`find` / `rfind` return a code-point index (not a byte offset), `-1` if missing. `index` / `rindex` raise `ValueError` instead of returning `-1`. `find`, `rfind`, `index`, `rindex`, `count`, `startswith`, `endswith` take optional `start` / `end` code-point positions. `startswith` / `endswith` accept a single string or a tuple of strings.
 
 ```python
 print("hello".startswith("he"))
@@ -171,7 +171,7 @@ a   bc
 
 ### Formatting
 
-`str.format(*args)` fills positional fields (`{}` auto-numbered, `{0}` explicit) with the f-string [format mini-language](/language/syntax#f-strings) after `:`. Keyword fields (`"{name}".format(name=...)`) are not supported, use positional indices. The `%` operator does printf-style formatting (`%s %r %d %i %x %X %o %f %e %g %c %%`, with flags / width / `.precision`, where `*` reads the width or precision from the next argument); a tuple spreads, any other value is a single argument.
+`str.format(*args)` fills positional fields (`{}` auto-numbered, `{0}` explicit) with the f-string [format mini-language](/language/syntax#f-strings) after `:`. Keyword fields (`"{name}".format(name=...)`) are not supported, use positional indices. The `%` operator does printf-style formatting (`%s %r %d %i %u %x %X %o %f %F %e %E %g %G %c %%`, with flags / width / `.precision`, where `*` reads the width or precision from the next argument); a tuple spreads, any other value is a single argument.
 
 ```python
 print("{} and {}".format("a", "b"))
@@ -207,7 +207,7 @@ b'hi'
 
 ## Bytes methods
 
-`bytes.decode([encoding[, errors]])` takes `encoding` (`utf-8` or `ascii`) and an `errors` handler: `strict` (default) raises on invalid UTF-8, `ignore` drops the bad bytes, `replace` substitutes `U+FFFD`. `bytes.find` returns a byte offset (not a code-point index). `bytes.index` raises `ValueError` if absent. `split` needs an explicit separator (no whitespace-split mode). `lower` / `upper` case-fold ASCII bytes; `strip` / `lstrip` / `rstrip` trim ASCII whitespace (or any byte in the optional set). `join` concatenates an iterable of bytes. `bytes.fromhex(s)` parses a hex string (whitespace ignored). `bytearray` and `memoryview` are unimplemented.
+`bytes.decode([encoding[, errors]])` takes `encoding` (`utf-8`/`utf8` or `ascii`) and an `errors` handler: `strict` (default) raises on invalid UTF-8, `ignore` drops the bad bytes, `replace` substitutes `U+FFFD`. `bytes.find` returns a byte offset (not a code-point index). `bytes.index` raises `ValueError` if absent. `split` needs an explicit separator (no whitespace-split mode). `lower` / `upper` case-fold ASCII bytes; `strip` / `lstrip` / `rstrip` trim ASCII whitespace (or any byte in the optional set). `join` concatenates an iterable of bytes. `bytes.fromhex(s)` parses a hex string (whitespace ignored). `bytearray` and `memoryview` are unimplemented.
 
 ```python
 b = b"\x48\x65\x6c\x6c\x6f"
@@ -370,7 +370,7 @@ None
 
 ### Mutation
 
-`update` accepts a `dict`, an iterable of length-2 sequences, or keyword arguments (`d.update(a=1)`). `popitem` returns the last-inserted entry; empty -> `KeyError`. `pop(key)` on a missing key -> `KeyError` unless a default is given. The `dict.fromkeys(iterable[, value])` classmethod builds a new dict mapping each key to `value` (default `None`). `clear` empties the dict in place, so shared references see it.
+`update` accepts a `dict`, an iterable of length-2 sequences, or keyword arguments (`d.update(a=1)`). `popitem` returns the last-inserted entry; empty -> `KeyError`. `pop(key)` on a missing key -> `KeyError` unless a default is given. The `dict.fromkeys(iterable[, value])` classmethod builds a new dict mapping each key to `value` (default `None`). `clear` empties the dict in place, so shared references see it. `copy` returns a shallow copy.
 
 ```python
 d = {"a": 1}
@@ -419,7 +419,7 @@ These are `set`-only. `frozenset` exposes no methods; it uses the algebra operat
 
 ### Mutation
 
-`remove` raises `KeyError` if absent. `discard` is silent. `pop` removes an arbitrary element; empty -> `KeyError`. `update` accepts any iterable (variadic).
+`remove` raises `KeyError` if absent. `discard` is silent. `pop` removes an arbitrary element; empty -> `KeyError`. `update` accepts any iterable (variadic). `copy` returns a shallow copy.
 
 ```python
 s = {1, 2, 3}
@@ -518,5 +518,5 @@ True
 False
 ```
 
-The standalone [`int_to_bytes` / `int_from_bytes` / `bytes_fromhex`](/reference/builtins#bytes_fromhex-int_from_bytes-int_to_bytes) builtin functions remain available and behave identically.
+The standalone [`int_to_bytes` / `int_from_bytes` / `bytes_fromhex`](/reference/builtins#bytes_fromhex-int_from_bytes-int_to_bytes) builtin functions remain available; unlike the methods they are fixed-arity, capped at 8 bytes, and reject negative ints with `ValueError`.
 

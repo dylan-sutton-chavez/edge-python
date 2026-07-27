@@ -233,9 +233,9 @@ self.with_fresh_chunk(|s| {
 
 Free variables (non-parameters with no local binding) are looked up in the outer chunk. `MakeFunction` captures matching slots from the enclosing scope into `captures` as shared cells (1-element heap lists, registered per call frame by the enclosing slot), so sibling closures over the same variable observe each other's `nonlocal` writes. Nested `def`/`lambda` push their free names back into the parent's name table. Capture propagates through any depth (`A -> B -> C` where `C` references a var in `A`).
 
-Parameter slots: `Normal`, `Star` (`*args`), `DoubleStar` (`**kwargs`). Lone `*` separator marks following params as keyword-only. Defaults live in `HeapObj::Func.defaults` and bind to the `=`-marked params in source order, so a default before `*args` and keyword-only defaults both apply correctly. Annotations (`x: T`, `-> T`) parse and drain to `chunk.annotations` (tooling-only).
+Parameter slots: `Normal`, `Star` (`*args`), `DoubleStar` (`**kwargs`), `KwOnly`. Lone `*` separator marks following params as keyword-only. Defaults live in `HeapObj::Func.defaults` and bind to the `=`-marked params in source order, so a default before `*args` and keyword-only defaults both apply correctly. Annotations (`x: T`, `-> T`) parse and drain to `chunk.annotations` (tooling-only).
 
-`compile_body` checks impurity opcodes (`StoreItem`, `DelItem`, `StoreAttr`, `DelAttr`, `CallPrint`, `CallInput`, `Global`, `Nonlocal`, `Raise`, `RaiseFrom`, `Yield`, `LoadAttr`) to set `body.is_pure`, the flag that gates template memoisation ([Design](/implementation/design#concepts)). This static gate is complemented at runtime by an observed-impurity check that propagates through calls, so a side-effecting builtin reached as a first-class value (e.g. `print` passed to a wrapper) disqualifies the caller too.
+`compile_body` checks impurity opcodes (`StoreItem`, `DelItem`, `StoreAttr`, `DelAttr`, `CallPrint`, `CallInput`, `Global`, `Nonlocal`, `Raise`, `RaiseFrom`, `Yield`, `LoadAttr`) — and that the body reads no free (global/builtin) name — to set `body.is_pure`, the flag that gates template memoisation ([Design](/implementation/design#concepts)). This static gate is complemented at runtime by an observed-impurity check that propagates through calls, so a side-effecting builtin reached as a first-class value (e.g. `print` passed to a wrapper) disqualifies the caller too.
 
 ## Type annotations
 
@@ -280,7 +280,7 @@ BuildString 4
 - bit 0, set when a format spec string is on the stack just below the value (collected as the raw text between `:` and `}` and emitted as a constant).
 - bits 1–2, conversion: `0` none, `1` `!r`, `2` `!s`, `3` `!a`.
 
-VM applies conversion first, then the spec mini-language `[[fill]align][sign][#][0][width][,][.precision][type]` with type chars `s d b o x X f F e E g G n % c`. `n` aliases `d` (no locale). `=` self-documenting form (`{expr=}`) emits a literal `expr=` prefix. Adjacent string literals concatenate at parse time. Spec parse failures -> `ValueError` at runtime.
+VM applies conversion first, then the spec mini-language `[[fill]align][sign][#][0][width][,|_][.precision][type]` with type chars `s d b o x X f F e E g G n % c`. `n` aliases `d` (no locale). `=` self-documenting form (`{expr=}`) emits a literal `expr=` prefix. Adjacent string literals concatenate at parse time. Spec parse failures -> `ValueError` at runtime.
 
 ## Limits
 

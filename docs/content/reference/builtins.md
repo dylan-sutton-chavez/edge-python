@@ -3,7 +3,7 @@ title: "Built-in functions"
 description: "Every built-in function in Edge Python with examples and outputs."
 ---
 
-66 built-in functions, all first-class values: pass as arguments, store in containers, alias.
+67 built-in functions, all first-class values: pass as arguments, store in containers, alias.
 
 ```python
 # All built-ins are real values
@@ -44,7 +44,7 @@ no newline!
 
 ### input
 
-`input()`: one line from the host buffer. Native: stdin. WASM: drains the buffer the host wrote via `set_input`. Empty buffer -> empty string. No prompt argument.
+`input()`: one line from the host buffer. Native: stdin. WASM: drains the buffer the host wrote via `set_input`. Empty buffer -> `RuntimeError` (the host must provide data first). No prompt argument.
 
 ## Numeric
 
@@ -118,7 +118,7 @@ print(sum(x * x for x in range(5)))
 
 ### pow
 
-`pow(base, exp)` or `pow(base, exp, mod)` for modular exp. 3-arg requires int operands and non-negative exp (`pow(a, b, 0)` -> `ZeroDivisionError`; `pow(a, -1, m)` -> `ValueError`). Modulus must be `<= 2^63` (larger overflows i128 in `(result * base) % m`), raises `ValueError("pow() modulus too large; must be < 2^63")`.
+`pow(base, exp)` or `pow(base, exp, mod)` for modular exp. 3-arg requires int operands and non-negative exp (`pow(a, b, 0)` -> `ZeroDivisionError`; `pow(a, -1, m)` -> `ValueError`). Modulus must be `<= 2^63` (larger overflows i128 in `(result * base) % m`), raises `ValueError("pow() modulus too large; must be < 2^63 (no arbitrary precision)")`.
 
 ```python
 print(pow(2, 10))
@@ -240,7 +240,7 @@ False True
 
 ### list, tuple, set, frozenset, dict
 
-`list`, `tuple`, `set`, `frozenset` accept any iterable: list, tuple, set, frozenset, dict (keys), range, bytes, str, generator, coroutine. Share an `extract_iter` helper, so all constructors are interchangeable. With no argument, each builds an empty one.
+`list`, `tuple`, `set`, `frozenset` accept any iterable: list, tuple, set, frozenset, dict (keys), range, bytes, str. Generator expressions work in all of them (they lower to list comprehensions), but a live generator object (`def` + `yield`) is only accepted by `list()`; the others raise `TypeError: 'coroutine' object is not iterable`. With no argument, each builds an empty one.
 
 ```python
 print(list("abc"))
@@ -262,7 +262,7 @@ frozenset({1, 2, 3})
 
 ### chr, ord
 
-Convert between code points and single-char strings. `chr` accepts full Unicode (`chr(0x1F600)` -> `"😀"`); negative -> `ValueError`. `ord` requires a length-1 string; `ord(b'A')` not accepted.
+Convert between code points and single-char strings. `chr` accepts full Unicode (`chr(0x1F600)` -> `"😀"`); negative -> `ValueError`. `ord` accepts a length-1 string or length-1 bytes (`ord(b'A')` -> `65`).
 
 ```python
 print(chr(65))
@@ -500,10 +500,10 @@ See [Bytes](/language/data-types#bytes) for literal syntax (`b"..."`), indexing,
 
 ### bytes_fromhex, int_from_bytes, int_to_bytes
 
-Free-function forms. The equivalent [methods](/reference/methods#int-and-float-methods) (`bytes.fromhex`, `int.from_bytes`, `int.to_bytes`) also exist and behave identically; use whichever reads better.
+Free-function forms. The equivalent [methods](/reference/methods#int-and-float-methods) (`bytes.fromhex`, `int.from_bytes`, `int.to_bytes`) also exist but are not identical: the methods take defaults (`length=1`, `byteorder='big'`) and have no 8-byte cap, while these free functions are fixed-arity, capped at 8 bytes, and reject negative ints with `ValueError`.
 
 - `bytes_fromhex(s)`: hex string -> bytes. Inner whitespace ignored; non-hex -> `ValueError`.
-- `int_from_bytes(b, order)`: `order` is `"big"` or `"little"`. Unsigned (high bit never sign).
+- `int_from_bytes(b, order)`: `order` is `"big"` or `"little"`. Unsigned (high bit never sign). Max 8 bytes, `OverflowError` beyond.
 - `int_to_bytes(n, length, order)`: `n >= 0`, `length <= 8`. Accepts inline ints or `LongInt`; doesn't fit -> `OverflowError`.
 
 ```python
@@ -685,7 +685,7 @@ False
 
 ### id, hash
 
-`id(x)`: stable identifier (NaN-box bit pattern masked to int range). `hash(x)`: hash for hashable values. `hash(1) == hash(1.0)`, so int/float keys collapse to one dict slot.
+`id(x)`: stable identifier (NaN-box bit pattern masked to int range). `hash(x)`: hash for hashable values. Ints hash to themselves; floats hash by bit pattern, so `hash(1) != hash(1.0)` — int/float keys still collapse to one dict slot via the containers' internal value hasher.
 
 ```python
 x = 42
@@ -754,7 +754,7 @@ print(format("hi", ">10"))
 
 ## Attribute access
 
-`getattr` / `hasattr` / `delattr` consult the instance `__dict__` first, then the user class chain (including inherited methods), then the built-in method table for primitives (str/bytes/list/dict/set, plus the small int/float method set), class attributes on a class object, and attributes stored on functions. Bound methods expose `__self__`, and user methods also `__func__`. So `hasattr(MyClass(), 'my_method')` is `True` for a defined method, and `delattr` on a missing attribute raises `AttributeError`.
+`getattr` / `hasattr` / `delattr` consult the instance `__dict__` first, then the user class chain (including inherited methods), then the built-in method table for primitives (str/bytes/list/dict/set, plus the small int/float method set), class attributes on a class object, and attributes stored on functions. Bound methods expose `__self__`, and user methods also `__func__`. So `hasattr(MyClass(), 'my_method')` is `True` for a defined method, and `delattr` on a missing attribute raises `AttributeError` (except on a class object, where a missing name is silently ignored).
 
 ### getattr
 
@@ -785,7 +785,7 @@ False
 
 ### globals, locals
 
-`globals()`: fresh dict snapshot of module-level bindings (builtins, types, top-level assignments). `locals()`: fresh dict of the current frame: function locals inside a function, same as `globals()` minus builtins at module level.
+`globals()`: fresh dict snapshot of module-level bindings — user top-level names only; builtins and types live in a separate namespace, matching CPython. `locals()`: fresh dict of the current frame: function locals inside a function, same as `globals()` at module level.
 
 ```python
 x = 100
@@ -875,7 +875,7 @@ print(vars(p))
 
 ### super
 
-`super()`: zero-arg only. Proxy resolving attribute access against the bases of the current method's class, starting one step up the MRO. Outside a method -> `TypeError`.
+`super()`: zero-arg only. Proxy resolving attribute access against the bases of the current method's class, starting one step up the MRO. Outside a method -> `RuntimeError`.
 
 ```python
 class A:
