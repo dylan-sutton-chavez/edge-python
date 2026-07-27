@@ -34,15 +34,15 @@ Cargo workspace rooted at the engine crate (`edge-python`); commands work from a
 ├── pdk
 ├── src
 │   ├── lexer
-│   ├── main
 │   ├── packages
 │   ├── parser
 │   ├── util
-│   └── vm
-│       ├── builtins
-│       ├── handlers
-│       │   └── builtin_methods
-│       └── types
+│   ├── vm
+│   │   ├── builtins
+│   │   ├── handlers
+│   │   │   └── builtin_methods
+│   │   └── types
+│   └── wasm
 ├── std
 └── tests
     └── cases

@@ -1,12 +1,11 @@
 #![cfg_attr(target_arch = "wasm32", no_std)]
-#![allow(special_module_name)]
 
 extern crate alloc;
 
 pub mod abi;
 
 #[cfg(target_arch = "wasm32")]
-pub mod main;
+pub mod wasm;
 
 /* Internal compiler helpers (not Edge Python stdlib); separate from pipeline code. */
 pub mod util {
