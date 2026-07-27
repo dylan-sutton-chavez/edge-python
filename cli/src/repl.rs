@@ -142,9 +142,9 @@ mod tests {
 
     #[test]
     fn language_list_tracks_compiler_tables() {
-        let vm = std::fs::read_to_string("../compiler/src/modules/vm/types/mod.rs").unwrap();
+        let vm = std::fs::read_to_string("../src/modules/vm/types/mod.rs").unwrap();
         let builtins = vm.split("builtins! {").nth(1).unwrap().split("\n}").next().unwrap();
-        let lexer = std::fs::read_to_string("../compiler/src/modules/lexer/tables.rs").unwrap();
+        let lexer = std::fs::read_to_string("../src/modules/lexer/tables.rs").unwrap();
 
         let mut missing: Vec<String> = quoted(builtins, "\"")
             .into_iter()

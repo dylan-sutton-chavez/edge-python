@@ -34,11 +34,11 @@ jobs:
         run: cargo install cargo-afl
 
       - name: Fuzz
-        working-directory: compiler/fuzz-afl
+        working-directory: fuzz
         run: bash ./deploy.sh
 
       - name: Triage
-        working-directory: compiler/fuzz-afl
+        working-directory: fuzz
         run: |
           shopt -s nullglob
           crashes=(out/*/crashes*/id:*)
@@ -55,7 +55,7 @@ jobs:
         if: always()
         run: |
           shopt -s nullglob
-          dirs=(compiler/fuzz-afl/out/*/crashes* compiler/fuzz-afl/out/*/hangs*)
+          dirs=(fuzz/out/*/crashes* fuzz/out/*/hangs*)
           if (( ${#dirs[@]} )); then
             tar -czf findings.tar.gz "${dirs[@]}"
           else

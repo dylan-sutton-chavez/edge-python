@@ -13,7 +13,7 @@ import { SOURCE_LIMIT } from '../src/specs.js';
 const TE = new TextEncoder();
 const TD = new TextDecoder();
 
-/* Packed status from `run_start` / `run_resume`; mirrors `compiler/src/main/exports.rs`. */
+/* Packed status from `run_start` / `run_resume`; mirrors `src/main/exports.rs`. */
 const STATUS_KIND_SHIFT = 29;
 const STATUS_PAYLOAD_MASK = (1 << STATUS_KIND_SHIFT) - 1;
 const STATUS_DONE = 0;

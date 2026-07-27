@@ -1,7 +1,7 @@
 # Local build/runtime artifacts — regenerated inside the container.
 **/target
 .git
-compiler/fuzz-afl/in
-compiler/fuzz-afl/out
-compiler/fuzz-afl/logs
-compiler/fuzz-afl/edge.dict
+fuzz/in
+fuzz/out
+fuzz/logs
+fuzz/edge.dict

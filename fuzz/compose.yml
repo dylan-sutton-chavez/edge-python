@@ -4,10 +4,10 @@ services:
   fuzzer:
     build:
       context: ../..
-      dockerfile: compiler/fuzz-afl/Dockerfile
+      dockerfile: fuzz/Dockerfile
     restart: unless-stopped
     volumes:
-      - findings:/app/compiler/fuzz-afl/out
+      - findings:/app/fuzz/out
 
     environment:
       - JOBS

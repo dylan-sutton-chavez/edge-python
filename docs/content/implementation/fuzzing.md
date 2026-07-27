@@ -5,7 +5,7 @@ description: "Coverage-guided fuzzing of the lex, parse, and VM pipeline with ca
 
 ## Overview
 
-The fuzzer drives the full `lex -> parse -> VM` pipeline against mutated input. It looks for panics and memory faults. It lives in [`compiler/fuzz-afl/`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/compiler/fuzz-afl) and is built on [cargo-afl](https://github.com/rust-fuzz/afl.rs) (AFL++). On stable it instruments through rustc's own LLVM SanitizerCoverage (`-sanitizer-coverage-trace-pc-guard`) and links the AFL++ runtime. So it runs on **stable Rust**, no nightly toolchain required. (AFL++'s own LLVM passes, CMPLOG and IJON, are an optional, nightly-only path the project does not use.)
+The fuzzer drives the full `lex -> parse -> VM` pipeline against mutated input. It looks for panics and memory faults. It lives in [`fuzz/`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/fuzz) and is built on [cargo-afl](https://github.com/rust-fuzz/afl.rs) (AFL++). On stable it instruments through rustc's own LLVM SanitizerCoverage (`-sanitizer-coverage-trace-pc-guard`) and links the AFL++ runtime. So it runs on **stable Rust**, no nightly toolchain required. (AFL++'s own LLVM passes, CMPLOG and IJON, are an optional, nightly-only path the project does not use.)
 
 The target runs the VM under the sandbox profile. Runaway loops and allocations become a `VmErr` instead of a hang. Most crashes are genuine bugs, not resource exhaustion; the exception is arithmetic-overflow panics — a debug-only artifact of `overflow-checks` (off in the release VM) — which are triaged out by hand, not filtered automatically. The harness tightens one field: `Limits { ops: 100_000, ..Limits::sandbox() }`. The default 100M-op budget is bounded, but takes long enough that AFL would flag a legitimately-terminating loop (or wide recursion) as a hang. The smaller budget keeps each execution inside AFL's hang timeout while still reaching deep into the language. It also sets `strict_input = true`, so `input()` raises instead of blocking on real stdin, which AFL feeds through shared memory. See [Limits and errors](/reference/limits-and-errors).
 
@@ -14,7 +14,7 @@ The build runs `--release`. `[profile.release]` sets `debug = "line-tables-only"
 ## Running it
 
 ```bash
-cd compiler/fuzz-afl
+cd fuzz
 ./seeds.sh # generate corpus + dictionary from vm.json (once)
 cargo afl build --release # instrument on stable, no nightly
 cargo afl fuzz -i in -o out -x edge.dict target/release/afl-pipeline # runs until Ctrl-C; add -V 300 to stop after 300s
@@ -24,7 +24,7 @@ cargo afl whatsup out # status summary of the ./out campaign; run in another ter
 
 For a parallel run across the host cores, `./deploy.sh` builds, regenerates seeds, and launches one `-M` plus N-1 `-S` instances sharing one `out/`. It runs one instance per logical core by default. Override with `JOBS`. `DURATION` / `FRESH` / `TIMEOUT_MS` are optional too. The same target runs on a daily schedule in CI via [`.github/workflows/fuzzer.yml`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/.github/workflows/fuzzer.yml), which calls `deploy.sh` directly on the runner (no container) and fails the run on any saved crash.
 
-For a long-running campaign in a container, `compose.yml` builds the image from `Dockerfile` and runs the same `deploy.sh`. Findings persist in the `findings` volume mounted at `compiler/fuzz-afl/out/`, instead of CI's 14-day artifact. It sets `restart: unless-stopped`, so the campaign survives host reboots and only stops when you explicitly run `docker compose down`. It also sets `AFL_NO_AFFINITY=1`: a container hides the host topology, and AFL must not pin instances to cores it cannot see.
+For a long-running campaign in a container, `compose.yml` builds the image from `Dockerfile` and runs the same `deploy.sh`. Findings persist in the `findings` volume mounted at `fuzz/out/`, instead of CI's 14-day artifact. It sets `restart: unless-stopped`, so the campaign survives host reboots and only stops when you explicitly run `docker compose down`. It also sets `AFL_NO_AFFINITY=1`: a container hides the host topology, and AFL must not pin instances to cores it cannot see.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -34,20 +34,20 @@ For a long-running campaign in a container, `compose.yml` builds the image from 
 | `TIMEOUT_MS` | `5000` | Per-input hang threshold in ms. Should exceed the max bounded VM run. |
 
 ```bash
-cd compiler/fuzz-afl
+cd fuzz
 DURATION=3600 docker compose up --build -d # detached; same JOBS / FRESH / TIMEOUT_MS overrides apply
 
 docker compose ps # Up vs Restarting
 docker compose logs -f # raw deploy output: seed count, instance count, startup errors
 
 # Live status (-s = aggregated summary; drop it for per-instance metrics).
-docker compose exec -it fuzzer bash -c "cd compiler/fuzz-afl && watch -n 10 cargo afl whatsup -s out"
+docker compose exec -it fuzzer bash -c "cd fuzz && watch -n 10 cargo afl whatsup -s out"
 
 docker compose down # stop the campaign
 
-docker compose exec -T fuzzer bash -c 'cd compiler/fuzz-afl && find out -type f -path "*crashes*" ! -name README.txt' # Every saved crash across all instances and archived dirs
-docker compose exec -T fuzzer bash -c 'cd compiler/fuzz-afl && base64 out/m0/crashes/<id>' # Take a look to the bug in base 64
-docker compose exec -T fuzzer bash -c "cd compiler/fuzz-afl && find out -type f -path '*crashes*' ! -name README.txt -print0 | tar --null -cf - -T -" > ~/crashes.tar # Bundle every crash into a tar on the host
+docker compose exec -T fuzzer bash -c 'cd fuzz && find out -type f -path "*crashes*" ! -name README.txt' # Every saved crash across all instances and archived dirs
+docker compose exec -T fuzzer bash -c 'cd fuzz && base64 out/m0/crashes/<id>' # Take a look to the bug in base 64
+docker compose exec -T fuzzer bash -c "cd fuzz && find out -type f -path '*crashes*' ! -name README.txt -print0 | tar --null -cf - -T -" > ~/crashes.tar # Bundle every crash into a tar on the host
 ```
 
 If a container is stuck restarting and `docker compose down` won't clear it, force-remove it by id:
@@ -87,8 +87,8 @@ Where findings land depends on how you launched. A bare `cargo afl fuzz` (no `-M
 In a container campaign, list the saved crashes (the `m0`/`s1` dir is the instance) and reproduce one with a backtrace:
 
 ```bash
-docker compose exec -it fuzzer bash -c "cd compiler/fuzz-afl && find out -type f -path '*crashes*' ! -name README.txt"
-docker compose exec -it fuzzer bash -c "cd compiler/fuzz-afl && RUST_BACKTRACE=1 ./target/release/afl-pipeline < 'out/m0/crashes/<id>' 2>&1 | head -20"
+docker compose exec -it fuzzer bash -c "cd fuzz && find out -type f -path '*crashes*' ! -name README.txt"
+docker compose exec -it fuzzer bash -c "cd fuzz && RUST_BACKTRACE=1 ./target/release/afl-pipeline < 'out/m0/crashes/<id>' 2>&1 | head -20"
 ```
 
 ## Triaging crashes
