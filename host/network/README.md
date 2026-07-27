@@ -128,7 +128,7 @@ run(main())
 
 ## How it works
 
-`src/index.js` is a factory `(ctx) => handlers` (same shape as `dom`). Three slices in `src/main/` (`http`, `ws`, `sse`) close over a shared `state` (handle tables for in-flight requests, sockets, SSE sources) and merge with `Object.assign`. HTTP handlers are async (`async (url) => { ... return body; }`); the runtime detects the Promise and parks in `WaitingHostCall` until resolved, same shape as `sleep()`. WS/SSE slices return sync handlers wiring DOM-style listeners into `ctx.pushEvent`.
+`src/index.js` is a factory `(ctx) => handlers` (same shape as `dom`). Three slices in `src/` (`http`, `ws`, `sse`) close over a shared `state` (handle tables for in-flight requests, sockets, SSE sources) and merge with `Object.assign`. HTTP handlers are async (`async (url) => { ... return body; }`); the runtime detects the Promise and parks in `WaitingHostCall` until resolved, same shape as `sleep()`. WS/SSE slices return sync handlers wiring DOM-style listeners into `ctx.pushEvent`.
 
 Per-handler cost is one `postMessage` round-trip; HTTP adds network latency on top. For many small same-host requests, prefer one larger request. JS sources only; loads from `cdn.edgepython.com`, no build step.
 

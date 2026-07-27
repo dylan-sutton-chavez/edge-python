@@ -1,9 +1,9 @@
 /* Factory consumed by `createWorker({ mainThreadModules: { network } })`. Composes all handler slices over a shared `state`. */
 
-import { makeState } from './main/state.js';
-import http from './main/http.js';
-import ws from './main/ws.js';
-import sse from './main/sse.js';
+import { makeState } from './state.js';
+import http from './http.js';
+import ws from './ws.js';
+import sse from './sse.js';
 
 export const network = (ctx) => {
     const state = makeState();

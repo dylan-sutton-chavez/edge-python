@@ -1,14 +1,14 @@
 /* Factory consumed by `createWorker({ mainThreadModules: { dom } })`. Composes all handler slices over a shared `state`. */
 
-import { makeState } from './main/state.js';
-import tree from './main/tree.js';
-import style from './main/style.js';
-import events from './main/events.js';
-import forms from './main/forms.js';
-import observers from './main/observers.js';
-import animations from './main/animations.js';
-import media from './main/media.js';
-import platform from './main/platform.js';
+import { makeState } from './state.js';
+import tree from './tree.js';
+import style from './style.js';
+import events from './events.js';
+import forms from './forms.js';
+import observers from './observers.js';
+import animations from './animations.js';
+import media from './media.js';
+import platform from './platform.js';
 
 export const dom = (ctx) => {
     const state = makeState();

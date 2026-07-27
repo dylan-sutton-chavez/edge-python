@@ -4,13 +4,15 @@ Edge Python `re` package. Exposes `match`/`search`/`fullmatch`/`findall`/`sub`/`
 
 #![cfg_attr(target_arch = "wasm32", no_std)]
 #![cfg_attr(target_arch = "wasm32", no_main)]
-#![allow(special_module_name)]
 
 extern crate alloc;
 
 wasm_pdk::module_fixed_pool!();
 
-pub mod main;
+pub mod ast;
+pub mod engine;
+pub mod matcher;
+pub mod parser;
 
 /* Exports compile only for wasm32 so the engine stays native testable. */
 #[cfg(target_arch = "wasm32")]
@@ -20,7 +22,7 @@ mod wasm_api {
     use alloc::string::String;
     use alloc::vec::Vec;
     use wasm_pdk::*;
-    use crate::main::{self, Found, Mode, ReError};
+    use crate::engine::{self, Found, Mode, ReError};
 
     /* Routes engine errors to the matching host exception kind. */
     fn to_error(e: ReError) -> Error {
@@ -35,14 +37,14 @@ mod wasm_api {
     }
 
     /* Compiled-pattern cache; every call path compiles a given pattern once. Capped so unbounded pattern churn stays bounded. */
-    static PATTERNS: PluginCell<Vec<(String, main::Regex)>> = PluginCell::new();
+    static PATTERNS: PluginCell<Vec<(String, engine::Regex)>> = PluginCell::new();
 
-    fn with_compiled<T>(pattern: &str, f: impl FnOnce(&main::Regex) -> Result<T>) -> Result<T> {
+    fn with_compiled<T>(pattern: &str, f: impl FnOnce(&engine::Regex) -> Result<T>) -> Result<T> {
         let cache = PATTERNS.get_or_init(Vec::new);
         let idx = match cache.iter().position(|(p, _)| p == pattern) {
             Some(i) => i,
             None => {
-                let re = rx(main::Regex::compile(pattern))?;
+                let re = rx(engine::Regex::compile(pattern))?;
                 if cache.len() >= 64 { cache.remove(0); }
                 cache.push((String::from(pattern), re));
                 cache.len() - 1
@@ -53,12 +55,12 @@ mod wasm_api {
 
     /* Shared op bodies; module functions and Pattern methods delegate here. */
     fn do_find(pattern: &str, string: &str, mode: Mode) -> Result<Option<String>> {
-        with_compiled(pattern, |re| Ok(rx(main::find_rx(re, string, mode))?.map(|f| f.text)))
+        with_compiled(pattern, |re| Ok(rx(engine::find_rx(re, string, mode))?.map(|f| f.text)))
     }
 
     fn do_findall(pattern: &str, string: &str) -> Result<Vec<Value>> {
         with_compiled(pattern, |re| {
-            let (founds, ngroups) = rx(main::find_all_rx(re, string))?;
+            let (founds, ngroups) = rx(engine::find_all_rx(re, string))?;
             if ngroups <= 1 {
                 return Ok(founds.iter().map(|f| Value::Bytes(pick(f, ngroups).into_bytes())).collect());
             }
@@ -70,7 +72,7 @@ mod wasm_api {
 
     fn do_groups(pattern: &str, string: &str) -> Result<Option<Vec<Value>>> {
         with_compiled(pattern, |re| {
-            let Some(f) = rx(main::find_rx(re, string, Mode::Search))? else { return Ok(None); };
+            let Some(f) = rx(engine::find_rx(re, string, Mode::Search))? else { return Ok(None); };
             Ok(Some(f.groups.iter().map(|g| match g {
                 Some(s) => Value::Bytes(s.clone().into_bytes()),
                 None => Value::None,
@@ -80,13 +82,13 @@ mod wasm_api {
 
     fn do_span(pattern: &str, string: &str) -> Result<Option<Vec<Value>>> {
         with_compiled(pattern, |re| {
-            let Some(f) = rx(main::find_rx(re, string, Mode::Search))? else { return Ok(None); };
+            let Some(f) = rx(engine::find_rx(re, string, Mode::Search))? else { return Ok(None); };
             Ok(Some(alloc::vec![Value::Int(f.start as i128), Value::Int(f.end as i128)]))
         })
     }
 
     fn do_sub(pattern: &str, repl: &str, string: &str) -> Result<String> {
-        with_compiled(pattern, |re| rx(main::sub_rx(re, repl, string)))
+        with_compiled(pattern, |re| rx(engine::sub_rx(re, repl, string)))
     }
 
     /* search: leftmost match anywhere, returns group 0 or None. */

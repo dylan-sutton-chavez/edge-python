@@ -4,7 +4,6 @@ Edge Python `json` package. Exports `loads(text) -> value` and `dumps(value) -> 
 
 #![cfg_attr(target_arch = "wasm32", no_std)]
 #![cfg_attr(target_arch = "wasm32", no_main)]
-#![allow(special_module_name)]
 
 extern crate alloc;
 
@@ -13,23 +12,25 @@ use wasm_pdk::*;
 
 module_fixed_pool!();
 
-pub mod main;
+pub mod parser;
+pub mod serializer;
+pub mod tokenizer;
 
 #[plugin_fn]
 fn loads(text: String, kw: Kwargs) -> Result<Handle> {
-    let ctx = main::parser::LoadCtx {
+    let ctx = parser::LoadCtx {
         object_hook: kw.get_handle("object_hook")?,
         object_pairs_hook: kw.get_handle("object_pairs_hook")?,
         parse_float: kw.get_handle("parse_float")?,
         parse_int: kw.get_handle("parse_int")?,
         parse_constant: kw.get_handle("parse_constant")?,
     };
-    main::parser::parse(&text, &ctx)
+    parser::parse(&text, &ctx)
 }
 
 #[plugin_fn]
 fn dumps(value: Handle, kw: Kwargs) -> Result<String> {
-    let mut opts = main::serializer::Options {
+    let mut opts = serializer::Options {
         indent: kw.get::<i64>("indent")?,
         sort_keys: kw.get::<bool>("sort_keys")?.unwrap_or(false),
         ensure_ascii: kw.get::<bool>("ensure_ascii")?.unwrap_or(true),
@@ -53,7 +54,7 @@ fn dumps(value: Handle, kw: Kwargs) -> Result<String> {
         // CPython: when `indent` is given and `separators` is not, default key separator becomes `": "`.
         opts.key_sep = ": ".to_string();
     }
-    main::serializer::serialize(&value, opts)
+    serializer::serialize(&value, opts)
 }
 
 fn decode_str(h: &Handle, what: &str) -> Result<String> {

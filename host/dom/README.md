@@ -218,7 +218,7 @@ Payload: `{msg, where, error, stack?}`. `where` identifies the call site (`event
 
 ## How it works
 
-Factory `(ctx) => handlers`. `src/main/state.js` opens a fresh closure per `createWorker` with handle tables (`nodes`, `bindings`, `files`, observers, animations), `alloc` / `node` / `allocList` helpers, and `cleanSubtree`. Eight handler slices in `src/main/` (`tree`, `style`, `events`, `forms`, `observers`, `animations`, `media`, `platform`) each return an object literal of handlers closing over the shared state; `src/index.js` composes them with `Object.assign` and wraps async callbacks with `emitError` so failures surface via `bind_global_error`. 
+Factory `(ctx) => handlers`. `src/state.js` opens a fresh closure per `createWorker` with handle tables (`nodes`, `bindings`, `files`, observers, animations), `alloc` / `node` / `allocList` helpers, and `cleanSubtree`. Eight handler slices in `src/` (`tree`, `style`, `events`, `forms`, `observers`, `animations`, `media`, `platform`) each return an object literal of handlers closing over the shared state; `src/index.js` composes them with `Object.assign` and wraps async callbacks with `emitError` so failures surface via `bind_global_error`. 
 
 Adding a handler is one entry in one slice; the [`entry.py`](src/entry.py) façade re-exports it automatically, and a new *mutator* also gets a buffered wrapper there plus an `index.js` `BATCHABLE` entry.
 

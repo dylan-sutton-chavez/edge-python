@@ -67,7 +67,7 @@ item = with_timeout(0.5, idb_get(db, "items", "1")) # deadline
 
 ## How it works
 
-`src/index.js` is a factory `() => handlers` (same shape as `dom`, `network`). Two slices in `src/main/` (`kv`, `idb`) close over a shared `state` (a handle table for open `IDBDatabase` instances) and merge with `Object.assign`. KV handlers call `localStorage` / `sessionStorage` directly; IDB handlers promisify native `IDBRequest`s and the runtime parks until resolved.
+`src/index.js` is a factory `() => handlers` (same shape as `dom`, `network`). Two slices in `src/` (`kv`, `idb`) close over a shared `state` (a handle table for open `IDBDatabase` instances) and merge with `Object.assign`. KV handlers call `localStorage` / `sessionStorage` directly; IDB handlers promisify native `IDBRequest`s and the runtime parks until resolved.
 
 ## License
 

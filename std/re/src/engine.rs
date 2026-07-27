@@ -1,12 +1,9 @@
 /* Engine facade, compiles patterns and runs the high level operations. */
 
-pub mod ast;
-pub mod matcher;
-pub mod parser;
 
 use alloc::{format, string::String, vec::Vec};
-use ast::{Node, Program};
-use matcher::{fixed_len, Caps, Matcher};
+use crate::ast::{Node, Program};
+use crate::matcher::{fixed_len, Caps, Matcher};
 
 /* Which anchoring a single match uses. */
 pub enum Mode {
@@ -36,7 +33,7 @@ pub struct Regex {
 
 impl Regex {
     pub fn compile(pattern: &str) -> Result<Regex, ReError> {
-        let prog = parser::parse(pattern).map_err(|e| ReError::Syntax(format!("{} at position {}", e.msg, e.pos)))?;
+        let prog = crate::parser::parse(pattern).map_err(|e| ReError::Syntax(format!("{} at position {}", e.msg, e.pos)))?;
         validate(&prog.root)?;
         Ok(Regex { prog })
     }

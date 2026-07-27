@@ -100,7 +100,7 @@ By design, a sandboxed WASM runtime has no process, thread, or POSIX clock to ex
 
 ## How it works
 
-`src/index.js` is a factory `() => handlers`. Two slices in `src/main/` merge with `Object.assign`. `clock.js` returns the sync reads (`Date.now`, `performance.now`, `Intl`) plus the yielding `sleep`. `fmt.js` returns the pure calendar helpers, building struct_time tuples and formatting through `Date` without shipping locale tables, on CPython's C locale names.
+`src/index.js` is a factory `() => handlers`. Two slices in `src/` merge with `Object.assign`. `clock.js` returns the sync reads (`Date.now`, `performance.now`, `Intl`) plus the yielding `sleep`. `fmt.js` returns the pure calendar helpers, building struct_time tuples and formatting through `Date` without shipping locale tables, on CPython's C locale names.
 
 ## License
 
