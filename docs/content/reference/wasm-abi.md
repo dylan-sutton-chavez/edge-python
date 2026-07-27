@@ -455,6 +455,27 @@ Little-endian, self-contained, versioned.
 
 `restore_state` re-parses the embedded source, recomputes the fingerprint, and rejects any blob whose fingerprint does not match the freshly compiled chunk, which pins each blob to one program and one compiler build. The whole blob must fit the 1 MiB source buffer. Serializer: [`vm/snapshot.rs`](https://github.com/dylan-sutton-chavez/edge-python/blob/main/src/vm/snapshot.rs); internals in [Design](/implementation/design#snapshots).
 
+## Consuming the release from a Rust crate
+
+The `edge-python` crate is a `cdylib`: a Rust host can instantiate `compiler.wasm` and call the exports above directly, the same `.wasm` that ships to browsers; the host owns I/O. The crate declares `links = "compiler"` and its `build.rs` downloads the matching `compiler.wasm` from the GitHub Release for `CARGO_PKG_VERSION` into `OUT_DIR`. Downstream crates read the absolute path through `DEP_COMPILER_WASM`.
+
+```toml
+# Downstream Cargo.toml
+[dependencies]
+edge-python = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.2.4" }
+```
+
+```rust
+// Downstream build.rs
+fn main() {
+    println!("cargo::rerun-if-changed=build.rs");
+    let wasm = std::env::var("DEP_COMPILER_WASM").expect("`DEP_COMPILER_WASM` unset, upstream `edge-python` must declare `links = \"compiler\"`");
+    std::fs::copy(&wasm, "runtime/compiler.wasm").expect("copy failed");
+}
+```
+
+The download URL is derived from `CARGO_PKG_VERSION`, so a tag bump is the only retarget. Use `branch = "main"` for unreleased work. Requires `curl` on PATH; gated by the default-on `prebuilt` feature. To add native modules from a Rust host, implement the `Resolver` trait; see [Writing modules](/reference/writing-modules).
+
 ## See also
 
 - [Imports](/reference/imports): how `from "..." import` resolves on the script side, including walk-up packages.json and integrity verification.

@@ -103,8 +103,9 @@ Chunk-derived tables (bytecode, name pools, the extern table) are not stored: th
 3. Cytron et al. *Efficiently Computing Static Single Assignment Form* (TOPLAS 1991).
 4. Gudeman. *Representing Type Information in Dynamically Typed Languages* (1993). NaN-boxing.
 5. Deutsch & Schiffman. *Efficient Implementation of the Smalltalk-80 System* (POPL 1984). Inline caching.
-6. Ertl & Gregg. *The Structure and Performance of Efficient Interpreters* (JILP 2003). Threaded dispatch.
-7. Casey et al. *Towards Superinstructions for Java Interpreters* (SCOPES 2003). LoadAttr+Call fusion.
-8. Michie. *Memo Functions and Machine Learning* (Nature 1968). Pure-function memoization.
-9. McCarthy. *Recursive Functions of Symbolic Expressions* (CACM 1960). Mark-sweep GC.
-10. Backus. *Can Programming Be Liberated from the von Neumann Style?* (CACM 1978). Function-level paradigm.
+6. Hölzle & Ungar. *Optimizing Dynamically-Dispatched Calls with Run-Time Type Feedback* (PLDI 1994). Inline-cache type feedback.
+7. Ertl & Gregg. *The Structure and Performance of Efficient Interpreters* (JILP 2003). Threaded dispatch.
+8. Casey et al. *Towards Superinstructions for Java Interpreters* (SCOPES 2003). LoadAttr+Call fusion.
+9. Michie. *Memo Functions and Machine Learning* (Nature 1968). Pure-function memoization.
+10. McCarthy. *Recursive Functions of Symbolic Expressions* (CACM 1960). Mark-sweep GC.
+11. Backus. *Can Programming Be Liberated from the von Neumann Style?* (CACM 1978). Function-level paradigm.
