@@ -2,10 +2,10 @@
 
 import { chromium } from "npm:playwright@latest";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
-import { DEFAULT_IMPORTS } from "../../runtime/src/defaults.js";
+import { DEFAULT_IMPORTS } from "../../js/src/defaults.js";
 
 const ROOT = new URL("../", import.meta.url).pathname;
-const RUNTIME = new URL("../../runtime/", import.meta.url).pathname;
+const RUNTIME = new URL("../../js/", import.meta.url).pathname;
 const REPO = new URL("../../", import.meta.url).pathname;
 const CDN_HOST = new URL(Object.values(DEFAULT_IMPORTS)[0]).host;
 const MANIFEST = "/_packages.json"; // synthesized; keeps the agnostic <pkg>/ folder free of test artifacts

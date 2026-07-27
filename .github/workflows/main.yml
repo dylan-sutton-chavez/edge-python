@@ -26,18 +26,18 @@ jobs:
         with:
           mode: check
 
-  runtime-lint:
-    name: Runtime / Deno Lint
+  js-lint:
+    name: JS / Deno Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: ./.github/actions/runtime
+      - uses: ./.github/actions/js
         with:
           mode: lint
 
   compiler:
     name: Compiler / Test and Release
-    needs: [compiler-check, runtime-lint]
+    needs: [compiler-check, js-lint]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -48,19 +48,19 @@ jobs:
           mode: build
           github-token: ${{ github.token }}
 
-  runtime:
-    name: Runtime / Deno Test
+  js:
+    name: JS / Deno Test
     needs: [compiler]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: ./.github/actions/runtime
+      - uses: ./.github/actions/js
         with:
           mode: test
 
   host:
     name: Host / ${{ matrix.capability }}
-    needs: [runtime]
+    needs: [js]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -74,7 +74,7 @@ jobs:
 
   std:
     name: Std / ${{ matrix.package }}
-    needs: [runtime]
+    needs: [js]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

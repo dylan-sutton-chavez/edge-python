@@ -195,7 +195,7 @@ Handlers: `time`, `time_ns`, `monotonic`, `monotonic_ns`, `perf_counter`, `perf_
 }
 ```
 
-One manifest drives both directions: `imports` for worker-side `.py` / `.wasm` modules, `host` for main-thread libraries. See [Imports](/reference/imports) for resolution semantics and the full `packages.json` schema, and the [runtime README](https://github.com/dylan-sutton-chavez/edge-python/tree/main/runtime) for `<edge-python>` attributes and `createWorker` options.
+One manifest drives both directions: `imports` for worker-side `.py` / `.wasm` modules, `host` for main-thread libraries. See [Imports](/reference/imports) for resolution semantics and the full `packages.json` schema, and the [runtime README](https://github.com/dylan-sutton-chavez/edge-python/tree/main/js) for `<edge-python>` attributes and `createWorker` options.
 
 ### Defaults
 

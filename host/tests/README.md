@@ -1,6 +1,6 @@
 # Tests
 
-Shared test harness for every host capability, modeled on [`edge-python/runtime/tests`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/runtime/tests). `index.html` is pure markup: it loads the runtime's `<edge-python>` tag and nothing else. `host.test.js` boots one tag per capability and drives it through the tag's programmatic API (`run`, `onOutput`).
+Shared test harness for every host capability, modeled on [`edge-python/js/tests`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/js/tests). `index.html` is pure markup: it loads the runtime's `<edge-python>` tag and nothing else. `host.test.js` boots one tag per capability and drives it through the tag's programmatic API (`run`, `onOutput`).
 
 ## Layout
 

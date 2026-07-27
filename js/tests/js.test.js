@@ -1,7 +1,7 @@
 /*
-Drives <edge-python> through index.html: boots one tag, then feeds every runtime.json case to its worker
+Drives <edge-python> through index.html: boots one tag, then feeds every js.json case to its worker
 via run(), comparing #app for output cases and the run trace for error cases.
-Run: deno test --allow-all runtime/tests/runtime.test.js
+Run: deno test --allow-all js/tests/js.test.js
 */
 
 import { chromium } from "npm:playwright@latest";
@@ -12,7 +12,7 @@ import { DEFAULT_IMPORTS } from "../src/defaults.js";
 const CDN_HOST = new URL(Object.values(DEFAULT_IMPORTS)[0]).host;
 
 const REPO = new URL("../../", import.meta.url).pathname; // edge-python/ repo root
-const cases = JSON.parse(readFileSync(new URL("./runtime.json", import.meta.url)));
+const cases = JSON.parse(readFileSync(new URL("./js.json", import.meta.url)));
 const PKG = JSON.parse(readFileSync(new URL("./app/packages.json", import.meta.url)));
 // star-import every module key, recursing through the imports/host category containers
 const star = (m) => Object.entries(m).flatMap(([k, v]) => (k === "imports" || k === "host" ? star(v) : `from ${k} import *`));
@@ -35,7 +35,7 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
     const HOST_DIR = new URL("../../host", import.meta.url).pathname;
     await page.route("**/*", (r) => {
         const u = new URL(r.request().url());
-        // Prefer the in-tree std/ and host/ artifacts; if absent (CI checks out only the runtime/ subset), fall back to the CDN-deployed copy.
+        // Prefer the in-tree std/ and host/ artifacts; if absent (CI checks out only the js/ subset), fall back to the CDN-deployed copy.
         if (u.host === CDN_HOST && u.pathname.startsWith("/std/")) {
             // /std/<name>.wasm lives at <name>/target/wasm32-unknown-unknown/release/ in the tree.
             const name = u.pathname.slice("/std/".length).replace(/\.wasm$/, "");
@@ -60,7 +60,7 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
         try { return r.fulfill({ contentType: TYPES[ext] ?? "application/octet-stream", body: readFileSync(REPO + u.pathname.slice(1)) }); }
         catch { return r.fulfill({ status: 404 }); }
     });
-    await page.goto("http://localhost/runtime/tests/index.html");
+    await page.goto("http://localhost/js/tests/index.html");
 
     try {
         // Boot one tag without an entry, then reuse its worker for every case via run().
