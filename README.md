@@ -81,6 +81,8 @@ download it to your machine ([reference docs](https://edgepython.com/reference/c
 ```bash
 # Compatible with macOS, Linux and WSL
 curl -fsSL https://cdn.edgepython.com/cli/install.sh | sh
+# Or from source (any platform with Rust + Cargo)
+cargo install --path cli
 
 edge -h # List all commands
 ```

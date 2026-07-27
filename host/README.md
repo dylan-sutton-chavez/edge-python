@@ -6,23 +6,21 @@ Official JS modules for [Edge Python](https://edgepython.com) exposing host APIs
 
 ```
 ├── dom
+│   ├── dom.json
 │   ├── packages.json
 │   └── src
 │       ├── entry.py
 │       ├── index.js
-│       └── main
+│       └── *.js
 ├── network
+│   ├── network.json
 │   └── src
-│       ├── index.js
-│       └── main
 ├── storage
+│   ├── storage.json
 │   └── src
-│       ├── index.js
-│       └── main
 ├── time
+│   ├── time.json
 │   └── src
-│       ├── index.js
-│       └── main
 └── tests
 ```
 
