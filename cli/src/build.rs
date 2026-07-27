@@ -25,8 +25,8 @@ const RUNTIME_FILES: &[&str] = &[
     "src/defaults.js",
     "src/cache/idb.js",
     "src/cache/memory.js",
-    "worker/worker.js",
-    "worker/engine.js",
+    "src/worker/worker.js",
+    "src/worker/engine.js",
 ];
 
 const INDEX_HTML: &str = include_str!("templates/dist.html");

@@ -6,7 +6,7 @@ import { DEFAULT_HOST, DEFAULT_IMPORTS } from './defaults.js';
 
 export async function createWorker(opts) {
     // Chromium blocks `new Worker(crossOriginUrl)` even with `type:'module'`; cross-origin runtimes need the Blob bootstrap below.
-    const workerUrl = new URL('../worker/worker.js', import.meta.url);
+    const workerUrl = new URL('./worker/worker.js', import.meta.url);
     const sameOrigin = workerUrl.origin === self.location.origin;
     const worker = sameOrigin
         ? new Worker(workerUrl, { type: 'module' })

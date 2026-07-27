@@ -237,7 +237,7 @@ A spec the prefetch can't fetch or register (wrong scheme, a `.wasm` served as H
 |---|---|
 | `src/index.js` | Public API. `createWorker` factory (main-thread). |
 | `src/element.js` | Public `<edge-python>` custom element. Wraps `createWorker`; reads `host` / `imports` from `packages.json`. |
-| `worker/engine.js` | Internal orchestrator (Worker only). `load`, `run`, `pushEvent`, `reset`, `clearCache`, `dispose`, host-call delegates. |
+| `src/worker/engine.js` | Internal orchestrator (Worker only). `load`, `run`, `pushEvent`, `reset`, `clearCache`, `dispose`, host-call delegates. |
 | `src/env.js` | The 4 `env.*` imports `compiler` declares: `host_print`, `host_call_native`, `host_fetch_bytes`, `host_now_ns`. |
 | `src/native.js` | Native module loader extension point + built-in Path A (wasm-pdk) loader + `nativeTable`. |
 | `src/prefetch.js` | Lazy BFS over the dependency graph; resolves and registers only the modules a run uses. |
@@ -246,7 +246,7 @@ A spec the prefetch can't fetch or register (wrong scheme, a `.wasm` served as H
 | `src/specs.js` | URL/spec helpers mirroring `compiler::packages::manifest`. |
 | `src/rt.js` | Handle codec wrappers (`decodeStr`, `encodeInt`, ...) for loaders. |
 | `src/cache/{memory,idb}.js` | In-memory (per-Worker) and IndexedDB (persistent) cache backends. |
-| `worker/worker.js` | Web Worker entry; postMessage protocol. |
+| `src/worker/worker.js` | Web Worker entry; postMessage protocol. |
 
 ## License
 
