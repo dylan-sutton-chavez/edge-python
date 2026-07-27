@@ -1,7 +1,7 @@
 use crate::abi::{classify_decode, classify_encode, DecodeBits, EncodeRequest, ErrorKind, Op, PrimitiveBytes, TAG_INVALID};
-use crate::modules::vm::types::{DictMap, HeapObj, Val, VmErr};
-use crate::modules::vm::handlers::methods::{lookup_method, dispatch_method};
-use crate::modules::packages::NativeBinding;
+use crate::vm::types::{DictMap, HeapObj, Val, VmErr};
+use crate::vm::handlers::methods::{lookup_method, dispatch_method};
+use crate::packages::NativeBinding;
 use alloc::{rc::Rc, string::{String, ToString}, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 use crate::s;
@@ -48,7 +48,7 @@ fn dispatch_call(recv_h: u32, name: &str, args: &[Val]) -> Result<Val, VmErr> {
             vm.stack.push(recv);
             for a in args { vm.stack.push(*a); }
             let operand = args.len() as u16; // (num_kw<<8)|num_pos; no kwargs from FFI hooks.
-            let chunk: &crate::modules::parser::SSAChunk = unsafe { &*(vm.chunk as *const _) };
+            let chunk: &crate::parser::SSAChunk = unsafe { &*(vm.chunk as *const _) };
             let mut empty_slots: [Val; 0] = [];
             vm.exec_call(operand, chunk, &mut empty_slots)?;
             if vm.stack.len() != stack_before + 1 {
@@ -245,7 +245,7 @@ pub unsafe extern "C" fn host_edge_encode(tag: u32, ptr: *const u8, len: u32) ->
 }
 
 /* Wire tree to heap value. Str keys only for dicts; mirrors `classify_encode` inline-int split. */
-fn wire_to_val(vm: &mut crate::modules::vm::VM, w: &crate::abi::WireValue) -> Result<Val, VmErr> {
+fn wire_to_val(vm: &mut crate::vm::VM, w: &crate::abi::WireValue) -> Result<Val, VmErr> {
     use crate::abi::WireValue;
     Ok(match w {
         WireValue::None => Val::none(),
@@ -279,7 +279,7 @@ fn wire_to_val(vm: &mut crate::modules::vm::VM, w: &crate::abi::WireValue) -> Re
 }
 
 /* Heap value to wire tree. `None` on cycles, depth past the cap, or non-transit members. */
-fn val_to_wire(vm: &crate::modules::vm::VM, v: Val, depth: u32, seen: &mut Vec<u64>) -> Option<crate::abi::WireValue> {
+fn val_to_wire(vm: &crate::vm::VM, v: Val, depth: u32, seen: &mut Vec<u64>) -> Option<crate::abi::WireValue> {
     use crate::abi::{DecodeBits as DB, PrimitiveBytes as PB, WireValue, MAX_WIRE_DEPTH};
     if depth > MAX_WIRE_DEPTH { return None; }
     match classify_decode(v.0) {
@@ -294,7 +294,7 @@ fn val_to_wire(vm: &crate::modules::vm::VM, v: Val, depth: u32, seen: &mut Vec<u
         }
         DB::Heap => {
             // Shared references are fine; re-entering a value mid-walk is a cycle.
-            let guard = |vm: &crate::modules::vm::VM, seen: &mut Vec<u64>, items: &[Val]| -> Option<Vec<crate::abi::WireValue>> {
+            let guard = |vm: &crate::vm::VM, seen: &mut Vec<u64>, items: &[Val]| -> Option<Vec<crate::abi::WireValue>> {
                 items.iter().map(|it| val_to_wire(vm, *it, depth + 1, seen)).collect()
             };
             if seen.contains(&v.0) { return None; }
@@ -427,7 +427,7 @@ pub unsafe extern "C" fn host_edge_take_error(out_kind: *mut u32, dst: *mut u8, 
 
 /* Builds a NativeBinding that marshals handles around `host_call_native`. Kept out of resolver.rs so the resolver stays ABI-agnostic. */
 pub(super) fn make_native_binding(name: String, id: u32) -> NativeBinding {
-    let closure = move |_: &mut crate::modules::vm::types::HeapPool, args: &[Val], kwargs: Option<Val>| -> Result<Val, VmErr> {
+    let closure = move |_: &mut crate::vm::types::HeapPool, args: &[Val], kwargs: Option<Val>| -> Result<Val, VmErr> {
         /* 1. Register positional args as handles the guest will see; append the kwargs handle (0 means no kwargs). */
         let mut argv: Vec<u32> = args.iter().map(|v| put_val(*v)).collect();
         argv.push(kwargs.map_or(0, put_val));

@@ -243,7 +243,7 @@ A spec the prefetch can't fetch or register (wrong scheme, a `.wasm` served as H
 | `src/prefetch.js` | Lazy BFS over the dependency graph; resolves and registers only the modules a run uses. |
 | `src/defaults.js` | Built-in base manifest: official std + host packages, resolvable by bare name. |
 | `src/fetch.js` | CAS-backed fetch with lockfile integrity check. |
-| `src/specs.js` | URL/spec helpers mirroring `compiler::modules::packages::manifest`. |
+| `src/specs.js` | URL/spec helpers mirroring `compiler::packages::manifest`. |
 | `src/rt.js` | Handle codec wrappers (`decodeStr`, `encodeInt`, ...) for loaders. |
 | `src/cache/{memory,idb}.js` | In-memory (per-Worker) and IndexedDB (persistent) cache backends. |
 | `worker/worker.js` | Web Worker entry; postMessage protocol. |

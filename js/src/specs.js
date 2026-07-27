@@ -1,5 +1,5 @@
 /*
-Spec/URL helpers. Mirror `compiler::modules::packages::manifest` so transitive imports canonicalize identically on both sides.
+Spec/URL helpers. Mirror `compiler::packages::manifest` so transitive imports canonicalize identically on both sides.
 */
 
 /* Byte cap on any source handed to the compiler; mirrors the wasm SRC buffer (compiler SZ). */

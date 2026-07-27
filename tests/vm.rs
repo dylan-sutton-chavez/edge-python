@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod test {
 
-    use compiler::modules::lexer::lex;
-    use compiler::modules::parser::Parser;
-    use compiler::modules::vm::VM;
-    use compiler::modules::vm::types::Limits;
-    use compiler::modules::vm::types::{SchedulerStatus, VmErr};
+    use compiler::lexer::lex;
+    use compiler::parser::Parser;
+    use compiler::vm::VM;
+    use compiler::vm::types::Limits;
+    use compiler::vm::types::{SchedulerStatus, VmErr};
 
     #[derive(serde::Deserialize)]
     struct Case {
@@ -76,7 +76,7 @@ mod test {
             }
             let (mut chunk, _errors) = Parser::new(&case.src, tokens.into_iter()).parse();
             // Run the same fold pass production does (exports.rs), so fold-path bugs surface here.
-            compiler::modules::vm::optimizer::constant_fold(&mut chunk);
+            compiler::vm::optimizer::constant_fold(&mut chunk);
             let mut vm = VM::with_limits(&chunk, Limits::sandbox());
             vm.input_buffer = case.input.clone();
             for evt in &case.events { vm.push_event(evt).expect("push_event"); }
@@ -141,7 +141,7 @@ mod test {
                 }
             }
             // Match production: fold before running.
-            compiler::modules::vm::optimizer::constant_fold(&mut chunk);
+            compiler::vm::optimizer::constant_fold(&mut chunk);
 
             let mut vm = VM::with_limits(&chunk, Limits::sandbox());
             vm.strict_input = true;

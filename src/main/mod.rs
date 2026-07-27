@@ -4,9 +4,9 @@ Wire contract lives in `crate::abi`; extend there, never here.
 */
 
 use crate::abi::{ErrorStash, HandleTable};
-use crate::modules::vm::VM;
-use crate::modules::vm::types::{Val, VmErr};
-use crate::modules::packages::Manifest;
+use crate::vm::VM;
+use crate::vm::types::{Val, VmErr};
+use crate::packages::Manifest;
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 use core::ptr::NonNull;
 

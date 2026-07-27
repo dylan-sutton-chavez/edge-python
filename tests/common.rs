@@ -8,11 +8,11 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use compiler::modules::packages::{
+use compiler::packages::{
     NativeBinding, Resolved, Resolver, partition_bindings,
     Manifest, walk_up_dirs, dir_of, join_relative,
 };
-use compiler::modules::vm::types::{HeapObj, HeapPool, Val, VmErr};
+use compiler::vm::types::{HeapObj, HeapPool, Val, VmErr};
 
 // TestResolver
 

@@ -1,5 +1,5 @@
 use crate::abi::ErrorKind;
-use crate::modules::vm::types::VmErr;
+use crate::vm::types::VmErr;
 use crate::s;
 use alloc::string::String;
 

@@ -453,7 +453,7 @@ Little-endian, self-contained, versioned.
 | 24 | N | source, UTF-8 |
 | 24+N | rest | serialised VM state (heap, stacks, scheduler, pending) |
 
-`restore_state` re-parses the embedded source, recomputes the fingerprint, and rejects any blob whose fingerprint does not match the freshly compiled chunk, which pins each blob to one program and one compiler build. The whole blob must fit the 1 MiB source buffer. Serializer: [`vm/snapshot.rs`](https://github.com/dylan-sutton-chavez/edge-python/blob/main/src/modules/vm/snapshot.rs); internals in [Design](/implementation/design#snapshots).
+`restore_state` re-parses the embedded source, recomputes the fingerprint, and rejects any blob whose fingerprint does not match the freshly compiled chunk, which pins each blob to one program and one compiler build. The whole blob must fit the 1 MiB source buffer. Serializer: [`vm/snapshot.rs`](https://github.com/dylan-sutton-chavez/edge-python/blob/main/src/vm/snapshot.rs); internals in [Design](/implementation/design#snapshots).
 
 ## See also
 

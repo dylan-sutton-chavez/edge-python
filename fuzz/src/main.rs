@@ -1,10 +1,10 @@
 use afl::fuzz;
 
-use compiler::modules::lexer::lex;
-use compiler::modules::parser::Parser;
-use compiler::modules::vm::snapshot;
-use compiler::modules::vm::types::{SchedulerStatus, VmErr};
-use compiler::modules::vm::{Limits, VM};
+use compiler::lexer::lex;
+use compiler::parser::Parser;
+use compiler::vm::snapshot;
+use compiler::vm::types::{SchedulerStatus, VmErr};
+use compiler::vm::{Limits, VM};
 
 // Tight so fuzzed loops preempt and unwind.
 const PREEMPT_EVERY: usize = 7;

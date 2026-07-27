@@ -33,17 +33,16 @@ Cargo workspace rooted at the engine crate (`edge-python`); commands work from a
 ├── js
 ├── pdk
 ├── src
+│   ├── lexer
 │   ├── main
-│   ├── modules
-│   │   ├── lexer
-│   │   ├── packages
-│   │   ├── parser
-│   │   └── vm
-│   │       ├── builtins
-│   │       ├── handlers
-│   │       │   └── builtin_methods
-│   │       └── types
-│   └── util
+│   ├── packages
+│   ├── parser
+│   ├── util
+│   └── vm
+│       ├── builtins
+│       ├── handlers
+│       │   └── builtin_methods
+│       └── types
 ├── std
 └── tests
     └── cases
@@ -63,11 +62,11 @@ The test suite (`tests/`, fixtures in `tests/cases/vm.json`) runs every case und
 
 Single-pass pipeline: source -> SSA bytecode chunk; stack interpreter with adaptive inline caching and pure-function memoization.
 
-* **Lexer** (`src/modules/lexer/`) LUT-driven, offset-based tokens.
-* **Parser** (`src/modules/parser/`) Pratt precedence, SSA-versioned bytecode with `Phi` at joins, no AST.
-* **Optimizer** (`src/modules/vm/optimizer.rs`) constant folding, Phi-noop elimination, dead-code compaction.
-* **VM** (`src/modules/vm/`) flat-match dispatch, scalar + instance-dunder inline caches, pure-function template memoization, NaN-boxed 64-bit `Val` with a mark-and-sweep arena.
-* **Resolver** (`src/modules/packages/`) host-injected; native imports register for `CallExtern` dispatch.
+* **Lexer** (`src/lexer/`) LUT-driven, offset-based tokens.
+* **Parser** (`src/parser/`) Pratt precedence, SSA-versioned bytecode with `Phi` at joins, no AST.
+* **Optimizer** (`src/vm/optimizer.rs`) constant folding, Phi-noop elimination, dead-code compaction.
+* **VM** (`src/vm/`) flat-match dispatch, scalar + instance-dunder inline caches, pure-function template memoization, NaN-boxed 64-bit `Val` with a mark-and-sweep arena.
+* **Resolver** (`src/packages/`) host-injected; native imports register for `CallExtern` dispatch.
 
 Full rationale, NaN-box patterns, IC thresholds, GC roots, and intentional omissions: [Design](https://edgepython.com/implementation/design). Lexer and parser internals: [Lexical](https://edgepython.com/implementation/lexical), [Syntax](https://edgepython.com/implementation/syntax).
 

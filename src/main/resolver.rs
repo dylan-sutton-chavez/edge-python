@@ -1,4 +1,4 @@
-use crate::modules::packages::{NativeBinding, Resolved, Resolver, partition_bindings, parse_manifest, walk_up_dirs, dir_of, join_relative};
+use crate::packages::{NativeBinding, Resolved, Resolver, partition_bindings, parse_manifest, walk_up_dirs, dir_of, join_relative};
 use crate::util::fx::FxHashSet;
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 use crate::s;

@@ -8,16 +8,14 @@ pub mod abi;
 #[cfg(target_arch = "wasm32")]
 pub mod main;
 
-/* Internal compiler helpers (not Edge Python stdlib); separated from `modules/` runtime code. */
+/* Internal compiler helpers (not Edge Python stdlib); separate from pipeline code. */
 pub mod util {
     pub mod fx;
     pub mod fstr;
     pub mod sha256;
 }
 
-pub mod modules {
-    pub mod lexer;
-    pub mod vm;
-    pub mod parser;
-    pub mod packages;
-}
+pub mod lexer;
+pub mod vm;
+pub mod parser;
+pub mod packages;

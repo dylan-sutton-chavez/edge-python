@@ -1,7 +1,7 @@
-use crate::modules::lexer::lex;
-use crate::modules::parser::{Parser, Diagnostic, SSAChunk};
-use crate::modules::vm::{VM, Limits};
-use crate::modules::vm::types::{HeapObj, SchedulerStatus, VmErr};
+use crate::lexer::lex;
+use crate::parser::{Parser, Diagnostic, SSAChunk};
+use crate::vm::{VM, Limits};
+use crate::vm::types::{HeapObj, SchedulerStatus, VmErr};
 use alloc::{boxed::Box, string::{String, ToString}};
 use core::ptr::NonNull;
 use crate::s;
@@ -46,7 +46,7 @@ fn parse_source(src: &str) -> Result<SSAChunk, String> {
         }
         return Err(buf);
     }
-    crate::modules::vm::optimizer::constant_fold(&mut chunk);
+    crate::vm::optimizer::constant_fold(&mut chunk);
     Ok(chunk)
 }
 
@@ -153,7 +153,7 @@ pub unsafe extern "C" fn set_entry_dir(len: usize) {
 /* Pre-fetch feed: each import as `b<TAB>name` (bare, resolve via manifest) or `q<TAB>spec` (quoted URL/path), one per line. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn extract_imports(len: usize) -> usize {
-    use crate::modules::packages::{scan_imports, ImportSpec};
+    use crate::packages::{scan_imports, ImportSpec};
     let src = match read_src(len) {
         Ok(s) => s,
         Err(_) => return unsafe { write_out("") },
@@ -331,7 +331,7 @@ pub unsafe extern "C" fn run_push_event(ptr: *const u8, len: u32) -> i32 {
 }
 
 /* `set_host_*` prologue: take `handle`'s Val (1 = stale) and run `f` on the paused VM (3 = no paused run). */
-fn with_paused_vm(handle: u32, f: impl FnOnce(&mut VM<'static>, crate::modules::vm::types::Val) -> i32) -> i32 {
+fn with_paused_vm(handle: u32, f: impl FnOnce(&mut VM<'static>, crate::vm::types::Val) -> i32) -> i32 {
     let Some(val) = super::get_val(handle) else { return 1; };
     super::with_runtime(|rt| { rt.handles.release(handle); });
     super::with_runtime(|rt| {
@@ -371,7 +371,7 @@ pub extern "C" fn last_yield_deadline_ns() -> u64 {
     with_runtime(|rt| rt.paused_run.as_ref().map(|p| p.last_yield_deadline_ns).unwrap_or(0))
 }
 
-use crate::modules::vm::snapshot;
+use crate::vm::snapshot;
 
 /* Preempt every `n` loop back-edges; 0 disables. */
 #[unsafe(no_mangle)]

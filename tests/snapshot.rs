@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod test {
 
-    use compiler::modules::lexer::lex;
-    use compiler::modules::parser::{Parser, SSAChunk};
-    use compiler::modules::vm::VM;
-    use compiler::modules::vm::snapshot;
-    use compiler::modules::vm::types::{Limits, SchedulerStatus, VmErr};
+    use compiler::lexer::lex;
+    use compiler::parser::{Parser, SSAChunk};
+    use compiler::vm::VM;
+    use compiler::vm::snapshot;
+    use compiler::vm::types::{Limits, SchedulerStatus, VmErr};
 
     #[derive(serde::Deserialize)]
     struct Case {
@@ -51,7 +51,7 @@ mod test {
         assert!(lex_errs.is_empty(), "lex error in {:?}", src);
         let (mut chunk, errs) = Parser::new(src, tokens.into_iter()).parse();
         assert!(errs.is_empty(), "parse error in {:?}: {:?}", src, errs.iter().map(|e| &e.msg).collect::<Vec<_>>());
-        compiler::modules::vm::optimizer::constant_fold(&mut chunk);
+        compiler::vm::optimizer::constant_fold(&mut chunk);
         Box::leak(Box::new(chunk))
     }
 
