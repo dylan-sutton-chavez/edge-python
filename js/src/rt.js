@@ -5,7 +5,7 @@ Handle-codec helpers wrapping `host_edge_decode` / `host_edge_encode`; passed to
 const TD = new TextDecoder();
 const TE = new TextEncoder();
 
-// wasm-abi/src/lib.rs `pub mod tag`.
+// abi/src/lib.rs `pub mod tag`.
 const TAG_NONE = 0;
 const TAG_BOOL = 1;
 const TAG_INT = 2;

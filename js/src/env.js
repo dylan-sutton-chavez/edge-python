@@ -6,7 +6,7 @@ import { nativeTable } from './native.js';
 
 const TD = new TextDecoder();
 const TE = new TextEncoder();
-const ERR_RUNTIME = 2; // wasm-abi/src/lib.rs error_kind::RUNTIME
+const ERR_RUNTIME = 2; // abi/src/lib.rs error_kind::RUNTIME
 
 export function makeCompilerEnv({ getExports, onLine, fetchedSources, lockfile, integrityActive, rt, captureHostCall }) {
     const readStr = (ptr, len) => TD.decode(new Uint8Array(getExports().memory.buffer, ptr, len));
