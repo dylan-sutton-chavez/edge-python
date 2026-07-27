@@ -12,7 +12,7 @@ name = "edge_struct"
 crate-type = ["cdylib"]
 
 [dependencies]
-wasm-pdk = { path = "../../wasm-pdk" }
+wasm-pdk = { path = "../../pdk" }
 
 [profile.release]
 opt-level = "z"

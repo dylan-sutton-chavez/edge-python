@@ -25,15 +25,14 @@ Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Pyt
 Cargo workspace; commands work from any directory.
 
 ```text
+├── abi
 ├── cli
 ├── compiler
 ├── docs
 ├── host
+├── pdk
 ├── runtime
-├── std
-├── target
-├── wasm-abi
-└── wasm-pdk
+└── std
 ```
 
 ```bash

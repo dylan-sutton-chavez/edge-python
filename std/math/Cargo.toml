@@ -10,7 +10,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-wasm-pdk = { path = "../../wasm-pdk" }
+wasm-pdk = { path = "../../pdk" }
 libm = "0.2"
 
 # opt-level 3: this is a compute package, favour speed over the few KB of size.

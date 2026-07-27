@@ -1,7 +1,7 @@
 [workspace]
-members = ["compiler", "wasm-abi", "wasm-pdk", "wasm-pdk/macros", "wasm-pdk/example"]
-# `wasm-pdk/example` is wasm-only: kept in `members` so it shares the lockfile and resolves path deps, but excluded from `default-members` so default workspace commands skip it. Build it explicitly with `-p slugify-mod --target wasm32-unknown-unknown`.
-default-members = ["compiler", "wasm-abi", "wasm-pdk", "wasm-pdk/macros"]
+members = ["compiler", "abi", "pdk", "pdk/macros", "pdk/example"]
+# `pdk/example` is wasm-only: kept in `members` so it shares the lockfile and resolves path deps, but excluded from `default-members` so default workspace commands skip it. Build it explicitly with `-p slugify-mod --target wasm32-unknown-unknown`.
+default-members = ["compiler", "abi", "pdk", "pdk/macros"]
 resolver = "2"
 
 [workspace.package]
@@ -12,7 +12,7 @@ repository = "https://github.com/dylan-sutton-chavez/edge-python/"
 
 # Single source for third-party versions. Members opt in with `dep = { workspace = true }` so a bump touches one line workspace-wide and the lockfile cannot grow accidental version splits.
 [workspace.dependencies]
-wasm-abi = { path = "wasm-abi" }
+wasm-abi = { path = "abi" }
 hashbrown = { version = "0.17", default-features = false }
 itoa = "1"
 libm = "0.2"
