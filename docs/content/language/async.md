@@ -3,7 +3,7 @@ title: "Async"
 description: "Cooperative coroutines: run, sleep, frame, gather, with_timeout, cancel, receive."
 ---
 
-Cooperative concurrency via `async def` coroutines and `await` / `yield`. No preemption: a coroutine runs until it yields, sleeps, awaits, or returns. The scheduler is single-threaded. Concurrency comes from interleaving, not parallelism.
+Cooperative concurrency via `async def` coroutines and `await` / `yield`. No preemption between coroutines: a coroutine runs until it yields, sleeps, awaits, or returns (the host can still force a pause; see [Snapshots](/language/snapshots)). The scheduler is single-threaded. Concurrency comes from interleaving, not parallelism.
 
 No `asyncio` module. These primitives are top-level builtins: `run`, `sleep`, `frame`, `gather`, `with_timeout`, `cancel`, `receive`.
 
@@ -79,7 +79,7 @@ print(run(main()))
 30
 ```
 
-## Sleeping
+## sleep
 
 `sleep(seconds)` suspends until `seconds` of wall time pass. Without a host time hook, a virtual clock advances logically. Coroutines interleave deterministically with no real wait (useful for tests).
 
@@ -97,6 +97,17 @@ a step 1
 b step 1
 a step 2
 b step 2
+```
+
+## frame
+
+`frame()` parks the coroutine until the host's next render frame; browser embedders hook `requestAnimationFrame`. Use it for animation loops at display refresh rate ([reference](/reference/builtins#frame)):
+
+```python
+async def animate(node):
+  for i in range(60):
+    set_attribute(node, "style", f"transform: translateX({i}px)")
+    frame() # resumes on the next rendered frame
 ```
 
 ## gather
@@ -151,7 +162,7 @@ async def status(url):
 print(gather(status("https://api.github.com/zen"), status("https://nope.invalid/x")))
 ```
 
-```text Output
+```text
 ['ok', 'failed']
 ```
 
@@ -193,6 +204,19 @@ async def loop_forever():
 
 For deadline-driven cancellation use `with_timeout`.
 
+## receive
+
+`receive()` pops the oldest message from the host event queue; when the queue is empty it parks the coroutine until the host pushes one (`pushEvent` from JS, `run_push_event` in the ABI). Messages are arbitrary strings — DOM event names from `bind_event`, or anything the embedder sends ([reference](/reference/builtins#receive)). A parked `receive()` is also a natural pause point for [snapshots](/language/snapshots):
+
+```python
+async def main():
+  while True:
+    msg = receive() # parks until the host pushes an event
+    print(f"got {msg}")
+
+run(main())
+```
+
 ## Exception types
 
 | Exception | When |
@@ -204,7 +228,7 @@ Both live in the built-in exception namespace and match `except` clauses normall
 
 ## Limitations
 
-* **No preemption**, `while True: pass` inside a coroutine blocks the scheduler.
+* **No preemption between coroutines**, `while True: pass` inside a coroutine blocks the scheduler (the host can still force a pause via the preempt interval; see [Snapshots](/language/snapshots)).
 * **Silent cancellation**, `cancel(coro)` stops the coro; the body doesn't see `CancelledError`. Use `with_timeout` for deadline-as-exception.
 * **Cooperative host loop**, the scheduler suspends to the host when it can't progress synchronously (pending timer/frame/event). The embedder resumes via `run_start` / `run_resume` / `run_push_event`, and can serialize a parked run for later with `save_state` / `restore_state` (see [Snapshots](/language/snapshots)). The legacy non-suspending `run` cannot resume. Code using `sleep(n>0)`, `frame()`, or an empty `receive()` must run via the driver loop. Statements after a top-level `run()` don't execute after a yield.
 * **`async for`** works against any `for`-iterable plus coroutines and async generators (`async def` with `yield`). Each iteration resumes to the next yield. No `__aiter__` / `__anext__` dispatch on user classes. Write an `async def` generator instead. Behaviour over lists/tuples/dicts is identical to regular `for`.

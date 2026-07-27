@@ -153,7 +153,7 @@ Hard caps to prevent asymmetric DoS (small input exhausting memory/time). Hittin
 | `MAX_INDENT_DEPTH` | 100 | Cap on the indentation stack |
 | `MAX_FSTRING_DEPTH` | 200 | Cap on nested f-string contexts |
 
-These match the OWASP A04:2021 advice on resource exhaustion in interpreters.
+These follow the OWASP A04:2021 (Insecure Design) guidance on bounding resource consumption in interpreters.
 
 ## Why offset-based tokens
 
@@ -176,6 +176,6 @@ The parser slices `&source[t.start..t.end]` lazily for identifier names, string 
 
 ## References
 
-- Python language reference, *Lexical analysis*: docs.python.org/3/reference/lexical_analysis
-- OWASP, *Insecure Compiler Optimization*: owasp.org/www-community/vulnerabilities/Insecure_Compiler_Optimization
-- Aho, Sethi & Ullman. *Compilers: Principles, Techniques and Tools* (1986). LUT-driven scanners.
+1. Aho, Sethi & Ullman. *Compilers: Principles, Techniques and Tools* (1986). LUT-driven scanners.
+2. Python language reference. *Lexical analysis* ([docs.python.org](https://docs.python.org/3/reference/lexical_analysis.html)). Token grammar mirrored.
+3. OWASP. *A04:2021 Insecure Design* ([owasp.org](https://owasp.org/Top10/A04_2021-Insecure_Design/)). Bounded source-level limits.

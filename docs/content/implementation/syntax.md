@@ -235,7 +235,7 @@ Free variables (non-parameters with no local binding) are looked up in the outer
 
 Parameter slots: `Normal`, `Star` (`*args`), `DoubleStar` (`**kwargs`), `KwOnly`. Lone `*` separator marks following params as keyword-only. Defaults live in `HeapObj::Func.defaults` and bind to the `=`-marked params in source order, so a default before `*args` and keyword-only defaults both apply correctly. Annotations (`x: T`, `-> T`) parse and drain to `chunk.annotations` (tooling-only).
 
-`compile_body` checks impurity opcodes (`StoreItem`, `DelItem`, `StoreAttr`, `DelAttr`, `CallPrint`, `CallInput`, `Global`, `Nonlocal`, `Raise`, `RaiseFrom`, `Yield`, `LoadAttr`) — and that the body reads no free (global/builtin) name — to set `body.is_pure`, the flag that gates template memoisation ([Design](/implementation/design#concepts)). This static gate is complemented at runtime by an observed-impurity check that propagates through calls, so a side-effecting builtin reached as a first-class value (e.g. `print` passed to a wrapper) disqualifies the caller too.
+`compile_body` checks impurity opcodes (`StoreItem`, `DelItem`, `StoreAttr`, `DelAttr`, `CallPrint`, `CallInput`, `Global`, `Nonlocal`, `Raise`, `RaiseFrom`, `Yield`, `LoadAttr`) — and that the body reads no free (global/builtin) name — to set `body.is_pure`, the flag that gates template memoisation; the runtime half of the check lives in [Design](/implementation/design#concepts).
 
 ## Type annotations
 
@@ -293,7 +293,7 @@ VM applies conversion first, then the spec mini-language `[[fill]align][sign][#]
 
 ## References
 
-- Pratt. *Top Down Operator Precedence* (POPL 1973). Precedence climbing.
-- Cytron et al. *Efficiently Computing Static Single Assignment Form* (TOPLAS 1991). SSA, phi-nodes.
-- Crafting Interpreters, by Robert Nystrom: craftinginterpreters.com, single-pass codegen patterns.
-- Casey et al. *Towards Superinstructions for Java Interpreters* (SCOPES 2003). LoadAttr+Call fusion.
+1. Pratt. *Top Down Operator Precedence* (POPL 1973). Precedence climbing.
+2. Cytron et al. *Efficiently Computing Static Single Assignment Form* (TOPLAS 1991). SSA, phi-nodes.
+3. Nystrom. *Crafting Interpreters* ([craftinginterpreters.com](https://craftinginterpreters.com/)). Single-pass codegen patterns.
+4. Casey et al. *Towards Superinstructions for Java Interpreters* (SCOPES 2003). LoadAttr+Call fusion.

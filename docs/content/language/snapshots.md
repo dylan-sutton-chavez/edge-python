@@ -196,8 +196,6 @@ if (res.ok) {
 }
 ```
 
-A blob is program- and build-pinned, so a snapshot served to a client on a different compiler build is rejected cleanly rather than silently misinterpreted.
-
 ## Inspect without resuming
 
 `stateGlobals` and `stateStack` read a parked run without waking it, which suits a "resume?" screen or debugging a restored blob.
@@ -212,9 +210,11 @@ await worker.stateGlobals();
 
 The `state` field reads `"waiting_event"` for a parked `receive()`, `"sleeping"` for a `sleep()`, and so on. A run held by `pause()` reads `"ready"`, because a preempted coroutine is not waiting on anything, it is simply not being stepped.
 
-## See also
+## Limits
 
-Pure Python state restores identically, while live host resources (DOM handles, sockets, pending host calls) are not captured and must be recreated after restoring. The blob also carries the whole heap, so it must fit the runtime's 1 MiB buffer to restore.
+Pure Python state restores identically, while live host resources (DOM handles, sockets, pending host calls) are not captured and must be recreated after restoring. The blob also carries the whole heap, so it must fit the runtime's 1 MiB buffer to restore ([blob layout](/reference/wasm-abi#snapshot-exports)).
+
+## See also
 
 - [Runtime README](https://github.com/dylan-sutton-chavez/edge-python/tree/main/js#state-snapshots) for the worker and element API and the size limit.
 - [Design](/implementation/design#snapshots) for the serializer internals.

@@ -15,7 +15,7 @@ Edge Python has no bundled stdlib. Three ways to add native functionality:
 
 ## Path A: `.wasm` module by URL
 
-Contract: the [WASM module ABI](/reference/wasm-abi), language-agnostic, three scalar types. Rust authors use the bundled [`wasm-pdk`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/pdk) (`#[plugin_fn]` for free functions, `#[plugin_class]` + `#[plugin_methods]` for Python-visible classes, typed `Handle` / `Value` / `Error`). Other languages use community PDKs or hand-roll the boilerplate.
+Contract: the [WASM module ABI](/reference/wasm-abi), language-agnostic, three scalar types. Rust authors use the bundled [`wasm-pdk`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/pdk) macros ([the surface](/reference/wasm-abi#author-conveniences)). Other languages use community PDKs or hand-roll the boilerplate.
 
 Worked examples (with and without the SDK), encoding tables, and language-specific snippets: [WASM module ABI](/reference/wasm-abi). Script side:
 
@@ -71,11 +71,7 @@ Browsers run the engine in a Web Worker (no `document`, no `window`). Path C bri
 
 Async handlers (returning a `Promise`) run concurrently when several coroutines call them under `gather`. Each result is routed back to the coroutine that issued it. A rejected handler raises a catchable exception in that one coroutine without disturbing its peers.
 
-Three ways to register:
-
-- Pass the imported object to `mainThreadModules` (eager, shown below).
-- Give a URL to `hostModules` or the `packages.json` `host` field, imported lazily the first time a run uses it.
-- For the official libraries, rely on the runtime [defaults](/reference/packages#defaults) with no config.
+Registration (eager `mainThreadModules` — shown below —, lazy `hostModules` / `packages.json` `host`, or the built-in defaults): see [How to load them](/reference/packages#how-to-load-them).
 
 No `.wasm`, no Rust, no build step.
 

@@ -230,6 +230,13 @@ class Vec:
     self.x, self.y = x, y
   def __add__(self, other):
     return Vec(self.x + other.x, self.y + other.y)
+
+v = Vec(1, 2) + Vec(3, 4)
+print(v.x, v.y)
+```
+
+```text Output
+4 6
 ```
 
 See [Dunder methods](/language/dunders) for the full matrix.

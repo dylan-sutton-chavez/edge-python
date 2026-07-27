@@ -4,8 +4,8 @@ export default {
   methods: 'Methods',
   packages: 'Packages',
   imports: 'Imports',
-  'writing-modules': 'Writing Modules',
+  'writing-modules': 'Writing modules',
   cli: 'CLI',
   'wasm-abi': 'WASM ABI',
-  'limits-and-errors': 'Limits and Errors',
+  'limits-and-errors': 'Limits and errors',
 }

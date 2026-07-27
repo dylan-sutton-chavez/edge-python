@@ -3,7 +3,7 @@ title: "Built-in functions"
 description: "Every built-in function in Edge Python with examples and outputs."
 ---
 
-67 built-in functions, all first-class values: pass as arguments, store in containers, alias.
+68 built-ins, all first-class values: pass as arguments, store in containers, alias.
 
 ```python
 # All built-ins are real values
@@ -459,6 +459,7 @@ print(list(filter(None, [0, 1, "", "hi", [], [1]])))
 `import_module(name)` returns a module previously imported statically. Runtime dispatch among pre-imported modules without a manual dict.
 
 ```python
+# Sketch (not runnable): assumes prod_handler / dev_handler modules exist.
 import prod_handler
 import dev_handler
 
@@ -957,6 +958,7 @@ Concurrency primitives. Full model in [Async](/language/async).
 `frame()`: yield until the host's next render frame. Coro -> `WaitingFrame`, scheduler signals `PendingFrame`. Browser embedders hook `requestAnimationFrame`. Use for animation loops at display refresh rate.
 
 ```python
+# Sketch (not runnable): needs a dom node and a rendering host.
 async def animate(node):
   for i in range(60):
     set_attribute(node, "style", f"transform: translateX({i}px)")
@@ -984,22 +986,7 @@ print(gather(task(1), task(2), task(3)))
 
 ### with_timeout
 
-`with_timeout(seconds, coro)`: runs `coro` to completion or raises `TimeoutError` on deadline. Coro cancelled on timeout.
-
-```python
-async def slow():
-  sleep(10)
-  return "never"
-
-try:
-  with_timeout(0.1, slow())
-except TimeoutError:
-  print("timed out")
-```
-
-```text Output
-timed out
-```
+`with_timeout(seconds, coro)`: runs `coro` to completion or raises `TimeoutError` on deadline. Coro cancelled on timeout. Worked example: [Async](/language/async#with_timeout).
 
 ### cancel
 

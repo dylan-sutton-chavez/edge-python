@@ -3,20 +3,19 @@ title: "Introduction"
 description: "What Edge Python is and where to go next."
 ---
 
-# Introduction
-
 Welcome to the Edge Python docs! 👋 Edge is a sandboxed subset of Python, compiled to a ~200 KB WebAssembly binary and built in Rust to run in the browser. Embed your full business logic, run LLMs client-side, and build frontend apps.
 
 ## Ecosystem
 
 1. [Quickstart](/getting-started/quickstart): Run your first Edge Python program in under a minute.
-2. [Syntax](/language/syntax): How to write a program?
-3. [Reference](/reference/builtins): All the builtin methods.
-4. [Implementation](/implementation/design): Compiler architecture, dispatch model, and runtime layout.
+2. [What Edge Python is](/getting-started/what-it-is): Scope, philosophy, and what intentionally isn't supported.
+3. [Syntax](/language/syntax): The language guide.
+4. [Reference](/reference/builtins): All the builtin functions and methods.
+5. [Implementation](/implementation/design): Compiler architecture, dispatch model, and runtime layout.
 
 ## Try it
 
-### Browser:
+### Browser
 
 Try to edit or execute this script:
 
@@ -38,7 +37,7 @@ for w, n in words.items():
    fox -> 3
 ```
 
-### Command Line Interface:
+### Command Line Interface
 
 Or download it to your machine ([reference docs](/reference/cli)):
 
@@ -51,4 +50,4 @@ edge -h # List all commands
 
 ## Need help?
 
-Looking to integrate Edge into your app: run Python business logic in your users browsers, or anything else? Get in touch: [email](mailto:c.sutton.dylan@gmail.com)
+Looking to integrate Edge into your app: run Python business logic in your users' browsers, or anything else? Get in touch: [email](mailto:c.sutton.dylan@gmail.com)

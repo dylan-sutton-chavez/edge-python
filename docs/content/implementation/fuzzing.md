@@ -121,3 +121,8 @@ The seed corpus (`in/`) derives from the single source of truth `tests/cases/vm.
 - **`dict.txt` -> `edge.dict`**: keywords, operators, dunders, boundary literals, and multi-token idioms, so the byte mutator splices real tokens instead of discovering them blindly. Edit `dict.txt` to grow it.
 
 Seven files are tracked: `Cargo.toml`, `src/main.rs`, `seeds.sh`, `dict.txt`, `deploy.sh`, `Dockerfile`, and `compose.yml`. The corpus, `edge.dict`, AFL output, and build artifacts are reproducible.
+
+## References
+
+1. Fioraldi et al. *AFL++: Combining Incremental Steps of Fuzzing Research* (WOOT 2020). The fuzzer this target runs on.
+2. LLVM. *SanitizerCoverage* ([clang docs](https://clang.llvm.org/docs/SanitizerCoverage.html)). The stable-Rust instrumentation path.

@@ -219,7 +219,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-wasm-pdk = { path = "../../wasm-pdk" }   # in-repo example; external authors use the git+tag form below
+wasm-pdk = { path = "../../pdk" }   # in-repo example; external authors use the git+tag form below
 ```
 
 Build:
@@ -462,7 +462,7 @@ The `edge-python` crate is a `cdylib`: a Rust host can instantiate `compiler.was
 ```toml
 # Downstream Cargo.toml
 [dependencies]
-edge-python = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.2.4" }
+edge-python = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.1.0" }
 ```
 
 ```rust

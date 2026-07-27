@@ -3,11 +3,7 @@ title: "What Edge Python is"
 description: "A subset of Python, compiled to bytecode and run on a sandboxed VM."
 ---
 
-A sandboxed Python subset. Classes, async/await, structural pattern matching, and `packages.json` imports.
-
-Compiled to bytecode. Run on a stack VM with adaptive inline caching and pure-function memoisation. See [Design](/implementation/design) for internals.
-
-It reads like Python: it parses Python syntax. It runs differently. What it executes is curated.
+It reads like Python: it parses Python syntax. It runs differently. What it executes is curated — compiled to bytecode and run on a sandboxed stack VM ([Design](/implementation/design)).
 
 ## What it supports
 
@@ -32,7 +28,7 @@ It reads like Python: it parses Python syntax. It runs differently. What it exec
 
 These parse for syntactic compatibility. They raise at runtime, or don't exist:
 
-- **Standard library**: no bundled stdlib. Every module is external (see **Modules*- above).
+- **Standard library**: no bundled stdlib. Every module is external (see **Modules** above).
 - **I/O**: `input()` reads from a host-provided buffer. No file system, no network, no `os`, no `sys`. These surface only when the host runtime registers them as [host capabilities](/reference/writing-modules#path-b-host-capability), the same mechanism behind `print` and `input` themselves.
 - **Async surface**: `async def` creates real coroutines, and the VM runs a cooperative scheduler. No `asyncio` module; the primitives are top-level builtins ([Async](/language/async)).
 - **Metaclasses, descriptor protocol, `__slots__`**: not modeled.
@@ -58,9 +54,15 @@ Inherits WASM-host guarantees: no syscalls, no FS, no network, isolated linear m
 One `.wasm` artifact (`compiler.wasm`, a ~200 KB release) runs anywhere WebAssembly does:
 
 - **Browser**: served alongside the [`js/`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/js) JS package, which bridges `print()` and module imports across the `WASM <-> JS` boundary. The host runtime owns I/O, fetching, and module loading.
-- **Embedded Rust apps**: load `compiler.wasm` via your runtime of choice or use the `compiler` rlib when cargo-linked.
+- **Embedded Rust apps**: load `compiler.wasm` via your runtime of choice, or declare the [`edge-python` crate](/reference/wasm-abi#consuming-the-release-from-a-rust-crate) as a Cargo dependency.
 
 Two ABIs sit on top:
 
 - **`Compiler <-> host` imports**, embedder-declared, covering output, module fetching, native dispatch, wall-clock time. Custom embedders that ship [host capabilities](/reference/writing-modules#path-b-host-capability) declare additional imports (DOM, FS) without touching the plugin ABI.
 - **Plugin ABI (sealed v1)**, contract for CDN-distributed `.wasm` plugin modules. Exactly 6 `env.*` imports, never extended. See the [WASM module ABI](/reference/wasm-abi).
+
+## See also
+
+- [Quickstart](/getting-started/quickstart): run your first program.
+- [Limits and errors](/reference/limits-and-errors): the sandbox caps and error types.
+- [Design](/implementation/design): compiler and VM internals.

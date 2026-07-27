@@ -251,3 +251,9 @@ error: module 'json' has no export 'badname'
 ```
 
 Runtime errors from native bindings (e.g., `upper()` with a non-string argument) propagate normally as `VmErr`.
+
+## See also
+
+- [Official packages](/reference/packages): the ready-made modules and the default registry.
+- [Writing modules](/reference/writing-modules): the three delivery paths for native modules.
+- [WASM module ABI](/reference/wasm-abi): the wire contract behind `.wasm` imports.

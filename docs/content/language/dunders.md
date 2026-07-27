@@ -23,7 +23,7 @@ print(V(3) == V(3))
 True
 ```
 
-Dunders are looked up on the class chain. The instance dict is skipped. Subclasses inherit and may override. Operator overloading composes with [inheritance](/language/classes#inheritance-and-super). Monomorphic sites (keyed on the receiver's class) promote through the IC after 4 hits, then bypass lookup entirely.
+Dunders are looked up on the class chain. The instance dict is skipped. Subclasses inherit and may override. Operator overloading composes with [inheritance](/language/classes#inheritance-and-super). Dispatch is cached per call site; see [Design](/implementation/design) for the inline-cache mechanics.
 
 ## Arithmetic
 
@@ -271,4 +271,6 @@ Parsed for compatibility but never invoked on user classes:
 - Augmented-assignment dunders (`__iadd__`, ...), `a += b` desugars to `a = a + b`, so `__add__` covers it. Exception: list `+=` extends in place (alias-visible); see [Data types](/language/data-types#list)
 - Async dunders (`__aenter__` / `__aexit__` / `__aiter__` / `__anext__`), `async with` / `async for` use the sync paths
 
-For class basics (constructors, inheritance, properties), see [Classes](/language/classes).
+## See also
+
+- [Classes](/language/classes): constructors, inheritance, properties.

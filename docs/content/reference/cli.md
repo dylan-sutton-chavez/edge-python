@@ -1,5 +1,5 @@
 ---
-title: "Command Line Interface"
+title: "Command line interface"
 description: "The Edge Python developer command line interface (CLI): run, serve, repl, init, package management, and build."
 ---
 
@@ -31,7 +31,7 @@ cargo install --path cli
 
 `install.sh` drops the binary at `~/.local/bin/edge` and appends that directory (plus `EDGE_CHROME_PATH`, when the bundled browser is downloaded) to your `~/.bashrc` or `~/.zshrc` unless the file already has it. Open a new shell (or `source` the file it printed) and `edge --version` should work. Re-run the same `curl … | sh` line any time to upgrade. To remove everything: `curl -fsSL https://cdn.edgepython.com/cli/uninstall.sh | sh` (non-interactive: it leaves the bundled browser cache in place; `edge uninstall` asks before removing it).
 
-`install.sh` also downloads a pinned `chrome-headless-shell` into `~/.cache/edge` when no browser is already reachable. This needs `unzip`, with no package manager and no `sudo`. An existing browser on `PATH`, or an `EDGE_CHROME_PATH` you set, is used as-is. Linux arm64 has no such build: install Chrome/Chromium manually and set `EDGE_CHROME_PATH`. See [Bring your own browser](#bring-your-own-browser).
+`install.sh` also provisions a headless browser when none is reachable; details and overrides in [Bring your own browser](#bring-your-own-browser).
 
 ## `edge run`: run a Python file
 
@@ -119,9 +119,12 @@ my-app/
 $ edge test
 PASS - adds
 1 passed, 0 failed
-  (successful) sub/s_test.py
+  (successful) main_test.py
+PASS - parses
+1 passed, 0 failed
+  (successful) lib/parse_test.py
 
-  1/1 files passed · 1.6s
+  2/2 files passed · 1.6s
 ```
 
 Test files declare tests with the [`test` package](/reference/packages#test) and don't need to call `run()` — the runner drives it after the file loads:

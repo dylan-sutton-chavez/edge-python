@@ -178,27 +178,6 @@ pair-equal
 1 then 3 more
 ```
 
-```python
-def describe(n):
-  match n:
-    case 0:
-      return "zero"
-    case 1:
-      return "one"
-    case _:
-      return "many"
-
-for x in [0, 1, 2, 99]:
-  print(describe(x))
-```
-
-```text Output
-zero
-one
-many
-many
-```
-
 ## try / except / else / finally
 
 ```python

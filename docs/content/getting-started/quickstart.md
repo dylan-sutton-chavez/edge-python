@@ -3,11 +3,17 @@ title: "Quickstart"
 description: "Run your first Edge Python program in under a minute."
 ---
 
-# Quickstart
-
 ## Run it
 
-Edge Python ships as a ~200 KB WASM module. The fastest way to try it is the playground. No install. Everything runs client-side.
+Edge Python ships as a ~200 KB WASM module. The fastest way to try it is any runnable code block in these docs ([here](/getting-started/introduction#try-it), for instance). No install. Everything runs client-side.
+
+For a local project, the [CLI](/reference/cli) covers the whole loop:
+
+```bash
+edge init my-app # scaffold entry, packages.json, and a test
+cd my-app && edge serve # dev server with live reload
+edge test # run the *_test.py files
+```
 
 ## Embed it
 
@@ -42,7 +48,7 @@ from dom import query, set_text
 set_text(query("#app"), "Hello from Python")
 ```
 
-`dom` is one of the official [host libraries](/reference/packages#host-libraries) (`dom`, `network`, `storage`...). Standard `.wasm` packages like [`json`](/reference/packages#json) sit alongside them. The `packages.json` above declares `dom` explicitly. The browser runtime also resolves the official packages by bare name, with no manifest (see [Defaults](/reference/packages#defaults)). Each is fetched lazily on first import.
+`dom` is one of the official [host libraries](/reference/packages#host-libraries) (`dom`, `network`, `storage`...). Standard `.wasm` packages like [`json`](/reference/packages#json) sit alongside them. Official packages also resolve by bare name with no manifest, fetched lazily on first import (see [Defaults](/reference/packages#defaults)).
 
 See [Official packages](/reference/packages) for the full catalog. See the [runtime README](https://github.com/dylan-sutton-chavez/edge-python/tree/main/js) for all `<edge-python>` attributes and the `imports` field for `.py` / `.wasm` modules.
 

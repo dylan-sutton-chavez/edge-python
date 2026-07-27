@@ -5,5 +5,5 @@ export default {
         theme: { typesetting: 'article' },
     },
     quickstart: 'Quickstart',
-    'what-it-is': 'What It Is'
+    'what-it-is': 'What Edge Python is'
 }

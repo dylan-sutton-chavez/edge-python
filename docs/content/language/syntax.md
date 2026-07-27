@@ -16,6 +16,8 @@ parsed but discarded.
 """
 ```
 
+The same applies to `def` and `class` docstrings: parsed for compatibility, then discarded — there is no `__doc__` at runtime.
+
 ## Identifiers and assignment
 
 Identifiers follow Python rules: letters, digits, underscores, plus any non-ASCII letter.
@@ -202,40 +204,19 @@ answer is 43
 
 Full format mini-language: `[[fill]align][sign][#][0][width][,|_][.precision][type]`, with `!r` / `!s` / `!a` conversions before the spec. Type chars: `b o c d e E f F g G n s x X %`. The `,` and `_` group digits (every three for decimals/floats; `_` groups `b`/`o`/`x`/`X` every four).
 
-f-string literals process [escape sequences](#escape-sequences) like any string. The `\r` carriage return rewinds the cursor to the line start, so a single line can redraw in place — here a loading indicator. `sleep` (from the `time` module) paces the frames, and `flush=True` forces each one out immediately.
-
-```python
-from time import sleep
-
-loader_len: int = 11
-char: dict[str, str] = { "full": "·", "empty": "." }
-
-for n in range(loader_len + 1):
-    if n < loader_len:
-        loader: str = char["empty"] * n + char["full"] + char["empty"] * (loader_len - 1 - n)
-    else:
-        loader = char["empty"] * loader_len
-    print(f"\r{loader}", end="", flush=True)
-    sleep(0.07)
-```
-
-```text Output
-...........
-```
-
-Each `\r` overwrites the previous frame, so the terminal shows a single dot sweeping across the line; the row above is the final frame.
+f-string literals process [escape sequences](#escape-sequences) like any string — `\r`, for instance, rewinds the cursor to the line start so a single output line can redraw in place.
 
 ## Booleans and None
 
+The literals are `True`, `False`, and `None`; `not` negates. Truthiness rules and the full falsy table: see [Data types](/language/data-types#truthy-and-falsy).
+
 ```python
 print(True, False, None)
-print(bool(0), bool(1), bool(""), bool("x"))
 print(not True)
 ```
 
 ```text Output
 True False None
-False True False True
 False
 ```
 
@@ -376,7 +357,7 @@ print([x for x in range(10) if x % 2 == 0])
 print([(i, j) for i in range(2) for j in range(2)])
 print([[x for x in range(y)] for y in range(3)])
 print({x: x * x for x in range(4)})
-print({x % 3 for x in range(10)})
+print(sorted({x % 3 for x in range(10)})) # set order is implementation-defined; sort to compare
 ```
 
 ```text Output
@@ -385,20 +366,10 @@ print({x % 3 for x in range(10)})
 [(0, 0), (0, 1), (1, 0), (1, 1)]
 [[], [0], [0, 1]]
 {0: 0, 1: 1, 2: 4, 3: 9}
-{1, 2, 0}
+[0, 1, 2]
 ```
 
-Generator expressions consumed by reducers:
-
-```python
-print(sum(x * x for x in range(5)))
-print(max(x for x in [3, 1, 4, 1, 5]))
-```
-
-```text Output
-30
-5
-```
+Generator expressions: see [Functions](/language/functions#generator-expressions).
 
 ## Type annotations
 

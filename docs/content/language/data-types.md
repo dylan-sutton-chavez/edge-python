@@ -104,7 +104,7 @@ b
 c
 ```
 
-`len(s)` and padding (`str.center` / `str.zfill`) measure in code points, not bytes. `'ñ'.center(5, '*')` -> `'**ñ**'` (5 visual chars).
+`len(s)` measures code points, not bytes; padding methods do the same (see [Methods, padding](/reference/methods#padding)).
 
 ## Bytes
 
@@ -151,20 +151,7 @@ for byte in b"abc":
 99
 ```
 
-```python
-# Constructors
-print(bytes()) # empty
-print(bytes(3)) # zero-filled, length 3
-print(bytes([65, 66, 67])) # from int iterable
-print(bytes("hi", "utf-8")) # encoded string
-```
-
-```text Output
-b''
-b'\x00\x00\x00'
-b'ABC'
-b'hi'
-```
+The four constructor forms (`bytes()`, `bytes(n)`, from int iterable, from encoded string): see [bytes](/reference/builtins#bytes).
 
 ```python
 # Round-tripping with str
@@ -307,7 +294,7 @@ Unordered, no duplicates, hashable values. Mutators (`add`, `remove`, `discard`,
 ```python
 s = {1, 2, 2, 3}
 s.add(4)
-print(s)
+print(sorted(s)) # set order is implementation-defined; sort to compare
 print(len(s))
 
 # Empty set literal is set(), not {}
@@ -315,18 +302,18 @@ print(set())
 print(type({})) # this is a dict
 
 # Algebra
-print({1, 2, 3} | {3, 4})
-print({1, 2, 3} & {2, 3, 4})
+print(sorted({1, 2, 3} | {3, 4}))
+print(sorted({1, 2, 3} & {2, 3, 4}))
 print({1, 2} <= {1, 2, 3}) # subset
 ```
 
 ```text Output
-{2, 4, 1, 3}
+[1, 2, 3, 4]
 4
 set()
 <class 'dict'>
-{2, 4, 1, 3}
-{2, 3}
+[1, 2, 3, 4]
+[2, 3]
 True
 ```
 
@@ -435,32 +422,20 @@ False
 
 ## Conversions
 
+Every constructor (`int`, `float`, `str`, `bool`, `list`, `tuple`, `set`) doubles as a converter; the full matrix lives in [Built-in functions](/reference/builtins#type-conversion). The two gotchas worth remembering:
+
 ```python
-print(int("42"))
-print(int(3.7)) # truncates toward zero
-print(int(True))
-print(float("3.14"))
-print(str(42))
-print(str([1, 2]))
-print(bool([])) # empty is falsy
-print(bool([0])) # non-empty is truthy
-print(list("abc"))
-print(tuple([1, 2, 3]))
-print(set([1, 1, 2]))
+print(int(3.7)) # truncates toward zero, no rounding
+print(int(-3.7))
+print(bool([])) # empty collections are falsy
+print(bool([0])) # non-empty is truthy, even [0]
 ```
 
 ```text Output
-42
 3
-1
-3.14
-42
-[1, 2]
+-3
 False
 True
-['a', 'b', 'c']
-(1, 2, 3)
-{1, 2}
 ```
 
 ## Truthy and falsy

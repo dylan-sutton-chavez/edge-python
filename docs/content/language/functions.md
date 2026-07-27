@@ -272,6 +272,28 @@ print(add0(10), add1(10), add2(10))
 10 11 12
 ```
 
+### Scoping: global and nonlocal
+
+Assignment inside a function creates a local unless declared otherwise. `nonlocal name` rebinds the nearest enclosing function's variable — the shared cell the `counter` closure above relies on. `global name` rebinds the module-level variable instead:
+
+```python
+total = 0
+
+def bump(n):
+  global total
+  total += n
+
+bump(3)
+bump(4)
+print(total)
+```
+
+```text Output
+7
+```
+
+Reading an outer variable needs no declaration; only rebinding does.
+
 ## Currying
 
 Partial application built from nested lambdas or closures.
@@ -437,7 +459,7 @@ returned done
 ```
 
 <Note>
-Generators are one-way: producer to consumer. `gen.send(value)`, `gen.throw(exc)`, and `gen.close()` are not exposed. Bidirectional communication is a procedural pattern, inconsistent with the functional paradigm. For bidirectional flow, use the cooperative scheduler (`run` / `sleep` / `gather`). Pass values through arguments and return values.
+Generators are one-way: producer to consumer. `gen.send(value)`, `gen.throw(exc)`, and `gen.close()` are not exposed. Bidirectional communication is a procedural pattern, inconsistent with the functional paradigm. For bidirectional flow, use the [cooperative scheduler](/language/async) (`run` / `sleep` / `gather`). Pass values through arguments and return values.
 </Note>
 
 ## Generator expressions
