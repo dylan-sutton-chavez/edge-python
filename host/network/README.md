@@ -134,4 +134,4 @@ Per-handler cost is one `postMessage` round-trip; HTTP adds network latency on t
 
 ## License
 
-MIT OR Apache-2.0
+Apache-2.0

@@ -60,4 +60,4 @@ These come from the Edge Python VM, not this package:
 cargo build --release --target wasm32-unknown-unknown
 ```
 
-License: MIT OR Apache-2.0
+License: Apache-2.0

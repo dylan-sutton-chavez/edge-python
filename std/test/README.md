@@ -46,4 +46,4 @@ A failing `assert` is reported as `FAIL`; any other exception as `ERROR` with it
 
 Pure Edge Python source (no `cargo` build); the package entry is `src/entry.py`, imported as a code module via `packages.json`. This differs from the wasm packages (`re`, `math`, `json`), whose entry is `src/lib.rs` built to `<pkg>.wasm`.
 
-License: MIT OR Apache-2.0
+License: Apache-2.0

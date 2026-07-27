@@ -46,4 +46,4 @@ cargo build --release --target wasm32-unknown-unknown
 
 ## License
 
-MIT OR Apache-2.0
+Apache-2.0

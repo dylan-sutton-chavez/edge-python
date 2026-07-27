@@ -104,4 +104,4 @@ By design, a sandboxed WASM runtime has no process, thread, or POSIX clock to ex
 
 ## License
 
-MIT OR Apache-2.0
+Apache-2.0

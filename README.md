@@ -174,7 +174,7 @@ On pushes to `main` it deploys two Cloudflare Pages projects: `edge-python-cdn` 
 
 ## License
 
-MIT OR Apache-2.0
+Apache-2.0
 
 ## Sponsors 
 

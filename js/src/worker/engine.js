@@ -3,12 +3,12 @@ Engine orchestrator. Internal to the Worker; consumers use `createWorker` in `sr
 Lifecycle: `load` once -> many `run` cycles -> `dispose`. Each run instantiates compiler fresh, no state leak.
 */
 
-import { MemoryCache } from '../src/cache/memory.js';
-import { bfsPrefetch } from '../src/prefetch.js';
-import { makeCompilerEnv } from '../src/env.js';
-import { makeRt } from '../src/rt.js';
-import { nativeTable, resetNativeTable } from '../src/native.js';
-import { SOURCE_LIMIT } from '../src/specs.js';
+import { MemoryCache } from '../cache/memory.js';
+import { bfsPrefetch } from '../prefetch.js';
+import { makeCompilerEnv } from '../env.js';
+import { makeRt } from '../rt.js';
+import { nativeTable, resetNativeTable } from '../native.js';
+import { SOURCE_LIMIT } from '../specs.js';
 
 const TE = new TextEncoder();
 const TD = new TextDecoder();
@@ -450,7 +450,7 @@ export function dispose() {
 async function openCache(integrity) {
     if (!integrity) return new MemoryCache();
     try {
-        const { IdbCache } = await import('../src/cache/idb.js');
+        const { IdbCache } = await import('../cache/idb.js');
         const idb = new IdbCache();
         await idb.open();
         return idb;

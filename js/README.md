@@ -250,4 +250,4 @@ A spec the prefetch can't fetch or register (wrong scheme, a `.wasm` served as H
 
 ## License
 
-MIT OR Apache-2.0
+Apache-2.0

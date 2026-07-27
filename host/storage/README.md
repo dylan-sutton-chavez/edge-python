@@ -71,4 +71,4 @@ item = with_timeout(0.5, idb_get(db, "items", "1")) # deadline
 
 ## License
 
-MIT OR Apache-2.0
+Apache-2.0

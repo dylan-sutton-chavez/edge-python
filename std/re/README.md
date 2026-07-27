@@ -79,4 +79,4 @@ Compiles to `wasm32-unknown-unknown` (`cdylib`) against the [wasm-pdk](https://g
 
 ## License
 
-MIT OR Apache-2.0
+Apache-2.0

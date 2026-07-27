@@ -84,4 +84,4 @@ Pre-built `.wasm` is served from `https://cdn.edgepython.com/std/json.wasm`, dep
 
 ## License
 
-MIT OR Apache-2.0
+Apache-2.0
