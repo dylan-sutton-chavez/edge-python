@@ -41,8 +41,6 @@
       };
       // `.reset` calls this to wipe runtime modules without re-launching the browser.
       window.__edgeReset = () => el.worker.reset();
-      // `.globals` reads the live interpreter's module bindings.
-      window.__edgeGlobals = async () => JSON.stringify(await el.worker.stateGlobals());
       window.__edgeReady = true;
     })();
   </script>
