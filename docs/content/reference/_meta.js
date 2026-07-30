@@ -7,5 +7,6 @@ export default {
   'writing-modules': 'Writing modules',
   cli: 'CLI',
   'wasm-abi': 'WASM ABI',
+  native: 'Native port',
   'limits-and-errors': 'Limits and errors',
 }

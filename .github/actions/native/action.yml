@@ -1,0 +1,112 @@
+name: Native port
+description: Host-less native builds. runner = the edge-native bin, std packages = plugin cdylibs. Tag Release upload, no deploy.
+
+inputs:
+  package:
+    description: "runner | json | re | math | struct"
+    required: true
+  target:
+    description: Rust target triple.
+    required: true
+  github-token:
+    description: Token for the tag Release upload (tags only).
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Toolchain (stable)
+      if: inputs.package == 'runner'
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ inputs.target }}
+        components: clippy
+
+    # build-std needs nightly plus rust-src.
+    - name: Toolchain (nightly)
+      uses: dtolnay/rust-toolchain@nightly
+      with:
+        targets: ${{ inputs.target }}
+        components: rust-src
+
+    - name: Cache Rust (runner)
+      if: inputs.package == 'runner'
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: native-${{ inputs.target }}
+
+    - name: Cache Rust (std)
+      if: inputs.package != 'runner'
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: std/${{ inputs.package }} -> std/${{ inputs.package }}/target
+        key: native-${{ inputs.target }}
+
+    # The bin sits behind `required-features`, so the workspace-wide lint job never covers it.
+    - name: Clippy (runner)
+      if: inputs.package == 'runner'
+      shell: bash
+      run: cargo +stable clippy --bin edge-native --no-default-features --features native --target "${{ inputs.target }}" -- -D warnings
+
+    - name: Build runner
+      if: inputs.package == 'runner'
+      shell: bash
+      run: |
+        RUSTFLAGS="-Z location-detail=none -Z fmt-debug=none -Z unstable-options -C panic=immediate-abort" \
+        cargo +nightly build \
+          --profile native \
+          --no-default-features --features native \
+          --bin edge-native \
+          --target "${{ inputs.target }}" \
+          -Z build-std=std,panic_abort
+
+    - name: Smoke test (runner)
+      if: inputs.package == 'runner'
+      shell: bash
+      run: |
+        printf 'print("native ok")\n' > /tmp/smoke.py
+        "target/${{ inputs.target }}/native/edge-native" /tmp/smoke.py | grep -qx "native ok"
+
+    - name: Build std package
+      if: inputs.package != 'runner'
+      shell: bash
+      working-directory: std/${{ inputs.package }}
+      run: |
+        RUSTFLAGS="-Z location-detail=none -Z fmt-debug=none -Z unstable-options -C panic=immediate-abort" \
+        cargo +nightly build \
+          --profile native \
+          --target "${{ inputs.target }}" \
+          -Z build-std=std,panic_abort
+
+    # Assets carry the short arch, the lib glob absorbs keyword-crate names like libedge_struct.so.
+    - name: Package
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+      run: |
+        ARCH="${TARGET%%-*}"
+        mkdir -p _native
+        if [ "${{ inputs.package }}" = "runner" ]; then
+          cp "target/${TARGET}/native/edge-native" "_native/edge-${ARCH}"
+          tar -C _native -czf "_native/edge-${ARCH}.tar.gz" "edge-${ARCH}"
+          rm "_native/edge-${ARCH}"
+        else
+          cp "std/${{ inputs.package }}/target/${TARGET}/native/"lib*.so "_native/${{ inputs.package }}-${ARCH}.so"
+        fi
+
+    # The `native-` prefix keeps these out of the cdn-deploy `edge-*` artifact glob.
+    - name: Upload artifact
+      uses: actions/upload-artifact@v6
+      with:
+        name: native-${{ inputs.package }}-${{ inputs.target }}
+        path: _native/
+        retention-days: 1
+
+    - name: Upload Release assets
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v3
+      with:
+        token: ${{ inputs.github-token }}
+        files: _native/*
+        fail_on_unmatched_files: true

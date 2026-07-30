@@ -33,6 +33,7 @@ Cargo workspace rooted at the engine crate (`edge-python`); commands work from a
 ├── js
 ├── pdk
 ├── src
+│   ├── bin
 │   ├── lexer
 │   ├── packages
 │   ├── parser
@@ -51,6 +52,7 @@ Cargo workspace rooted at the engine crate (`edge-python`); commands work from a
 ```bash
 cargo wasm # release .wasm (the distributed artifact)
 cargo build --release # host .rlib + cdylib for Rust embedders
+cargo build --profile native --no-default-features --features native # host-less native runner
 cargo test --release --no-default-features # run the compiler test suite
 ```
 
@@ -107,6 +109,24 @@ The runtime spawns a Web Worker that pre-fetches imports, dispatches native call
 ### Rust host
 
 Edge Python is a `cdylib`: a Rust host can instantiate `compiler.wasm` and call its exports directly, the same `.wasm` that ships to browsers; the host owns I/O. Declaring `edge-python` as a Cargo dependency fetches the matching release `.wasm` automatically (exposed as `DEP_COMPILER_WASM`), see [Consuming the release](https://edgepython.com/reference/wasm-abi#consuming-the-release-from-a-rust-crate). To add native modules from your own crate, implement the `Resolver` trait, see [Writing modules](https://edgepython.com/reference/writing-modules).
+
+### Native
+
+Tagged releases attach the engine as a host-less native executable, plus each std package as a native plugin library ([native port](https://edgepython.com/reference/native)).
+
+```python
+# hello.py
+async def greet(name):
+  await sleep(0.1)
+  print(f"hello {name}")
+
+await greet("edge")
+```
+
+```text
+$ ./edge-aarch64 hello.py
+hello edge
+```
 
 ## What it is
 

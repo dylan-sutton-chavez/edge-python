@@ -24,6 +24,13 @@ path = "tests/main.rs"
 [features]
 default = ["prebuilt"]
 prebuilt = []
+# Gates the host-less native runner bin out of lib and wasm builds.
+native = []
+
+[[bin]]
+name = "edge-native"
+path = "src/bin/native.rs"
+required-features = ["native"]
 
 [dependencies]
 wasm-abi = { workspace = true }
