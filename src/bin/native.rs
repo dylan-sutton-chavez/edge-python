@@ -12,6 +12,12 @@ fn stream_stdout(s: &str) {
     let _ = out.flush();
 }
 
+// Wall-clock ns, the same base PendingTimer deadlines are minted against.
+fn now_ns() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64)
+}
+
 fn pending_name(status: &SchedulerStatus) -> &'static str {
     match status {
         SchedulerStatus::PendingTimer(_) => "a timer",
@@ -51,6 +57,7 @@ fn main() -> ExitCode {
     let mut vm = VM::with_limits(&chunk, Limits::sandbox());
     vm.strict_input = true;
     vm.print_hook = Some(stream_stdout);
+    vm.set_time_hook(now_ns);
     let mut stdin = std::io::stdin();
     if !stdin.is_terminal() {
         let mut buf = String::new();
@@ -59,7 +66,17 @@ fn main() -> ExitCode {
             vm.input_buffer = buf.split('\n').map(String::from).collect();
         }
     }
-    match vm.run() {
+    // Serve timer parks like the web driver: sleep to the deadline, resume.
+    let result = loop {
+        match vm.run() {
+            Err(VmErr::HostYield(SchedulerStatus::PendingTimer(deadline))) => {
+                let now = now_ns();
+                if deadline > now { std::thread::sleep(std::time::Duration::from_nanos(deadline - now)); }
+            }
+            other => break other,
+        }
+    };
+    match result {
         Ok(_) | Err(VmErr::HostYield(SchedulerStatus::Done)) => ExitCode::SUCCESS,
         Err(VmErr::HostYield(status)) => {
             eprintln!("error: script suspended awaiting {}, no host wired in this binary", pending_name(&status));

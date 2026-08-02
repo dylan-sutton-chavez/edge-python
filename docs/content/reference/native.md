@@ -3,7 +3,7 @@ title: "Native port"
 description: "Host-less native builds of the engine and std packages, their release assets, runtime contract, and source builds."
 ---
 
-Each tagged GitHub Release attaches native aarch64 builds alongside `compiler.wasm`, and the CDN serves the same assets under `https://cdn.edgepython.com/native/`, refreshed on every push to `main`. No host runtime ships with them yet. The executable runs with engine defaults only, and the std libraries wait for an embedding host to load them.
+Each tagged GitHub Release attaches native aarch64 builds alongside `compiler.wasm`, and the CDN serves the same assets under `https://cdn.edgepython.com/native/`, refreshed on every push to `main`. No host runtime ships with them yet. The executable runs with engine defaults plus a real wall clock, and the std libraries wait for an embedding host to load them.
 
 | Asset | Contents |
 | --- | --- |
@@ -12,13 +12,12 @@ Each tagged GitHub Release attaches native aarch64 builds alongside `compiler.wa
 
 ## The runner
 
-`edge-aarch64 file.py` parses and runs one script. The exit-code contract matches [`edge run`](/reference/cli#edge-run-run-a-python-file). Output streams to stdout, an uncaught error prints its traceback to stderr and exits 1, and `raise SystemExit(code)` exits cleanly with that code. Everything executes under [sandbox limits](/reference/limits-and-errors#sandbox-limits).
+`edge-aarch64 file.py` parses and runs one script. The exit-code contract matches [`edge run`](/reference/cli#edge-run-run-a-python-file). Output streams to stdout, an uncaught error prints its traceback to stderr and exits 1, and `raise SystemExit(code)` exits cleanly with that code. Everything executes under [sandbox limits](/reference/limits-and-errors#sandbox-limits). A wall clock drives the scheduler, so `sleep()` and timeouts wait in real time, matching the web runtime.
 
-The missing host shows up in four places.
+The missing host shows up in three places.
 
 - Every `import` fails with `module not found (no resolver configured)`, so there is no module loading of any kind ([imports](/reference/imports)).
 - [`input()`](/reference/builtins#input) drains piped stdin, one line per call, and an empty buffer raises `RuntimeError`.
-- No wall clock is attached, so the fallback virtual clock serves `sleep()` and timers complete in order without real waiting.
 - `frame()`, `receive()`, and native-module calls park the scheduler with no host to resume it, and the runner exits 1 with `script suspended awaiting ...`.
 
 ## std packages as native libraries
