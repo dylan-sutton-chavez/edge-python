@@ -32,6 +32,13 @@ runs:
         path: /tmp/cli/
         merge-multiple: true
 
+    - name: Download native artifacts
+      uses: actions/download-artifact@v8
+      with:
+        pattern: native-*
+        path: /tmp/native/
+        merge-multiple: true
+
     - name: Install brotli
       shell: bash
       run: command -v brotli >/dev/null || (sudo apt-get update && sudo apt-get install -y brotli)
@@ -39,7 +46,7 @@ runs:
     - name: Stage site
       shell: bash
       run: |
-        mkdir -p _site/runtime _site/std _site/host _site/cli
+        mkdir -p _site/runtime _site/std _site/host _site/cli _site/native
 
         # compiler: served at /compiler.wasm as brotli-11; _headers tags the encoding.
         brotli -q 11 -c /tmp/compiler/compiler.wasm > _site/compiler.wasm
@@ -67,6 +74,9 @@ runs:
         # cli: release tarballs + the install/uninstall scripts, served under cdn.edgepython.com/cli/.
         cp -r /tmp/cli/. _site/cli/
         cp cli/setup/install.sh cli/setup/uninstall.sh _site/cli/
+
+        # native: the runner tarball plus std plugin .so files, served under /native/.
+        cp -r /tmp/native/. _site/native/
 
     - name: Report served size
       shell: bash

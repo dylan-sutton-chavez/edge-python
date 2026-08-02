@@ -3,7 +3,7 @@ title: "Native port"
 description: "Host-less native builds of the engine and std packages, their release assets, runtime contract, and source builds."
 ---
 
-Each tagged GitHub Release attaches native aarch64 builds alongside `compiler.wasm`. No host runtime ships with them yet. The executable runs with engine defaults only, and the std libraries wait for an embedding host to load them.
+Each tagged GitHub Release attaches native aarch64 builds alongside `compiler.wasm`, and the CDN serves the same assets under `https://cdn.edgepython.com/native/`, refreshed on every push to `main`. No host runtime ships with them yet. The executable runs with engine defaults only, and the std libraries wait for an embedding host to load them.
 
 | Asset | Contents |
 | --- | --- |

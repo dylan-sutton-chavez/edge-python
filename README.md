@@ -112,7 +112,7 @@ Edge Python is a `cdylib`: a Rust host can instantiate `compiler.wasm` and call 
 
 ### Native
 
-Tagged releases attach the engine as a host-less native executable, plus each std package as a native plugin library ([native port](https://edgepython.com/reference/native)).
+Tagged releases attach the engine as a host-less native executable, plus each std package as a native plugin library; the CDN serves the same assets under `/native/` ([native port](https://edgepython.com/reference/native)).
 
 ```python
 # hello.py

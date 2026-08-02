@@ -1,5 +1,5 @@
 name: Native port
-description: Host-less native builds. runner = the edge-native bin, std packages = plugin cdylibs. Tag Release upload, no deploy.
+description: Host-less native builds. runner = the edge-native bin, std packages = plugin cdylibs. CDN staging + tag Release upload.
 
 inputs:
   package:
@@ -16,6 +16,21 @@ inputs:
 runs:
   using: composite
   steps:
+    # Nightly rotates daily; its manifest hash keys an exact-version toolchain cache.
+    - name: Toolchain cache key
+      id: toolchain
+      shell: bash
+      run: echo "nightly=$(curl -fsSL https://static.rust-lang.org/dist/channel-rust-nightly.toml.sha256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+    # Restoring update-hashes lets rustup see the toolchain as current and skip reinstalling.
+    - name: Cache toolchain
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.rustup/toolchains
+          ~/.rustup/update-hashes
+        key: rustup-${{ inputs.package == 'runner' && 'runner' || 'std' }}-${{ inputs.target }}-${{ steps.toolchain.outputs.nightly }}
+
     - name: Toolchain (stable)
       if: inputs.package == 'runner'
       uses: dtolnay/rust-toolchain@stable
@@ -95,7 +110,7 @@ runs:
           cp "std/${{ inputs.package }}/target/${TARGET}/native/"lib*.so "_native/${{ inputs.package }}-${ARCH}.so"
         fi
 
-    # The `native-` prefix keeps these out of the cdn-deploy `edge-*` artifact glob.
+    # The `native-` prefix is the glob cdn-deploy stages under /native/.
     - name: Upload artifact
       uses: actions/upload-artifact@v6
       with:

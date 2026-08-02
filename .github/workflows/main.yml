@@ -86,7 +86,7 @@ jobs:
         with:
           package: ${{ matrix.package }}
 
-  # Host-less native port, the runner bin plus std plugin cdylibs. Assets attach to tag Releases only.
+  # Host-less native port, the runner bin plus std plugin cdylibs. Assets ship to the CDN and tag Releases.
   native:
     name: Native / ${{ matrix.package }} (${{ matrix.target }})
     needs: [compiler-check]
@@ -155,7 +155,7 @@ jobs:
 
   cdn:
     name: Cloudflare Upload (CDN)
-    needs: [cli-test]
+    needs: [cli-test, native]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
