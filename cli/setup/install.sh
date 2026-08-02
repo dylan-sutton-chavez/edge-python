@@ -10,8 +10,21 @@ INSTALL_DIR="${EDGE_INSTALL_DIR:-$HOME/.local/bin}"
 CHROME_DIR="${EDGE_CHROME_DIR:-$HOME/.cache/edge}"
 CHROME_BUILD="${EDGE_CHROME_BUILD:-131.0.6778.85}"
 
+# Glibc 2.28 or newer gets the gnu build (std .so plugins load); older or musl systems get the static fallback.
+linux_libc() {
+  glibc="$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')"
+  if [ -n "$glibc" ]; then
+    major="${glibc%%.*}"
+    minor="${glibc#*.}"; minor="${minor%%.*}"
+    if [ "$major" -gt 2 ] 2>/dev/null || { [ "$major" -eq 2 ] && [ "$minor" -ge 28 ]; } 2>/dev/null; then
+      echo "gnu"; return
+    fi
+  fi
+  echo "musl"
+}
+
 case "$(uname -s)" in
-  Linux) os="unknown-linux-musl" ;;
+  Linux) os="unknown-linux-$(linux_libc)" ;;
   Darwin) os="apple-darwin" ;;
   *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
 esac
@@ -25,14 +38,14 @@ esac
 target="${arch}-${os}"
 
 case "$target" in
-  x86_64-unknown-linux-musl|aarch64-unknown-linux-musl|x86_64-apple-darwin|aarch64-apple-darwin) ;;
+  x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|x86_64-unknown-linux-musl|aarch64-unknown-linux-musl|x86_64-apple-darwin|aarch64-apple-darwin) ;;
   *) echo "no prebuilt for $target yet; build from source with 'cargo install --path cli'" >&2; exit 1 ;;
 esac
 
 # Map our target to the chrome-for-testing platform folder name.
 case "$target" in
-  x86_64-unknown-linux-musl) chrome_platform="linux64" ;;
-  aarch64-unknown-linux-musl) chrome_platform="" ;; # no headless-shell build for linux-arm64
+  x86_64-unknown-linux-*) chrome_platform="linux64" ;;
+  aarch64-unknown-linux-*) chrome_platform="" ;; # no headless-shell build for linux-arm64
   x86_64-apple-darwin) chrome_platform="mac-x64" ;;
   aarch64-apple-darwin) chrome_platform="mac-arm64" ;;
 esac
@@ -79,7 +92,10 @@ curl -fsSL "${BASE}/edge-${target}.tar.gz" | tar -xz -C "$INSTALL_DIR" edge
 chmod +x "$INSTALL_DIR/edge"
 echo "installed $INSTALL_DIR/edge"
 
-if have_browser; then
+# The native engine needs no browser; EDGE_NO_BROWSER skips the download for server installs.
+if [ -n "${EDGE_NO_BROWSER:-}" ]; then
+  echo "browser: skipped (EDGE_NO_BROWSER); web commands need Chrome/Chromium or EDGE_CHROME_PATH"
+elif have_browser; then
   echo "browser: found an existing Chrome/Chromium, skipping chrome-headless-shell download"
 else
   install_browser

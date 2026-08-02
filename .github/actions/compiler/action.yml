@@ -39,6 +39,12 @@ runs:
       shell: bash
       run: cargo clippy --all-targets --no-default-features -- -D warnings
 
+    # The native engine module only compiles under this feature, e2e coverage lives in cli/tests.
+    - name: Clippy (native engine)
+      if: inputs.mode == 'check'
+      shell: bash
+      run: cargo clippy --lib --no-default-features --features native -- -D warnings
+
     - name: Install wasm target (check)
       if: inputs.mode == 'check'
       shell: bash

@@ -8,16 +8,20 @@ use rustyline::history::DefaultHistory;
 use rustyline::Editor;
 use std::path::Path;
 
-use crate::engine::Session;
+use crate::engine::{Backend, Session};
+use crate::native::NativeSession;
 use crate::pkg::Manifest;
 
 const PROMPT: &str = ">>> ";
 
 type Repl = Editor<(), DefaultHistory>;
 
-pub fn run(manifest_path: &Path) -> Result<()> {
-    let manifest = Manifest::load(manifest_path)?;
-    let mut session = Session::open(&manifest)?;
+pub fn run(manifest_path: &Path, packages: Option<&Path>, web: bool) -> Result<()> {
+    let mut session: Box<dyn Backend> = if web {
+        Box::new(Session::open(&Manifest::load(manifest_path)?)?)
+    } else {
+        Box::new(NativeSession::open(packages))
+    };
     println!("Edge Python {}  ·  .reset to start fresh  ·  .exit, Ctrl+C or Ctrl+D to quit", env!("CARGO_PKG_VERSION"));
 
     let mut rl: Repl = Editor::new()?;
@@ -35,7 +39,7 @@ pub fn run(manifest_path: &Path) -> Result<()> {
         match trimmed {
             ".exit" => break,
             ".reset" => {
-                // Wipe runtime modules in place; the browser keeps running.
+                // Wipe the interpreter in place; the engine keeps running.
                 session.reset()?;
                 rl.clear_screen()?;
                 continue;
@@ -43,7 +47,7 @@ pub fn run(manifest_path: &Path) -> Result<()> {
             _ => {}
         }
 
-        let outcome = session.eval(&line, None, crate::engine::emit_chunk)?;
+        let outcome = session.eval(&line, None, &mut |l| crate::engine::emit_chunk(l))?;
         // `raise SystemExit` quits the session with its code, matching the one-shot runner.
         if let Some(code) = outcome.exit_code {
             std::process::exit(code);

@@ -3,10 +3,10 @@
 */
 
 use anyhow::{bail, Context, Result};
+use compiler::devkit::SCAFFOLD_MAIN_PY;
 use std::fs;
 use std::path::Path;
 
-const MAIN_PY: &str = "print(\"hello from edge python\")\n";
 const PACKAGES_JSON: &str = "{}\n";
 const INDEX_HTML: &str = include_str!("templates/scaffold.html");
 
@@ -25,7 +25,7 @@ pub fn run(name: Option<&str>, bare: bool) -> Result<()> {
         fs::create_dir_all(root).with_context(|| format!("creating {dir}"))?;
     }
 
-    fs::write(root.join("main.py"), MAIN_PY)?;
+    fs::write(root.join("main.py"), SCAFFOLD_MAIN_PY)?;
     fs::write(root.join("packages.json"), PACKAGES_JSON)?;
 
     let mut items = vec![];

@@ -16,6 +16,7 @@ Run the following commands before sending a pull request to ensure code quality:
 - `cargo test --release --no-default-features` Run the compiler test suite.
 - `cargo clippy --all-targets --no-default-features -- -D warnings` Lint the Rust code.
 - `cargo clippy --lib --target wasm32-unknown-unknown -p edge-python -p slugify-mod -- -D warnings` Lint the wasm build.
+- `cargo clippy --lib --no-default-features --features native -- -D warnings` Lint the native engine module.
 - `cargo shear` Detect unused dependencies.
 - For significant changes, execute the [fuzzer](https://edgepython.com/implementation/fuzzing/) to check for new crashes or performance regressions.
 

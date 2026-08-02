@@ -41,8 +41,7 @@ pub enum Kind {
     Host,
 }
 
-const STD: [&str; 5] = ["json", "re", "math", "struct", "test"];
-const HOST: [&str; 4] = ["dom", "network", "storage", "time"];
+use compiler::devkit::{HOST_PACKAGES as HOST, STD_PACKAGES as STD};
 
 /// Resolve a bare name against the official registry; user manifest overrides go through `resolve`.
 pub fn registry(name: &str) -> Option<(Kind, String)> {

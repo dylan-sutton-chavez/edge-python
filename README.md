@@ -8,7 +8,7 @@
 
 <br/>
 
-Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Python subset: NaN-boxed values, inline caching, super-instruction fusion, pure-function memoization, mark-sweep GC. Coverage-guided fuzzing; runs in the browser as a WebAssembly module.
+Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Python subset. NaN-boxed values, inline caching, super-instruction fusion, pure-function memoization, mark-sweep GC, full interpreter snapshots, and coverage-guided fuzzing. Runs in the browser as a WebAssembly module and natively inside the CLI.
 
 - Secure by default. No file, network, or environment access, unless explicitly enabled by the [host](https://edgepython.com/reference/packages#host-libraries).
 - Around 200 KB footprint. The full compiler and runtime ship as a single WASM binary.
@@ -33,8 +33,9 @@ Cargo workspace rooted at the engine crate (`edge-python`); commands work from a
 ├── js
 ├── pdk
 ├── src
-│   ├── bin
 │   ├── lexer
+│   ├── native
+│   │   └── host
 │   ├── packages
 │   ├── parser
 │   ├── util
@@ -52,7 +53,7 @@ Cargo workspace rooted at the engine crate (`edge-python`); commands work from a
 ```bash
 cargo wasm # release .wasm (the distributed artifact)
 cargo build --release # host .rlib + cdylib for Rust embedders
-cargo build --profile native --no-default-features --features native # host-less native runner
+cargo clippy --lib --no-default-features --features native # lint the native engine module
 cargo test --release --no-default-features # run the compiler test suite
 ```
 
@@ -70,7 +71,7 @@ Single-pass pipeline: source -> SSA bytecode chunk; stack interpreter with adapt
 
 Full rationale, NaN-box patterns, IC thresholds, GC roots, and intentional omissions: [Design](https://edgepython.com/implementation/design). Lexer and parser internals: [Lexical](https://edgepython.com/implementation/lexical), [Syntax](https://edgepython.com/implementation/syntax).
 
-Native modules ship via three delivery paths (CDN `.wasm`, host capability, JS host module), see [Writing modules](https://edgepython.com/reference/writing-modules).
+Native modules ship via four delivery paths (CDN `.wasm`, native `.so`/`.dylib` plugin, host capability, JS host module), see [Writing modules](https://edgepython.com/reference/writing-modules).
 
 ## Quick start
 
@@ -87,7 +88,7 @@ cargo install --path cli
 edge -h # List all commands
 ```
 
-`edge` hosts the runtime in a headless Chromium for `run`, `repl` and `test`; `install.sh` downloads a pinned `chrome-headless-shell` into `~/.cache/edge` unless a system Chrome/Chromium is already installed.
+`run`, `repl` and `test` execute in the built-in native engine; `--web` hosts the runtime in a headless Chromium instead, and `install.sh` downloads a pinned `chrome-headless-shell` into `~/.cache/edge` unless a system Chrome/Chromium is already installed (`EDGE_NO_BROWSER=1` skips it).
 
 ### Browser
 
@@ -112,7 +113,7 @@ Edge Python is a `cdylib`: a Rust host can instantiate `compiler.wasm` and call 
 
 ### Native
 
-Tagged releases attach the engine as a host-less native executable, plus each std package as a native plugin library; the CDN serves the same assets under `/native/` ([native port](https://edgepython.com/reference/native)).
+`edge run`, `edge repl`, and `edge test` execute in the CLI's in-process native engine by default (`--web` restores Chromium); tagged releases and the CDN's `/native/` route carry each std package as a native plugin library ([native engine](https://edgepython.com/reference/native)).
 
 ```python
 # hello.py
@@ -124,13 +125,30 @@ await greet("edge")
 ```
 
 ```text
-$ ./edge-aarch64 hello.py
+$ edge run hello.py
 hello edge
+```
+
+Imports, std packages, and the built-in `time` / `network` modules resolve without a browser:
+
+```python
+# app.py
+import json
+from "./lib/helper.py" import double
+
+data = json.loads('{"n": 21}')
+await sleep(0.1)
+print(json.dumps({"result": double(data["n"])}))
+```
+
+```text
+$ edge run app.py
+{"result":42}
 ```
 
 ## What it is
 
-Edge Python targets sandboxed in-browser execution: a dynamic, multi-paradigm Python subset with classes, async/await, structural pattern matching, and compile-time module resolution. There is no bundled stdlib, modules are external artifacts.
+Edge Python targets sandboxed execution, in the browser and in the CLI's native engine: a dynamic, multi-paradigm Python subset with classes, async/await, structural pattern matching, and compile-time module resolution. There is no bundled stdlib, modules are external artifacts.
 
 Full language reference, scope, and what intentionally isn't supported: [What Edge Python is](https://edgepython.com/getting-started/what-it-is).
 

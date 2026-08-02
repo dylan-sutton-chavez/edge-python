@@ -75,7 +75,7 @@ runs:
         cp -r /tmp/cli/. _site/cli/
         cp cli/setup/install.sh cli/setup/uninstall.sh _site/cli/
 
-        # native: the runner tarball plus std plugin .so files, served under /native/.
+        # native assets, the std plugin .so files the CLI's native engine resolves, served under /native/.
         cp -r /tmp/native/. _site/native/
 
     - name: Report served size

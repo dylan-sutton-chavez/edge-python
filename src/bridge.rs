@@ -1,13 +1,154 @@
-use crate::abi::{classify_decode, classify_encode, DecodeBits, EncodeRequest, ErrorKind, Op, PrimitiveBytes, TAG_INVALID};
+// The FFI safety contract lives in docs/reference/wasm-abi.md, per-fn sections would duplicate it.
+#![allow(clippy::missing_safety_doc)]
+
+use crate::abi::{classify_decode, classify_encode, DecodeBits, EncodeRequest, ErrorKind, ErrorStash, HandleTable, Op, PrimitiveBytes, TAG_INVALID};
 use crate::vm::types::{DictMap, HeapObj, Val, VmErr};
 use crate::vm::handlers::methods::{lookup_method, dispatch_method};
-use crate::packages::NativeBinding;
-use alloc::{rc::Rc, string::{String, ToString}, sync::Arc, vec::Vec};
+use crate::vm::VM;
+use alloc::{rc::Rc, string::{String, ToString}, vec::Vec};
 use core::cell::RefCell;
+use core::ptr::NonNull;
 use crate::s;
 
-use super::{get_val, host_call_native, in_vm, put_val, release_handles, safe_bytes, safe_handles, safe_str_owned, with_recv, with_runtime, with_vm};
-use super::errors::{error_from_kind, stash_error};
+/* All bridge state behind one accessor so `with_bridge` is the sole unsafe point. */
+pub(crate) struct BridgeState {
+    pub handles: HandleTable,
+    pub error_stash: ErrorStash,
+    /* Set and cleared by `VmGuard` or the paused-run stashes, deref only while its VM lives. */
+    pub current_vm: Option<NonNull<VM<'static>>>,
+}
+
+static mut BRIDGE: BridgeState = BridgeState {
+    handles: HandleTable::new(),
+    error_stash: ErrorStash::new(),
+    current_vm: None,
+};
+
+// SAFETY holds because WASM and the native engine are single-threaded, re-entry routes through `with_vm`.
+pub(crate) fn with_bridge<R>(f: impl FnOnce(&mut BridgeState) -> R) -> R {
+    unsafe { f(&mut *core::ptr::addr_of_mut!(BRIDGE)) }
+}
+
+pub fn put_val(v: Val) -> u32 { with_bridge(|b| b.handles.put(v.0)) }
+pub fn get_val(h: u32) -> Option<Val> { with_bridge(|b| b.handles.get(h).map(Val)) }
+
+// Release a batch of handles in one bridge borrow.
+pub fn release_handles(handles: &[u32]) {
+    with_bridge(|b| for &h in handles { b.handles.release(h); });
+}
+
+/* Drops handles, stash and VM pointer together, a paused run holding stale handles must go with them. */
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn reset() {
+    with_bridge(|b| {
+        b.handles.clear();
+        b.error_stash.clear();
+        b.current_vm = None;
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn set_current_vm(ptr: Option<NonNull<VM<'static>>>) {
+    with_bridge(|b| b.current_vm = ptr);
+}
+
+/* RAII publisher for the live VM pointer. Holding the guard across `run()` ensures a panic or early return cannot leave a stale pointer for later `host_edge_op` calls. */
+pub struct VmGuard;
+
+impl VmGuard {
+    pub fn new(vm: &mut VM<'_>) -> Self {
+        // 'static is storage-only, deref only inside the `run()` frame holding the guard.
+        let ptr: NonNull<VM<'static>> = NonNull::from(vm).cast();
+        with_bridge(|b| b.current_vm = Some(ptr));
+        Self
+    }
+}
+
+impl Drop for VmGuard {
+    fn drop(&mut self) {
+        with_bridge(|b| b.current_vm = None);
+    }
+}
+
+pub(crate) fn with_vm<R>(f: impl FnOnce(&mut VM<'static>) -> R) -> Option<R> {
+    // Drop the bridge borrow before `f`, VM dispatch re-enters `with_bridge`.
+    let ptr = with_bridge(|b| b.current_vm)?;
+    Some(f(unsafe { &mut *ptr.as_ptr() }))
+}
+
+/* Builds a `&[u8]` from an FFI `(ptr, len)`, empty on null or zero length, `from_raw_parts` would UB on either. */
+pub(crate) unsafe fn safe_bytes<'a>(ptr: *const u8, len: u32) -> &'a [u8] {
+    if ptr.is_null() || len == 0 { return &[]; }
+    unsafe { core::slice::from_raw_parts(ptr, len as usize) }
+}
+
+/* Same for `&[u32]` argv arrays. */
+pub(crate) unsafe fn safe_handles<'a>(ptr: *const u32, len: u32) -> &'a [u32] {
+    if ptr.is_null() || len == 0 { return &[]; }
+    unsafe { core::slice::from_raw_parts(ptr, len as usize) }
+}
+
+/* Owned UTF-8 string from an FFI `(ptr, len)`; empty on null or invalid UTF-8. */
+pub(crate) unsafe fn safe_str_owned(ptr: *const u8, len: u32) -> String {
+    core::str::from_utf8(unsafe { safe_bytes(ptr, len) }).unwrap_or("").to_string()
+}
+
+/* `with_vm` that errors when called outside run(). */
+pub(crate) fn in_vm(err: &'static str, f: impl FnOnce(&mut VM<'static>) -> Result<Val, VmErr>) -> Result<Val, VmErr> {
+    with_vm(f).ok_or(VmErr::Runtime(err))?
+}
+
+/* `dispatch_*` prologue: resolve `recv_h` and run `f` against the live VM. Fails on stale handle or call outside `run()`. */
+pub(crate) fn with_recv<F>(invalid_recv_msg: &'static str, recv_h: u32, f: F) -> Result<Val, VmErr>
+where F: FnOnce(&mut VM<'static>, Val) -> Result<Val, VmErr>
+{ let recv = get_val(recv_h).ok_or(VmErr::Runtime(invalid_recv_msg))?; with_vm(|vm| f(vm, recv)).ok_or(VmErr::Runtime("edge_op called outside run()"))? }
+
+/* VmErr classifier for the ABI boundary. */
+pub(crate) fn err_to_kind(e: &VmErr) -> ErrorKind {
+    match e {
+        VmErr::Type(_) | VmErr::TypeMsg(_) => ErrorKind::Type,
+        VmErr::Value(_) => ErrorKind::Value,
+        VmErr::Runtime(_) => ErrorKind::Runtime,
+        VmErr::Attribute(_) | VmErr::Name(_) => ErrorKind::Attribute,
+        VmErr::Raised(s) => {
+            if s.starts_with("ValueError") { ErrorKind::Value }
+            else if s.starts_with("IndexError") { ErrorKind::Index }
+            else if s.starts_with("KeyError") { ErrorKind::Key }
+            else { ErrorKind::Runtime }
+        }
+        _ => ErrorKind::Runtime,
+    }
+}
+
+pub(crate) fn stash_error(e: VmErr) {
+    let kind = err_to_kind(&e);
+    let msg = e.render();
+    with_bridge(|b| b.error_stash.set_typed(kind, msg));
+}
+
+/* Message-only stash for contexts without a `VmErr`, e.g. the WASM panic handler. */
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn stash_raw_error(kind: u32, msg: String) {
+    with_bridge(|b| b.error_stash.set(kind, msg));
+}
+
+pub fn take_error() -> Option<(u32, String)> {
+    with_bridge(|b| b.error_stash.take())
+}
+
+/* Inverse of `err_to_kind`: rebuilds a `VmErr` from (kind, msg). Exhaustive over `ErrorKind` so new variants can't slip into `Raised`. */
+pub fn error_from_kind(kind: u32, msg: String) -> VmErr {
+    match ErrorKind::from_u32(kind) {
+        Some(ErrorKind::Type) => VmErr::TypeMsg(msg),
+        Some(ErrorKind::Value) => VmErr::Raised(s!("ValueError: ", str &msg)),
+        Some(ErrorKind::Runtime) => VmErr::Raised(s!("RuntimeError: ", str &msg)),
+        Some(ErrorKind::Attribute) => VmErr::Attribute(msg),
+        Some(ErrorKind::Index) => VmErr::Raised(s!("IndexError: ", str &msg)),
+        Some(ErrorKind::Key) => VmErr::Raised(s!("KeyError: ", str &msg)),
+        // Custom kinds carry the user-defined class name in `msg` (`<ClassName>: <text>`); pass through unchanged.
+        Some(ErrorKind::Custom) | None => VmErr::Raised(msg),
+    }
+}
 
 // Universal dispatch. Returns 0 + handle in `*out_handle`, or 1 + stashed error.
 #[unsafe(no_mangle)]
@@ -394,27 +535,27 @@ pub unsafe extern "C" fn host_edge_decode(h: u32, out_tag: *mut u32, dst: *mut u
 // Decrement refcount on a handle. No-op for invalid handles.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn host_edge_release(h: u32) {
-    with_runtime(|rt| rt.handles.release(h));
+    with_bridge(|b| b.handles.release(h));
 }
 
 // Stash a guest error for the host. Overwrites any pending error.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn host_edge_throw(kind: u32, msg_ptr: *const u8, msg_len: u32) {
     let msg = unsafe { safe_str_owned(msg_ptr, msg_len) };
-    with_runtime(|rt| rt.error_stash.set(kind, msg));
+    with_bridge(|b| b.error_stash.set(kind, msg));
 }
 
 // Drain the most recent error.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn host_edge_take_error(out_kind: *mut u32, dst: *mut u8, dst_max: u32) -> i32 {
     // Peek first so buffer-too-small callers can retry.
-    let (kind, len) = match with_runtime(|rt| rt.error_stash.peek().map(|(k, m)| (k, m.len()))) {
+    let (kind, len) = match with_bridge(|b| b.error_stash.peek().map(|(k, m)| (k, m.len()))) {
         Some(p) => p,
         None => return -1,
     };
     if len > dst_max as usize { return -(len as i32); }
     // Buffer fits, drain and copy. None on `take()` means a lost peek/take race; return no-pending-error instead of panicking across FFI.
-    let Some((_, msg)) = with_runtime(|rt| rt.error_stash.take()) else { return -1; };
+    let Some((_, msg)) = with_bridge(|b| b.error_stash.take()) else { return -1; };
     let bytes = msg.as_bytes();
     unsafe {
         *out_kind = kind;
@@ -423,42 +564,4 @@ pub unsafe extern "C" fn host_edge_take_error(out_kind: *mut u32, dst: *mut u8, 
         }
     }
     bytes.len() as i32
-}
-
-/* Builds a NativeBinding that marshals handles around `host_call_native`. Kept out of resolver.rs so the resolver stays ABI-agnostic. */
-pub(super) fn make_native_binding(name: String, id: u32) -> NativeBinding {
-    let closure = move |_: &mut crate::vm::types::HeapPool, args: &[Val], kwargs: Option<Val>| -> Result<Val, VmErr> {
-        /* 1. Register positional args as handles the guest will see; append the kwargs handle (0 means no kwargs). */
-        let mut argv: Vec<u32> = args.iter().map(|v| put_val(*v)).collect();
-        argv.push(kwargs.map_or(0, put_val));
-        let mut out_handle: u32 = 0;
-
-        // call_id is what call_extern will park with on defer; lets the host route the result back.
-        let call_id = with_vm(|vm| vm.next_host_call_id as u32).unwrap_or(0);
-        let status = unsafe {
-            host_call_native(
-                id, call_id,
-                argv.as_ptr(), argv.len() as u32,
-                &mut out_handle as *mut u32,
-            )
-        };
-
-        /* 3. Read result BEFORE releasing argv: a returned input would point into slots we're about to free. */
-        // Status 2 = DEFERRED: handler has captured what it needs; release argv and park the VM.
-        if status == 2 {
-            release_handles(&argv);
-            return Err(VmErr::HostCallDeferred);
-        }
-        if status != 0 {
-            release_handles(&argv);
-            let (kind, msg) = with_runtime(|rt| rt.error_stash.take())
-                .unwrap_or((ErrorKind::Runtime as u32, String::from("native call failed")));
-            return Err(error_from_kind(kind, msg));
-        }
-        let result = get_val(out_handle).ok_or(VmErr::Runtime("native returned invalid handle"))?;
-        argv.push(out_handle);
-        release_handles(&argv);
-        Ok(result)
-    };
-    NativeBinding { name, func: Arc::new(closure), pure: false }
 }

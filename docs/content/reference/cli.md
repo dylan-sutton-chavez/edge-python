@@ -3,7 +3,7 @@ title: "Command line interface"
 description: "The Edge Python developer command line interface (CLI): run, serve, repl, init, package management, and build."
 ---
 
-The `edge` developer CLI. Write `.py`, run it, serve it, ship it. You never compile anything yourself. `edge` hosts the [Edge Python runtime](/getting-started/what-it-is#where-it-runs) in a headless Chromium provisioned at install time, then runs your code against it. You point it at a file.
+The `edge` developer CLI. Write `.py`, run it, serve it, ship it. You never compile anything yourself. `run`, `repl`, and `test` execute in the built-in [native engine](/reference/native) by default, in-process with millisecond startup; the `--web` flag hosts the [Edge Python runtime](/getting-started/what-it-is#where-it-runs) in a headless Chromium instead, for scripts that need the browser (`dom`, `frame()`, sockets).
 
 ```bash
 edge run app.py     # run a script
@@ -17,7 +17,7 @@ edge build          # bundle to dist/
 edge uninstall      # remove the binary, PATH entry, optionally the bundled browser
 ```
 
-The runtime does the actual work. `edge` is the loop around it. It launches the headless browser, serves the runtime alongside your code, runs everything in that browser, and streams output back to your terminal. `edge serve` instead serves your project directory to your own browser, with live reload.
+Under `--web` the browser runtime does the actual work and `edge` is the loop around it: it launches headless Chromium, serves the runtime alongside your code, runs everything there, and streams output back to your terminal. `edge serve` always targets your own browser, with live reload.
 
 ## Install
 
@@ -31,7 +31,7 @@ cargo install --path cli
 
 `install.sh` drops the binary at `~/.local/bin/edge` and appends that directory (plus `EDGE_CHROME_PATH`, when the bundled browser is downloaded) to your `~/.bashrc` or `~/.zshrc` unless the file already has it. Open a new shell (or `source` the file it printed) and `edge --version` should work. Re-run the same `curl … | sh` line any time to upgrade. To remove everything: `curl -fsSL https://cdn.edgepython.com/cli/uninstall.sh | sh` (non-interactive: it leaves the bundled browser cache in place; `edge uninstall` asks before removing it).
 
-`install.sh` also provisions a headless browser when none is reachable; details and overrides in [Bring your own browser](#bring-your-own-browser).
+On Linux the installer probes your libc and picks the matching build: glibc 2.28+ gets the gnu binary (std `.so` plugins load natively), anything older or musl-based gets a fully static fallback. `install.sh` also provisions a headless browser when none is reachable — set `EDGE_NO_BROWSER=1` to skip it on servers that only use the native engine; details and overrides in [Bring your own browser](#bring-your-own-browser).
 
 ## `edge run`: run a Python file
 
@@ -55,7 +55,7 @@ error: ZeroDivisionError: division by zero
 
 A `raise SystemExit(code)` with an integer (or no argument) exits cleanly with that code and no traceback. A string argument is reported as an error and exits 1.
 
-Flags: `--packages <file>` (custom manifest). With no path, `edge run` reads from stdin if it is piped (`cat hello.py | edge run`). It errors out if stdin is a terminal.
+Flags: `--packages <file>` (custom manifest), plus the native-engine flags `--events`, `--save-state`, `--restore-state`, and `--preempt` ([native engine](/reference/native#run-flags); they reject `--web`). With no path, `edge run` reads from stdin if it is piped (`cat hello.py | edge run`). It errors out if stdin is a terminal. With a path, piped stdin feeds [`input()`](/reference/builtins#input) one line per call.
 
 ## `edge serve`: local dev server
 
@@ -208,6 +208,7 @@ Removes the binary and its `PATH` entry. Asks before removing the bundled `chrom
 | Flag | Effect |
 |------|--------|
 | `--packages <file>` | Use a specific manifest instead of `./packages.json` (read by `run`, `repl`, `test`, `add`, `remove`, `build`) |
+| `--web` | Drive the browser runtime instead of the in-process [native engine](/reference/native) (`run`, `repl`, `test`) |
 | `--version` / `-V` | Print version |
 
 `Ctrl+C` cancels any running command cleanly.

@@ -6,8 +6,9 @@ use alloc::{boxed::Box, string::{String, ToString}};
 use core::ptr::NonNull;
 use crate::s;
 
-use super::{ModuleEntry, PausedRun, SZ, VmGuard, now_ns_host, safe_bytes, safe_str_owned, stream_print, with_runtime, write_out};
+use super::{ModuleEntry, PausedRun, SZ, now_ns_host, stream_print, with_runtime, write_out};
 use super::resolver::WasmHostResolver;
+use crate::bridge::{self, VmGuard, safe_bytes, safe_str_owned};
 
 /* Packed `u32` from `run_start` / `run_resume`: top 3 bits = kind, low 29 = out-buffer length. */
 const STATUS_KIND_SHIFT: u32 = 29;
@@ -124,15 +125,13 @@ pub unsafe extern "C" fn reset_modules() {
     with_runtime(|rt| {
         rt.registry.clear();
         rt.manifests.clear();
-        rt.handles.clear();
-        rt.error_stash.clear();
         // Paused run references the now-stale module table; drop it for a clean reset.
         rt.paused_run = None;
         rt.repl_vm = None;
         rt.repl_mode = false;
-        // current_vm may have pointed into the dropped paused VM; clear it so a stray host_edge_* sees None instead of dangling.
-        rt.current_vm = None;
     });
+    // The bridge current_vm may have pointed into the dropped paused VM, reset clears it too.
+    bridge::reset();
 }
 
 /* Copies up to SZ bytes from the host SRC buffer into an owned `String` so the caller can drop the runtime borrow before parsing. */
@@ -206,10 +205,8 @@ fn step_vm(mut vm: VM<'static>, src: &str, prev_paused: Option<Box<PausedRun>>) 
             };
             // Re-publish `current_vm` to the boxed VM so embedder calls like `host_edge_encode` (run between this yield and the next `run_resume`) can still allocate into the heap. The Box's address is stable across the move into rt.
             let vm_ptr = paused.vm.as_mut().map(|v| NonNull::from(v).cast::<VM<'static>>());
-            with_runtime(|rt| {
-                rt.paused_run = Some(paused);
-                rt.current_vm = vm_ptr;
-            });
+            with_runtime(|rt| rt.paused_run = Some(paused));
+            bridge::set_current_vm(vm_ptr);
             kind
         }
         Err(e) => {
@@ -233,13 +230,12 @@ fn step_vm(mut vm: VM<'static>, src: &str, prev_paused: Option<Box<PausedRun>>) 
 
 /* Terminal-state VM: the REPL keeps it for the next input, one-shot runs drop it. */
 fn park_repl_or_drop(mut vm: VM<'static>) {
-    with_runtime(|rt| {
-        if rt.repl_mode {
-            vm.clear_error_state();
-            rt.current_vm = None;
-            rt.repl_vm = Some(Box::new(vm));
-        }
-    });
+    let repl_mode = with_runtime(|rt| rt.repl_mode);
+    if repl_mode {
+        vm.clear_error_state();
+        bridge::set_current_vm(None);
+        with_runtime(|rt| rt.repl_vm = Some(Box::new(vm)));
+    }
 }
 
 /* REPL entry: first call boots the interpreter, later calls adopt each input as a new entry chunk on the SAME interpreter, so history never re-executes. */
@@ -332,8 +328,8 @@ pub unsafe extern "C" fn run_push_event(ptr: *const u8, len: u32) -> i32 {
 
 /* `set_host_*` prologue: take `handle`'s Val (1 = stale) and run `f` on the paused VM (3 = no paused run). */
 fn with_paused_vm(handle: u32, f: impl FnOnce(&mut VM<'static>, crate::vm::types::Val) -> i32) -> i32 {
-    let Some(val) = super::get_val(handle) else { return 1; };
-    super::with_runtime(|rt| { rt.handles.release(handle); });
+    let Some(val) = bridge::get_val(handle) else { return 1; };
+    bridge::release_handles(&[handle]);
     super::with_runtime(|rt| {
         let Some(paused) = rt.paused_run.as_mut() else { return 3; };
         let Some(vm) = paused.vm.as_mut() else { return 3; };
@@ -361,7 +357,7 @@ pub unsafe extern "C" fn set_host_error_by_id(id: u32, kind: u32, msg_handle: u3
             HeapObj::Str(s) => s.clone(),
             _ => String::new(),
         };
-        let e = super::errors::error_from_kind(kind, msg);
+        let e = bridge::error_from_kind(kind, msg);
         if vm.inject_host_error_by_id(id as u64, e) { 0 } else { 2 }
     })
 }
@@ -405,10 +401,8 @@ pub unsafe extern "C" fn snapshot_ptr() -> *const u8 {
 /* Boot from the blob's embedded source, overlay its saved state. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn restore_state(len: usize) -> u32 {
-    with_runtime(|rt| {
-        rt.paused_run = None;
-        rt.current_vm = None;
-    });
+    with_runtime(|rt| rt.paused_run = None);
+    bridge::set_current_vm(None);
     let blob: alloc::vec::Vec<u8> = with_runtime(|rt| rt.src[..len.min(SZ)].to_vec());
     let source = match snapshot::source_of(&blob) {
         Ok(s) => s.to_string(),

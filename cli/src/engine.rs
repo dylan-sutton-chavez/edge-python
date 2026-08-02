@@ -43,6 +43,22 @@ pub struct Outcome {
     pub exit_code: Option<i32>,
 }
 
+/// The engine seam: repl and test drive the browser session or the native VM through this.
+pub trait Backend {
+    fn eval(&mut self, src: &str, base: Option<&str>, on_line: &mut dyn FnMut(&str)) -> Result<Outcome>;
+    fn reset(&mut self) -> Result<()>;
+}
+
+impl Backend for Session {
+    fn eval(&mut self, src: &str, base: Option<&str>, on_line: &mut dyn FnMut(&str)) -> Result<Outcome> {
+        Session::eval(self, src, base, |line| on_line(line))
+    }
+
+    fn reset(&mut self) -> Result<()> {
+        Session::reset(self)
+    }
+}
+
 /// A live session: the worker keeps the interpreter alive, so each eval runs its input exactly once.
 pub struct Session {
     _browser: Browser,

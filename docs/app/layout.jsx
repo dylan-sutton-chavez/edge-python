@@ -19,7 +19,7 @@ const monoCode = JetBrains_Mono({
     display: 'swap',
 })
 
-const DEFAULT_DESCRIPTION = 'Edge Python — a sandboxed Python scripting language compiled to WebAssembly for the edge.'
+const DEFAULT_DESCRIPTION = 'Edge Python, a sandboxed Python subset that runs in the browser as WebAssembly and natively in the CLI, with full interpreter snapshots.'
 
 // Per-page <title> comes from frontmatter via the catch-all's generateMetadata; this just supplies the suffix template and the fallback.
 export const metadata = {

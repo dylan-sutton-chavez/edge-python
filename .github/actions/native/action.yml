@@ -1,12 +1,12 @@
-name: Native port
-description: Host-less native builds. runner = the edge-native bin, std packages = plugin cdylibs. CDN staging + tag Release upload.
+name: Native std packages
+description: std packages as native plugin cdylibs, linux with a glibc 2.28 floor plus darwin dylibs. CDN staging + tag Release upload.
 
 inputs:
   package:
-    description: "runner | json | re | math | struct"
+    description: "json | re | math | struct"
     required: true
   target:
-    description: Rust target triple.
+    description: Rust linux-gnu or apple-darwin target triple.
     required: true
   github-token:
     description: Token for the tag Release upload (tags only).
@@ -16,7 +16,7 @@ inputs:
 runs:
   using: composite
   steps:
-    # Nightly rotates daily; its manifest hash keys an exact-version toolchain cache.
+    # Nightly rotates daily, its manifest hash keys an exact-version toolchain cache.
     - name: Toolchain cache key
       id: toolchain
       shell: bash
@@ -29,14 +29,7 @@ runs:
         path: |
           ~/.rustup/toolchains
           ~/.rustup/update-hashes
-        key: rustup-${{ inputs.package == 'runner' && 'runner' || 'std' }}-${{ inputs.target }}-${{ steps.toolchain.outputs.nightly }}
-
-    - name: Toolchain (stable)
-      if: inputs.package == 'runner'
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        targets: ${{ inputs.target }}
-        components: clippy
+        key: rustup-std-${{ inputs.target }}-${{ steps.toolchain.outputs.nightly }}
 
     # build-std needs nightly plus rust-src.
     - name: Toolchain (nightly)
@@ -45,70 +38,48 @@ runs:
         targets: ${{ inputs.target }}
         components: rust-src
 
-    - name: Cache Rust (runner)
-      if: inputs.package == 'runner'
-      uses: Swatinem/rust-cache@v2
-      with:
-        key: native-${{ inputs.target }}
+    # The pip wheel bundles zig, which links against a chosen glibc floor.
+    - name: Install cargo-zigbuild
+      if: contains(inputs.target, 'linux')
+      shell: bash
+      run: command -v cargo-zigbuild >/dev/null || pip3 install --user cargo-zigbuild
 
-    - name: Cache Rust (std)
-      if: inputs.package != 'runner'
+    - name: Cache Rust
       uses: Swatinem/rust-cache@v2
       with:
         workspaces: std/${{ inputs.package }} -> std/${{ inputs.package }}/target
         key: native-${{ inputs.target }}
 
-    # The bin sits behind `required-features`, so the workspace-wide lint job never covers it.
-    - name: Clippy (runner)
-      if: inputs.package == 'runner'
-      shell: bash
-      run: cargo +stable clippy --bin edge-native --no-default-features --features native --target "${{ inputs.target }}" -- -D warnings
-
-    - name: Build runner
-      if: inputs.package == 'runner'
-      shell: bash
-      run: |
-        RUSTFLAGS="-Z location-detail=none -Z fmt-debug=none -Z unstable-options -C panic=immediate-abort" \
-        cargo +nightly build \
-          --profile native \
-          --no-default-features --features native \
-          --bin edge-native \
-          --target "${{ inputs.target }}" \
-          -Z build-std=std,panic_abort
-
-    - name: Smoke test (runner)
-      if: inputs.package == 'runner'
-      shell: bash
-      run: |
-        printf 'print("native ok")\n' > /tmp/smoke.py
-        "target/${{ inputs.target }}/native/edge-native" /tmp/smoke.py | grep -qx "native ok"
-
-    - name: Build std package
-      if: inputs.package != 'runner'
+    # Glibc 2.28 covers every mainstream distro of the last decade; Mach-O leaves edge_* to dlopen via dynamic_lookup.
+    - name: Build
       shell: bash
       working-directory: std/${{ inputs.package }}
+      env:
+        TARGET: ${{ inputs.target }}
+        SIZE_FLAGS: -Z location-detail=none -Z fmt-debug=none -Z unstable-options -C panic=immediate-abort
       run: |
-        RUSTFLAGS="-Z location-detail=none -Z fmt-debug=none -Z unstable-options -C panic=immediate-abort" \
-        cargo +nightly build \
-          --profile native \
-          --target "${{ inputs.target }}" \
-          -Z build-std=std,panic_abort
+        export PATH="$HOME/.local/bin:$PATH"
+        case "$TARGET" in
+          *linux-gnu)
+            RUSTFLAGS="$SIZE_FLAGS" cargo +nightly zigbuild --profile native --target "${TARGET}.2.28" -Z build-std=std,panic_abort ;;
+          *apple-darwin)
+            RUSTFLAGS="$SIZE_FLAGS -C link-arg=-undefined -C link-arg=dynamic_lookup" \
+            cargo +nightly build --profile native --target "$TARGET" -Z build-std=std,panic_abort ;;
+        esac
 
-    # Assets carry the short arch, the lib glob absorbs keyword-crate names like libedge_struct.so.
+    # Assets carry the short arch, the lib glob absorbs keyword-crate names like libedge_struct.
     - name: Package
       shell: bash
       env:
         TARGET: ${{ inputs.target }}
       run: |
         ARCH="${TARGET%%-*}"
+        case "$TARGET" in
+          *apple-darwin) EXT="dylib" ;;
+          *) EXT="so" ;;
+        esac
         mkdir -p _native
-        if [ "${{ inputs.package }}" = "runner" ]; then
-          cp "target/${TARGET}/native/edge-native" "_native/edge-${ARCH}"
-          tar -C _native -czf "_native/edge-${ARCH}.tar.gz" "edge-${ARCH}"
-          rm "_native/edge-${ARCH}"
-        else
-          cp "std/${{ inputs.package }}/target/${TARGET}/native/"lib*.so "_native/${{ inputs.package }}-${ARCH}.so"
-        fi
+        cp "std/${{ inputs.package }}/target/${TARGET}/native/"lib*."$EXT" "_native/${{ inputs.package }}-${ARCH}.${EXT}"
 
     # The `native-` prefix is the glob cdn-deploy stages under /native/.
     - name: Upload artifact
