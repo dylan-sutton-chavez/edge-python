@@ -280,7 +280,7 @@ pub fn base_dir(file: &Path) -> Option<String> {
 
 /* Test hooks: EDGE_FAKE_CONTRACT lands after element.js, so the fake wins; EDGE_RUNTIME_DIR swaps the CDN runtime and compiler for locally served copies. */
 fn harness_page() -> String {
-    let mut page = HARNESS.to_string();
+    let mut page = HARNESS.replacen("%CONTRACT%", compiler::devkit::RUNTIME_CONTRACT, 1);
     if let Ok(v) = std::env::var("EDGE_FAKE_CONTRACT") {
         // Non-numeric sentinels inject as strings, still unequal to any contract.
         let lit = if v.parse::<i64>().is_ok() { v } else { format!("{v:?}") };

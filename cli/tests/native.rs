@@ -155,15 +155,26 @@ fn native_only_flags_reject_web() {
     assert_eq!(code, 1);
 }
 
-// Exercises dlopen plus the exported edge_* bridge end to end when the plugin is built.
+// Exercises dlopen plus the exported edge_* bridge end to end when the plugin is available.
 #[test]
 fn loads_a_std_plugin_from_disk() {
-    let lib = format!("{}json.{}", std::env::consts::DLL_PREFIX, std::env::consts::DLL_SUFFIX.trim_start_matches('.'));
-    let so = Path::new(env!("CARGO_MANIFEST_DIR")).join("../std/json/target/release").join(lib);
-    if !so.exists() {
-        eprintln!("skipping, build std/json with cargo build --release first");
-        return;
-    }
+    let so = match std::env::var("EDGE_STD_DIR") {
+        // CI stages this run's artifacts here, a missing plugin is a wiring bug, not a skip.
+        Ok(d) => {
+            let staged = Path::new(&d).join("native").join(format!("json-{}.{}", std::env::consts::ARCH, std::env::consts::DLL_EXTENSION));
+            assert!(staged.exists(), "EDGE_STD_DIR is set but {} is missing", staged.display());
+            staged
+        }
+        Err(_) => {
+            let lib = format!("{}json.{}", std::env::consts::DLL_PREFIX, std::env::consts::DLL_SUFFIX.trim_start_matches('.'));
+            let local = Path::new(env!("CARGO_MANIFEST_DIR")).join("../std/json/target/release").join(lib);
+            if !local.exists() {
+                eprintln!("skipping, build std/json with cargo build --release first");
+                return;
+            }
+            local
+        }
+    };
     let dir = scratch("plugin");
     std::fs::write(
         dir.join("packages.json"),

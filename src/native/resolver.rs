@@ -122,7 +122,7 @@ impl FileResolver {
     }
 
     fn resolve_canonical(&mut self, spec: &str) -> Result<Resolved, String> {
-        let (target, _) = parse_integrity(spec)?;
+        let (target, frag_hash) = parse_integrity(spec)?;
         if target.ends_with(".py") {
             let bytes = self.fetch_bytes(spec, None)?;
             let src = String::from_utf8(bytes).map_err(|_| format!("module '{target}' is not valid UTF-8"))?;
@@ -130,6 +130,13 @@ impl FileResolver {
         }
         if target.ends_with(".so") || target.ends_with(".dylib") {
             let path = if target.contains("://") { fetch_cached(target)? } else { PathBuf::from(target) };
+            // dlopen runs arbitrary code, so a pinned hash must gate it.
+            if let Some(h) = frag_hash {
+                let bytes = std::fs::read(&path).map_err(|e| format!("cannot read module '{target}': {e}"))?;
+                if sha256(&bytes) != h {
+                    return Err(format!("sha256 mismatch for '{target}'"));
+                }
+            }
             let all = super::loader::load(&path)?;
             let (bindings, classes, consts) = partition_bindings(all);
             return Ok(Resolved::Native { bindings, classes, consts, canonical: spec.to_string() });
@@ -137,8 +144,7 @@ impl FileResolver {
         if target.ends_with(".wasm") {
             // Official std .wasm specs written by `edge add` swap to their native twin for this platform.
             if let Some(name) = target.strip_prefix("https://cdn.edgepython.com/std/").and_then(|r| r.strip_suffix(".wasm")) {
-                let twin = format!("https://cdn.edgepython.com/native/{name}-{}.{}", std::env::consts::ARCH, std::env::consts::DLL_EXTENSION);
-                return self.resolve_canonical(&twin);
+                return self.resolve_canonical(&native_std_spec(name));
             }
             return Err(format!("module '{target}' is a .wasm build; the native engine loads native plugins (or run with --web)"));
         }
@@ -149,12 +155,27 @@ impl FileResolver {
 /* Official std packages resolvable by bare name with no manifest, mirrors js/src/defaults.js. */
 fn std_default(name: &str) -> Option<String> {
     match name {
-        "json" | "re" | "math" | "struct" => {
-            Some(format!("https://cdn.edgepython.com/native/{name}-{}.{}", std::env::consts::ARCH, std::env::consts::DLL_EXTENSION))
-        }
-        "test" => Some("https://cdn.edgepython.com/std/test.py".to_string()),
+        "json" | "re" | "math" | "struct" => Some(native_std_spec(name)),
+        "test" => Some(match local_std_dir() {
+            Some(d) => format!("{d}/std/test.py"),
+            None => "https://cdn.edgepython.com/std/test.py".to_string(),
+        }),
         _ => None,
     }
+}
+
+/* Native twin of an official std package: local under EDGE_STD_DIR, contract-versioned CDN otherwise. */
+fn native_std_spec(name: &str) -> String {
+    let file = format!("{name}-{}.{}", std::env::consts::ARCH, std::env::consts::DLL_EXTENSION);
+    match local_std_dir() {
+        Some(d) => format!("{d}/native/{file}"),
+        None => format!("https://cdn.edgepython.com/native/{}/{file}", crate::devkit::RUNTIME_CONTRACT),
+    }
+}
+
+// Test hook mirroring the web engine's EDGE_RUNTIME_DIR, std assets come from a local dir.
+fn local_std_dir() -> Option<String> {
+    std::env::var("EDGE_STD_DIR").ok()
 }
 
 /* Spec bytes, a cached download for URLs, a plain read for paths. */
@@ -178,7 +199,10 @@ pub fn fetch_cached(url: &str) -> Result<PathBuf, String> {
     let mut bytes = Vec::new();
     resp.body_mut().as_reader().take(MAX_FETCH_BYTES).read_to_end(&mut bytes).map_err(|e| format!("reading '{url}': {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("creating cache dir: {e}"))?;
-    std::fs::write(&file, &bytes).map_err(|e| format!("writing cache for '{url}': {e}"))?;
+    // Temp plus rename keeps a truncated download out of the shared cache.
+    let tmp = file.with_extension(format!("{ext}.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, &bytes).map_err(|e| format!("writing cache for '{url}': {e}"))?;
+    std::fs::rename(&tmp, &file).map_err(|e| format!("writing cache for '{url}': {e}"))?;
     Ok(file)
 }
 

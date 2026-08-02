@@ -46,7 +46,7 @@ runs:
     - name: Stage site
       shell: bash
       run: |
-        mkdir -p _site/runtime _site/std _site/host _site/cli _site/native
+        mkdir -p _site/runtime _site/std _site/host _site/cli
 
         # compiler: served at /compiler.wasm as brotli-11; _headers tags the encoding.
         brotli -q 11 -c /tmp/compiler/compiler.wasm > _site/compiler.wasm
@@ -75,8 +75,11 @@ runs:
         cp -r /tmp/cli/. _site/cli/
         cp cli/setup/install.sh cli/setup/uninstall.sh _site/cli/
 
-        # native assets, the std plugin .so files the CLI's native engine resolves, served under /native/.
-        cp -r /tmp/native/. _site/native/
+        # native assets, the std plugin .so files, under /native/<contract>/ matching the resolver's URL.
+        contract="$(sed -n 's/^pub const RUNTIME_CONTRACT: &str = "\(.*\)";$/\1/p' src/devkit.rs)"
+        test -n "$contract"
+        mkdir -p "_site/native/$contract"
+        cp -r /tmp/native/. "_site/native/$contract/"
 
     - name: Report served size
       shell: bash

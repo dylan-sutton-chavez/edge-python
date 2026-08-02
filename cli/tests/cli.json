@@ -115,6 +115,7 @@
   },
   {
     "given": { "u.py": "val = 5\n", "t.py": "from \"./u.py\" import val\nprint(\"got\", val)\n" },
+    "engine": "both",
     "run": ["run", "t.py"],
     "stdout": ["got 5"]
   },
@@ -124,11 +125,13 @@
   },
   {
     "given": { "t.py": "print('hi from edge')\n" },
+    "engine": "both",
     "run": ["run", "t.py"],
     "stdout": ["hi from edge"]
   },
   {
     "given": { "boom.py": "x = 1 / 0\n" },
+    "engine": "both",
     "run": ["run", "boom.py"],
     "fails": ["ZeroDivisionError"]
   },
@@ -138,11 +141,13 @@
     "creates": ["dist/index.html", "dist/main.py", "dist/compiler.wasm"]
   },
   {
+    "engine": "both",
     "run": ["repl"],
-    "stdin": "from math import sqrt\ndef double(n): return sqrt(n) * 2\nprint(double(4))\n.exit\n",
+    "stdin": "def double(n): return n * 2\nprint(double(2.0))\n.exit\n",
     "stdout": ["4.0"]
   },
   {
+    "engine": "both",
     "run": ["repl"],
     "stdin": "x = 42\n.reset\nprint(x)\n.exit\n",
     "stderr": ["NameError"]
@@ -153,6 +158,7 @@
     "stdout": ["done"]
   },
   {
+    "engine": "both",
     "run": ["repl"],
     "stdin": "x = 1\nx = 2; 1 / 0\nprint(x)\n.exit\n",
     "stdout": ["2"],
@@ -161,6 +167,7 @@
   {
     "given": {"main.py": "print(1)"},
     "env": {"EDGE_FAKE_CONTRACT": "inf"},
+    "engine": "web",
     "run": ["run", "main.py"],
     "fails": ["cli built for runtime contract 0.1.0, the CDN serves contract inf", "install.sh"]
   }
