@@ -388,7 +388,7 @@ For `from "<url>" import <names>` with a `.wasm` URL, the host:
 4. Marshals args as handles.
 5. Propagates results.
 
-Reference browser shim: [`js/src/native.js`](https://github.com/dylan-sutton-chavez/edge-python/blob/main/js/src/native.js) (the `edge_*` guest imports and the built-in Path A loader). WASI hosts and Rust embedders mirror the shape.
+Reference browser shim: [`js/src/native.js`](https://github.com/dylan-sutton-chavez/edge-python/blob/main/js/src/native.js) (the `edge_*` guest imports and the built-in Path A loader). The CLI's [native engine](/reference/native#std-packages-as-native-libraries) implements the same six imports over `dlopen`. WASI hosts and Rust embedders mirror the shape.
 
 ## Constraints and caveats
 

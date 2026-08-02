@@ -95,11 +95,11 @@ Edge Python 0.1.0  ·  .reset to start fresh  ·  .exit, Ctrl+C or Ctrl+D to qui
 
 History (arrow keys) is supported. Each line runs as one input, so compound statements go on a single line (`def double(n): return n * 2`). `.exit`, `Ctrl+C`, or `Ctrl+D` quit. `.reset` wipes the session state and clears the screen. Expression results are not auto-printed. Use `print()` explicitly.
 
-The worker keeps one interpreter alive across prompts: each input compiles and runs **once**, and imports, definitions, and mutations persist in place. Side effects never re-fire, and an input that raises keeps the effects it made before the error.
+The engine keeps one interpreter alive across prompts: each input compiles and runs **once**, and imports, definitions, and mutations persist in place. Side effects never re-fire, and an input that raises keeps the effects it made before the error.
 
 ## `edge test`: test runner
 
-Discovers `*_test.py` files (recursively, skipping `dist/` and hidden directories), runs each in a fresh interpreter inside one shared browser session, and prints a verdict per file. `edge test path/` narrows discovery to a directory; `edge test file.py` runs one file.
+Discovers `*_test.py` files (recursively, skipping `dist/` and hidden directories), runs each in a fresh interpreter inside one shared engine session, and prints a verdict per file. `edge test path/` narrows discovery to a directory; `edge test file.py` runs one file.
 
 ```text
 my-app/
@@ -139,7 +139,7 @@ def t_add():
 
 A file that calls `run()` itself also works: either way its `SystemExit` code is the file's verdict, so the reported result never depends on parsing printed output. A file that registers no tests fails.
 
-Exit codes: `0` every file passed, `1` a file failed or no `*_test.py` was found, `2` the browser session could not start.
+Exit codes: `0` every file passed, `1` a file failed or no `*_test.py` was found, `2` the engine session could not start.
 
 ## `edge init`: scaffold a workspace
 

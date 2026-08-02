@@ -9,14 +9,14 @@ Two families, matching two of the three [delivery paths](/reference/writing-modu
 
 | Family | Source | Form | Where it runs | Path |
 |---|---|---|---|---|
-| **Standard packages** | [`std/`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/std) | `.wasm` (Rust) | Inside the WASM sandbox, any host | [Path A](/reference/writing-modules#path-a-wasm-module-by-url) |
+| **Standard packages** | [`std/`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/std) | `.wasm` + native `.so` twin (Rust) | Inside the WASM sandbox, any host; the CLI loads the twin | [Path A](/reference/writing-modules#path-a-wasm-module-by-url) |
 | **Host libraries** | [`host/`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/host) | Plain ESM (JS) | Browser main thread | [Path C](/reference/writing-modules#path-c-js-host-module) |
 
-Standard packages are host-agnostic (they run wherever WASM runs). Host libraries are browser-only: they reach `document` / `window` / `localStorage`, surfaces that don't exist in a non-browser host.
+Standard packages are host-agnostic (they run wherever WASM runs, and the CLI's [native engine](/reference/native#module-resolution) loads their `.so` twins). Host libraries reach `document` / `window` / `localStorage`, surfaces that need a browser; the native engine builds in its own `time` and `network`, while `dom` and `storage` stay web-only.
 
 ## Standard packages
 
-Language-agnostic `.wasm` plugins over the [WASM module ABI](/reference/wasm-abi). Import by bare name (the browser runtime resolves the official ones by default; see [Defaults](#defaults)), by URL, or via a `packages.json` alias. The host fetches the `.wasm` and treats its exports as native bindings.
+Language-agnostic `.wasm` plugins over the [WASM module ABI](/reference/wasm-abi). Import by bare name (both engines resolve the official ones by default; see [Defaults](#defaults)), by URL, or via a `packages.json` alias. The host fetches the `.wasm` and treats its exports as native bindings.
 
 ### `json`
 
@@ -32,7 +32,7 @@ print(dumps({"k": [1, 2, 3], "ok": True})) # {"k":[1,2,3],"ok":true}
 
 Pre-built `.wasm` is served from `https://cdn.edgepython.com/std/json.wasm`. Full API: [`std/json/README.md`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/std/json).
 
-> **`json` is an external `.wasm` package, not built into `compiler.wasm`**. The browser runtime resolves it by [default](#defaults), so `from json import ...` works with no manifest.
+> **`json` is an external `.wasm` package, not built into `compiler.wasm`**. Both engines resolve it by [default](#defaults), so `from json import ...` works with no manifest.
 
 ### `re`
 
@@ -109,7 +109,7 @@ run() # prints PASS/FAIL lines and a summary, then raises SystemExit(0 if all pa
 
 `@fixture` registers a `def` under its name and injects it by keyword into the tests that ask for it. `@test(description, *uses)` registers a test plus the fixtures it pulls. `raises(ExcType)` is a context manager asserting the block raises `ExcType` (a subclass, or any type in a tuple). `run()` executes every registered test, prints `PASS` / `FAIL` / `ERROR` and a summary, then raises `SystemExit(1 if any failed, else 0)` so a host can read the result as a process exit code. [`edge test`](/reference/cli) drives `run()` for you across every `*_test.py` file.
 
-Unlike the other standard packages, `test` ships as **pure Edge Python source** (`src/entry.py`), not a compiled `.wasm`, so there is no `cargo` build. It is served from `https://cdn.edgepython.com/std/test.py`. The browser runtime resolves it by default, importing the `.py` directly (see [Defaults](#defaults)). Full API: [`std/test/README.md`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/std/test).
+Unlike the other standard packages, `test` ships as **pure Edge Python source** (`src/entry.py`), not a compiled `.wasm`, so there is no `cargo` build. It is served from `https://cdn.edgepython.com/std/test.py`. Both engines resolve it by default, importing the `.py` directly (see [Defaults](#defaults)). Full API: [`std/test/README.md`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/std/test).
 
 ## Host libraries
 
@@ -195,16 +195,16 @@ One manifest drives both directions: `imports` for worker-side `.py` / `.wasm` m
 
 ### Defaults
 
-The browser runtime ships a built-in base manifest, so the official packages resolve by bare name with **no `packages.json` at all**: the std packages (`json`, `re`, `math`, `struct`, and the pure-Python `test`) and the host libraries (`dom`, `network`, `storage`, `time`). `dom` resolves to a pure-Python façade over the internal `_dom` host module, adding opt-in mutation batching. Three rules:
+The browser runtime ships a built-in base manifest, so the official packages resolve by bare name with **no `packages.json` at all**: the std packages (`json`, `re`, `math`, `struct`, and the pure-Python `test`) and the host libraries (`dom`, `network`, `storage`, `time`). The CLI's [native engine](/reference/native#module-resolution) mirrors the same defaults, swapping std `.wasm` for the `.so` twins and serving `time` / `network` from built-ins. `dom` resolves to a pure-Python façade over the internal `_dom` host module, adding opt-in mutation batching. Three rules:
 
 - **Lazy.** A default is fetched only when a run actually imports it. Unused defaults never hit the network.
 - **Overridable.** Your `packages.json` (or `imports` / `hostModules`) wins for the same name, so you can pin a specific version or URL.
 - **Opt-out.** Pass `defaults: false` to `createWorker` to disable the base manifest entirely (e.g. offline or non-browser embedders).
 
-Defaults are a convenience of the browser runtime, not the compiler: `compiler.wasm` stays hermetic and resolves bare names only through the manifest the host provides. Non-browser hosts decide their own defaults, if any.
+Defaults are a convenience of the browser runtime and the CLI's native engine, not the compiler: `compiler.wasm` stays hermetic and resolves bare names only through the manifest the host provides. Other hosts decide their own defaults, if any.
 
 ## See also
 
 - [Imports](/reference/imports), import syntax, `packages.json`, integrity verification.
-- [Writing modules](/reference/writing-modules), build your own package (the three delivery paths).
+- [Writing modules](/reference/writing-modules), build your own package.
 - [WASM module ABI](/reference/wasm-abi), the contract standard `.wasm` packages implement.

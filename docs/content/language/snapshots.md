@@ -182,6 +182,10 @@ await store.put("cart", await worker.saveState()); // IndexedDB
 await fetch("/saves/cart", { method: "PUT", body: await worker.saveState() }); // server
 ```
 
+## The same blob from the CLI
+
+The [native engine](/reference/native#run-flags) works with snapshots as plain files, no JS involved: `edge run --save-state cart.bin` writes the blob when the script parks on a wait the CLI cannot serve, and `edge run --restore-state cart.bin` boots from it and keeps running. `--preempt <n>` is `setPreemptInterval(n)` as a flag, and `--events <f>` feeds `receive()` line by line. The blob layout is the same one `saveState` produces here.
+
 ## Restore if present, else start fresh
 
 The common pattern resumes a saved session when one exists and otherwise begins a new run. A backend works the same way as a local store: it only holds bytes and never runs the VM.

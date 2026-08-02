@@ -132,6 +132,11 @@ impl Cursor<'_> {
                 Some(b'"') => { self.i += 1; return Ok(out); }
                 Some(b'\\') => {
                     self.i += 1;
+                    if self.peek() == Some(b'u') {
+                        self.i += 1;
+                        out.push(self.unicode_escape()?);
+                        continue;
+                    }
                     match self.peek() {
                         Some(b'"') => out.push('"'),
                         Some(b'\\') => out.push('\\'),
@@ -143,8 +148,42 @@ impl Cursor<'_> {
                     }
                     self.i += 1;
                 }
-                Some(c) => { out.push(c as char); self.i += 1; }
+                Some(_) => {
+                    let start = self.i;
+                    while !matches!(self.peek(), None | Some(b'"') | Some(b'\\')) { self.i += 1; }
+                    // Spans between ASCII structurals in a &str are always valid UTF-8.
+                    out.push_str(core::str::from_utf8(&self.b[start..self.i]).unwrap_or(""));
+                }
             }
         }
+    }
+
+    /* Four hex digits after `\u`, surrogate pairs combine, lone surrogates read as U+FFFD. */
+    fn unicode_escape(&mut self) -> Result<char, String> {
+        let hi = self.hex4()?;
+        if (0xD800..0xDC00).contains(&hi) {
+            if self.b.get(self.i) == Some(&b'\\') && self.b.get(self.i + 1) == Some(&b'u') {
+                let save = self.i;
+                self.i += 2;
+                let lo = self.hex4()?;
+                if (0xDC00..0xE000).contains(&lo) {
+                    return Ok(char::from_u32(0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00)).unwrap_or('\u{FFFD}'));
+                }
+                self.i = save;
+            }
+            return Ok('\u{FFFD}');
+        }
+        Ok(char::from_u32(hi).unwrap_or('\u{FFFD}'))
+    }
+
+    fn hex4(&mut self) -> Result<u32, String> {
+        let mut v = 0u32;
+        for _ in 0..4 {
+            let d = self.peek().and_then(|c| (c as char).to_digit(16))
+                .ok_or_else(|| "expected 4 hex digits after \\u".to_string())?;
+            v = v * 16 + d;
+            self.i += 1;
+        }
+        Ok(v)
     }
 }

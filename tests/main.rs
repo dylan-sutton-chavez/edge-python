@@ -6,3 +6,4 @@ mod parser;
 mod vm;
 mod packages;
 mod snapshot;
+mod devkit;
