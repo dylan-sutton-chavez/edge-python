@@ -1,5 +1,5 @@
 name: Native std packages
-description: std packages as native plugin cdylibs, linux with a glibc 2.28 floor plus darwin dylibs. CDN staging + tag Release upload.
+description: std packages as native plugin cdylibs, linux with a glibc 2.17 floor plus darwin dylibs. CDN staging + tag Release upload.
 
 inputs:
   package:
@@ -50,7 +50,7 @@ runs:
         workspaces: std/${{ inputs.package }} -> std/${{ inputs.package }}/target
         key: native-${{ inputs.target }}
 
-    # Glibc 2.28 covers every mainstream distro of the last decade; Mach-O leaves edge_* to dlopen via dynamic_lookup.
+    # Glibc 2.17 covers every distro still in support; Mach-O leaves edge_* to dlopen via dynamic_lookup.
     - name: Build
       shell: bash
       working-directory: std/${{ inputs.package }}
@@ -61,7 +61,7 @@ runs:
         export PATH="$HOME/.local/bin:$PATH"
         case "$TARGET" in
           *linux-gnu)
-            RUSTFLAGS="$SIZE_FLAGS" cargo +nightly zigbuild --profile native --target "${TARGET}.2.28" -Z build-std=std,panic_abort ;;
+            RUSTFLAGS="$SIZE_FLAGS" cargo +nightly zigbuild --profile native --target "${TARGET}.2.17" -Z build-std=std,panic_abort ;;
           *apple-darwin)
             RUSTFLAGS="$SIZE_FLAGS -C link-arg=-undefined -C link-arg=dynamic_lookup" \
             cargo +nightly build --profile native --target "$TARGET" -Z build-std=std,panic_abort ;;

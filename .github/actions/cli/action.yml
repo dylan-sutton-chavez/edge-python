@@ -39,12 +39,7 @@ runs:
       with:
         targets: ${{ inputs.target }}
 
-    - name: Install musl tools
-      if: inputs.mode == 'release' && contains(inputs.target, 'linux-musl')
-      shell: bash
-      run: sudo apt-get update && sudo apt-get install -y musl-tools
-
-    # Gnu releases link through zig against a glibc 2.28 floor so dlopen'd std plugins work everywhere.
+    # Gnu releases link through zig against a glibc 2.17 floor so dlopen'd std plugins work everywhere.
     - name: Install cargo-zigbuild
       if: inputs.mode == 'release' && contains(inputs.target, 'linux-gnu')
       shell: bash
@@ -64,7 +59,7 @@ runs:
       run: |
         export PATH="$HOME/.local/bin:$PATH"
         case "${{ inputs.target }}" in
-          *linux-gnu) cargo zigbuild --release --target "${{ inputs.target }}.2.28" ;;
+          *linux-gnu) cargo zigbuild --release --target "${{ inputs.target }}.2.17" ;;
           *) cargo build --release --target "${{ inputs.target }}" ;;
         esac
 

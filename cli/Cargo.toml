@@ -28,10 +28,6 @@ rustyline = "17.0.0"
 # HTTPS fetcher used by `edge build` to vendor the runtime, compiler.wasm, and packages.
 ureq = "3"
 
-# Static musl builds keep musl's slow malloc otherwise.
-[target.'cfg(target_env = "musl")'.dependencies]
-mimalloc = "0.1"
-
 [dev-dependencies]
 # Per-test tempdir; auto-cleans on drop so cases don't leak state into the project.
 tempfile = "3"

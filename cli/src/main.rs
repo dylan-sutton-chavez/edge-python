@@ -14,11 +14,6 @@ use std::path::{Path, PathBuf};
 
 use manifest::Manifest;
 
-// Static musl builds keep musl's slow malloc otherwise.
-#[cfg(target_env = "musl")]
-#[global_allocator]
-static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
 #[derive(Parser)]
 #[command(name = "edge", version, about = "The Edge Python developer command line interface.", after_help = "Press Ctrl+C at any time to exit cleanly.", after_long_help = "Docs: https://edgepython.com/", color = clap::ColorChoice::Never)]
 struct Cli {

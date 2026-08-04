@@ -44,7 +44,7 @@ pub(super) fn load(path: &Path) -> Result<Vec<NativeBinding>, String> {
     std::hint::black_box([edge_op as *const (), edge_encode as *const (), edge_decode as *const (), edge_release as *const (), edge_throw as *const (), edge_take_error as *const ()]);
     let names = candidate_exports(path)?;
     let lib: &'static libloading::Library = Box::leak(Box::new(
-        unsafe { libloading::Library::new(path) }.map_err(|e| format!("dlopen '{}': {e}", path.display()))?,
+        unsafe { libloading::Library::new(path) }.map_err(|e| format!("dlopen '{}': {}", path.display(), dl_detail(&e)))?,
     ));
     let version: unsafe extern "C" fn() -> u32 = *unsafe { lib.get(b"__edge_abi_version") }
         .map_err(|_| format!("'{}' is missing __edge_abi_version", path.display()))?;
@@ -63,6 +63,14 @@ pub(super) fn load(path: &Path) -> Result<Vec<NativeBinding>, String> {
         return Err(format!("'{}' exports no __fn_/__class_/__const_ symbols", path.display()));
     }
     Ok(bindings)
+}
+
+/* libloading 0.9 renders a bare "dlopen failed", the dlerror text it wraps is the actionable part. */
+fn dl_detail(e: &libloading::Error) -> String {
+    match std::error::Error::source(e) {
+        Some(src) => src.to_string(),
+        None => e.to_string(),
+    }
 }
 
 /* Marshals handles around one plugin call, mirroring the wasm-side extern dispatch. */

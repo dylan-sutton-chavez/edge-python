@@ -31,7 +31,7 @@ cargo install --path cli
 
 `install.sh` drops the binary at `~/.local/bin/edge` and appends that directory (plus `EDGE_CHROME_PATH`, when the bundled browser is downloaded) to your `~/.bashrc` or `~/.zshrc` unless the file already has it. Open a new shell (or `source` the file it printed) and `edge --version` should work. Re-run the same `curl … | sh` line any time to upgrade. To remove everything: `curl -fsSL https://cdn.edgepython.com/cli/uninstall.sh | sh` (non-interactive: it leaves the bundled browser cache in place; `edge uninstall` asks before removing it).
 
-On Linux the installer probes your libc and picks the matching build: glibc 2.28+ gets the gnu binary (std `.so` plugins load natively), anything older or musl-based gets a fully static fallback. `install.sh` also provisions a headless browser when none is reachable — set `EDGE_NO_BROWSER=1` to skip it on servers that only use the native engine; details and overrides in [Bring your own browser](#bring-your-own-browser).
+Linux needs glibc 2.17 or newer, the floor the prebuilt binaries are linked against; the installer checks it up front and explains what to do instead when the host is older or musl-based, rather than installing a static build that could not load std `.so` plugins. `install.sh` also provisions a headless browser when none is reachable — set `EDGE_NO_BROWSER=1` to skip it on servers that only use the native engine; details and overrides in [Bring your own browser](#bring-your-own-browser).
 
 ## `edge run`: run a Python file
 

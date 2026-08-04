@@ -10,21 +10,22 @@ INSTALL_DIR="${EDGE_INSTALL_DIR:-$HOME/.local/bin}"
 CHROME_DIR="${EDGE_CHROME_DIR:-$HOME/.cache/edge}"
 CHROME_BUILD="${EDGE_CHROME_BUILD:-131.0.6778.85}"
 
-# Glibc 2.28 or newer gets the gnu build (std .so plugins load); older or musl systems get the static fallback.
-linux_libc() {
+# Floor the release binaries link against, kept in step with .github/actions/cli.
+GLIBC_FLOOR="2.17"
+
+# A static fallback would link musl's stub dlopen, so it could never load a .so plugin.
+require_glibc() {
   glibc="$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')"
-  if [ -n "$glibc" ]; then
-    major="${glibc%%.*}"
-    minor="${glibc#*.}"; minor="${minor%%.*}"
-    if [ "$major" -gt 2 ] 2>/dev/null || { [ "$major" -eq 2 ] && [ "$minor" -ge 28 ]; } 2>/dev/null; then
-      echo "gnu"; return
-    fi
+  # sort -V puts the floor first when the host meets it, and handles 2.9 vs 2.17 correctly.
+  if [ -n "$glibc" ] && [ "$(printf '%s\n%s\n' "$GLIBC_FLOOR" "$glibc" | sort -V | head -n1)" = "$GLIBC_FLOOR" ]; then
+    return 0
   fi
-  echo "musl"
+  echo "unsupported glibc: ${glibc:-none (musl)}, edge needs $GLIBC_FLOOR or newer; build from source with 'cargo install --path cli'" >&2
+  exit 1
 }
 
 case "$(uname -s)" in
-  Linux) os="unknown-linux-$(linux_libc)" ;;
+  Linux) require_glibc; os="unknown-linux-gnu" ;;
   Darwin) os="apple-darwin" ;;
   *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
 esac
@@ -36,11 +37,6 @@ case "$(uname -m)" in
 esac
 
 target="${arch}-${os}"
-
-case "$target" in
-  x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|x86_64-unknown-linux-musl|aarch64-unknown-linux-musl|x86_64-apple-darwin|aarch64-apple-darwin) ;;
-  *) echo "no prebuilt for $target yet; build from source with 'cargo install --path cli'" >&2; exit 1 ;;
-esac
 
 # Map our target to the chrome-for-testing platform folder name.
 case "$target" in
