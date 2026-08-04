@@ -16,7 +16,8 @@ fn scratch(name: &str) -> PathBuf {
 
 fn run_in(dir: &Path, args: &[&str], stdin: Option<&str>) -> (String, String, i32) {
     let mut cmd = Command::new(BIN);
-    cmd.current_dir(dir).args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // Scratch-local module cache, so no case reads or writes the real one.
+    cmd.current_dir(dir).args(args).env("XDG_CACHE_HOME", dir).stdout(Stdio::piped()).stderr(Stdio::piped());
     cmd.stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() });
     let mut child = cmd.spawn().unwrap();
     if let Some(input) = stdin {
@@ -152,6 +153,33 @@ fn native_only_flags_reject_web() {
     std::fs::write(dir.join("e.txt"), "x\n").unwrap();
     let (_, err, code) = run_in(&dir, &["run", "--web", "--events", "e.txt"], None);
     assert!(err.contains("native-only"), "stderr was: {err}");
+    assert_eq!(code, 1);
+}
+
+/* A cached url loads with no pin in the spec, then stays pinned to those first bytes. */
+#[test]
+fn a_cached_module_is_pinned_to_its_first_bytes() {
+    let dir = scratch("pin");
+    // Seed cache and pin the way a download would. The url never resolves, so nothing can refetch.
+    let url = "https://cdn.test/helper.py";
+    let key = compiler::util::sha256::hex_encode(&compiler::util::sha256::sha256(url.as_bytes()));
+    let blob = dir.join("edge-native").join(format!("{key}.py"));
+    let src = "def double(n):\n    return n * 2\n";
+    std::fs::create_dir_all(blob.parent().unwrap()).unwrap();
+    std::fs::write(&blob, src).unwrap();
+    let pin = compiler::util::sha256::hex_encode(&compiler::util::sha256::sha256(src.as_bytes()));
+    std::fs::write(blob.with_extension("py.lock"), &pin).unwrap();
+    std::fs::write(dir.join("packages.json"), format!("{{ \"imports\": {{ \"helper\": \"{url}\" }} }}\n")).unwrap();
+    std::fs::write(dir.join("main.py"), "from helper import double\nprint(double(21))\n").unwrap();
+
+    // The gate this replaced refused unpinned bytes outright, breaking every default std import.
+    let (out, err, code) = run_in(&dir, &["run", "main.py"], None);
+    assert_eq!(out, "42\n", "stderr was: {err}");
+    assert_eq!(code, 0, "stderr was: {err}");
+
+    std::fs::write(&blob, "def double(n):\n    return 0\n").unwrap();
+    let (_, err, code) = run_in(&dir, &["run", "main.py"], None);
+    assert!(err.contains("integrity drift"), "stderr was: {err}");
     assert_eq!(code, 1);
 }
 

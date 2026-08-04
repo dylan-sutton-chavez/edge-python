@@ -465,7 +465,7 @@ The `edge-python` crate is a `cdylib`: a Rust host can instantiate `compiler.was
 edge-python = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.1.0" }
 ```
 
-Vendor the matching `compiler.wasm` next to your own sources and pin it by checksum, the same way the CLI pins native plugins with a `#sha256-` fragment. A release asset is immutable; the CDN path is not, so a checksum is the only thing that ties a build to a known engine.
+Vendor the matching `compiler.wasm` next to your own sources and pin it by checksum, the same way the CLI pins native plugins it downloads. A release asset is immutable; the CDN path is not, so a checksum is the only thing that ties a build to a known engine.
 
 To add native modules from a Rust host, implement the `Resolver` trait; see [Writing modules](/reference/writing-modules).
 

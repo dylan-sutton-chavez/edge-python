@@ -216,7 +216,7 @@ integrity drift for 'https://cdn.foo/kit/index.py'
 
 Same primitive as inline `#sha256-...` integrity, applied automatically to every imported URL. Explicit hashes in source are still honoured and fail at compile time before any code runs.
 
-Non-browser hosts make their own caching choices: `Resolver` sees only `(spec -> Resolved)` and `(spec -> bytes)`.
+Non-browser hosts make their own caching choices: `Resolver` sees only `(spec -> Resolved)` and `(spec -> bytes)`. The CLI's [native engine](/reference/native#module-resolution) pins downloaded plugins the same way.
 
 ## Sandbox
 

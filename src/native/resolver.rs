@@ -38,10 +38,7 @@ impl Resolver for FileResolver {
     fn fetch_bytes(&mut self, spec: &str, expected_hash: Option<[u8; 32]>) -> Result<Vec<u8>, String> {
         let (target, frag_hash) = parse_integrity(spec)?;
         let bytes = read_spec(target)?;
-        if let Some(h) = expected_hash.or(frag_hash)
-            && sha256(&bytes) != h {
-            return Err(format!("sha256 mismatch for '{target}'"));
-        }
+        check_pin(target, &bytes, None, expected_hash.or(frag_hash))?;
         Ok(bytes)
     }
 
@@ -129,26 +126,23 @@ impl FileResolver {
             return Ok(Resolved::Code { src, canonical: spec.to_string() });
         }
         if target.ends_with(".so") || target.ends_with(".dylib") {
-            let remote = target.contains("://");
-            // dlopen runs arbitrary code, so a downloaded plugin must carry a pinned hash.
-            if remote && frag_hash.is_none() {
-                return Err(format!("refusing to load '{target}' without a pinned '#sha256-' hash"));
-            }
-            let path = if remote { fetch_cached(target)? } else { PathBuf::from(target) };
-            if let Some(h) = frag_hash {
-                let bytes = std::fs::read(&path).map_err(|e| format!("cannot read module '{target}': {e}"))?;
-                if sha256(&bytes) != h {
-                    // Drop the poisoned entry so a later run refetches instead of failing forever.
-                    if remote { let _ = std::fs::remove_file(&path); }
-                    return Err(format!("sha256 mismatch for '{target}'"));
+            // dlopen runs arbitrary code, so the cache pins a downloaded plugin on first fetch.
+            let path = if target.contains("://") {
+                fetch_cached(target, frag_hash)?
+            } else {
+                let path = PathBuf::from(target);
+                if frag_hash.is_some() {
+                    let bytes = std::fs::read(&path).map_err(|e| format!("cannot read module '{target}': {e}"))?;
+                    check_pin(target, &bytes, None, frag_hash)?;
                 }
-            }
+                path
+            };
             let all = super::loader::load(&path)?;
             let (bindings, classes, consts) = partition_bindings(all);
             return Ok(Resolved::Native { bindings, classes, consts, canonical: spec.to_string() });
         }
         if target.ends_with(".wasm") {
-            // Official std .wasm specs written by `edge add` swap to their native twin for this platform.
+            // `edge add` .wasm specs swap to their native twin, dropping a fragment that digests the .wasm.
             if let Some(name) = target.strip_prefix("https://cdn.edgepython.com/std/").and_then(|r| r.strip_suffix(".wasm")) {
                 return self.resolve_canonical(&native_std_spec(name));
             }
@@ -187,29 +181,54 @@ fn local_std_dir() -> Option<String> {
 /* Spec bytes, a cached download for URLs, a plain read for paths. */
 fn read_spec(target: &str) -> Result<Vec<u8>, String> {
     if target.contains("://") {
-        let path = fetch_cached(target)?;
+        let path = fetch_cached(target, None)?;
         return std::fs::read(&path).map_err(|e| format!("cannot read cached '{target}': {e}"));
     }
     std::fs::read(target).map_err(|e| format!("cannot read module '{target}': {e}"))
 }
 
-/* Downloads once into the user cache, the file name is the url hash plus its extension. */
-pub fn fetch_cached(url: &str) -> Result<PathBuf, String> {
+/* Downloads once into the user cache, a `.lock` sidecar pins the digest like the runtime lockfile. */
+pub fn fetch_cached(url: &str, expected: Option<[u8; 32]>) -> Result<PathBuf, String> {
     let dir = cache_dir()?;
     let ext = url.rsplit('.').next().unwrap_or("bin");
     let file = dir.join(format!("{}.{ext}", hex_encode(&sha256(url.as_bytes()))));
+    let lock = file.with_extension(format!("{ext}.lock"));
     if file.exists() {
-        return Ok(file);
+        let bytes = std::fs::read(&file).map_err(|e| format!("cannot read cached '{url}': {e}"))?;
+        // A stale blob under a new explicit pin is a miss, so refetch instead of failing.
+        match check_pin(url, &bytes, std::fs::read_to_string(&lock).ok(), expected) {
+            Ok(_) => return Ok(file),
+            Err(e) if expected.is_none() => return Err(e),
+            Err(_) => {}
+        }
     }
     let mut resp = ureq::get(url).call().map_err(|e| format!("fetching '{url}': {e}"))?;
     let mut bytes = Vec::new();
     resp.body_mut().as_reader().take(MAX_FETCH_BYTES).read_to_end(&mut bytes).map_err(|e| format!("reading '{url}': {e}"))?;
+    let got = check_pin(url, &bytes, None, expected)?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("creating cache dir: {e}"))?;
     // Temp plus rename keeps a truncated download out of the shared cache.
     let tmp = file.with_extension(format!("{ext}.{}.tmp", std::process::id()));
     std::fs::write(&tmp, &bytes).map_err(|e| format!("writing cache for '{url}': {e}"))?;
     std::fs::rename(&tmp, &file).map_err(|e| format!("writing cache for '{url}': {e}"))?;
+    // Written after the bytes land, so a crash leaves no pin claiming an absent file.
+    std::fs::write(&lock, &got).map_err(|e| format!("writing cache for '{url}': {e}"))?;
     Ok(file)
+}
+
+/* Hashes `bytes` against an explicit pin, else the sidecar record. Unpinned bytes set the pin. */
+fn check_pin(spec: &str, bytes: &[u8], locked: Option<String>, expected: Option<[u8; 32]>) -> Result<String, String> {
+    let got = hex_encode(&sha256(bytes));
+    // A source fragment is a stated expectation, a sidecar record means upstream moved.
+    if let Some(want) = expected.map(|h| hex_encode(&h)) {
+        if want != got {
+            return Err(format!("integrity check failed for '{spec}'\n expected sha256-{want}\n got sha256-{got}"));
+        }
+    } else if let Some(want) = locked
+        && want != got {
+        return Err(format!("integrity drift for '{spec}'\n  locked: sha256-{want}\n  remote: sha256-{got}"));
+    }
+    Ok(got)
 }
 
 fn cache_dir() -> Result<PathBuf, String> {

@@ -8,6 +8,9 @@ INSTALL_DIR="${EDGE_INSTALL_DIR:-$HOME/.local/bin}"
 # Browser model: install.sh downloads a pinned chrome-headless-shell to ~/.cache/edge, so uninstall just removes that directory: no package-manager dispatch, no sudo, and we never touch system Chromium that other apps may depend on.
 CHROME_DIR="${EDGE_CHROME_DIR:-$HOME/.cache/edge}"
 
+# Downloaded plugins and their pins, edge-owned and refetchable, so they go with the binary.
+NATIVE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/edge-native"
+
 # 1. Binary.
 if [ -f "$INSTALL_DIR/edge" ]; then
   rm -f "$INSTALL_DIR/edge"
@@ -32,7 +35,13 @@ for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
   [ "$changed" = 1 ] && echo "cleaned edge entries from $rc (backup at $rc.edgebak)"
 done
 
-# 3. Bundled chrome-headless-shell cache. Opt-in; `edge uninstall` sets EDGE_UNINSTALL_REMOVE_BROWSER after asking in Rust, so we skip the prompt then.
+# 3. Module cache. Unconditional, nothing else reads it and every entry refetches on demand.
+if [ -d "$NATIVE_DIR" ]; then
+  rm -rf "$NATIVE_DIR"
+  echo "removed $NATIVE_DIR"
+fi
+
+# 4. Bundled chrome-headless-shell cache. Opt-in; `edge uninstall` sets EDGE_UNINSTALL_REMOVE_BROWSER after asking in Rust, so we skip the prompt then.
 remove_chrome_cache() {
   if [ -d "$CHROME_DIR" ]; then
     rm -rf "$CHROME_DIR"
