@@ -9,6 +9,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Case {
     #[serde(default)] given: BTreeMap<String, String>,
     #[serde(default)] env: BTreeMap<String, String>,

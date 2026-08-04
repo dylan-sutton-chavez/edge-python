@@ -1,6 +1,6 @@
 use crate::s;
-use crate::util::fx::FxHashMap as HashMap;
-use crate::vm::types::ExternFn;
+use crate::util::hash::FxHashMap as HashMap;
+use crate::value::ExternFn;
 
 use alloc::{string::{String, ToString}, vec, vec::Vec};
 
@@ -124,13 +124,13 @@ pub struct ImportEntry {
 #[derive(Clone)]
 pub struct NativeClassEntry {
     pub name: String,
-    pub methods: Vec<crate::vm::types::ExternFn>,
+    pub methods: Vec<crate::value::ExternFn>,
 }
 
 #[derive(Clone)]
 pub enum ImportKind {
     Code(alloc::rc::Rc<SSAChunk>),
-    Native { funcs: Vec<crate::vm::types::ExternFn>, classes: Vec<NativeClassEntry>, consts: Vec<crate::vm::types::ExternFn> },
+    Native { funcs: Vec<crate::value::ExternFn>, classes: Vec<NativeClassEntry>, consts: Vec<crate::value::ExternFn> },
 }
 
 // SSA chunk: instructions, constant/name pools, Phi metadata, nested functions/classes.

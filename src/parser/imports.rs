@@ -9,7 +9,7 @@ use super::types::{Diagnostic, ImportEntry, ImportKind, NativeClassEntry, OpCode
 use crate::lexer::{Token, TokenType, lex};
 use crate::packages::{Resolved, binding_to_extern, parse_integrity};
 use crate::util::sha256::{sha256, hex_encode};
-use crate::util::fx::FxHashSet;
+use crate::util::hash::FxHashSet;
 
 use alloc::{string::{String, ToString}, vec::Vec};
 

@@ -8,7 +8,6 @@ description = "Single-pass SSA bytecode compiler and threaded-code stack VM for 
 readme = "README.md"
 autotests = false
 autobins = false
-links = "compiler"
 
 [lib]
 name = "compiler"
@@ -20,10 +19,7 @@ doctest = false
 name = "tests"
 path = "tests/main.rs"
 
-# `prebuilt` (default on) gates the `build.rs` download of `compiler.wasm`. Consumers get the wasm transparently; this repo's own producer-side commands pass `--no-default-features` to skip the fetch (nothing here reads `DEP_COMPILER_WASM`).
 [features]
-default = ["prebuilt"]
-prebuilt = []
 # Gates the native engine module (resolver, dlopen loader, host modules) out of wasm and plain lib builds.
 native = ["dep:libloading", "dep:ureq"]
 

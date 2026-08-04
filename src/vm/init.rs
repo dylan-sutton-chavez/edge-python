@@ -9,7 +9,7 @@ use super::types::*;
 // `_`-prefixed names stay: the free-name fallback resolves module functions here.
 pub(crate) fn collect_module_attrs(chunk: &SSAChunk, slots: &[Val]) -> Vec<(String, Val)> {
     let mut attrs: Vec<(String, Val)> = Vec::new();
-    let mut seen: crate::util::fx::FxHashSet<String> = crate::util::fx::FxHashSet::default();
+    let mut seen: crate::util::hash::FxHashSet<String> = crate::util::hash::FxHashSet::default();
     for ins in &chunk.instructions {
         if !matches!(ins.opcode, OpCode::StoreName) { continue; }
         let Some(name) = chunk.names.get(ins.operand as usize) else { continue; };
@@ -43,7 +43,7 @@ impl<'a> VM<'a> {
         self.fn_index.push((chunk as *const _, indices));
 
         // Bare-name index so the free-load fallback is O(1) instead of re-parsing per miss.
-        let mut name_versions: super::NameVersionIndex = crate::util::fx::FxHashMap::default();
+        let mut name_versions: super::NameVersionIndex = crate::util::hash::FxHashMap::default();
         for (si, sname) in chunk.names.iter().enumerate() {
             if let Some(parsed) = crate::parser::SsaName::parse(sname) {
                 name_versions
@@ -150,7 +150,7 @@ impl<'a> VM<'a> {
         let fresh_entry = self.scheduler.is_empty();
         if fresh_entry {
             // Fresh entry. Initialise imports before user code; DFS gives topological order naturally.
-            let mut in_progress: crate::util::fx::FxHashSet<String> = crate::util::fx::FxHashSet::default();
+            let mut in_progress: crate::util::hash::FxHashSet<String> = crate::util::hash::FxHashSet::default();
             self.init_modules(self.chunk, &mut in_progress)?;
             // Wrap the module body as an implicit coroutine; lets top-level statements suspend on deferred host calls (DOM, sleep, receive) through the same scheduler path as `async def`.
             let slots = self.fill_builtins(&self.chunk.names);
@@ -193,7 +193,7 @@ impl<'a> VM<'a> {
     }
 
     /* Init each unique import once; code modules run their top-level, native ones just bind. `in_progress` catches cycles cleanly. */
-    fn init_modules(&mut self, chunk: &SSAChunk, in_progress: &mut crate::util::fx::FxHashSet<String>) -> Result<(), VmErr> {
+    fn init_modules(&mut self, chunk: &SSAChunk, in_progress: &mut crate::util::hash::FxHashSet<String>) -> Result<(), VmErr> {
         for entry in &chunk.imports {
             if self.module_table.contains_key(&entry.spec) { continue; }
             if !in_progress.insert(entry.spec.clone()) {

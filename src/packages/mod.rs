@@ -5,7 +5,7 @@ Parse-time import: resolver returns Code (spliced .py) or Native (extern_table);
 use alloc::{boxed::Box, string::{String, ToString}, sync::Arc, vec::Vec};
 
 use crate::s;
-use crate::vm::types::{HeapPool, Val, VmErr};
+use crate::value::{HeapPool, Val, VmErr};
 use crate::lexer::{lex, Token, TokenType};
 
 pub mod manifest;
@@ -133,8 +133,8 @@ impl Default for Box<dyn Resolver> {
 }
 
 /* Converts public NativeBinding into internal ExternFn; two structs separate host API from VM storage. */
-pub(crate) fn binding_to_extern(b: &NativeBinding) -> crate::vm::types::ExternFn {
-    crate::vm::types::ExternFn {
+pub(crate) fn binding_to_extern(b: &NativeBinding) -> crate::value::ExternFn {
+    crate::value::ExternFn {
         name: b.name.clone(),
         func: b.func.clone(),
         pure: b.pure,

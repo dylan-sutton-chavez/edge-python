@@ -22,28 +22,31 @@ Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Pyt
 
 ## Repository layout
 
-Cargo workspace rooted at the engine crate (`edge-python`); commands work from any directory.
+A Cargo workspace at the repo root holds the engine, `abi` and `pdk`. `cli/`, `fuzz/` and each `std/*` package are standalone workspaces with their own build and test commands; the commands below run from the repo root.
 
 ```text
 ├── abi
 ├── cli
+│   └── src
+│       ├── cmd
+│       └── engine
 ├── docs
 ├── fuzz
 ├── host
-├── js
 ├── pdk
+├── runtime
 ├── src
 │   ├── lexer
 │   ├── native
-│   │   └── host
+│   │   └── builtins
 │   ├── packages
 │   ├── parser
 │   ├── util
+│   ├── value
 │   ├── vm
-│   │   ├── builtins
-│   │   ├── handlers
-│   │   │   └── builtin_methods
-│   │   └── types
+│   │   ├── globals
+│   │   ├── methods
+│   │   └── opcodes
 │   └── wasm
 ├── std
 └── tests
@@ -51,13 +54,11 @@ Cargo workspace rooted at the engine crate (`edge-python`); commands work from a
 ```
 
 ```bash
-cargo wasm # release .wasm (the distributed artifact)
+cargo wasm # local release .wasm (CI ships a further size-optimised build)
 cargo build --release # host .rlib + cdylib for Rust embedders
-cargo clippy --lib --no-default-features --features native # lint the native engine module
-cargo test --release --no-default-features # run the compiler test suite
+cargo clippy --lib --features native # lint the native engine module
+cargo test --release # run the compiler test suite
 ```
-
-*`--no-default-features` disables the `prebuilt` feature, which otherwise triggers a `build.rs` download of `compiler.wasm` from the GitHub release: that download is only needed by external Rust crates that consume this library, not when developing locally.*
 
 ## Architecture
 
@@ -65,8 +66,9 @@ Single-pass pipeline: source -> SSA bytecode chunk; stack interpreter with adapt
 
 * **Lexer** (`src/lexer/`) LUT-driven, offset-based tokens.
 * **Parser** (`src/parser/`) Pratt precedence, SSA-versioned bytecode with `Phi` at joins, no AST.
-* **Optimizer** (`src/vm/optimizer.rs`) constant folding, Phi-noop elimination, dead-code compaction.
-* **VM** (`src/vm/`) flat-match dispatch, scalar + instance-dunder inline caches, pure-function template memoization, NaN-boxed 64-bit `Val` with a mark-and-sweep arena.
+* **Optimizer** (`src/optimizer.rs`) constant folding, Phi-noop elimination, dead-code compaction.
+* **Values** (`src/value/`) NaN-boxed 64-bit `Val`, heap objects, and the mark-and-sweep arena the whole pipeline shares.
+* **VM** (`src/vm/`) flat-match dispatch, scalar + instance-dunder inline caches, pure-function template memoization; `opcodes/` implements opcodes, `globals/` the global functions, `methods/` the builtin-type methods.
 * **Resolver** (`src/packages/`) host-injected; native imports register for `CallExtern` dispatch.
 
 Full rationale, NaN-box patterns, IC thresholds, GC roots, and intentional omissions: [Design](https://edgepython.com/implementation/design). Lexer and parser internals: [Lexical](https://edgepython.com/implementation/lexical), [Syntax](https://edgepython.com/implementation/syntax).
@@ -109,7 +111,7 @@ The runtime spawns a Web Worker that pre-fetches imports, dispatches native call
 
 ### Rust host
 
-Edge Python is a `cdylib`: a Rust host can instantiate `compiler.wasm` and call its exports directly, the same `.wasm` that ships to browsers; the host owns I/O. Declaring `edge-python` as a Cargo dependency fetches the matching release `.wasm` automatically (exposed as `DEP_COMPILER_WASM`), see [Consuming the release](https://edgepython.com/reference/wasm-abi#consuming-the-release-from-a-rust-crate). To add native modules from your own crate, implement the `Resolver` trait, see [Writing modules](https://edgepython.com/reference/writing-modules).
+Edge Python is a `cdylib`: a Rust host can instantiate `compiler.wasm` and call its exports directly, the same `.wasm` that ships to browsers; the host owns I/O. The crate fetches nothing at build time, so vendor the `.wasm` from a tagged release and pin it by checksum, see [Consuming the release](https://edgepython.com/reference/wasm-abi#consuming-the-release-from-a-rust-crate). To add native modules from your own crate, implement the `Resolver` trait, see [Writing modules](https://edgepython.com/reference/writing-modules).
 
 ### Native
 

@@ -121,7 +121,7 @@ async def main():
 run(main())
 ```
 
-Or skip the manual wiring: the browser runtime's `<edge-python>` element loads these declaratively from a `host` field in `packages.json`. See the [runtime README](https://github.com/dylan-sutton-chavez/edge-python/tree/main/js).
+Or skip the manual wiring: the browser runtime's `<edge-python>` element loads these declaratively from a `host` field in `packages.json`. See the [runtime README](https://github.com/dylan-sutton-chavez/edge-python/tree/main/runtime).
 
 Handlers take decoded JS values and return plain JS values. Supported tags: `None`, `bool`, `int` (i128; a JS `Number` within ±2^53, `BigInt` beyond), `float`, string, `bytes` (`Uint8Array`), plus nested `list` / `dict`. Opaque object references (DOM nodes, files, observers) model as integer IDs into a main-thread registry the handlers own (the `alloc` / `node` pattern above).
 

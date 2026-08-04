@@ -155,33 +155,50 @@ fn native_only_flags_reject_web() {
     assert_eq!(code, 1);
 }
 
-// Exercises dlopen plus the exported edge_* bridge end to end when the plugin is available.
-#[test]
-fn loads_a_std_plugin_from_disk() {
-    let so = match std::env::var("EDGE_STD_DIR") {
+// Locates a staged or locally built plugin, a staged one missing is a wiring bug.
+fn std_plugin(pkg: &str) -> Option<PathBuf> {
+    match std::env::var("EDGE_STD_DIR") {
         // CI stages this run's artifacts here, a missing plugin is a wiring bug, not a skip.
         Ok(d) => {
-            let staged = Path::new(&d).join("native").join(format!("json-{}.{}", std::env::consts::ARCH, std::env::consts::DLL_EXTENSION));
+            let staged = Path::new(&d).join("native").join(format!("{pkg}-{}.{}", std::env::consts::ARCH, std::env::consts::DLL_EXTENSION));
             assert!(staged.exists(), "EDGE_STD_DIR is set but {} is missing", staged.display());
-            staged
+            Some(staged)
         }
         Err(_) => {
-            let lib = format!("{}json.{}", std::env::consts::DLL_PREFIX, std::env::consts::DLL_SUFFIX.trim_start_matches('.'));
-            let local = Path::new(env!("CARGO_MANIFEST_DIR")).join("../std/json/target/release").join(lib);
-            if !local.exists() {
-                eprintln!("skipping, build std/json with cargo build --release first");
-                return;
-            }
-            local
+            // `struct` is a Rust keyword, so its crate and its local artifact carry the edge prefix.
+            let crate_name = if pkg == "struct" { "edge_struct" } else { pkg };
+            let lib = format!("{}{crate_name}.{}", std::env::consts::DLL_PREFIX, std::env::consts::DLL_SUFFIX.trim_start_matches('.'));
+            let local = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../std/{pkg}/target/release")).join(lib);
+            local.exists().then_some(local)
         }
-    };
-    let dir = scratch("plugin");
-    std::fs::write(
-        dir.join("packages.json"),
-        format!("{{ \"imports\": {{ \"json\": \"{}\" }} }}\n", so.display()),
-    ).unwrap();
-    std::fs::write(dir.join("main.py"), "import json\nprint(json.dumps({\"a\": [1, True, None]}))\n").unwrap();
-    let (out, _, code) = run_in(&dir, &["run", "main.py"], None);
-    assert_eq!(out, "{\"a\":[1,true,null]}\n");
-    assert_eq!(code, 0);
+    }
+}
+
+// Exercises dlopen plus the exported edge_* bridge end to end for every native std package.
+#[test]
+fn loads_std_plugins_from_disk() {
+    // A package whose exports are gated out of the native build would resolve to zero bindings.
+    let cases = [
+        ("json", "import json\nprint(json.dumps({\"a\": [1, True, None]}))\n", "{\"a\":[1,true,null]}\n"),
+        ("re", "import re\nprint(re.search(r'\\d+', 'abc123def'))\n", "123\n"),
+        ("math", "import math\nprint(math.floor(2.7))\n", "2\n"),
+        ("struct", "import struct\nprint(struct.calcsize('i'))\n", "4\n"),
+    ];
+    let mut ran = 0;
+    for (pkg, src, want) in cases {
+        let Some(so) = std_plugin(pkg) else { continue };
+        let dir = scratch(pkg);
+        std::fs::write(
+            dir.join("packages.json"),
+            format!("{{ \"imports\": {{ \"{pkg}\": \"{}\" }} }}\n", so.display()),
+        ).unwrap();
+        std::fs::write(dir.join("main.py"), src).unwrap();
+        let (out, err, code) = run_in(&dir, &["run", "main.py"], None);
+        assert_eq!(out, want, "{pkg} stdout, stderr was: {err}");
+        assert_eq!(code, 0, "{pkg} exit code, stderr was: {err}");
+        ran += 1;
+    }
+    if ran == 0 {
+        eprintln!("skipping, build the std packages with cargo build --release first");
+    }
 }

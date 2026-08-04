@@ -2,23 +2,17 @@
 edge: the Edge Python developer CLI. Run, serve, test, and scaffold Edge Python apps.
 */
 
-mod ui;
-mod init;
-mod native;
-mod pkg;
-mod serve;
+mod cmd;
 mod engine;
-mod repl;
-mod build;
-mod test;
-mod uninstall;
+mod manifest;
+mod ui;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
-use pkg::Manifest;
+use manifest::Manifest;
 
 // Static musl builds keep musl's slow malloc otherwise.
 #[cfg(target_env = "musl")]
@@ -98,10 +92,10 @@ fn main() -> Result<()> {
     let manifest_path = cli.packages.clone().unwrap_or_else(|| PathBuf::from("packages.json"));
 
     let result = match cli.cmd {
-        Cmd::Init { name, bare } => init::run(name.as_deref(), bare),
-        Cmd::Add { pkgs } => pkg::add(&manifest_path, &pkgs),
-        Cmd::Remove { pkgs } => pkg::remove(&manifest_path, &pkgs),
-        Cmd::Serve { host, port, open } => serve::run(PathBuf::from("."), &host, port, open),
+        Cmd::Init { name, bare } => cmd::init::run(name.as_deref(), bare),
+        Cmd::Add { pkgs } => cmd::pkg::add(&manifest_path, &pkgs),
+        Cmd::Remove { pkgs } => cmd::pkg::remove(&manifest_path, &pkgs),
+        Cmd::Serve { host, port, open } => cmd::serve::run(PathBuf::from("."), &host, port, open),
         Cmd::Run { file, events, save_state, restore_state, preempt } => {
             if cli.web {
                 if events.is_some() || save_state.is_some() || restore_state.is_some() || preempt.is_some() {
@@ -117,15 +111,15 @@ fn main() -> Result<()> {
                     save_state: save_state.map(|p| p.to_string_lossy().into_owned()),
                     restore_state: restore_state.map(|p| p.to_string_lossy().into_owned()),
                 };
-                native::run(file.as_deref(), &opts).map(|code| {
+                engine::native::run(file.as_deref(), &opts).map(|code| {
                     if code != 0 { std::process::exit(code) }
                 })
             }
         }
-        Cmd::Repl => repl::run(&manifest_path, cli.packages.as_deref(), cli.web),
-        Cmd::Build { out } => build::run(&manifest_path, out.unwrap_or_else(|| PathBuf::from("dist"))),
-        Cmd::Uninstall => uninstall::run(),
-        Cmd::Test { path } => test::run(&manifest_path, cli.packages.as_deref(), cli.web, path.as_deref()),
+        Cmd::Repl => cmd::repl::run(&manifest_path, cli.packages.as_deref(), cli.web),
+        Cmd::Build { out } => cmd::build::run(&manifest_path, out.unwrap_or_else(|| PathBuf::from("dist"))),
+        Cmd::Uninstall => cmd::uninstall::run(),
+        Cmd::Test { path } => cmd::test::run(&manifest_path, cli.packages.as_deref(), cli.web, path.as_deref()),
     };
 
     if let Err(e) = result {

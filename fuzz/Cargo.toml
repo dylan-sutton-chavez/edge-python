@@ -10,10 +10,8 @@ edition = "2024"
 [dependencies]
 afl = "0.18.2"
 
-# `default-features = false` drops `prebuilt` so the build skips the wasm download.
 [dependencies.edge-python]
 path = ".."
-default-features = false
 
 [[bin]]
 name = "afl-pipeline"

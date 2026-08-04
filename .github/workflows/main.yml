@@ -26,18 +26,18 @@ jobs:
         with:
           mode: check
 
-  js-lint:
-    name: JS / Deno Lint
+  runtime-lint:
+    name: Runtime / Deno Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: ./.github/actions/js
+      - uses: ./.github/actions/runtime
         with:
           mode: lint
 
   compiler:
     name: Compiler / Test and Release
-    needs: [compiler-check, js-lint]
+    needs: [compiler-check, runtime-lint]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -48,19 +48,19 @@ jobs:
           mode: build
           github-token: ${{ github.token }}
 
-  js:
-    name: JS / Deno Test
+  runtime:
+    name: Runtime / Deno Test
     needs: [compiler]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: ./.github/actions/js
+      - uses: ./.github/actions/runtime
         with:
           mode: test
 
   host:
     name: Host / ${{ matrix.capability }}
-    needs: [js]
+    needs: [runtime]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -74,7 +74,7 @@ jobs:
 
   std:
     name: Std / ${{ matrix.package }}
-    needs: [js]
+    needs: [runtime]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -86,10 +86,25 @@ jobs:
         with:
           package: ${{ matrix.package }}
 
+  # Cheap host-target clippy; gates the 16-cell cross matrix below.
+  native-lint:
+    name: Native / Lint (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [json, re, math, struct]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/native
+        with:
+          mode: lint
+          package: ${{ matrix.package }}
+
   # std packages as native plugin cdylibs for the CLI's in-process engine. Assets ship to the CDN and tag Releases.
   native:
     name: Native / ${{ matrix.package }} (${{ matrix.target }})
-    needs: [compiler-check]
+    needs: [native-lint]
     permissions:
       contents: write
     strategy:
@@ -111,6 +126,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/native
         with:
+          mode: build
           package: ${{ matrix.package }}
           target: ${{ matrix.target }}
           github-token: ${{ github.token }}

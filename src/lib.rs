@@ -21,12 +21,17 @@ pub mod native;
 
 /* Internal compiler helpers (not Edge Python stdlib); separate from pipeline code. */
 pub mod util {
-    pub mod fx;
+    pub mod hash;
     pub mod fstr;
     pub mod sha256;
 }
 
+/* NaN-boxed values and the mark-and-sweep heap; the layer both the frontend and the VM build on. */
+pub mod value;
+
 pub mod lexer;
-pub mod vm;
 pub mod parser;
+/* Post-SSA passes, run between parse and boot; touches no VM state. */
+pub mod optimizer;
+pub mod vm;
 pub mod packages;

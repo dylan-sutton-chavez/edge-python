@@ -52,10 +52,8 @@ runs:
         brotli -q 11 -c /tmp/compiler/compiler.wasm > _site/compiler.wasm
         printf '/compiler.wasm\n  Content-Type: application/wasm\n  Content-Encoding: br\n  Cache-Control: public, max-age=0, must-revalidate\n' > _site/_headers
 
-        # js package: served under /runtime/ (public embed URLs); tests/ not shipped.
-        cp -r js/src _site/runtime/src
-        # Compat alias: cached index.js builds resolve ../worker/worker.js.
-        cp -r js/src/worker _site/runtime/worker
+        # runtime package: served under /runtime/ (public embed URLs); tests/ not shipped.
+        cp -r runtime/src _site/runtime/src
 
         # std: <pkg>.wasm / <pkg>.py.
         cp -r /tmp/std/. _site/std/

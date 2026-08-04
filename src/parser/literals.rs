@@ -5,7 +5,7 @@ use super::types::builtin;
 use super::types::{OpCode, Value, SSAChunk, Instruction};
 
 use crate::lexer::{Token, TokenType};
-use crate::util::fx::FxHashMap as HashMap;
+use crate::util::hash::FxHashMap as HashMap;
 
 use alloc::{string::{String, ToString}, vec::Vec};
 
@@ -717,7 +717,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 _ => n,
             }
         }
-        let mut locals: crate::util::fx::FxHashSet<&str> =
+        let mut locals: crate::util::hash::FxHashSet<&str> =
             params.iter().map(|p| super::types::param_base_name(p)).collect();
         for ins in &body.instructions {
             if ins.opcode == OpCode::StoreName

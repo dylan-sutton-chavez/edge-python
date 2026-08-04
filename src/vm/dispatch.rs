@@ -3,7 +3,7 @@ use alloc::{string::{String, ToString}, vec::Vec};
 
 use crate::parser::{OpCode, SSAChunk, Instruction, ssa_strip};
 
-use super::{ExceptionFrame, VM, handlers};
+use super::{ExceptionFrame, VM, opcodes};
 use super::types::*;
 use super::cache::{OpcodeCache, FastOp, InstanceCache};
 
@@ -309,8 +309,8 @@ impl<'a> VM<'a> {
             Err(other) => return Err(other),
         };
         match lookup {
-            handlers::methods::AttrLookup::ModuleAttr(callee)
-            | handlers::methods::AttrLookup::ClassMember(callee) => {
+            opcodes::attr_lookup::AttrLookup::ModuleAttr(callee)
+            | opcodes::attr_lookup::AttrLookup::ClassMember(callee) => {
                 // Direct call on the resolved value, no `self` prepended.
                 self.push(callee);
                 for a in &positional { self.push(*a); }
@@ -319,7 +319,7 @@ impl<'a> VM<'a> {
                 let encoded = ((kw_flat.len() as u16 / 2) << 8) | argc;
                 self.exec_call(encoded, chunk, slots)
             }
-            handlers::methods::AttrLookup::InstanceMethod { recv, func, class } => {
+            opcodes::attr_lookup::AttrLookup::InstanceMethod { recv, func, class } => {
                 // Prepend `self`; kw pairs re-pushed like the unfused BoundUserMethod path. `super()` reads the binding off `pending`.
                 self.pending.method_binding = Some((class, recv));
                 self.push(func);
@@ -334,12 +334,12 @@ impl<'a> VM<'a> {
                 self.pending_exec_safe = false;
                 called
             }
-            handlers::methods::AttrLookup::BuiltinMethod(id) => {
+            opcodes::attr_lookup::AttrLookup::BuiltinMethod(id) => {
                 // sort runs user __lt__, so it needs chunk/slots the builtin-method table can't carry.
                 if id.name() == "sort" { return self.exec_sort(obj, &positional, &kw_flat, chunk, slots); }
                 self.exec_bound_method(obj, id, &positional, &kw_flat)
             }
-            handlers::methods::AttrLookup::InstanceField(field) => {
+            opcodes::attr_lookup::AttrLookup::InstanceField(field) => {
                 // Instance-attribute callable: call directly, no `self` prepended (only class-level functions bind); exec_call reports non-callables as TypeError, matching `obj.attr(...)` and `g = obj.attr; g()`.
                 self.push(field);
                 for a in &positional { self.push(*a); }
@@ -348,12 +348,12 @@ impl<'a> VM<'a> {
                 let encoded = ((kw_flat.len() as u16 / 2) << 8) | argc;
                 self.exec_call(encoded, chunk, slots)
             }
-            handlers::methods::AttrLookup::ExcArgs(_) | handlers::methods::AttrLookup::Name(_) => {
+            opcodes::attr_lookup::AttrLookup::ExcArgs(_) | opcodes::attr_lookup::AttrLookup::Name(_) => {
                 // `e.args()` / `f.__name__()`: the value isn't callable, reports as missing attribute.
                 let ty = self.type_name(obj);
                 Err(VmErr::Attribute(s!("'", str ty, "' object has no attribute '", str &name, "'")))
             }
-            handlers::methods::AttrLookup::PropertyGet { recv, getter } => {
+            opcodes::attr_lookup::AttrLookup::PropertyGet { recv, getter } => {
                 // Materialise the value first, then call it with the user's args, `foo.prop(arg)` where `prop` returns a callable.
                 if self.depth >= self.max_calls { return Err(cold_depth()); }
                 self.push(getter);
@@ -367,7 +367,7 @@ impl<'a> VM<'a> {
                 let encoded = ((kw_flat.len() as u16 / 2) << 8) | argc;
                 self.exec_call(encoded, chunk, slots)
             }
-            handlers::methods::AttrLookup::PropertySetterRef(prop) => {
+            opcodes::attr_lookup::AttrLookup::PropertySetterRef(prop) => {
                 let v = self.heap.alloc(HeapObj::PropertySetter(prop))?;
                 self.push(v);
                 for a in &positional { self.push(*a); }
@@ -1003,7 +1003,7 @@ impl<'a> VM<'a> {
         self.live_slots.truncate(snap);
         exec_result?;
         // Members are exactly the slots the body itself stores; loads of builtins or injected globals never leak into the class namespace.
-        let mut member_slots: crate::util::fx::FxHashSet<u16> = crate::util::fx::FxHashSet::default();
+        let mut member_slots: crate::util::hash::FxHashSet<u16> = crate::util::hash::FxHashSet::default();
         for ins in &body.instructions {
             if matches!(ins.opcode, OpCode::StoreName | OpCode::Phi) {
                 member_slots.insert(ins.operand);

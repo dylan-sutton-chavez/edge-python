@@ -49,7 +49,7 @@ Here `items` and `total` live in the VM heap, and the only freeze point is the `
 
 ## Save, persist, restore
 
-The round trip runs from the host through [`createWorker`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/js#api).
+The round trip runs from the host through [`createWorker`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/runtime#api).
 
 ```js
 import { createWorker } from "https://cdn.edgepython.com/runtime/src/index.js";
@@ -220,6 +220,6 @@ Pure Python state restores identically, while live host resources (DOM handles, 
 
 ## See also
 
-- [Runtime README](https://github.com/dylan-sutton-chavez/edge-python/tree/main/js#state-snapshots) for the worker and element API and the size limit.
+- [Runtime README](https://github.com/dylan-sutton-chavez/edge-python/tree/main/runtime#state-snapshots) for the worker and element API and the size limit.
 - [Design](/implementation/design#snapshots) for the serializer internals.
 - [WASM module ABI](/reference/wasm-abi#snapshot-exports) for the `compiler.wasm` exports and blob layout.

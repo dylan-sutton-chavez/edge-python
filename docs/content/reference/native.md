@@ -31,7 +31,7 @@ Gnu CLI releases carry the same glibc 2.28 floor (linked through `cargo-zigbuild
 ## Building from source
 
 ```bash
-cargo clippy --lib --no-default-features --features native # lint the engine module
+cargo clippy --lib --features native # lint the engine module
 cd cli && cargo build --release # the CLI embeds the native engine
 cd std/json && cargo build --profile native # any std package as a .so
 ```

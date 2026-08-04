@@ -2,7 +2,7 @@
 
 import { chromium } from "npm:playwright";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
-import { DEFAULT_IMPORTS } from "../../js/src/defaults.js";
+import { DEFAULT_IMPORTS } from "../../runtime/src/defaults.js";
 
 const ROOT = new URL("../", import.meta.url).pathname;
 const RUNTIME = new URL("../../js/", import.meta.url).pathname;

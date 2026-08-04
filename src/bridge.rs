@@ -3,7 +3,7 @@
 
 use crate::abi::{classify_decode, classify_encode, DecodeBits, EncodeRequest, ErrorKind, ErrorStash, HandleTable, Op, PrimitiveBytes, TAG_INVALID};
 use crate::vm::types::{DictMap, HeapObj, Val, VmErr};
-use crate::vm::handlers::methods::{lookup_method, dispatch_method};
+use crate::vm::methods::{lookup_method, dispatch_method};
 use crate::vm::VM;
 use alloc::{rc::Rc, string::{String, ToString}, vec::Vec};
 use core::cell::RefCell;

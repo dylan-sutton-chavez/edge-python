@@ -3,7 +3,7 @@ use alloc::{string::{String, ToString}, vec, vec::Vec};
 
 use super::VM;
 use super::types::*;
-use super::builtins::sequence::range_int;
+use super::globals::sequence::range_int;
 
 impl<'a> VM<'a> {
 
@@ -39,9 +39,6 @@ impl<'a> VM<'a> {
     pub(crate) fn now_ns(&self) -> u64 {
         match self.time_hook { Some(h) => h(), None => self.virtual_clock_ns }
     }
-
-    pub fn heap_usage(&self) -> usize { self.heap.usage() }
-    pub fn cache_stats(&self) -> (usize, usize) { (self.templates.count(), self.chunk.instructions.len()) }
 
     // Stack helpers.
 

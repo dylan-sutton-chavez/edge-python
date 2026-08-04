@@ -53,7 +53,7 @@ Inherits WASM-host guarantees: no syscalls, no FS, no network, isolated linear m
 
 One `.wasm` artifact (`compiler.wasm`, a ~200 KB release) runs anywhere WebAssembly does:
 
-- **Browser**: served alongside the [`js/`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/js) JS package, which bridges `print()` and module imports across the `WASM <-> JS` boundary. The host runtime owns I/O, fetching, and module loading.
+- **Browser**: served alongside the [`js/`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/runtime) JS package, which bridges `print()` and module imports across the `WASM <-> JS` boundary. The host runtime owns I/O, fetching, and module loading.
 - **The `edge` CLI**: the same engine crate compiled natively rather than to WASM; `run`, `repl`, and `test` execute in-process by default ([native engine](/reference/native)).
 - **Embedded Rust apps**: load `compiler.wasm` via your runtime of choice, or declare the [`edge-python` crate](/reference/wasm-abi#consuming-the-release-from-a-rust-crate) as a Cargo dependency.
 

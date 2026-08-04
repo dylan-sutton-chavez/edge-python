@@ -17,6 +17,7 @@ mod test {
 
     /* `native`/`code` drive resolve(); optional `bytes` drives fetch_bytes() for `#sha256-` cases. */
     #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
     #[serde(untagged)]
     enum ModuleDef {
         Native {
@@ -33,6 +34,7 @@ mod test {
 
     /* Per-directory `packages.json` for walk-up cases; flat fixtures use `aliases` instead. */
     #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
     struct ManifestDef {
         #[serde(default)]
         imports: HashMap<String, String>,
@@ -41,6 +43,7 @@ mod test {
     }
 
     #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
     struct Case {
         src: String,
         #[serde(default)]
@@ -72,6 +75,7 @@ mod test {
     }
 
     #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
     struct Delivery {
         id: u32,
         #[serde(default)]

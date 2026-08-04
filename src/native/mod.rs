@@ -4,7 +4,7 @@ use crate::vm::{Limits, VM};
 use std::io::Write;
 
 mod driver;
-mod host;
+mod builtins;
 mod loader;
 mod resolver;
 

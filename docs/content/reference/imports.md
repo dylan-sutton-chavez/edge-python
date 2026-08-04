@@ -81,7 +81,7 @@ Schema:
 - Top-level value is a JSON object. Empty `{}` is valid.
 - `imports` (optional): alias -> spec string.
 - `extends` (optional): directory whose `packages.json` is consulted when an alias isn't found locally.
-- `host` (optional): name -> JS module URL. Read by the browser runtime's `<edge-python>` element to load [host libraries](/reference/packages#host-libraries) on the main thread (DOM, network, storage…). The compiler folds each `host` name into the import table as a main-thread spec (`mt:<name>`); loading the module is the runtime's job. See the [runtime README](https://github.com/dylan-sutton-chavez/edge-python/tree/main/js).
+- `host` (optional): name -> JS module URL. Read by the browser runtime's `<edge-python>` element to load [host libraries](/reference/packages#host-libraries) on the main thread (DOM, network, storage…). The compiler folds each `host` name into the import table as a main-thread spec (`mt:<name>`); loading the module is the runtime's job. See the [runtime README](https://github.com/dylan-sutton-chavez/edge-python/tree/main/runtime).
 - Unknown top-level keys silently ignored (forward-compatible).
 - Booleans, numbers, arrays at any level are rejected.
 - String escapes: `\"`, `\\`, `\/`, `\n`, `\t`, `\r`. `\uXXXX` not supported. Paste UTF-8 literally.
@@ -139,7 +139,7 @@ When multiple paths import the same module, it's fetched, parsed, and initialise
 
 The compiler never fetches. Bringing the bytes is the host's job:
 
-- Browser runtime ([`js/`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/js)) uses `fetch()` in a Web Worker.
+- Browser runtime ([`js/`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/runtime)) uses `fetch()` in a Web Worker.
 - The CLI's [native engine](/reference/native#module-resolution) reads disk directly and downloads URL specs once into `~/.cache/edge-native`.
 - WASI hosts use their FS/network APIs.
 - Embedders pre-stage modules for `Resolver`.

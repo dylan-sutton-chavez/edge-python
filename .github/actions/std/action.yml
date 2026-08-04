@@ -136,7 +136,7 @@ runs:
       working-directory: std
       env:
         STDPKG: ${{ inputs.package }}
-      run: deno test --allow-all tests/
+      run: deno test --allow-all harness/
 
     # Stage native -> <pkg>.wasm, pure-Python -> <pkg>.py.
     - name: Stage artifact

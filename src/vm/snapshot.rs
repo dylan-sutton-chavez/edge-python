@@ -5,7 +5,7 @@ use core::cell::RefCell;
 use core::hash::Hasher;
 
 use crate::parser::types::{ImportKind, SSAChunk};
-use crate::util::fx::{FxHashMap, FxHasher};
+use crate::util::hash::{FxHashMap, FxHasher};
 use super::{Pending, VM};
 use super::types::*;
 

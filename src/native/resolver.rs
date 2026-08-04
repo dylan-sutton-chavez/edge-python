@@ -57,7 +57,7 @@ impl FileResolver {
             let canonical = join_relative(&dir, &target);
             return self.resolve_canonical(&canonical);
         }
-        if let Some(resolved) = super::host::resolve(name) {
+        if let Some(resolved) = super::builtins::resolve(name) {
             return Ok(resolved);
         }
         if let Some(url) = std_default(name) {
@@ -152,7 +152,7 @@ impl FileResolver {
     }
 }
 
-/* Official std packages resolvable by bare name with no manifest, mirrors js/src/defaults.js. */
+/* Official std packages resolvable by bare name with no manifest, mirrors runtime/src/defaults.js. */
 fn std_default(name: &str) -> Option<String> {
     match name {
         "json" | "re" | "math" | "struct" => Some(native_std_spec(name)),

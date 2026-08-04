@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 # The engine crate, devkit helpers plus the in-process native engine.
-edge-python = { path = "..", default-features = false, features = ["native"] }
+edge-python = { path = "..", features = ["native"] }
 clap = { version = "4", features = ["derive"] }
 tiny_http = "0.12"
 serde = { version = "1", features = ["derive"] }

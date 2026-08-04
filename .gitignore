@@ -9,12 +9,13 @@ Cargo.lock
 
 # Windows
 Thumbs.db
-Desktop.ini
+[Dd]esktop.ini
 
 # Editors
 .vscode/
 .idea/
 *.swp
+*~
 
 # Node (for the docs)
 node_modules/
@@ -25,8 +26,7 @@ dist/
 # Next.js / Nextra (docs)
 .next/
 **/.next/
-out/
-**/out/
+docs/out/
 
 # WASM
 pkg/
@@ -40,10 +40,10 @@ pkg/
 .env.*
 
 # Fuzz
-**/in/
-**/out/
-**/target/
-**/edge.dict
+fuzz/in/
+fuzz/out/
+fuzz/logs/
+fuzz/edge.dict
 
 # MicroPython differential corpus (scratch, not part of this repo)
 _micropython/
