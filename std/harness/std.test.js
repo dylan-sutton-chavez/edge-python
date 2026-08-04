@@ -1,11 +1,11 @@
-/* Agnostic driver: feeds each <pkg>/<pkg>.json corpus to the <edge-python> tag. Run: deno test --allow-all tests/ */
+/* Agnostic driver: feeds each <pkg>/<pkg>.json corpus to the <edge-python> tag. Run: deno test --allow-all harness/ */
 
 import { chromium } from "npm:playwright@latest";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { DEFAULT_IMPORTS } from "../../runtime/src/defaults.js";
 
 const ROOT = new URL("../", import.meta.url).pathname;
-const RUNTIME = new URL("../../js/", import.meta.url).pathname;
+const RUNTIME = new URL("../../runtime/", import.meta.url).pathname;
 const REPO = new URL("../../", import.meta.url).pathname;
 const CDN_HOST = new URL(Object.values(DEFAULT_IMPORTS)[0]).host;
 const MANIFEST = "/_packages.json"; // synthesized; keeps the agnostic <pkg>/ folder free of test artifacts
@@ -90,7 +90,7 @@ async function runPackage(pkg) {
 
     const failures = [];
     try {
-        await page.goto("http://localhost/tests/index.html");
+        await page.goto("http://localhost/harness/index.html");
         // Boot the tag once without an entry, reuse its worker, and capture stdout via onOutput.
         await page.evaluate(async (manifestPath) => {
             const el = document.createElement("edge-python");

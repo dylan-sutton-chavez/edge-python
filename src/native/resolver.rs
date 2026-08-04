@@ -129,11 +129,17 @@ impl FileResolver {
             return Ok(Resolved::Code { src, canonical: spec.to_string() });
         }
         if target.ends_with(".so") || target.ends_with(".dylib") {
-            let path = if target.contains("://") { fetch_cached(target)? } else { PathBuf::from(target) };
-            // dlopen runs arbitrary code, so a pinned hash must gate it.
+            let remote = target.contains("://");
+            // dlopen runs arbitrary code, so a downloaded plugin must carry a pinned hash.
+            if remote && frag_hash.is_none() {
+                return Err(format!("refusing to load '{target}' without a pinned '#sha256-' hash"));
+            }
+            let path = if remote { fetch_cached(target)? } else { PathBuf::from(target) };
             if let Some(h) = frag_hash {
                 let bytes = std::fs::read(&path).map_err(|e| format!("cannot read module '{target}': {e}"))?;
                 if sha256(&bytes) != h {
+                    // Drop the poisoned entry so a later run refetches instead of failing forever.
+                    if remote { let _ = std::fs::remove_file(&path); }
                     return Err(format!("sha256 mismatch for '{target}'"));
                 }
             }
