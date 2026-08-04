@@ -33,16 +33,17 @@ runs:
       shell: bash
       run: cargo shear
 
+    # --no-default-features skips the prebuilt wasm download in build.rs.
     - name: Clippy (host)
       if: inputs.mode == 'check'
       shell: bash
-      run: cargo clippy --all-targets -- -D warnings
+      run: cargo clippy --all-targets --no-default-features -- -D warnings
 
     # The native engine module only compiles under this feature, e2e coverage lives in cli/tests.
     - name: Clippy (native engine)
       if: inputs.mode == 'check'
       shell: bash
-      run: cargo clippy --lib --features native -- -D warnings
+      run: cargo clippy --lib --no-default-features --features native -- -D warnings
 
     - name: Install wasm target (check)
       if: inputs.mode == 'check'
@@ -131,7 +132,7 @@ runs:
     - name: Test
       if: inputs.mode == 'build'
       shell: bash
-      run: cargo test -p edge-python
+      run: cargo test -p edge-python --no-default-features
 
     - name: Upload wasm artifact
       if: inputs.mode == 'build'

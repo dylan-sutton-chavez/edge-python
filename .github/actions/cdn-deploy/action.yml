@@ -54,6 +54,8 @@ runs:
 
         # runtime package: served under /runtime/ (public embed URLs); tests/ not shipped.
         cp -r runtime/src _site/runtime/src
+        # Compat alias: cached index.js builds resolve ../worker/worker.js.
+        cp -r runtime/src/worker _site/runtime/worker
 
         # std: <pkg>.wasm / <pkg>.py.
         cp -r /tmp/std/. _site/std/

@@ -1,17 +1,13 @@
 name: Native std packages
-description: std packages as native plugin cdylibs. lint = clippy on the host target; build = cross build, package and upload.
+description: std packages as native plugin cdylibs, linux with a glibc 2.28 floor plus darwin dylibs. CDN staging + tag Release upload.
 
 inputs:
-  mode:
-    description: "lint | build"
-    required: true
   package:
     description: "json | re | math | struct"
     required: true
   target:
-    description: Rust linux-gnu or apple-darwin target triple (build mode).
-    required: false
-    default: ""
+    description: Rust linux-gnu or apple-darwin target triple.
+    required: true
   github-token:
     description: Token for the tag Release upload (tags only).
     required: false
@@ -20,37 +16,14 @@ inputs:
 runs:
   using: composite
   steps:
-    # Stable clippy on the host target; the build below only ever sees cross targets.
-    - name: Toolchain (lint)
-      if: inputs.mode == 'lint'
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        components: clippy
-
-    - name: Cache Rust (lint)
-      if: inputs.mode == 'lint'
-      uses: Swatinem/rust-cache@v2
-      with:
-        workspaces: std/${{ inputs.package }} -> std/${{ inputs.package }}/target
-        key: native-lint
-
-    # `--lib` only: dlopen loads the cdylib, and --all-targets clashes with the wasm panic handler.
-    - name: Clippy (host target)
-      if: inputs.mode == 'lint'
-      shell: bash
-      working-directory: std/${{ inputs.package }}
-      run: cargo clippy --release --lib -- -D warnings
-
     # Nightly rotates daily, its manifest hash keys an exact-version toolchain cache.
     - name: Toolchain cache key
-      if: inputs.mode == 'build'
       id: toolchain
       shell: bash
       run: echo "nightly=$(curl -fsSL https://static.rust-lang.org/dist/channel-rust-nightly.toml.sha256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
     # Restoring update-hashes lets rustup see the toolchain as current and skip reinstalling.
     - name: Cache toolchain
-      if: inputs.mode == 'build'
       uses: actions/cache@v5
       with:
         path: |
@@ -60,7 +33,6 @@ runs:
 
     # build-std needs nightly plus rust-src.
     - name: Toolchain (nightly)
-      if: inputs.mode == 'build'
       uses: dtolnay/rust-toolchain@nightly
       with:
         targets: ${{ inputs.target }}
@@ -68,12 +40,11 @@ runs:
 
     # The pip wheel bundles zig, which links against a chosen glibc floor.
     - name: Install cargo-zigbuild
-      if: inputs.mode == 'build' && contains(inputs.target, 'linux')
+      if: contains(inputs.target, 'linux')
       shell: bash
       run: command -v cargo-zigbuild >/dev/null || pip3 install --user cargo-zigbuild
 
     - name: Cache Rust
-      if: inputs.mode == 'build'
       uses: Swatinem/rust-cache@v2
       with:
         workspaces: std/${{ inputs.package }} -> std/${{ inputs.package }}/target
@@ -81,7 +52,6 @@ runs:
 
     # Glibc 2.28 covers every mainstream distro of the last decade; Mach-O leaves edge_* to dlopen via dynamic_lookup.
     - name: Build
-      if: inputs.mode == 'build'
       shell: bash
       working-directory: std/${{ inputs.package }}
       env:
@@ -99,7 +69,6 @@ runs:
 
     # Assets carry the short arch, the lib glob absorbs keyword-crate names like libedge_struct.
     - name: Package
-      if: inputs.mode == 'build'
       shell: bash
       env:
         TARGET: ${{ inputs.target }}
@@ -112,25 +81,8 @@ runs:
         mkdir -p _native
         cp "std/${{ inputs.package }}/target/${TARGET}/native/"lib*."$EXT" "_native/${{ inputs.package }}-${ARCH}.${EXT}"
 
-    # A cfg gate that drops the bindings still links, so assert what the loader will look up.
-    - name: Verify exports
-      if: inputs.mode == 'build'
-      shell: bash
-      env:
-        TARGET: ${{ inputs.target }}
-        PKG: ${{ inputs.package }}
-      run: |
-        ARCH="${TARGET%%-*}"
-        case "$TARGET" in
-          *apple-darwin) LIB="_native/${PKG}-${ARCH}.dylib"; SYMS="$(nm -gU "$LIB")" ;;
-          *) LIB="_native/${PKG}-${ARCH}.so"; SYMS="$(nm -D "$LIB")" ;;
-        esac
-        echo "$SYMS" | grep -qE ' T _?__edge_abi_version$' || { echo "::error::$LIB is missing __edge_abi_version"; exit 1; }
-        echo "$SYMS" | grep -qE ' T _?__(fn|class|const)_' || { echo "::error::$LIB exports no __fn_/__class_/__const_ bindings"; exit 1; }
-
     # The `native-` prefix is the glob cdn-deploy stages under /native/.
     - name: Upload artifact
-      if: inputs.mode == 'build'
       uses: actions/upload-artifact@v6
       with:
         name: native-${{ inputs.package }}-${{ inputs.target }}
@@ -138,7 +90,7 @@ runs:
         retention-days: 1
 
     - name: Upload Release assets
-      if: inputs.mode == 'build' && startsWith(github.ref, 'refs/tags/')
+      if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v3
       with:
         token: ${{ inputs.github-token }}

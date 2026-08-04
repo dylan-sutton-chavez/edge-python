@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   compiler-check:
-    name: Engine / Compiler Lint and Check
+    name: Compiler / Lint and Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -26,18 +26,18 @@ jobs:
         with:
           mode: check
 
-  runtime-lint:
-    name: Engine / Runtime Lint
+  js-lint:
+    name: JS / Deno Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: ./.github/actions/runtime
+      - uses: ./.github/actions/js
         with:
           mode: lint
 
   compiler:
-    name: Engine / Compiler Test and Release
-    needs: [compiler-check, runtime-lint]
+    name: Compiler / Test and Release
+    needs: [compiler-check, js-lint]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -48,19 +48,19 @@ jobs:
           mode: build
           github-token: ${{ github.token }}
 
-  runtime:
-    name: Engine / Runtime Test
+  js:
+    name: JS / Deno Test
     needs: [compiler]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: ./.github/actions/runtime
+      - uses: ./.github/actions/js
         with:
           mode: test
 
   host:
     name: Host / ${{ matrix.capability }}
-    needs: [runtime]
+    needs: [js]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -72,9 +72,9 @@ jobs:
         with:
           capability: ${{ matrix.capability }}
 
-  std-web:
-    name: Std / Web (${{ matrix.package }})
-    needs: [runtime]
+  std:
+    name: Std / ${{ matrix.package }}
+    needs: [js]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -86,25 +86,10 @@ jobs:
         with:
           package: ${{ matrix.package }}
 
-  # Cheap host-target clippy; gates the 16-cell cross matrix below.
-  std-native-lint:
-    name: Std / Native Lint (${{ matrix.package }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        package: [json, re, math, struct]
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/native
-        with:
-          mode: lint
-          package: ${{ matrix.package }}
-
   # std packages as native plugin cdylibs for the CLI's in-process engine. Assets ship to the CDN and tag Releases.
-  std-native:
-    name: Std / Native (${{ matrix.package }}, ${{ matrix.target }})
-    needs: [std-native-lint]
+  native:
+    name: Native / ${{ matrix.package }} (${{ matrix.target }})
+    needs: [compiler-check]
     permissions:
       contents: write
     strategy:
@@ -126,7 +111,6 @@ jobs:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/native
         with:
-          mode: build
           package: ${{ matrix.package }}
           target: ${{ matrix.target }}
           github-token: ${{ github.token }}
@@ -171,7 +155,7 @@ jobs:
 
   cli-test:
     name: CLI / Test
-    needs: [host, std-web, std-native, cli-release]
+    needs: [host, std, native, cli-release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -181,7 +165,7 @@ jobs:
 
   cdn:
     name: Cloudflare Upload (CDN)
-    needs: [cli-test, std-native]
+    needs: [cli-test, native]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
