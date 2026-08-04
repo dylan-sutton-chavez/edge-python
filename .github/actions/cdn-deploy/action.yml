@@ -81,10 +81,15 @@ runs:
         mkdir -p "_site/native/$contract"
         cp -r /tmp/native/. "_site/native/$contract/"
 
+    # A notice survives on the run page; the summary is one of 38 jobs' and gets buried.
     - name: Report served size
       shell: bash
       run: |
-        echo "compiler.wasm served as brotli-11: $(( $(stat -c%s _site/compiler.wasm) / 1024 )) KB" >> "$GITHUB_STEP_SUMMARY"
+        raw=$(wc -c < /tmp/compiler/compiler.wasm)
+        served=$(wc -c < _site/compiler.wasm)
+        printf '### compiler.wasm\n\n| | Size |\n| --- | --- |\n| raw | %s KB |\n| served (brotli-11) | %s KB |\n' \
+          "$(( raw / 1024 ))" "$(( served / 1024 ))" >> "$GITHUB_STEP_SUMMARY"
+        echo "::notice title=compiler.wasm::served as brotli-11: $(( served / 1024 )) KB (raw $(( raw / 1024 )) KB)"
 
     - name: Deploy to Cloudflare Pages
       uses: cloudflare/wrangler-action@v4
