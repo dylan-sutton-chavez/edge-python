@@ -122,7 +122,7 @@ runs:
       shell: bash
       working-directory: cli
       env:
-        EDGE_RUNTIME_DIR: ${{ github.workspace }}/js
+        EDGE_RUNTIME_DIR: ${{ github.workspace }}/runtime
         EDGE_COMPILER_WASM: ${{ github.workspace }}/target/wasm32-unknown-unknown/release/compiler.wasm
         EDGE_STD_DIR: ${{ github.workspace }}/std_local
       run: cargo test
