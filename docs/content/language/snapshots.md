@@ -49,7 +49,7 @@ Here `items` and `total` live in the VM heap, and the only freeze point is the `
 
 ## Save, persist, restore
 
-The round trip runs from the host through [`createWorker`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/js#api).
+The round trip runs from the host through [`createWorker`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/runtime#api).
 
 ```js
 import { createWorker } from "https://cdn.edgepython.com/runtime/src/index.js";
@@ -182,6 +182,10 @@ await store.put("cart", await worker.saveState()); // IndexedDB
 await fetch("/saves/cart", { method: "PUT", body: await worker.saveState() }); // server
 ```
 
+## The same blob from the CLI
+
+The [native engine](/reference/native#run-flags) works with snapshots as plain files, no JS involved: `edge run --save-state cart.bin` writes the blob when the script parks on a wait the CLI cannot serve, and `edge run --restore-state cart.bin` boots from it and keeps running. `--preempt <n>` is `setPreemptInterval(n)` as a flag, and `--events <f>` feeds `receive()` line by line. The blob layout is the same one `saveState` produces here.
+
 ## Restore if present, else start fresh
 
 The common pattern resumes a saved session when one exists and otherwise begins a new run. A backend works the same way as a local store: it only holds bytes and never runs the VM.
@@ -216,6 +220,6 @@ Pure Python state restores identically, while live host resources (DOM handles, 
 
 ## See also
 
-- [Runtime README](https://github.com/dylan-sutton-chavez/edge-python/tree/main/js#state-snapshots) for the worker and element API and the size limit.
+- [Runtime README](https://github.com/dylan-sutton-chavez/edge-python/tree/main/runtime#state-snapshots) for the worker and element API and the size limit.
 - [Design](/implementation/design#snapshots) for the serializer internals.
 - [WASM module ABI](/reference/wasm-abi#snapshot-exports) for the `compiler.wasm` exports and blob layout.

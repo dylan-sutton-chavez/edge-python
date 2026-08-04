@@ -21,7 +21,7 @@ It reads like Python: it parses Python syntax. It runs differently. What it exec
 - **Walrus operator**: `:=` in expressions (Name target only).
 - **Type annotations**: parsed and discarded, no runtime `__annotations__`, no enforcement.
 - **Module identity**: `__name__` is bound to `"__main__"` in the entry chunk and to the module's spec inside imported modules, so the canonical `if __name__ == "__main__":` guard works as expected.
-- **Modules**: `import`, `from <spec> import names`, and `from <spec> import *` resolve at parse time through a host-injected resolver, with optional `#sha256-<hex>` integrity on URL specs. Two flavors: `.py` source modules and native modules. See [Imports](/reference/imports) for resolution semantics, [Writing modules](/reference/writing-modules) for the three delivery paths, and [Official packages](/reference/packages) for the ready-made modules (`json`, `dom`, `network`, `storage`, and more).
+- **Modules**: `import`, `from <spec> import names`, and `from <spec> import *` resolve at parse time through a host-injected resolver, with optional `#sha256-<hex>` integrity on URL specs. Two flavors: `.py` source modules and native modules. See [Imports](/reference/imports) for resolution semantics, [Writing modules](/reference/writing-modules) for the delivery paths, and [Official packages](/reference/packages) for the ready-made modules (`json`, `dom`, `network`, `storage`, and more).
 - **State snapshots**: a parked program can be serialized whole, heap, globals, and suspended coroutines included, then restored later, even on a fresh page load, to continue from the pause point. A program parks on its own (`receive()`, `sleep()`, a host call) or because the host called `pause()`, which stops even a bare `while True:` that never suspends. See [Snapshots](/language/snapshots).
 
 ## What it doesn't support
@@ -53,7 +53,8 @@ Inherits WASM-host guarantees: no syscalls, no FS, no network, isolated linear m
 
 One `.wasm` artifact (`compiler.wasm`, a ~200 KB release) runs anywhere WebAssembly does:
 
-- **Browser**: served alongside the [`js/`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/js) JS package, which bridges `print()` and module imports across the `WASM <-> JS` boundary. The host runtime owns I/O, fetching, and module loading.
+- **Browser**: served alongside the [`js/`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/runtime) JS package, which bridges `print()` and module imports across the `WASM <-> JS` boundary. The host runtime owns I/O, fetching, and module loading.
+- **The `edge` CLI**: the same engine crate compiled natively rather than to WASM; `run`, `repl`, and `test` execute in-process by default ([native engine](/reference/native)).
 - **Embedded Rust apps**: load `compiler.wasm` via your runtime of choice, or declare the [`edge-python` crate](/reference/wasm-abi#consuming-the-release-from-a-rust-crate) as a Cargo dependency.
 
 Two ABIs sit on top:

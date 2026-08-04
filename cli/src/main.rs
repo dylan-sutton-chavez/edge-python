@@ -2,22 +2,22 @@
 edge: the Edge Python developer CLI. Run, serve, test, and scaffold Edge Python apps.
 */
 
-mod ui;
-mod init;
-mod pkg;
-mod serve;
+mod cmd;
 mod engine;
-mod repl;
-mod build;
-mod test;
-mod uninstall;
+mod manifest;
+mod ui;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 
-use pkg::Manifest;
+use manifest::Manifest;
+
+// Static musl builds keep musl's slow malloc otherwise.
+#[cfg(target_env = "musl")]
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[derive(Parser)]
 #[command(name = "edge", version, about = "The Edge Python developer command line interface.", after_help = "Press Ctrl+C at any time to exit cleanly.", after_long_help = "Docs: https://edgepython.com/", color = clap::ColorChoice::Never)]
@@ -28,12 +28,30 @@ struct Cli {
     /// Use a specific manifest instead of ./packages.json.
     #[arg(long, global = true)]
     packages: Option<PathBuf>,
+
+    /// Drive the browser runtime instead of the in-process native engine.
+    #[arg(long, global = true)]
+    web: bool,
 }
 
 #[derive(Subcommand)]
 enum Cmd {
     /// Run a script.
-    Run { file: Option<PathBuf> },
+    Run {
+        file: Option<PathBuf>,
+        /// Feed each line of this file (or FIFO) into one receive() call. Native only.
+        #[arg(long)]
+        events: Option<PathBuf>,
+        /// Snapshot to this file when the script suspends on an unservable wait. Native only.
+        #[arg(long)]
+        save_state: Option<PathBuf>,
+        /// Boot from a snapshot instead of a script and keep running. Native only.
+        #[arg(long)]
+        restore_state: Option<PathBuf>,
+        /// Yield every n loop back-edges and resume. Native only.
+        #[arg(long)]
+        preempt: Option<usize>,
+    },
     /// Interactive shell. Ctrl+C, Ctrl+D, or .exit to quit.
     Repl,
     /// Dev server with live reload.
@@ -71,18 +89,37 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     ctrlc::set_handler(|| std::process::exit(130)).ok();
 
-    let manifest_path = cli.packages.unwrap_or_else(|| PathBuf::from("packages.json"));
+    let manifest_path = cli.packages.clone().unwrap_or_else(|| PathBuf::from("packages.json"));
 
     let result = match cli.cmd {
-        Cmd::Init { name, bare } => init::run(name.as_deref(), bare),
-        Cmd::Add { pkgs } => pkg::add(&manifest_path, &pkgs),
-        Cmd::Remove { pkgs } => pkg::remove(&manifest_path, &pkgs),
-        Cmd::Serve { host, port, open } => serve::run(PathBuf::from("."), &host, port, open),
-        Cmd::Run { file } => run_script(&manifest_path, file.as_deref()),
-        Cmd::Repl => repl::run(&manifest_path),
-        Cmd::Build { out } => build::run(&manifest_path, out.unwrap_or_else(|| PathBuf::from("dist"))),
-        Cmd::Uninstall => uninstall::run(),
-        Cmd::Test { path } => test::run(&manifest_path, path.as_deref()),
+        Cmd::Init { name, bare } => cmd::init::run(name.as_deref(), bare),
+        Cmd::Add { pkgs } => cmd::pkg::add(&manifest_path, &pkgs),
+        Cmd::Remove { pkgs } => cmd::pkg::remove(&manifest_path, &pkgs),
+        Cmd::Serve { host, port, open } => cmd::serve::run(PathBuf::from("."), &host, port, open),
+        Cmd::Run { file, events, save_state, restore_state, preempt } => {
+            if cli.web {
+                if events.is_some() || save_state.is_some() || restore_state.is_some() || preempt.is_some() {
+                    Err(anyhow::anyhow!("--events, --save-state, --restore-state and --preempt are native-only; drop --web"))
+                } else {
+                    run_script(&manifest_path, file.as_deref())
+                }
+            } else {
+                let opts = compiler::native::RunOpts {
+                    packages: cli.packages.as_deref().map(|p| p.to_string_lossy().replace('\\', "/")),
+                    preempt: preempt.unwrap_or(0),
+                    events: events.map(|p| p.to_string_lossy().into_owned()),
+                    save_state: save_state.map(|p| p.to_string_lossy().into_owned()),
+                    restore_state: restore_state.map(|p| p.to_string_lossy().into_owned()),
+                };
+                engine::native::run(file.as_deref(), &opts).map(|code| {
+                    if code != 0 { std::process::exit(code) }
+                })
+            }
+        }
+        Cmd::Repl => cmd::repl::run(&manifest_path, cli.packages.as_deref(), cli.web),
+        Cmd::Build { out } => cmd::build::run(&manifest_path, out.unwrap_or_else(|| PathBuf::from("dist"))),
+        Cmd::Uninstall => cmd::uninstall::run(),
+        Cmd::Test { path } => cmd::test::run(&manifest_path, cli.packages.as_deref(), cli.web, path.as_deref()),
     };
 
     if let Err(e) = result {

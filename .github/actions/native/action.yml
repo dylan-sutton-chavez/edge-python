@@ -1,0 +1,98 @@
+name: Native std packages
+description: std packages as native plugin cdylibs, linux with a glibc 2.28 floor plus darwin dylibs. CDN staging + tag Release upload.
+
+inputs:
+  package:
+    description: "json | re | math | struct"
+    required: true
+  target:
+    description: Rust linux-gnu or apple-darwin target triple.
+    required: true
+  github-token:
+    description: Token for the tag Release upload (tags only).
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # Nightly rotates daily, its manifest hash keys an exact-version toolchain cache.
+    - name: Toolchain cache key
+      id: toolchain
+      shell: bash
+      run: echo "nightly=$(curl -fsSL https://static.rust-lang.org/dist/channel-rust-nightly.toml.sha256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+    # Restoring update-hashes lets rustup see the toolchain as current and skip reinstalling.
+    - name: Cache toolchain
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.rustup/toolchains
+          ~/.rustup/update-hashes
+        key: rustup-std-${{ inputs.target }}-${{ steps.toolchain.outputs.nightly }}
+
+    # build-std needs nightly plus rust-src.
+    - name: Toolchain (nightly)
+      uses: dtolnay/rust-toolchain@nightly
+      with:
+        targets: ${{ inputs.target }}
+        components: rust-src
+
+    # The pip wheel bundles zig, which links against a chosen glibc floor.
+    - name: Install cargo-zigbuild
+      if: contains(inputs.target, 'linux')
+      shell: bash
+      run: command -v cargo-zigbuild >/dev/null || pip3 install --user cargo-zigbuild
+
+    - name: Cache Rust
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: std/${{ inputs.package }} -> std/${{ inputs.package }}/target
+        key: native-${{ inputs.target }}
+
+    # Glibc 2.28 covers every mainstream distro of the last decade; Mach-O leaves edge_* to dlopen via dynamic_lookup.
+    - name: Build
+      shell: bash
+      working-directory: std/${{ inputs.package }}
+      env:
+        TARGET: ${{ inputs.target }}
+        SIZE_FLAGS: -Z location-detail=none -Z fmt-debug=none -Z unstable-options -C panic=immediate-abort
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+        case "$TARGET" in
+          *linux-gnu)
+            RUSTFLAGS="$SIZE_FLAGS" cargo +nightly zigbuild --profile native --target "${TARGET}.2.28" -Z build-std=std,panic_abort ;;
+          *apple-darwin)
+            RUSTFLAGS="$SIZE_FLAGS -C link-arg=-undefined -C link-arg=dynamic_lookup" \
+            cargo +nightly build --profile native --target "$TARGET" -Z build-std=std,panic_abort ;;
+        esac
+
+    # Assets carry the short arch, the lib glob absorbs keyword-crate names like libedge_struct.
+    - name: Package
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+      run: |
+        ARCH="${TARGET%%-*}"
+        case "$TARGET" in
+          *apple-darwin) EXT="dylib" ;;
+          *) EXT="so" ;;
+        esac
+        mkdir -p _native
+        cp "std/${{ inputs.package }}/target/${TARGET}/native/"lib*."$EXT" "_native/${{ inputs.package }}-${ARCH}.${EXT}"
+
+    # The `native-` prefix is the glob cdn-deploy stages under /native/.
+    - name: Upload artifact
+      uses: actions/upload-artifact@v6
+      with:
+        name: native-${{ inputs.package }}-${{ inputs.target }}
+        path: _native/
+        retention-days: 1
+
+    - name: Upload Release assets
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v3
+      with:
+        token: ${{ inputs.github-token }}
+        files: _native/*
+        fail_on_unmatched_files: true

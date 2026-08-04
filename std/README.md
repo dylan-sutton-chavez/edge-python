@@ -23,7 +23,7 @@ Native packages build independently; the agnostic runner asserts against the pro
 ( cd json && cargo build --release --target wasm32-unknown-unknown )
 
 # One command, drives all corpora through the shared runner.
-deno test --allow-all tests/
+deno test --allow-all harness/
 ```
 
 The runner discovers packages by walking `std/` for `<name>/<name>.json` corpora. CI runs this matrix via `.github/workflows/`.
@@ -35,11 +35,11 @@ For a native (wasm) package:
 1. Create `<name>/` under `std/` with `Cargo.toml` (`name = "<name>"`, or a non-keyword variant like `edge-struct` when `<name>` is a Rust keyword, `crate-type = ["cdylib"]`, `wasm-pdk` dep) and a `src/lib.rs` exporting via `#[plugin_fn]`.
 2. Drop `<name>/<name>.json` with the corpus (Edge Python source + expected `output` / `error` per case).
 3. Run `cargo build --release --target wasm32-unknown-unknown` inside the package folder.
-4. Run `deno test --allow-all tests/` from the repo root.
+4. Run `deno test --allow-all harness/` from `std/`.
 
-For a pure-Python package, skip the crate: add `<name>/src/entry.py` plus `<name>/<name>.json`, then run `deno test --allow-all tests/`. The runner routes `.py` packages to their source and skips the wasm build.
+For a pure-Python package, skip the crate: add `<name>/src/entry.py` plus `<name>/<name>.json`, then run `deno test --allow-all harness/`. The runner routes `.py` packages to their source and skips the wasm build.
 
-No edits to `tests/`.
+No edits to `harness/`.
 
 ## License
 

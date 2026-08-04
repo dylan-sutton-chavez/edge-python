@@ -32,6 +32,13 @@ runs:
         path: /tmp/cli/
         merge-multiple: true
 
+    - name: Download native artifacts
+      uses: actions/download-artifact@v8
+      with:
+        pattern: native-*
+        path: /tmp/native/
+        merge-multiple: true
+
     - name: Install brotli
       shell: bash
       run: command -v brotli >/dev/null || (sudo apt-get update && sudo apt-get install -y brotli)
@@ -45,10 +52,10 @@ runs:
         brotli -q 11 -c /tmp/compiler/compiler.wasm > _site/compiler.wasm
         printf '/compiler.wasm\n  Content-Type: application/wasm\n  Content-Encoding: br\n  Cache-Control: public, max-age=0, must-revalidate\n' > _site/_headers
 
-        # js package: served under /runtime/ (public embed URLs); tests/ not shipped.
-        cp -r js/src _site/runtime/src
+        # runtime package: served under /runtime/ (public embed URLs); tests/ not shipped.
+        cp -r runtime/src _site/runtime/src
         # Compat alias: cached index.js builds resolve ../worker/worker.js.
-        cp -r js/src/worker _site/runtime/worker
+        cp -r runtime/src/worker _site/runtime/worker
 
         # std: <pkg>.wasm / <pkg>.py.
         cp -r /tmp/std/. _site/std/
@@ -67,6 +74,12 @@ runs:
         # cli: release tarballs + the install/uninstall scripts, served under cdn.edgepython.com/cli/.
         cp -r /tmp/cli/. _site/cli/
         cp cli/setup/install.sh cli/setup/uninstall.sh _site/cli/
+
+        # native assets, the std plugin .so files, under /native/<contract>/ matching the resolver's URL.
+        contract="$(sed -n 's/^pub const RUNTIME_CONTRACT: &str = "\(.*\)";$/\1/p' src/devkit.rs)"
+        test -n "$contract"
+        mkdir -p "_site/native/$contract"
+        cp -r /tmp/native/. "_site/native/$contract/"
 
     - name: Report served size
       shell: bash

@@ -23,7 +23,7 @@ runs:
     - name: Lint
       if: inputs.mode == 'lint'
       shell: bash
-      run: deno lint js/
+      run: deno lint runtime/
 
     # Test against this run's compiler, not the deployed CDN copy.
     - name: Download compiler wasm
@@ -50,4 +50,4 @@ runs:
     - name: Test
       if: inputs.mode == 'test'
       shell: bash
-      run: deno test --allow-all js/tests/js.test.js
+      run: deno test --allow-all runtime/tests/runtime.test.js

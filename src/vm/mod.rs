@@ -1,9 +1,16 @@
-pub mod types;
+/* The value model moved to `crate::value`; kept here so existing embedder paths keep resolving. */
+#[doc(hidden)]
+pub use crate::value as types;
+/* The optimizer moved to `crate::optimizer`; kept here so existing embedder paths keep resolving. */
+#[doc(hidden)]
+pub use crate::optimizer;
+
 mod cache;
-mod ops;
-mod builtins;
-pub(crate) mod handlers;
-pub mod optimizer;
+mod value_ops;
+mod format_spec;
+pub(crate) mod globals;
+pub(crate) mod opcodes;
+pub(crate) mod methods;
 pub mod snapshot;
 
 mod dispatch;
@@ -13,7 +20,7 @@ mod init;
 
 use crate::s;
 use crate::parser::{SSAChunk, BUILTIN_TYPES};
-use crate::util::fx::FxHashMap as HashMap;
+use crate::util::hash::FxHashMap as HashMap;
 
 pub use types::{Val, HeapObj, HeapPool, VmErr, Limits};
 
@@ -76,7 +83,7 @@ impl Pending {
 }
 
 /* `bare_name -> [(version, slot), ...]` for one chunk's `chunk.names`. */
-pub(crate) type NameVersionIndex = crate::util::fx::FxHashMap<String, Vec<(i64, usize)>>;
+pub(crate) type NameVersionIndex = crate::util::hash::FxHashMap<String, Vec<(i64, usize)>>;
 
 /* Free-load propagation entry: (bare name, body slot, referenced version, caller [(version, slot)] candidates). */
 pub(crate) type FreeLoadEntry = (String, u32, i64, Vec<(i64, u32)>);
@@ -133,7 +140,7 @@ pub struct VM<'a> {
     /* Free-variable body slots (bare_name, slot, referenced version); used for caller-chunk base-name fallback. */
     pub(crate) body_free_loads: Vec<Vec<(String, usize, i64)>>,
     /* Per-chunk bare names the chunk itself binds (stores, Phi, params); drives closure-cell capture. */
-    pub(crate) chunk_local_binds: HashMap<*const SSAChunk, alloc::rc::Rc<crate::util::fx::FxHashSet<String>>>,
+    pub(crate) chunk_local_binds: HashMap<*const SSAChunk, alloc::rc::Rc<crate::util::hash::FxHashSet<String>>>,
     /* Coroutines currently inside `resume_coroutine`; re-entry raises like CPython's already-executing guard. Transient, never snapshotted. */
     pub(crate) executing_coros: Vec<u64>,
     /* True once any builtin name is rebound at module scope; fused call sites then consult `module_state` first. */
@@ -356,7 +363,7 @@ impl<'a> VM<'a> {
         // True iff the body references names not in params/builtins/captures.
         let new: Vec<bool> = (start..end).map(|fi| {
             let (params, body, _, _) = self.functions[fi];
-            let param_names: crate::util::fx::FxHashSet<&str> = params.iter().map(|p| crate::parser::types::param_base_name(p)).collect();
+            let param_names: crate::util::hash::FxHashSet<&str> = params.iter().map(|p| crate::parser::types::param_base_name(p)).collect();
             body.names.iter().any(|n| {
                 let base = crate::parser::ssa_strip(n);
                 !param_names.contains(base) && !self.globals.contains_key(n)
@@ -380,7 +387,7 @@ impl<'a> VM<'a> {
         let new: Vec<Vec<(String, usize, i64)>> = (start..end).map(|fi| {
             let (_, body, _, _) = self.functions[fi];
             let param_bm = &self.is_param_slot[fi];
-            let mut written: crate::util::fx::FxHashSet<usize> = crate::util::fx::FxHashSet::default();
+            let mut written: crate::util::hash::FxHashSet<usize> = crate::util::hash::FxHashSet::default();
             for ins in &body.instructions {
                 if matches!(ins.opcode, crate::parser::OpCode::StoreName | crate::parser::OpCode::Phi) {
                     written.insert(ins.operand as usize);
@@ -429,7 +436,7 @@ impl<'a> VM<'a> {
         }).collect();
         self.slot_templates.truncate(start);
         self.slot_templates.extend(new);
-        let mut seen: crate::util::fx::FxHashSet<u64> = crate::util::fx::FxHashSet::default();
+        let mut seen: crate::util::hash::FxHashSet<u64> = crate::util::hash::FxHashSet::default();
         self.template_roots = self.slot_templates.iter().flatten()
             .filter(|v| !v.is_undef() && seen.insert(v.0))
             .copied()

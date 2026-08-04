@@ -1,11 +1,14 @@
 use crate::packages::{NativeBinding, Resolved, Resolver, partition_bindings, parse_manifest, walk_up_dirs, dir_of, join_relative};
-use crate::util::fx::FxHashSet;
+use crate::util::hash::FxHashSet;
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 use crate::s;
 
 use super::{ModuleEntry, host_fetch_bytes, with_runtime};
-use super::abi_bridge::make_native_binding;
 use super::exports::wasm_free;
+use crate::abi::ErrorKind;
+use crate::bridge::{error_from_kind, get_val, put_val, release_handles, take_error, with_vm};
+use crate::vm::types::{Val, VmErr};
+use alloc::sync::Arc;
 
 // Cap on packages.json `extends` chain, bounds attacker-crafted loops; 32 dwarfs real workspace depth.
 const MAX_PACKAGES_HOPS: u32 = 32;
@@ -134,5 +137,43 @@ impl WasmHostResolver {
             }
         }
     }
+}
+
+/* Builds a NativeBinding that marshals handles around `host_call_native`. Lives here so the bridge stays host-import-free. */
+fn make_native_binding(name: String, id: u32) -> NativeBinding {
+    let closure = move |_: &mut crate::vm::types::HeapPool, args: &[Val], kwargs: Option<Val>| -> Result<Val, VmErr> {
+        /* 1. Register positional args as handles the guest will see; append the kwargs handle (0 means no kwargs). */
+        let mut argv: Vec<u32> = args.iter().map(|v| put_val(*v)).collect();
+        argv.push(kwargs.map_or(0, put_val));
+        let mut out_handle: u32 = 0;
+
+        // call_id is what call_extern will park with on defer; lets the host route the result back.
+        let call_id = with_vm(|vm| vm.next_host_call_id as u32).unwrap_or(0);
+        let status = unsafe {
+            super::host_call_native(
+                id, call_id,
+                argv.as_ptr(), argv.len() as u32,
+                &mut out_handle as *mut u32,
+            )
+        };
+
+        /* 3. Read result BEFORE releasing argv: a returned input would point into slots we're about to free. */
+        // Status 2 = DEFERRED: handler has captured what it needs; release argv and park the VM.
+        if status == 2 {
+            release_handles(&argv);
+            return Err(VmErr::HostCallDeferred);
+        }
+        if status != 0 {
+            release_handles(&argv);
+            let (kind, msg) = take_error()
+                .unwrap_or((ErrorKind::Runtime as u32, String::from("native call failed")));
+            return Err(error_from_kind(kind, msg));
+        }
+        let result = get_val(out_handle).ok_or(VmErr::Runtime("native returned invalid handle"))?;
+        argv.push(out_handle);
+        release_handles(&argv);
+        Ok(result)
+    };
+    NativeBinding { name, func: Arc::new(closure), pure: false }
 }
 

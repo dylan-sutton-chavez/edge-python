@@ -5,12 +5,15 @@
 name = "edge"
 version = "0.1.0"
 edition = "2024"
+description = "The Edge Python developer CLI. Runs, tests, and scaffolds scripts on the in-process native engine by default, drives the browser runtime behind --web, and serves and bundles web apps."
 
 [[bin]]
 name = "edge"
 path = "src/main.rs"
 
 [dependencies]
+# The engine crate, devkit helpers plus the in-process native engine.
+edge-python = { path = "..", features = ["native"] }
 clap = { version = "4", features = ["derive"] }
 tiny_http = "0.12"
 serde = { version = "1", features = ["derive"] }
@@ -24,6 +27,10 @@ headless_chrome = "1.0.21"
 rustyline = "17.0.0"
 # HTTPS fetcher used by `edge build` to vendor the runtime, compiler.wasm, and packages.
 ureq = "3"
+
+# Static musl builds keep musl's slow malloc otherwise.
+[target.'cfg(target_env = "musl")'.dependencies]
+mimalloc = "0.1"
 
 [dev-dependencies]
 # Per-test tempdir; auto-cleans on drop so cases don't leak state into the project.

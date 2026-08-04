@@ -388,7 +388,7 @@ For `from "<url>" import <names>` with a `.wasm` URL, the host:
 4. Marshals args as handles.
 5. Propagates results.
 
-Reference browser shim: [`js/src/native.js`](https://github.com/dylan-sutton-chavez/edge-python/blob/main/js/src/native.js) (the `edge_*` guest imports and the built-in Path A loader). WASI hosts and Rust embedders mirror the shape.
+Reference browser shim: [`runtime/src/native.js`](https://github.com/dylan-sutton-chavez/edge-python/blob/main/runtime/src/native.js) (the `edge_*` guest imports and the built-in Path A loader). The CLI's [native engine](/reference/native#std-packages-as-native-libraries) implements the same six imports over `dlopen`. WASI hosts and Rust embedders mirror the shape.
 
 ## Constraints and caveats
 
@@ -457,7 +457,7 @@ Little-endian, self-contained, versioned.
 
 ## Consuming the release from a Rust crate
 
-The `edge-python` crate is a `cdylib`: a Rust host can instantiate `compiler.wasm` and call the exports above directly, the same `.wasm` that ships to browsers; the host owns I/O. The crate declares `links = "compiler"` and its `build.rs` downloads the matching `compiler.wasm` from the GitHub Release for `CARGO_PKG_VERSION` into `OUT_DIR`. Downstream crates read the absolute path through `DEP_COMPILER_WASM`.
+The `edge-python` crate is a `cdylib`: a Rust host can instantiate `compiler.wasm` and call the exports above directly, the same `.wasm` that ships to browsers; the host owns I/O. The crate builds no wasm of its own and fetches nothing at build time, so `cargo build` stays offline and reproducible. Take the artifact from the tagged GitHub Release, or from `https://cdn.edgepython.com/compiler.wasm` for the current `main`.
 
 ```toml
 # Downstream Cargo.toml
@@ -465,16 +465,9 @@ The `edge-python` crate is a `cdylib`: a Rust host can instantiate `compiler.was
 edge-python = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.1.0" }
 ```
 
-```rust
-// Downstream build.rs
-fn main() {
-    println!("cargo::rerun-if-changed=build.rs");
-    let wasm = std::env::var("DEP_COMPILER_WASM").expect("`DEP_COMPILER_WASM` unset, upstream `edge-python` must declare `links = \"compiler\"`");
-    std::fs::copy(&wasm, "runtime/compiler.wasm").expect("copy failed");
-}
-```
+Vendor the matching `compiler.wasm` next to your own sources and pin it by checksum, the same way the CLI pins native plugins with a `#sha256-` fragment. A release asset is immutable; the CDN path is not, so a checksum is the only thing that ties a build to a known engine.
 
-The download URL is derived from `CARGO_PKG_VERSION`, so a tag bump is the only retarget. Use `branch = "main"` for unreleased work. Requires `curl` on PATH; gated by the default-on `prebuilt` feature. To add native modules from a Rust host, implement the `Resolver` trait; see [Writing modules](/reference/writing-modules).
+To add native modules from a Rust host, implement the `Resolver` trait; see [Writing modules](/reference/writing-modules).
 
 ## See also
 

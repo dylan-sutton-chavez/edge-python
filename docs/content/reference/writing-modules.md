@@ -1,13 +1,13 @@
 ---
 title: "Writing modules"
-description: "Three paths to extend Edge Python: a `.wasm` module loaded by URL, a host capability bundled in a custom compiler, or a plain JS module that runs on the page's main thread."
+description: "Three paths to extend Edge Python: a `.wasm` module loaded by URL (with a native `.so` twin for the CLI), a host capability bundled in a custom compiler, or a plain JS module that runs on the page's main thread."
 ---
 
 Edge Python has no bundled stdlib. Three ways to add native functionality:
 
 | Path | Distribution | Type coverage | Maintenance |
 |---|---|---|---|
-| **`.wasm` module via URL** ([WASM ABI](/reference/wasm-abi)) | Publish `.wasm` to a CDN; any host loads dynamically | Transit values (None, bool, i128, f64, bytes/str, list, dict) | Reference [`wasm-pdk`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/pdk) (Rust), community PDKs, or hand-written wire boilerplate |
+| **`.wasm` module via URL** ([WASM ABI](/reference/wasm-abi)) | Publish `.wasm` to a CDN; any host loads dynamically. The same crate builds as `.so`/`.dylib` for the CLI's [native engine](/reference/native) | Transit values (None, bool, i128, f64, bytes/str, list, dict) | Reference [`wasm-pdk`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/pdk) (Rust), community PDKs, or hand-written wire boilerplate |
 | **Host capability** | Custom `compiler.wasm` (additional host imports declared) + host runtime they bridge to | Transit values + access to host services (DOM, FS, fetch) through embedder host imports | You own embedder + host runtime; bindings travel together |
 | **JS host module** | Plain ESM via `createWorker` (`mainThreadModules` eager, `hostModules` lazy) or the `host` field of `packages.json` | Transit values (same as Path A) | Pure JS; no Rust, no `.wasm`, no build step |
 
@@ -15,7 +15,7 @@ Edge Python has no bundled stdlib. Three ways to add native functionality:
 
 ## Path A: `.wasm` module by URL
 
-Contract: the [WASM module ABI](/reference/wasm-abi), language-agnostic, three scalar types. Rust authors use the bundled [`wasm-pdk`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/pdk) macros ([the surface](/reference/wasm-abi#author-conveniences)). Other languages use community PDKs or hand-roll the boilerplate.
+Contract: the [WASM module ABI](/reference/wasm-abi), language-agnostic, three scalar types. Rust authors use the bundled [`wasm-pdk`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/pdk) macros ([the surface](/reference/wasm-abi#author-conveniences)). Other languages use community PDKs or hand-roll the boilerplate. One source, two builds: the same crate also compiles to a native `.so`/`.dylib` plugin that the CLI's [in-process engine](/reference/native) loads through `dlopen`, identical ABI and exports, only the linking differs.
 
 Worked examples (with and without the SDK), encoding tables, and language-specific snippets: [WASM module ABI](/reference/wasm-abi). Script side:
 
@@ -121,7 +121,7 @@ async def main():
 run(main())
 ```
 
-Or skip the manual wiring: the browser runtime's `<edge-python>` element loads these declaratively from a `host` field in `packages.json`. See the [runtime README](https://github.com/dylan-sutton-chavez/edge-python/tree/main/js).
+Or skip the manual wiring: the browser runtime's `<edge-python>` element loads these declaratively from a `host` field in `packages.json`. See the [runtime README](https://github.com/dylan-sutton-chavez/edge-python/tree/main/runtime).
 
 Handlers take decoded JS values and return plain JS values. Supported tags: `None`, `bool`, `int` (i128; a JS `Number` within ±2^53, `BigInt` beyond), `float`, string, `bytes` (`Uint8Array`), plus nested `list` / `dict`. Opaque object references (DOM nodes, files, observers) model as integer IDs into a main-thread registry the handlers own (the `alloc` / `node` pattern above).
 

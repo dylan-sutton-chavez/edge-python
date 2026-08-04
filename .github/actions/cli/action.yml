@@ -44,6 +44,12 @@ runs:
       shell: bash
       run: sudo apt-get update && sudo apt-get install -y musl-tools
 
+    # Gnu releases link through zig against a glibc 2.28 floor so dlopen'd std plugins work everywhere.
+    - name: Install cargo-zigbuild
+      if: inputs.mode == 'release' && contains(inputs.target, 'linux-gnu')
+      shell: bash
+      run: command -v cargo-zigbuild >/dev/null || pip3 install --user cargo-zigbuild
+
     - name: Cache Rust (release)
       if: inputs.mode == 'release'
       uses: Swatinem/rust-cache@v2
@@ -55,7 +61,12 @@ runs:
       if: inputs.mode == 'release'
       shell: bash
       working-directory: cli
-      run: cargo build --release --target "${{ inputs.target }}"
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+        case "${{ inputs.target }}" in
+          *linux-gnu) cargo zigbuild --release --target "${{ inputs.target }}.2.28" ;;
+          *) cargo build --release --target "${{ inputs.target }}" ;;
+        esac
 
     - name: Tar
       if: inputs.mode == 'release'
@@ -89,6 +100,22 @@ runs:
         name: compiler_wasm
         path: target/wasm32-unknown-unknown/release/
 
+    # Same idea for the native engine: this run's std plugins and test.py, never the CDN.
+    - name: Download native std plugins
+      if: inputs.mode == 'test'
+      uses: actions/download-artifact@v8
+      with:
+        pattern: native-*-x86_64-unknown-linux-gnu
+        path: std_local/native/
+        merge-multiple: true
+
+    - name: Download std test.py
+      if: inputs.mode == 'test'
+      uses: actions/download-artifact@v8
+      with:
+        name: dist-test
+        path: std_local/std/
+
     # Drives a real Chromium; ubuntu-latest ships google-chrome-stable.
     - name: Test
       if: inputs.mode == 'test'
@@ -97,4 +124,5 @@ runs:
       env:
         EDGE_RUNTIME_DIR: ${{ github.workspace }}/js
         EDGE_COMPILER_WASM: ${{ github.workspace }}/target/wasm32-unknown-unknown/release/compiler.wasm
+        EDGE_STD_DIR: ${{ github.workspace }}/std_local
       run: cargo test

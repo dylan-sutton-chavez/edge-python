@@ -280,10 +280,6 @@ impl Templates {
         }
     }
 
-    pub fn count(&self) -> usize {
-        self.slots.iter().flat_map(|v| v.iter()).filter(|e| e.hits >= TPL_THRESH).count()
-    }
-
     pub fn mark_all(&self, heap: &mut super::types::HeapPool) {
         for slot in &self.slots {
             for e in slot {

@@ -5,6 +5,7 @@ mod test {
     use compiler::parser::{Parser, Value, Diagnostic};
 
     #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
     struct Case {
         src: String,
         constants: Vec<String>,
@@ -95,6 +96,18 @@ mod test {
             "expected 'program too large', got {:?}",
             diagnostics.iter().map(|d| &d.msg).collect::<Vec<_>>()
         );
+    }
+
+    // A multibyte identifier past the SSA name buffer must truncate on a codepoint boundary.
+    #[test]
+    fn long_multibyte_names_stay_valid_utf8() {
+        let name = "\u{4E2D}".repeat(43);
+        let src = format!("{name} = 1\n{name} = 2\nprint({name})\n");
+        let (tokens, _) = lex(&src);
+        let (chunk, _) = Parser::new(&src, tokens.into_iter()).parse();
+        for n in &chunk.names {
+            assert!(core::str::from_utf8(n.as_bytes()).is_ok(), "invalid utf8 in SSA name {n:?}");
+        }
     }
 
     // Deep prefix / right-associative operator chains must hit the expr-depth guard and error, not overflow the parser's native/WASM stack.

@@ -8,6 +8,7 @@ mod test {
     use compiler::vm::types::{SchedulerStatus, VmErr};
 
     #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
     struct Case {
         src: String,
         output: Vec<String>,

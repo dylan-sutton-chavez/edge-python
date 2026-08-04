@@ -66,22 +66,3 @@ macro_rules! s {
     (cap: $c:expr; $($t:tt)*) => {{ let mut _s = alloc::string::String::with_capacity($c); $crate::s!(@b _s; $($t)*); _s }};
     ($($t:tt)*) => {{ let mut _s = alloc::string::String::new(); $crate::s!(@b _s; $($t)*); _s }};
 }
-
-pub enum E {
-    Custom { msg: alloc::string::String },
-}
-
-impl E {
-    pub fn message(&self) -> alloc::string::String {
-        match self {
-            Self::Custom { msg } => msg.clone(),
-        }
-    }
-}
-
-impl From<E> for alloc::string::String { fn from(e: E) -> Self { e.message() } }
-
-#[macro_export]
-macro_rules! err {
-    ($($t:tt)*) => { $crate::util::fstr::E::Custom { msg: $crate::s!($($t)*) } };
-}

@@ -10,7 +10,7 @@ pub use types::*;
 
 use crate::s;
 use crate::lexer::{Token, TokenType};
-use crate::util::fx::FxHashMap as HashMap;
+use crate::util::hash::FxHashMap as HashMap;
 use crate::packages::{Resolver, NoopResolver};
 
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
@@ -48,7 +48,7 @@ pub struct Parser<'src, I: Iterator<Item = Token>> {
     pub(super) chunk: SSAChunk,
     pub(super) ssa_versions: HashMap<String, u32>,
     /* Names declared `global` in the current function body; redirects load/store to `self.globals`. */
-    pub(super) globals_decl: crate::util::fx::FxHashSet<String>,
+    pub(super) globals_decl: crate::util::hash::FxHashSet<String>,
     pub(super) join_stack: Vec<JoinNode>,
     pub(super) loop_starts: Vec<u16>,
     pub(super) last_line: usize,
@@ -87,6 +87,10 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         let name_bytes = name.as_bytes();
         let cap = buf.len();
         let mut n = name_bytes.len().min(cap);
+        // Identifiers are utf8, so back off to a codepoint boundary before truncating.
+        while n > 0 && n < name_bytes.len() && (name_bytes[n] & 0xC0) == 0x80 {
+            n -= 1;
+        }
         buf[..n].copy_from_slice(&name_bytes[..n]);
         if n < cap {
             buf[n] = b'_';
@@ -97,6 +101,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         let take = s.len().min(cap - n);
         buf[n..n + take].copy_from_slice(&s[..take]);
         n += take;
+        // SAFETY holds because the name prefix ends on a codepoint boundary and the suffix is ascii.
         unsafe { core::str::from_utf8_unchecked(&buf[..n]) }
     }
 
@@ -158,7 +163,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
     /* Propagate the body's free names to the parent chunk, register the function, and emit its make-op. `fname` is None for lambdas (anonymous, sentinel slot); Some(name) registers a store slot for a def. Order matches the historic def path: free-name propagation, then slot, then push. */
     pub(super) fn push_function(&mut self, params: Vec<String>, body: SSAChunk, defaults: u16, fname: Option<&str>, op: OpCode) {
-        let param_slots: crate::util::fx::FxHashSet<String> = params.iter()
+        let param_slots: crate::util::hash::FxHashSet<String> = params.iter()
             .map(|p| s!(str types::param_base_name(p), "_0")).collect();
         for name in &body.names {
             if !param_slots.contains(name.as_str()) {
@@ -510,7 +515,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             tokens: iter.peekable(),
             chunk,
             ssa_versions: HashMap::default(),
-            globals_decl: crate::util::fx::FxHashSet::default(),
+            globals_decl: crate::util::hash::FxHashSet::default(),
             join_stack: Vec::new(),
             loop_starts: Vec::new(),
             loop_breaks: Vec::new(),

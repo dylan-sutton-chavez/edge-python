@@ -14,8 +14,7 @@ pub mod engine;
 pub mod matcher;
 pub mod parser;
 
-/* Exports compile only for wasm32 so the engine stays native testable. */
-#[cfg(target_arch = "wasm32")]
+/* Exports build for wasm and native alike so the CLI can dlopen this package. */
 // Class exports follow the `__class_<Name>_<method>` ABI convention, not snake case.
 #[allow(non_snake_case)]
 mod wasm_api {

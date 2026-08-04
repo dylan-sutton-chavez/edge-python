@@ -4,11 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Single-pass SSA compiler and threaded-code VM for a sandboxed Python subset. NaN-boxed values, dual inline caching, super-instruction fusion, pure-function memoization, mark-sweep GC; classes with inheritance and dunder protocol, async/await, pattern matching, and packages.json imports. around 200 KB WebAssembly module release."
+description = "Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Python subset. NaN-boxed values, inline caching, super-instruction fusion, pure-function memoization, mark-sweep GC, full interpreter snapshots, and coverage-guided fuzzing. Runs in the browser as a WebAssembly module and natively inside the CLI."
 readme = "README.md"
 autotests = false
 autobins = false
-links = "compiler"
 
 [lib]
 name = "compiler"
@@ -20,16 +19,19 @@ doctest = false
 name = "tests"
 path = "tests/main.rs"
 
-# `prebuilt` (default on) gates the `build.rs` download of `compiler.wasm`. Consumers get the wasm transparently; this repo's own producer-side commands pass `--no-default-features` to skip the fetch (nothing here reads `DEP_COMPILER_WASM`).
 [features]
-default = ["prebuilt"]
-prebuilt = []
+# Gates the native engine module (resolver, dlopen loader, host modules) out of wasm and plain lib builds.
+native = ["dep:libloading", "dep:ureq"]
 
 [dependencies]
 wasm-abi = { workspace = true }
 hashbrown = { workspace = true }
 itoa = { workspace = true }
 libm = { workspace = true }
+
+# Native-engine only, dlopen for std plugins and blocking https for URL imports.
+libloading = { version = "0.9", optional = true }
+ureq = { version = "3.3.0", optional = true }
 
 # WASM-only global allocator. Pulled into wasm32 builds automatically; absent on host builds (where std's allocator is fine and `compiler.wasm` is just a library artifact, not the runtime target).
 [target.'cfg(target_arch = "wasm32")'.dependencies]

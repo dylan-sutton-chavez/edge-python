@@ -11,8 +11,8 @@
     const st = { lines: [], done: false, ok: false, err: "", code: null };
     window.__edge = st;
     const el = document.getElementById("ep");
-    // Bump together with runtime element.js.
-    const CONTRACT = "0.1.0";
+    // The CLI injects devkit::RUNTIME_CONTRACT here at page build.
+    const CONTRACT = "%CONTRACT%";
     (async () => {
       // Missing marker means older runtime, plain wait.
       if (window.__edgeContract !== undefined && window.__edgeContract !== CONTRACT) {

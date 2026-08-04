@@ -4,6 +4,7 @@ mod test {
     use compiler::lexer::lex;
 
     #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
     struct Case {
         src: String,
         tokens: Vec<String>,
