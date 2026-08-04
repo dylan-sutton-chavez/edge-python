@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   compiler-check:
-    name: Compiler / Lint and Check
+    name: Engine / Compiler Lint and Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -27,7 +27,7 @@ jobs:
           mode: check
 
   runtime-lint:
-    name: Runtime / Deno Lint
+    name: Engine / Runtime Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -36,7 +36,7 @@ jobs:
           mode: lint
 
   compiler:
-    name: Compiler / Test and Release
+    name: Engine / Compiler Test and Release
     needs: [compiler-check, runtime-lint]
     runs-on: ubuntu-latest
     permissions:
@@ -49,7 +49,7 @@ jobs:
           github-token: ${{ github.token }}
 
   runtime:
-    name: Runtime / Deno Test
+    name: Engine / Runtime Test
     needs: [compiler]
     runs-on: ubuntu-latest
     steps:
@@ -72,8 +72,8 @@ jobs:
         with:
           capability: ${{ matrix.capability }}
 
-  std:
-    name: Std / ${{ matrix.package }}
+  std-web:
+    name: Std / Web (${{ matrix.package }})
     needs: [runtime]
     runs-on: ubuntu-latest
     strategy:
@@ -87,8 +87,8 @@ jobs:
           package: ${{ matrix.package }}
 
   # Cheap host-target clippy; gates the 16-cell cross matrix below.
-  native-lint:
-    name: Native / Lint (${{ matrix.package }})
+  std-native-lint:
+    name: Std / Native Lint (${{ matrix.package }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -102,9 +102,9 @@ jobs:
           package: ${{ matrix.package }}
 
   # std packages as native plugin cdylibs for the CLI's in-process engine. Assets ship to the CDN and tag Releases.
-  native:
-    name: Native / ${{ matrix.package }} (${{ matrix.target }})
-    needs: [native-lint]
+  std-native:
+    name: Std / Native (${{ matrix.package }}, ${{ matrix.target }})
+    needs: [std-native-lint]
     permissions:
       contents: write
     strategy:
@@ -171,7 +171,7 @@ jobs:
 
   cli-test:
     name: CLI / Test
-    needs: [host, std, native, cli-release]
+    needs: [host, std-web, std-native, cli-release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -181,7 +181,7 @@ jobs:
 
   cdn:
     name: Cloudflare Upload (CDN)
-    needs: [cli-test, native]
+    needs: [cli-test, std-native]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
