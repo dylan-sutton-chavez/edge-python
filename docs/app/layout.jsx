@@ -2,6 +2,7 @@ import { Footer, Layout, Navbar } from 'nextra-theme-docs'
 import { Head } from 'nextra/components'
 import { getPageMap } from 'nextra/page-map'
 import { Inter, JetBrains_Mono } from 'next/font/google'
+import { NavbarAutoCollapse } from '../components/NavbarAutoCollapse'
 import 'nextra-theme-docs/style.css'
 import '../globals.css'
 
@@ -43,6 +44,7 @@ export default async function RootLayout({ children }) {
                 <Layout navbar={navbar} footer={footer} pageMap={await getPageMap()} docsRepositoryBase="https://github.com/dylan-sutton-chavez/edge-python/tree/main/docs">
                 {children}
                 </Layout>
+                <NavbarAutoCollapse />
             </body>
         </html>
     )

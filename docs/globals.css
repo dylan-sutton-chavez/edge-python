@@ -19,16 +19,28 @@ html {
     font-family: var(--font-mono-code), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-/* Centers nav links; logo left, icons right. Nextra 4 renamed .nextra-nav-container -> .nextra-navbar (the <header>); links stay in .nextra-scrollbar. */
+/* Center nav links in flow so the logo and search never overlap them. */
 .nextra-navbar nav {
-    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
 }
 
 .nextra-navbar nav .nextra-scrollbar {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
+    flex: 1;
+    justify-content: center;
+}
+
+/* When links overflow, NavbarAutoCollapse flips this to the hamburger layout. */
+[data-nav-cramped] .nextra-navbar nav .nextra-scrollbar,
+[data-nav-cramped] .nextra-navbar .nextra-search {
+    display: none;
+}
+[data-nav-cramped] .nextra-navbar .nextra-hamburger {
+    display: inline-block;
+}
+[data-nav-cramped] .nextra-mobile-nav {
+    display: flex;
 }
 
 /* Playground: tighter code padding (two-class specificity beats Nextra's single `_py-4`, no !important). */
