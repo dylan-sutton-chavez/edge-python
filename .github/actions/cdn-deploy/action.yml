@@ -87,8 +87,6 @@ runs:
       run: |
         raw=$(wc -c < /tmp/compiler/compiler.wasm)
         served=$(wc -c < _site/compiler.wasm)
-        printf '### compiler.wasm\n\n| | Size |\n| --- | --- |\n| raw | %s KB |\n| served (brotli-11) | %s KB |\n' \
-          "$(( raw / 1024 ))" "$(( served / 1024 ))" >> "$GITHUB_STEP_SUMMARY"
         echo "::notice title=compiler.wasm::served as brotli-11: $(( served / 1024 )) KB (raw $(( raw / 1024 )) KB)"
 
     - name: Deploy to Cloudflare Pages
