@@ -51,7 +51,7 @@ fn dumps(value: Handle, kw: Kwargs) -> Result<String> {
         opts.item_sep = decode_str(&item, "separators[0]")?;
         opts.key_sep = decode_str(&key, "separators[1]")?;
     } else if opts.indent.is_some() {
-        // CPython: when `indent` is given and `separators` is not, default key separator becomes `": "`.
+        // Python: when `indent` is given and `separators` is not, default key separator becomes `": "`.
         opts.key_sep = ": ".to_string();
     }
     serializer::serialize(&value, opts)

@@ -18,7 +18,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.ternary_tail(val_start);
     }
 
-    /* Ternary: value was emitted first (single-pass), so reorder `[value][cond]` into `[cond][JumpIfFalse][value][Jump][else]` for CPython evaluation order. */
+    /* Ternary: value was emitted first (single-pass), so reorder `[value][cond]` into `[cond][JumpIfFalse][value][Jump][else]` for Python evaluation order. */
     pub(super) fn ternary_tail(&mut self, val_start: usize) {
         if self.saw_newline || !matches!(self.peek(), Some(TokenType::If)) { return; }
         self.advance();

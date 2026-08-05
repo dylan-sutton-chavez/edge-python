@@ -1,53 +1,19 @@
 ---
 title: "Limits and errors"
-description: "Sandbox limits, error types, and runtime guarantees."
+description: "Sandbox limits, integer width, error types, and runtime guarantees."
 ---
 
 ## Sandbox limits
 
-Two profiles via `VM::with_limits`. The same `compiler.wasm` runs unsandboxed in trusted contexts, clamped in untrusted ones.
+The VM has two limit profiles, chosen with `VM::with_limits`. Both shipped engines, the browser runtime and the CLI's native engine, run every script under the `sandbox` profile. The `none` profile is the library default for Rust embedders who construct a `VM` directly and want no metering.
 
-| Limit | `none()` (default) | `sandbox()` | What hitting it raises |
-|----------------|--------------------|---------------|------------------------|
-| Max call depth | 1,000 | 256 | `RecursionError` |
-| Max operations | unbounded | 100,000,000 | `RuntimeError` |
-| Max live objects | 10,000,000 | 100,000 | `MemoryError` |
-
-## Integer width
-
-Two-tier:
-
-* **Inline (fast)**: 47-bit signed in a NaN-boxed `Val`. Range `-2^47 .. 2^47-1` (`-140_737_488_355_328 .. 140_737_488_355_327`). One ALU op per arithmetic, no allocation.
-* **Wide (slow)**: i128 in `HeapObj::LongInt`. Range `+/-2^127 - 1`. Auto-used when a literal exceeds 47-bit or inline arithmetic overflows.
-
-Outside `+/-2^127` raises `OverflowError`. Promotion is automatic. User code doesn't see the boundary.
+| Limit | `sandbox` (shipped engines) | `none` (library default) | What hitting it raises |
+|---|---|---|---|
+| Max call depth | 256 | 1,000 | `RecursionError` |
+| Max operations | 100,000,000 | unbounded | `RuntimeError` |
+| Max live objects | 100,000 | 10,000,000 | `MemoryError` |
 
 ```python
-print(140737488355327) # inline, fast path
-print(2 ** 47) # 140737488355328: auto-promotes to LongInt
-print(2 ** 100) # 1267650600228229401496703205376
-try:
-  print(2 ** 127) # past the i128 cap
-except OverflowError:
-  print("overflow")
-```
-
-```text Output
-140737488355327
-140737488355328
-1267650600228229401496703205376
-overflow
-```
-
-### Caveats
-
-- **`pow(a, b, m)` modular**: modulus must be `<= 2^63` (larger overflows i128 in the multiply). Hard cap without arbitrary-precision arithmetic.
-- **No CPython-style unbounded ints**: by design, edge workloads don't need wider than 128 bits. Crypto-scale math is out of scope.
-
-### Triggering limits
-
-```python
-# Recursion depth
 def loop(n):
   return loop(n + 1)
 
@@ -61,83 +27,158 @@ except RecursionError:
 hit max depth
 ```
 
+## Integer width
+
+Integers are two-tier:
+
+- **Inline (fast).** 47-bit signed, packed into the NaN-boxed value. Range `-140_737_488_355_328` to `140_737_488_355_327` (`-2^47` to `2^47 - 1`). One ALU op per arithmetic, no allocation.
+- **Wide (slow).** 128-bit, heap-allocated. Used automatically when a literal exceeds the inline range or inline arithmetic overflows.
+
+Promotion is automatic and invisible. Past ±2^127, arithmetic raises `OverflowError`. Integers are not unbounded: wider than 128 bits is out of scope by design.
+
 ```python
-# Heap quota, a tight loop retaining new objects
+print(140737488355327)   # inline, fast path
+print(2 ** 47)           # auto-promotes to the wide path
+print(2 ** 100)
 try:
-  xs = []
-  while True:
-    xs.append([])
-except MemoryError:
-  print("hit heap limit")
+  print(2 ** 127)        # past the 128-bit cap
+except OverflowError:
+  print("overflow")
 ```
 
-## Source size
+```text Output
+140737488355327
+140737488355328
+1267650600228229401496703205376
+overflow
+```
 
-Source must be under 10 MiB. Larger input is rejected at lex time.
+`pow(a, b, m)` with a modulus is supported, but the modulus must be at most `2^63`. Larger values raise `ValueError`, because the intermediate multiply would overflow 128 bits.
 
-## Token limits
+## Source and token limits
 
-| Limit | Value |
-|----------------------|-------|
-| Max indent depth | 100 |
-| Max f-string depth | 200 |
-| Max expression depth | 200 |
-| Max instructions per chunk | 65,535 |
+Source must be under 10 MiB. Larger input is rejected at lex time. The remaining caps prevent asymmetric inputs, small sources that would produce huge parse trees or instruction streams:
 
-Prevent asymmetric DoS: small input producing an exponentially large parse tree.
+| Limit | Value | Diagnostic |
+|---|---|---|
+| Source size | 10 MiB | `source file exceeds maximum size (10 MiB)` |
+| Indent depth | 100 | `indentation depth exceeds maximum (100)` |
+| F-string nesting depth | 200 | `f-string nesting depth exceeds maximum (200)` |
+| Expression nesting depth | 200 | `expression too deeply nested` |
+| Instructions per chunk | 65,535 | `program too large: exceeded maximum instruction limit` |
 
-## Error types
+Separately, `repr` output is truncated with a trailing `, ...` past 1,000,000 characters, so printing a huge structure cannot exhaust memory.
 
-### Compile-time
+## Compile-time errors
 
-Reported as `Diagnostic { start, end, msg }`, byte offsets into source. Line and column are computed lazily by `render()`. Caught before any code runs.
+Syntax and resolution errors are reported as diagnostics with byte offsets into the source, rendered with line, column, and a caret preview. They are caught before any code runs and cannot be caught by `try` / `except`.
 
 | Diagnostic | Cause |
-|-------------------------------------------|----------------------------------------|
+|---|---|
 | `expected X, got 'Y'` | Unexpected token |
 | `'(' was never closed` (or `'['` / `'{'`) | Bracket opened with no matching closer |
-| `')' does not match '[', expected ']'` | Wrong closer kind for innermost opener |
+| `')' does not match '[', expected ']'` | Wrong closer kind for the innermost opener |
 | `unexpected ')', no matching opener` | Closer with no opener on the stack |
-| `unexpected ':' (missing 'if', 'while', 'for', ...)` | `expr:` at statement level |
-| `unterminated string literal` | String missing closing quote |
+| `unterminated string literal` | String missing its closing quote |
 | `unterminated triple-quoted string literal` | Triple-quoted string hit EOF |
-| `f-string was never closed` | F-string body hit EOF before close |
+| `f-string was never closed` | F-string body hit EOF before its close |
 | `inconsistent indentation: mixing tabs and spaces` | Indent mixes both whitespace kinds |
-| `'break' outside loop` | Misplaced control keyword |
-| `'continue' outside loop` | Misplaced control keyword |
-| `default 'except:' must be last` | Bare `except` not at end |
-| `expression too deeply nested` | Past `MAX_EXPR_DEPTH` |
-| `program too large: exceeded maximum instruction limit` | Past `MAX_INSTRUCTIONS` |
+| `unindent does not match any outer indentation level` | Dedent lands between two outer levels |
+| `integer literal too large to represent (max ±2^127)` | Literal past the 128-bit cap |
+| `'break' outside loop` / `'continue' outside loop` | Misplaced control keyword |
+| `default 'except:' must be last` | Bare `except` not at the end |
+| `expression too deeply nested` | Past the expression depth cap |
+| `program too large: exceeded maximum instruction limit` | Past the instruction cap |
 
-### Runtime
+Import failures are compile-time diagnostics too, including modules Edge Python does not ship (`os`, `sys`, `asyncio`). See [Modules](/reference/modules#resolution-errors) for those message formats.
 
-Raised as `VmErr`. Most are catchable with `try` / `except`.
+## Runtime errors
 
-| Variant | Class name | When |
-|-----------------|----------------------|------------------------------------|
-| `Type` | `TypeError` | Wrong operand type |
-| `TypeMsg` | `TypeError` | Wrong operand type (with context) |
-| `Value` | `ValueError` | Right type, invalid value |
-| `Attribute` | `AttributeError` | Attribute not found on object |
-| `Name` | `NameError` | Undefined name |
-| `ZeroDiv` | `ZeroDivisionError` | Division or modulo by zero |
-| `Overflow` | `OverflowError` | Integer arithmetic past ±2^127 |
-| `Raised("KeyError")` | `KeyError` | Dict / set lookup miss |
-| `Raised("IndexError")` | `IndexError` | Sequence index out of range |
-| `Raised("StopIteration")` | `StopIteration` | Iterator exhausted |
-| `Raised("AssertionError")` | `AssertionError` | Failed `assert` |
-| `Raised("TimeoutError")` | `TimeoutError` | `with_timeout` deadline expired |
-| `Raised("CancelledError")` | `CancelledError` | User-thrown cancellation |
-| `Raised("SystemExit")` | `SystemExit` | `raise SystemExit(code)`; uncaught = clean host exit with that code |
-| `CallDepth` | `RecursionError` | Past `max_calls` (deep recursion or call depth) |
-| `Heap` | `MemoryError` | Past heap limit |
-| `Budget` | `RuntimeError` | Past op limit |
-| `Runtime` | `RuntimeError` | Internal invariant or unsupported |
-| `Raised` | (custom) | User `raise X` (X is a class or instance; raising a non-exception value such as a `str` or `int` gives `TypeError`) |
+Runtime errors raise as typed exceptions, catchable with `try` / `except`.
 
-#### Exception hierarchy
+| Class | When |
+|---|---|
+| `TypeError` | Wrong operand or argument type |
+| `ValueError` | Right type, invalid value |
+| `AttributeError` | Attribute not found on the object |
+| `NameError` | Undefined name |
+| `ZeroDivisionError` | Division or modulo by zero |
+| `OverflowError` | Integer arithmetic past ±2^127 |
+| `KeyError` | Dict or set lookup miss |
+| `IndexError` | Sequence index out of range |
+| `StopIteration` | Iterator exhausted |
+| `AssertionError` | Failed `assert` |
+| `TimeoutError` | `with_timeout` deadline expired |
+| `CancelledError` | User-thrown cancellation |
+| `SystemExit` | `raise SystemExit(code)`. Uncaught, the host exits with that code |
+| `RecursionError` | Past the call-depth limit |
+| `MemoryError` | Past the live-object limit |
+| `RuntimeError` | Past the op limit, an import cycle, or an internal invariant |
 
-Curated tree rooted at `BaseException -> Exception`. `except` walks parent links. `except Exception` catches `RuntimeError`, `ValueError`, `KeyError`, `AssertionError`, etc. `except RuntimeError` catches `RecursionError`, `NotImplementedError`. Intermediate groups match too: `except LookupError` catches `IndexError` / `KeyError`, and `except ArithmeticError` catches `OverflowError` / `ZeroDivisionError`; `OSError` also lives under `Exception`. `SystemExit` sits directly under `BaseException`, so `except Exception` does not catch it (use `except SystemExit` or a bare `except`).
+Every entry in the table fires from ordinary code:
+
+```python
+def show(f):
+  try:
+    f()
+  except Exception as e:
+    print(type(e).__name__ + ":", e)
+
+show(lambda: 1 + "x")
+show(lambda: int("abc"))
+show(lambda: {}["missing"])
+show(lambda: [1][5])
+show(lambda: nope)
+show(lambda: 1 % 0)
+
+def fail():
+  assert 1 == 2, "math broke"
+
+show(fail)
+```
+
+```text Output
+TypeError: unsupported operand type(s) for +: 'int' and 'str'
+ValueError: int(): invalid literal
+KeyError: 'missing'
+IndexError: list index out of range
+NameError: name 'nope' is not defined
+ZeroDivisionError: division by zero
+AssertionError: math broke
+```
+
+`SystemExit` needs its own `except` clause, and `TimeoutError` fires when a `with_timeout` deadline expires:
+
+```python
+try:
+  raise SystemExit(3)
+except SystemExit:
+  print("caught exit")
+
+async def slow():
+  sleep(1)
+
+try:
+  run(with_timeout(0.01, slow()))
+except TimeoutError:
+  print("timed out")
+```
+
+```text Output
+caught exit
+timed out
+```
+
+A user `raise X` re-raises whatever class or instance `X` is. Raising a value that does not derive from `BaseException` (a `str`, an `int`) gives `TypeError`.
+
+### Exception hierarchy
+
+`except` walks parent links in a curated tree rooted at `BaseException`:
+
+- `Exception` sits under `BaseException`. Everything catchable in normal code derives from `Exception`.
+- `LookupError` groups `IndexError` and `KeyError`. `ArithmeticError` groups `OverflowError` and `ZeroDivisionError`. `RuntimeError` parents `RecursionError` and `NotImplementedError`.
+- `OSError`, `NameError`, `StopIteration`, `StopAsyncIteration`, `AssertionError`, `MemoryError`, `TimeoutError`, and `CancelledError` sit directly under `Exception`.
+- `SystemExit` sits directly under `BaseException`, so `except Exception` does not catch it. Use `except SystemExit` or a bare `except`.
 
 ```python
 try:
@@ -156,15 +197,11 @@ caught via parent: oops
 caught IndexError as Exception
 ```
 
-User-defined classes don't auto-extend the built-in `BaseException` tree. They support inheritance among themselves: `except UserBase` catches a raised `UserSub` when `UserSub` inherits from `UserBase`. For `raise X from Y` and chaining, see [Control flow](/language/control-flow#raise).
+User-defined classes do not join the built-in tree, but they support inheritance among themselves: `except UserBase` catches a raised `UserSub` when `UserSub` inherits from `UserBase`. For `raise X from Y` and chaining, see [Control flow](/language/control-flow).
 
 ### Exception arguments
 
-Caught exceptions expose constructor args as `e.args` (tuple):
-
-- `raise X("msg")` and `raise X(a, b)` carry through.
-- Runtime-raised errors carry their message as a single arg.
-- Bare `raise X` produces an empty tuple.
+Caught exceptions expose their constructor arguments as `e.args`, a tuple. `raise X("msg")` and `raise X(a, b)` carry through, runtime-raised errors carry their message as a single arg, and a bare `raise X` produces an empty tuple.
 
 ```python
 try:
@@ -217,27 +254,37 @@ type
 
 ### Environmental errors
 
-Failures surfaced before the source reaches the compiler. No line/column preview. No parsed code to anchor to. Emitted as plain text, uncatchable from Python.
+Failures that happen before the source reaches the compiler surface as plain text, uncatchable from script code, with no line or column to anchor to:
 
-| Error | When | Resolution |
-|---------------------------------------------|-----------------------------------------------|---------------------------------------|
-| `input rejected: invalid utf-8 at byte N` | Host input bytes not valid UTF-8 | Re-encode as UTF-8 |
-| `source file exceeds maximum size (10 MiB)` | Source over the 10 MiB lex-time cap | Split or trim the input |
+| Error | When |
+|---|---|
+| `input rejected: invalid utf-8 at byte N` | Host input bytes are not valid UTF-8 |
+| `source file exceeds maximum size (10 MiB)` | Source over the lex-time cap |
 
-Handle at the embedder layer (path validation, encoding, size check) before invoking the compiler.
-
-## Unavailable modules
-
-Unavailable modules (`os`, `sys`, `asyncio`, …) parse for syntactic compatibility but have no resolver entry. So they are rejected at **compile time** before any code runs. This is a parse-time diagnostic, not a catchable runtime exception. See [Imports, Errors](/reference/imports#errors). For code reuse, use higher-order functions.
+Handle these at the embedder layer (path validation, encoding, size check) before invoking the compiler.
 
 ## Behavioral notes
 
 A few supported operations have implementation-defined or by-design behavior worth knowing:
 
-- **Set iteration / `repr` order**: sets store elements in a Rust hash table (`FxHash`), so iteration and `repr` follow hash order, not insertion order. It is implementation-defined — don't rely on it. `{3, 1, 2}` may `repr` as `{3, 2, 1}`.
-- **`is` on numbers**: small/inline integers are compared by value (NaN-box), so `a = 1000; b = 1000; a is b` is `True`. Use `==` for value equality and reserve `is` for `None` and identity checks.
-- **`str.casefold`**: simple lowercasing, without full Unicode case-fold expansion — `'ß'.casefold()` stays `'ß'` rather than expanding to `'ss'`.
+- **Set iteration and `repr` order.** Sets store elements in a hash table, so iteration and `repr` follow hash order, not insertion order. Do not rely on it. `{3, 1, 2}` may `repr` as `{3, 2, 1}`.
+- **`is` on numbers.** Inline integers are compared by value, so `a = 1000; b = 1000; a is b` is `True`. Use `==` for value equality and reserve `is` for `None` and identity checks.
+- **`str.casefold`.** Simple lowercasing without full Unicode case-fold expansion: `'ß'.casefold()` stays `'ß'` rather than expanding to `'ss'`.
+
+The `is` note, demonstrated:
+
+```python
+a = 1000
+b = 1000
+print(a is b)
+print(a == b)
+```
+
+```text Output
+True
+True
+```
 
 ## Determinism
 
-Same source + input -> same output across runs and architectures (`x86_64`, `aarch64`, `wasm32`). No time, randomness, threading, or OS interaction. Heap-pool slot reuse is the only nondeterminism: observable through `id(x)` only, never `==`, `repr`, or any other operation.
+Same source plus same input gives the same output across runs and architectures (`x86_64`, `aarch64`, `wasm32`). There is no time, randomness, threading, or OS interaction in the core language. Heap-slot reuse is the only nondeterminism, and it is observable through `id(x)` only, never through `==`, `repr`, or any other operation.

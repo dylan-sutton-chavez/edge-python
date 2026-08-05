@@ -1,5 +1,5 @@
 /*
-Walk a Handle, emit JSON text. Dispatch by `type_of`; sequences use `iter`+`len`+`get_item` (skip `iter_next`: wasm-pdk v0.1.0 StopIteration broken). Full CPython `json.dumps` kwargs supported.
+Walk a Handle, emit JSON text. Dispatch by `type_of`; sequences use `iter`+`len`+`get_item` (skip `iter_next`: wasm-pdk v0.1.0 StopIteration broken). Full Python `json.dumps` kwargs supported.
 */
 
 use alloc::{borrow::ToOwned, format, string::String, vec::Vec};
@@ -31,10 +31,9 @@ impl Default for Options {
 
 pub struct SerCtx<'a> {
     pub opts: &'a Options,
-    pub depth: usize,
 }
 
-/* Recursion-depth cap for circular detection: wasm plugin can't see Val identity (CPython's `id(x) in seen`); trips before JS call stack overflow on self-reference. */
+/* Recursion-depth cap for circular detection: wasm plugin can't see Val identity (Python's `id(x) in seen`); trips before JS call stack overflow on self-reference. */
 const MAX_DEPTH: usize = 200;
 
 pub fn serialize(value: &Handle, opts: Options) -> Result<String> {
@@ -48,7 +47,7 @@ pub fn serialize(value: &Handle, opts: Options) -> Result<String> {
         };
     }
     let mut out = String::new();
-    let mut ctx = SerCtx { opts: &opts, depth: 0 };
+    let mut ctx = SerCtx { opts: &opts };
     serialize_into(value, &mut out, &mut ctx, 0)?;
     Ok(out)
 }

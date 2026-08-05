@@ -247,7 +247,7 @@ impl<'a> VM<'a> {
         if seen.len() > RENDER_DEPTH_MAX { return "...".into(); }
         if v.is_int() { let mut b = itoa::Buffer::new(); return b.format(v.as_int()).into(); }
         if v.is_float() {
-            // Single source of truth for float text (CPython repr rules, scientific + .0).
+            // Single source of truth for float text (Python repr rules, scientific + .0).
             return crate::util::fstr::format_f64(v.as_float());
         }
         if v.is_true() { return "True".into(); }
@@ -266,7 +266,7 @@ impl<'a> VM<'a> {
             HeapObj::Dict(d) => { let id = v.as_heap(); if seen.contains(&id) { return "{...}".into(); } seen.push(id); let mut o = s!(cap: 32; "{"); for (i,(k,val)) in d.borrow().iter().enumerate() { if i>0 { if o.len() > MAX_REPR_LEN { o.push_str(", ..."); break; } o.push_str(", "); } o.push_str(&self.repr_d(k, seen)); o.push_str(": "); o.push_str(&self.repr_d(val, seen)); } o.push('}'); seen.pop(); o },
             HeapObj::BoundMethod(_, id) => s!("<built-in method ", str id.name(), ">"),
             HeapObj::NativeFn(id) => s!("<built-in function ", str id.name(), ">"),
-            // User classes live in `__main__`; CPython qualifies the repr with the module.
+            // User classes live in `__main__`; Python qualifies the repr with the module.
             HeapObj::Class(name, _, _) => crate::s!("<class '__main__.", str name, "'>"),
             HeapObj::Instance(cls, _) => {
                 if cls.is_heap() && let HeapObj::Class(name, _, _) = self.heap.get(*cls) { return crate::s!("<", str name, " instance>"); }

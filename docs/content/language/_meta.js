@@ -5,7 +5,6 @@ export default {
     'control-flow': 'Control flow',
     functions: 'Functions',
     classes: 'Classes',
-    dunders: 'Dunder methods',
     async: 'Async',
     snapshots: 'Snapshots'
 }

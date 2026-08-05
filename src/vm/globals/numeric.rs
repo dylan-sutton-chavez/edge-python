@@ -46,7 +46,7 @@ fn neumaier(sum: f64, comp: f64, x: f64) -> (f64, f64) {
 }
 
 /* `int(s, base)` parsing: optional sign, optional 0x/0o/0b prefix (matching the base, or inferred when base==0), `_` digit separators, radix 0 or 2..=36. */
-// Rounds an integer to -k decimal digits using banker's rounding, matching CPython.
+// Rounds an integer to -k decimal digits using banker's rounding, matching Python.
 fn round_int_banker(n: i128, k: u32) -> i128 {
     let factor = 10i128.checked_pow(k.min(38)).unwrap_or(i128::MAX);
     let q = n.div_euclid(factor);
@@ -293,7 +293,7 @@ impl<'a> VM<'a> {
         let start = if args.len() > 1 { args[1] } else { Val::int(0) };
         let mut cur = self.iter_cursor(args[0])?;
         let mut acc = start;
-        // Once a float enters, switch to Neumaier compensated summation (CPython 3.12+).
+        // Once a float enters, switch to Neumaier compensated summation (Python 3.12+).
         let mut fstate: Option<(f64, f64)> = if start.is_float() { Some((start.as_float(), 0.0)) } else { None };
         while let Some(item) = cur.next(&mut self.heap)? {
             match fstate {

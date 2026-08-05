@@ -39,7 +39,7 @@ pub enum OpCode {
     DictUpdate, SetUpdate, ListExtend,
     /* Pop a value, push whether it matches a sequence pattern (list/tuple; str/bytes excluded). */
     MatchSeq,
-    /* `name += rhs`: list+list extends in place (so aliases observe it, matching CPython's __iadd__); every other type behaves as Add. */
+    /* `name += rhs`: list+list extends in place (so aliases observe it, matching Python's __iadd__); every other type behaves as Add. */
     InPlaceAdd,
     /* Unary plus: calls `__pos__`, coerces bool to int, else identity on numbers. */
     Pos,

@@ -1,6 +1,6 @@
 ---
 title: "Control flow"
-description: "Conditionals, loops, exceptions, pattern matching."
+description: "Conditionals, loops, pattern matching, and exceptions."
 ---
 
 ## if / elif / else
@@ -24,6 +24,20 @@ zero
 positive
 ```
 
+## pass
+
+`pass` does nothing. Use it where the grammar requires a block.
+
+```python
+for i in range(3):
+  pass
+print("done")
+```
+
+```text Output
+done
+```
+
 ## while
 
 ```python
@@ -40,7 +54,7 @@ print(total)
 
 ### while ... else
 
-The `else` runs if the loop completes without `break`.
+The `else` runs when the loop ends without `break`.
 
 ```python
 x = 0
@@ -56,7 +70,7 @@ loop finished cleanly
 
 ## for
 
-Iterates anything that produces a sequence: list, tuple, dict, set, range, string, generator.
+`for` iterates any iterable: list, tuple, dict, set, range, string, or generator.
 
 ```python
 for ch in "abc":
@@ -95,6 +109,8 @@ for first, *rest in [[1, 2, 3], [4, 5, 6, 7]]:
 
 ### break and continue
 
+`break` exits the loop. `continue` skips to the next item. Both work in `for` and `while`.
+
 ```python
 for i in range(10):
   if i == 5:
@@ -111,7 +127,7 @@ for i in range(10):
 
 ### for ... else
 
-Runs when the loop exhausts its iterator (no `break`).
+The `else` runs when the loop exhausts its iterator without `break`.
 
 ```python
 for i in range(3):
@@ -126,11 +142,9 @@ done
 
 ## match / case
 
-Subset supported: literal patterns, capture variables, `_` wildcard, OR (`|`), guards (`if`), sequence patterns with `*rest`.
+Supported patterns: literals (`int`, `float`, `str`, `True`, `False`, `None`, and negative numbers), capture names, the `_` wildcard, OR patterns with `|`, guards with `if`, and sequence patterns with an optional `*rest`.
 
-Sequence-pattern items must be literals (`int` / `float` / `str` / `True` / `False` / `None`), capture names, or `_`. Nested sequences (`case [[a, b], c]:`), mapping patterns (`{"key": x}`), class patterns (`Point(x=0)`), and `as` captures are unsupported. Use chained `if` / `elif` instead. A `case [...]` pattern matches only a `list` or `tuple` subject; any other value (including `str` / `bytes`) just fails it and falls through, so scalar and sequence cases mix freely in one `match`.
-
-Scalars: literals, OR-patterns, capture-with-guard, wildcard.
+Items in a sequence pattern must be literals, capture names, or `_`. Nested sequence patterns, mapping patterns, class patterns, and `as` captures do not parse. Use chained `if` and `elif` for those. A sequence pattern matches only list and tuple subjects. Any other value, including `str` and `bytes`, fails the pattern and falls through to the next case.
 
 ```python
 def sign(n):
@@ -150,8 +164,6 @@ print(sign(0), sign(2), sign(-7), sign(99))
 ```text Output
 zero small negative other
 ```
-
-Sequences: fixed-length patterns, a guard, and a `*rest` capture.
 
 ```python
 def shape(seq):
@@ -196,20 +208,22 @@ print(safe_div(10, 0))
 None
 ```
 
+A handler names one exception, a tuple of exceptions, or nothing. A bare `except` catches everything. `else` runs when the `try` body raised nothing. `finally` always runs.
+
 ```python
-# Multiple handlers and finally
 try:
-  x = int("abc")
-except ValueError:
+  x = int("42")
+except (ValueError, TypeError):
   x = -1
+else:
+  print("parsed", x)
 finally:
   print("cleanup")
-print(x)
 ```
 
 ```text Output
+parsed 42
 cleanup
--1
 ```
 
 ```python
@@ -222,6 +236,19 @@ except:
 
 ```text Output
 caught
+```
+
+Handlers match subclasses. `except Exception` catches `ValueError`, `RuntimeError`, `KeyError`, and the rest of the hierarchy listed in [Limits and errors](/reference/limits-and-errors).
+
+```python
+try:
+  raise RuntimeError("boom")
+except Exception:
+  print("subclass caught")
+```
+
+```text Output
+subclass caught
 ```
 
 ### raise
@@ -242,7 +269,7 @@ except ValueError:
 rejected
 ```
 
-A bare `raise` inside an `except` re-raises the exception currently being handled.
+A bare `raise` inside an `except` block re-raises the exception being handled.
 
 ```python
 def attempt():
@@ -263,7 +290,7 @@ logging
 outer bad
 ```
 
-`raise X from Y` raises `X`. The `from` clause parses and the cause evaluates, but `__cause__` / `__context__` aren't preserved. Only `X` reaches the handler.
+`raise X from Y` raises `X`. The `from` clause parses and `Y` evaluates, but the cause is not preserved. There is no `__cause__` or `__context__`. Only `X` reaches the handler.
 
 ```python
 try:
@@ -276,32 +303,15 @@ except ValueError:
 caught the ValueError
 ```
 
-Handlers match on class and declared parents. `except Exception` catches `ValueError`, `RuntimeError`, `KeyError`, etc:
-
-```python
-try:
-  raise RuntimeError("boom")
-except Exception:
-  print("subclass caught")
-```
-
-```text Output
-subclass caught
-```
-
-### Exception names available
-
-Pre-bound exception classes (with their parent links so `except <Parent>:` matches subclasses) are listed in [Limits and errors, Runtime](/reference/limits-and-errors#runtime).
-
 ## with
 
-`with` drives the context-manager protocol:
+`with` runs the context manager protocol:
 
 1. Evaluate the expression.
-2. Call `__enter__`.
-3. Bind the result to `as`.
+2. Call `__enter__` and bind its result to the `as` target.
+3. On exit, call `__exit__(exc_type, exc_value, traceback)`.
 
-On exit, `__exit__` runs; a truthy return suppresses the exception, a falsy one propagates it. See [Dunders](/language/dunders#context-managers) for the `__exit__` signature and exception info.
+On a clean exit the three arguments are `None`. On an exception they carry the exception info. A truthy return from `__exit__` suppresses the exception.
 
 ```python
 class Resource:
@@ -343,9 +353,25 @@ with Tag("first") as x, Tag("second") as y:
 first second
 ```
 
+```python
+class Suppress:
+  def __enter__(self):
+    return self
+  def __exit__(self, *exc):
+    return True
+
+with Suppress():
+  raise ValueError("gone")
+print("suppressed")
+```
+
+```text Output
+suppressed
+```
+
 ### Cleanup on early exit
 
-`finally` and `__exit__` run on *every* way out of the block — not only normal completion and exceptions, but also `return`, `break`, and `continue`. A `return` in a `try` runs the `finally` before the value leaves; a `break` out of a `with` still calls `__exit__`. A `return` or `break` in the `finally` itself replaces the original exit.
+`finally` and `__exit__` run on every way out of a block. That includes normal completion, exceptions, `return`, `break`, and `continue`. A `return` or `break` inside `finally` replaces the original exit.
 
 ```python
 class Lock:
@@ -394,11 +420,22 @@ print(reciprocal(4))
 0.25
 ```
 
-A failed assertion raises `AssertionError`. Catch it with `except AssertionError`, `except Exception`, or bare `except`. The optional message after the comma is evaluated only when the assertion fails and becomes the exception's argument (`e.args`).
+A failed assertion raises `AssertionError`. The message after the comma evaluates only on failure and becomes the exception argument (`e.args`).
+
+```python
+try:
+  assert 1 == 2, "math broke"
+except AssertionError as e:
+  print(e.args[0])
+```
+
+```text Output
+math broke
+```
 
 ## del
 
-Removes a binding from the slot. Works on plain names, attributes (`del obj.attr`), indexed positions (`del seq[i]`), and parenthesized target groups (`del (a, b)`).
+`del` removes a binding. It works on plain names, attributes (`del obj.attr`), indexed positions (`del seq[i]`), and parenthesized groups (`del (a, b)`).
 
 ```python
 x = 42
@@ -407,8 +444,13 @@ try:
   print(x)
 except NameError:
   print("gone")
+
+xs = [1, 2, 3]
+del xs[1]
+print(xs)
 ```
 
 ```text Output
 gone
+[1, 3]
 ```

@@ -77,7 +77,7 @@ pub fn endswith(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     Ok(())
 }
 
-/* Shared search for find/index; `raise` turns a miss into ValueError. Empty needle matches at 0 (CPython); windows(0) would panic. */
+/* Shared search for find/index; `raise` turns a miss into ValueError. Empty needle matches at 0 (Python); windows(0) would panic. */
 fn find_impl(vm: &mut VM, recv: Val, pos: &[Val], raise: bool) -> Result<(), VmErr> {
     let buf = recv_bytes(vm, recv)?;
     let sub = recv_bytes(vm, pos[0])?;
@@ -117,7 +117,7 @@ pub fn replace(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let old = recv_bytes(vm, pos[0])?;
     let new = recv_bytes(vm, pos[1])?;
     if old.is_empty() {
-        // CPython inserts `new` before each byte and once at the end.
+        // Python inserts `new` before each byte and once at the end.
         let mut out: Vec<u8> = Vec::with_capacity(new.len() * (buf.len() + 1) + buf.len());
         out.extend_from_slice(&new);
         for &b in &buf { out.push(b); out.extend_from_slice(&new); }

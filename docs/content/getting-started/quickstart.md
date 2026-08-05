@@ -1,63 +1,29 @@
 ---
 title: "Quickstart"
-description: "Run your first Edge Python program in under a minute."
+description: "Install the CLI, run a script, import a package."
 ---
 
-## Run it
-
-Edge Python ships as a ~200 KB WASM module. The fastest way to try it is any runnable code block in these docs ([here](/getting-started/introduction#try-it), for instance). No install. Everything runs client-side.
-
-For a local project, the [CLI](/reference/cli) covers the whole loop:
+## Install the CLI
 
 ```bash
-edge init my-app # scaffold entry, packages.json, and a test
-cd my-app && edge serve # dev server with live reload
-edge test # run the *_test.py files
+curl -fsSL https://cdn.edgepython.com/cli/install.sh | sh
 ```
 
-## Embed it
+The installer works on macOS, Linux, and WSL. Open a new shell and check the install:
 
-To put Edge Python in your own page, drop in the `<edge-python>` element below. Building the `.wasm` from source or embedding in Rust/WASI: see [Where it runs](/getting-started/what-it-is#where-it-runs).
-
-### Drop-in HTML element
-
-In the browser, the `<edge-python>` element runs a `.py` file declaratively. No JS wiring. With a host library like `dom` (declared in `packages.json`), the script renders straight into the page:
-
-```html
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <script type="module" src="https://cdn.edgepython.com/runtime/src/element.js"></script>
-</head>
-<body>
-  <div id="app"></div>
-  <edge-python entry="./app/hello.py" packages="./app/packages.json"></edge-python>
-</body>
-</html>
+```bash
+edge --version
 ```
 
-```json
-// packages.json
-{ "host": { "dom": "./dom/src/index.js" } }
-```
+To build from source instead, run `cargo install --path cli` from the repo root. See the [CLI reference](/reference/cli) for install details and flags.
+
+## Run your first script
+
+Create `hello.py`:
 
 ```python
-# hello.py
-from dom import query, set_text
-set_text(query("#app"), "Hello from Python")
-```
-
-`dom` is one of the official [host libraries](/reference/packages#host-libraries) (`dom`, `network`, `storage`...). Standard `.wasm` packages like [`json`](/reference/packages#json) sit alongside them. Official packages also resolve by bare name with no manifest, fetched lazily on first import (see [Defaults](/reference/packages#defaults)).
-
-See [Official packages](/reference/packages) for the full catalog. See the [runtime README](https://github.com/dylan-sutton-chavez/edge-python/tree/main/runtime) for all `<edge-python>` attributes and the `imports` field for `.py` / `.wasm` modules.
-
-## Your first program
-
-Try to run or modify this script:
-
-```python
-greet = lambda name: f"Hello, {name}!"
+def greet(name):
+  return f"Hello, {name}!"
 
 for who in ["world", "edge", "python"]:
   print(greet(who))
@@ -68,3 +34,40 @@ Hello, world!
 Hello, edge!
 Hello, python!
 ```
+
+Run it from your terminal:
+
+```bash
+edge run hello.py
+```
+
+There is no build step. The CLI compiles the file and runs it in its native engine.
+
+## Import your first package
+
+Edge Python ships no standard library. The official packages resolve by bare name, with no configuration. Create `app.py`:
+
+```python
+import json
+
+data = json.loads('{"name": "edge", "tags": ["fast", "small"]}')
+data["tags"].append("sandboxed")
+print(json.dumps(data))
+```
+
+```text Output
+{"name":"edge","tags":["fast","small","sandboxed"]}
+```
+
+Run it:
+
+```bash
+edge run app.py
+```
+
+To record the dependency in your project, run `edge add json`. It writes the package to `packages.json`. The package catalog lives in [Modules](/reference/modules#standard-packages) and the manifest format in [packages.json](/reference/modules#packagesjson).
+
+## Next steps
+
+- [Syntax](/language/syntax) walks through the language.
+- [Command line interface](/reference/cli) covers `serve`, `repl`, `test`, and `build`.

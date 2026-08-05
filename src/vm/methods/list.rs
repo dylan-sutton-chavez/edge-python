@@ -19,7 +19,7 @@ pub fn next_method(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
 pub fn index(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let items = list_clone(vm, recv)?;
     let len = items.len() as i64;
-    // Optional start/end clamp like CPython; negatives count from the end. Bools count as ints.
+    // Optional start/end clamp like Python; negatives count from the end. Bools count as ints.
     let as_i = |v: Val| -> i64 { if v.is_bool() { v.as_bool() as i64 } else { v.as_int() } };
     let norm = |v: Val| (if as_i(v) < 0 { len + as_i(v) } else { as_i(v) }).clamp(0, len) as usize;
     let start = pos.get(1).filter(|v| v.is_int() || v.is_bool()).map_or(0, |&v| norm(v));

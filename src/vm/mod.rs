@@ -141,7 +141,7 @@ pub struct VM<'a> {
     pub(crate) body_free_loads: Vec<Vec<(String, usize, i64)>>,
     /* Per-chunk bare names the chunk itself binds (stores, Phi, params); drives closure-cell capture. */
     pub(crate) chunk_local_binds: HashMap<*const SSAChunk, alloc::rc::Rc<crate::util::hash::FxHashSet<String>>>,
-    /* Coroutines currently inside `resume_coroutine`; re-entry raises like CPython's already-executing guard. Transient, never snapshotted. */
+    /* Coroutines currently inside `resume_coroutine`; re-entry raises like Python's already-executing guard. Transient, never snapshotted. */
     pub(crate) executing_coros: Vec<u64>,
     /* True once any builtin name is rebound at module scope; fused call sites then consult `module_state` first. */
     pub(crate) builtins_rebound: bool,

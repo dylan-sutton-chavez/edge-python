@@ -102,7 +102,7 @@ mod wasm_api {
         do_find(&pattern, &string, Mode::Full)
     }
 
-    /* findall: list of matches, group shaped like CPython for zero or one group. One boundary crossing per call via the LIST transit. */
+    /* findall: list of matches, group shaped like Python for zero or one group. One boundary crossing per call via the LIST transit. */
     #[plugin_fn]
     fn findall(pattern: String, string: String) -> Result<Vec<Value>> {
         do_findall(&pattern, &string)
@@ -133,7 +133,7 @@ mod wasm_api {
     /* `re.compile(p)`: a native class named `compile`, so instantiation is the constructor call. Instances carry the source pattern; the compiled program lives in the cache. */
     #[plugin_fn]
     fn __class_compile___init__(self_h: Handle, pattern: String) -> Result<()> {
-        // Bad patterns raise here, at compile time, like CPython.
+        // Bad patterns raise here, at compile time, like Python.
         with_compiled(&pattern, |_| Ok(()))?;
         let ph = IntoValue::into_handle(pattern)?;
         self_h.set_attr("pattern", &ph)

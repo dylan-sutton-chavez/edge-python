@@ -93,7 +93,7 @@ fn eq_vals_depth(a: Val, b: Val, heap: &HeapPool, depth: usize) -> bool {
         (HeapObj::Dict(x), HeapObj::Dict(y)) => eq_dict(&x.borrow(), &y.borrow(), heap, |a,b| eq_vals_depth(a, b, heap, d)),
         (HeapObj::Type(x), HeapObj::Type(y)) => x == y, // by name; interning also makes `is` hold
         (HeapObj::Range(s1,e1,t1), HeapObj::Range(s2,e2,t2)) => {
-            // CPython: equal length, then matching start/step only when non-empty.
+            // Python: equal length, then matching start/step only when non-empty.
             let (l1, l2) = (range_len(*s1,*e1,*t1), range_len(*s2,*e2,*t2));
             l1 == l2 && (l1 == 0 || (s1 == s2 && (l1 == 1 || t1 == t2)))
         }

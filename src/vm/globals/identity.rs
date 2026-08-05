@@ -108,7 +108,7 @@ impl<'a> VM<'a> {
             // Default fallback: pointer identity, mirroring Python's `object.__hash__`.
         }
 
-        // CPython guarantees hash(n)==n for ints in range (hash(-1) is -2); bool hashes as 0/1.
+        // Python guarantees hash(n)==n for ints in range (hash(-1) is -2); bool hashes as 0/1.
         if o.is_int() { let n = o.as_int(); self.push(Val::int(if n == -1 { -2 } else { n })); return Ok(()); }
         if o.is_bool() { self.push(Val::int(o.as_bool() as i64)); return Ok(()); }
 

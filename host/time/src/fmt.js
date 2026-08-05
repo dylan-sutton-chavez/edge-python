@@ -6,11 +6,11 @@ const MONTHS = ["January", "February", "March", "April", "May", "June", "July", 
 const MONTHS_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 const pad = (n, w = 2) => String(n).padStart(w, "0");
-// CPython tm_wday is Mon=0..Sun=6; JS getDay is Sun=0. Convert both ways.
+// Python tm_wday is Mon=0..Sun=6; JS getDay is Sun=0. Convert both ways.
 const cpyWday = (d) => (d + 6) % 7;
 const jsDay = (cpy) => (cpy + 1) % 7;
 
-// Date -> struct_time JSON, CPython order (Y, m, d, H, M, S, wday, yday, isdst).
+// Date -> struct_time JSON, Python order (Y, m, d, H, M, S, wday, yday, isdst).
 const toTuple = (dt, utc) => {
     const g = (m) => (utc ? dt["getUTC" + m]() : dt["get" + m]());
     const yday = Math.floor((Date.UTC(g("FullYear"), g("Month"), g("Date")) - Date.UTC(g("FullYear"), 0, 1)) / 86400000) + 1;

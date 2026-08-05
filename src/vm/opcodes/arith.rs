@@ -28,7 +28,7 @@ impl<'a> VM<'a> {
 
         let (a, b) = self.pop2()?;
 
-        // `name += rhs`: a left list extends in place with any iterable (CPython __iadd__); other types behave as Add.
+        // `name += rhs`: a left list extends in place with any iterable (Python __iadd__); other types behave as Add.
         let op = if op == OpCode::InPlaceAdd {
             // Guard is_heap: `i += 1` operands are inline ints, and heap.get on a non-heap Val indexes garbage.
             let a_is_list = a.is_heap() && matches!(self.heap.get(a), HeapObj::List(_));
@@ -151,7 +151,7 @@ impl<'a> VM<'a> {
             if i < chars.len() && chars[i] == '*' {
                 i += 1;
                 let w = self.star_arg_int(&args, &mut ai)?;
-                if w < 0 { left = true; } // negative `*` width left-aligns, like CPython
+                if w < 0 { left = true; } // negative `*` width left-aligns, like Python
                 width = crate::s!(int w.unsigned_abs());
             } else {
                 while i < chars.len() && chars[i].is_ascii_digit() { width.push(chars[i]); i += 1; }
@@ -163,7 +163,7 @@ impl<'a> VM<'a> {
                 if i < chars.len() && chars[i] == '*' {
                     i += 1;
                     let p = self.star_arg_int(&args, &mut ai)?;
-                    // Negative `.*` precision is ignored, matching CPython.
+                    // Negative `.*` precision is ignored, matching Python.
                     if p >= 0 { has_prec = true; prec = crate::s!(int p); }
                 } else {
                     has_prec = true;
@@ -203,14 +203,14 @@ impl<'a> VM<'a> {
             let rendered = crate::vm::format_spec::format_value(fval, &spec, &self.heap).map_err(crate::vm::format_spec::fmt_err)?;
             out.push_str(&rendered);
         }
-        // Every supplied arg must be consumed, like CPython.
+        // Every supplied arg must be consumed, like Python.
         if ai != args.len() {
             return Err(cold_type("not all arguments converted during string formatting"));
         }
         self.heap.alloc(HeapObj::Str(out))
     }
 
-    /* Reads a `*` width/precision argument as an i64; non-integers raise TypeError like CPython. */
+    /* Reads a `*` width/precision argument as an i64; non-integers raise TypeError like Python. */
     fn star_arg_int(&self, args: &[Val], ai: &mut usize) -> Result<i64, VmErr> {
         let v = *args.get(*ai).ok_or(cold_type("not enough arguments for format string"))?;
         *ai += 1;
@@ -219,7 +219,7 @@ impl<'a> VM<'a> {
         Err(cold_type("* wants int"))
     }
 
-    /* `%d`/`%x` on a user instance defers to its `__int__`, matching CPython. */
+    /* `%d`/`%x` on a user instance defers to its `__int__`, matching Python. */
     fn coerce_format_int(&mut self, v: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Val, VmErr> {
         if v.is_heap() && matches!(self.heap.get(v), HeapObj::Instance(..))
             && let Some(r) = self.try_call_dunder(v, "__int__", &[], chunk, slots)? {

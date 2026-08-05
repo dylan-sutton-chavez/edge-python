@@ -4,6 +4,5 @@ export default {
         title: 'Introduction',
         theme: { typesetting: 'article' },
     },
-    quickstart: 'Quickstart',
-    'what-it-is': 'What Edge Python is'
+    quickstart: 'Quickstart'
 }

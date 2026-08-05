@@ -222,7 +222,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* `any(genexpr)` / `all(genexpr)`: same scaffolding, but each element decides instead of appending, so evaluation stops at the first hit like CPython. */
+    /* `any(genexpr)` / `all(genexpr)`: same scaffolding, but each element decides instead of appending, so evaluation stops at the first hit like Python. */
     pub(super) fn scan_comprehension(&mut self, elem_bodies: &[(usize, Vec<Instruction>)], find_true: bool, versions_before: &HashMap<String, u32>) {
         let (loop_starts, for_iters, var_map) = self.comp_header(versions_before);
         self.replay_comp_bodies(elem_bodies, &var_map);

@@ -695,7 +695,7 @@ impl<'a> VM<'a> {
             OpCode::WithEnter => {
                 let _ = operand;
                 let cm = self.pop()?;
-                // Both dunders resolve up front, like CPython.
+                // Both dunders resolve up front, like Python.
                 let (enter_fn, class) = self.with_dunder(cm, "__enter__")?;
                 self.with_dunder(cm, "__exit__")?;
                 self.with_stack.push(cm);
@@ -1032,7 +1032,7 @@ impl<'a> VM<'a> {
             .map(|n| ssa_strip(n))
             .unwrap_or("?")
             .to_string();
-        // C3 linearize before allocating: an inconsistent hierarchy raises here (CPython parity), so no half-built class escapes.
+        // C3 linearize before allocating: an inconsistent hierarchy raises here (Python parity), so no half-built class escapes.
         let mro_tail = self.c3_merge(&bases)?;
         let cls = self.heap.alloc(HeapObj::Class(name_str, bases, alloc::rc::Rc::new(core::cell::RefCell::new(methods))))?;
         let mut mro = Vec::with_capacity(mro_tail.len() + 1);

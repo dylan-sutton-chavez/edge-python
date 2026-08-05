@@ -20,9 +20,11 @@ Run the following commands before sending a pull request to ensure code quality:
 - `cargo shear` Detect unused dependencies.
 - For significant changes, execute the [fuzzer](https://edgepython.com/implementation/fuzzing/) to check for new crashes or performance regressions.
 
-The test suite (`tests/`, fixtures in `tests/cases/vm.json`) runs every case under `Limits::sandbox()`, not the default `none()`. The budget, heap, and call-depth guards short-circuit under `none` (`sandbox_off`), so only the bounded profile exercises them — that way a regression that lets a loop run unbounded, recurse without limit, or materialise an oversized collection becomes a failing `MemoryError` / `RecursionError` assertion instead of a hang. Every fixture must stay within the sandbox budget.
+The test suite (`tests/`, fixtures in `tests/cases/vm.json`) runs every case under `Limits::sandbox()`, not the default `none()`. The budget, heap, and call-depth guards short-circuit under `none` (`sandbox_off`), so only the bounded profile exercises them. 
 
-*Other packages have their own build and test setup — see the `README.md` in the relevant path.*
+That way a regression that lets a loop run unbounded, recurse without limit, or materialise an oversized collection becomes a failing `MemoryError` or `RecursionError` assertion instead of a hang. Every fixture must stay within the sandbox budget.
+
+*Other packages have their own build and test setup. See the repository layout section of the root README for the per-package commands.*
 
 `cli/` tests hit the CDN runtime by default; `EDGE_RUNTIME_DIR` and `EDGE_COMPILER_WASM` swap in local copies for end-to-end validation before a deploy:
 

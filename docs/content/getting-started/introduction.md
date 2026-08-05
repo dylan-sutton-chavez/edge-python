@@ -1,33 +1,25 @@
 ---
 title: "Introduction"
-description: "What Edge Python is and where to go next."
+description: "What Edge Python is, what it is not, and where to go next."
 ---
 
-Welcome to the Edge Python docs! 👋 Edge is a sandboxed subset of Python, built in Rust to run in the browser as a ~200 KB WebAssembly binary and natively inside the CLI. Embed your full business logic, run LLMs client-side, and build frontend apps.
+Edge Python is a sandboxed subset of Python. The compiler and the virtual machine are written in Rust. You write ordinary Python syntax. The compiler turns it into bytecode, and a stack VM runs it.
 
-## Ecosystem
+The same engine ships in two forms:
 
-1. [Quickstart](/getting-started/quickstart): Run your first Edge Python program in under a minute.
-2. [What Edge Python is](/getting-started/what-it-is): Scope, philosophy, and what intentionally isn't supported.
-3. [Syntax](/language/syntax): The language guide.
-4. [Reference](/reference/builtins): All the builtin functions and methods.
-5. [Implementation](/implementation/design): Compiler architecture, dispatch model, and runtime layout.
+- A WebAssembly binary of about 200 KB that runs in the browser.
+- A native engine built into the `edge` command line interface.
 
-## Try it
+Sandboxed means the defaults deny everything. A program gets no file system, no network, and no environment access unless the host grants it. Imports resolve at compile time through a resolver the host injects, so a running program never loads code you did not declare.
 
-### Browser
-
-Try to edit or execute this script:
+Every runnable example in these docs executes in the real runtime. Try editing this one:
 
 ```python
-import time
-
 text = "the quick brown fox"
 words = {w: len(w) for w in text.split()}
 
 for w, n in words.items():
   print(f"{w:>6} -> {n}")
-  time.sleep(0.2)
 ```
 
 ```text Output
@@ -37,17 +29,23 @@ for w, n in words.items():
    fox -> 3
 ```
 
-### Command Line Interface
+## What it is not
 
-Or download it to your machine ([reference docs](/reference/cli)):
+Edge Python is not a full Python. It leaves out what does not fit a small sandboxed runtime:
 
-```bash
-# Compatible with macOS, Linux and WSL
-curl -fsSL https://cdn.edgepython.com/cli/install.sh | sh
+- No bundled standard library. Every module is an external package. See [Modules](/reference/modules).
+- No dynamic code. `exec`, `eval`, `compile`, and `__import__` do not exist.
+- No metaclasses, no descriptor protocol, no `__slots__`.
+- No `complex` numbers.
+- A fixed set of builtins and nothing more. `dir` is not one of them. See [Builtins](/reference/builtins).
 
-edge -h # List all commands
-```
+The [language guide](/language/syntax) covers everything that is supported.
 
-## Need help?
+## Where to go next
 
-Looking to integrate Edge into your app: run Python business logic in your users' browsers, or anything else? Get in touch: [email](mailto:c.sutton.dylan@gmail.com)
+- [Quickstart](/getting-started/quickstart) installs the CLI and runs your first program.
+- [Syntax](/language/syntax) walks through the language feature by feature.
+- [Builtins](/reference/builtins) and [Methods](/reference/methods) list the fixed builtin set.
+- [Design](/implementation/design) explains how the compiler and VM work.
+
+For questions or integration help, email [c.sutton.dylan@gmail.com](mailto:c.sutton.dylan@gmail.com).

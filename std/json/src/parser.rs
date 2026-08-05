@@ -1,5 +1,5 @@
 /*
-Recursive-descent JSON parser. Composites via `Handle::new_dict`/`new_list`/`set_item`/`list.append`; primitives via `encode`. `LoadCtx` carries CPython `json.loads` hooks, each replaces the default at its production.
+Recursive-descent JSON parser. Composites via `Handle::new_dict`/`new_list`/`set_item`/`list.append`; primitives via `encode`. `LoadCtx` carries Python `json.loads` hooks, each replaces the default at its production.
 */
 
 use alloc::{format, vec::Vec};
@@ -90,7 +90,7 @@ fn parse_array(tk: &mut Tokenizer, ctx: &LoadCtx) -> Result<Handle> {
 }
 
 fn parse_object(tk: &mut Tokenizer, ctx: &LoadCtx) -> Result<Handle> {
-    // `object_pairs_hook` wins over `object_hook` per CPython spec: gather (key, value) pairs and call the hook on them, skipping dict build.
+    // `object_pairs_hook` wins over `object_hook` per Python spec: gather (key, value) pairs and call the hook on them, skipping dict build.
     if ctx.object_pairs_hook.is_some() {
         return parse_object_pairs(tk, ctx);
     }
@@ -144,7 +144,7 @@ fn parse_object_pairs(tk: &mut Tokenizer, ctx: &LoadCtx) -> Result<Handle> {
             }
         }
     }
-    // Materialise as `list[list[key, val]]`; CPython hands `list[tuple]` but wasm-pdk has no `new_tuple` (the hook can `tuple(p) for p in pairs` if it needs them).
+    // Materialise as `list[list[key, val]]`; Python hands `list[tuple]` but wasm-pdk has no `new_tuple` (the hook can `tuple(p) for p in pairs` if it needs them).
     let list = Handle::new_list()?;
     for (k, v) in pairs {
         let pair = Handle::new_list()?;

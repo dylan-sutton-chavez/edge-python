@@ -1,5 +1,5 @@
 /*
-Streaming JSON tokenizer. `next_token` advances one token, tracks byte offset. `Int`/`Float` carry source slice for `parse_int`/`parse_float`. `Constant` covers CPython tokens `NaN`/`Infinity`/`-Infinity`.
+Streaming JSON tokenizer. `next_token` advances one token, tracks byte offset. `Int`/`Float` carry source slice for `parse_int`/`parse_float`. `Constant` covers Python tokens `NaN`/`Infinity`/`-Infinity`.
 */
 
 use alloc::string::{String, ToString};

@@ -1,9 +1,9 @@
 ---
 title: "Functions"
-description: "First-class functions, lambdas, closures, generators."
+description: "First-class functions, lambdas, closures, generators, decorators."
 ---
 
-Functions are the central abstraction. They are values. Pass them, return them, store them, compose them.
+Functions are values. Pass them, return them, store them, compose them.
 
 ## def
 
@@ -50,7 +50,9 @@ print(f(1, z=3, y=2))
 123
 ```
 
-### Variadic: *args and **kwargs
+### Variadic parameters
+
+`*args` collects extra positional arguments into a tuple. `**kwargs` collects extra keyword arguments into a dict.
 
 ```python
 def total(*nums):
@@ -78,7 +80,7 @@ print(opts(host="api", port=443))
 
 ### Keyword-only parameters
 
-A bare `*` marks the following parameters as keyword-only: they must be passed by name. A positional argument that would reach them is rejected (as is any positional beyond the declared parameters when there is no `*args`), raising `TypeError`.
+A bare `*` marks the following parameters as keyword-only. They must be passed by name. A positional argument that would reach them raises `TypeError`, as does any positional argument beyond the declared parameters when there is no `*args`.
 
 ```python
 def connect(host, *, port=80, secure=False):
@@ -120,7 +122,7 @@ print(f(1, **{"b": 2, "c": 3}))
 
 ## lambda
 
-Anonymous function. The body is a single expression.
+An anonymous function. The body is a single expression.
 
 ```python
 double = lambda x: x * 2
@@ -142,7 +144,7 @@ Hi, world
 
 ## First-class functions
 
-Functions are values: store, pass, return them.
+Store functions in data structures and pass them as arguments.
 
 ```python
 ops = [abs, hex, str]
@@ -174,7 +176,7 @@ print(handlers["max"](3, 4))
 
 ## Function attributes
 
-Functions carry writable attributes, like any object. `getattr` / `hasattr` / `setattr` / `delattr` work on them, and an assigned `__name__` wins over the declared one. The usual home for decorator metadata.
+Functions carry writable attributes, like any object. `getattr` / `hasattr` / `setattr` / `delattr` work on them, and an assigned `__name__` wins over the declared one. Decorators use these for metadata.
 
 ```python
 def sma(source, length):
@@ -236,7 +238,7 @@ print(add10(3))
 
 ## Closures
 
-Functions capture their enclosing scope by reference.
+An inner function captures the variables of its enclosing scope by reference.
 
 ```python
 def counter():
@@ -259,8 +261,9 @@ print(tick())
 3
 ```
 
+Because capture is by reference, every lambda in a loop sees the same loop variable. Bind the current value through a default argument.
+
 ```python
-# Closures over loop variables; captured by reference
 def make_adders(n):
   return [lambda x, i=i: x + i for i in range(n)]
 
@@ -272,9 +275,9 @@ print(add0(10), add1(10), add2(10))
 10 11 12
 ```
 
-### Scoping: global and nonlocal
+### global and nonlocal
 
-Assignment inside a function creates a local unless declared otherwise. `nonlocal name` rebinds the nearest enclosing function's variable — the shared cell the `counter` closure above relies on. `global name` rebinds the module-level variable instead:
+Assignment inside a function creates a local unless declared otherwise. `nonlocal name` rebinds the nearest enclosing function's variable. That is the shared cell the `counter` closure above relies on. `global name` rebinds the module-level variable.
 
 ```python
 total = 0
@@ -292,64 +295,19 @@ print(total)
 7
 ```
 
-Reading an outer variable needs no declaration; only rebinding does.
-
-## Currying
-
-Partial application built from nested lambdas or closures.
+Reading an outer variable needs no declaration. Only rebinding does.
 
 ```python
-add = lambda x: lambda y: x + y
+BASE = 10
 
-print(add(3)(4))
+def add_base(n):
+  return n + BASE
 
-add3 = add(3)
-print(add3(10))
-print(add3(100))
+print(add_base(5))
 ```
 
 ```text Output
-7
-13
-103
-```
-
-```python
-# Curry helper
-def curry(f):
-  return lambda x: lambda y: f(x, y)
-
-cmul = curry(lambda a, b: a * b)
-double = cmul(2)
-triple = cmul(3)
-
-print(double(7), triple(7))
-```
-
-```text Output
-14 21
-```
-
-## Function composition
-
-```python
-def compose(*fns):
-  def piped(x):
-    for f in fns:
-      x = f(x)
-    return x
-  return piped
-
-# Reads left-to-right: double, then square
-pipeline = compose(lambda n: n * 2, lambda n: n * n)
-
-print(pipeline(3)) # (3 * 2) ** 2
-print([pipeline(x) for x in [1, 2, 3]])
-```
-
-```text Output
-36
-[4, 16, 36]
+15
 ```
 
 ## Recursion
@@ -383,12 +341,12 @@ True False
 ```
 
 <Note>
-Pure functions are memoized after two calls with the same arguments. The VM detects purity statically (no I/O, no mutation, no raise, no yield) and confirms it at runtime: any call that performs a side effect — including a builtin like `print` passed as a first-class value — marks the call impure and skips the cache, so memoization never drops an effect. Results live in a per-function template table. Naive recursion runs at memoized cost with no source changes. See [Design](/implementation/design#concepts) for the full model.
+Pure functions are memoized after two calls with the same arguments. The VM detects purity statically (no I/O, no mutation, no raise, no yield) and confirms it at runtime. Any call that performs a side effect, including a builtin like `print` passed as a first-class value, marks the call impure and skips the cache, so memoization never drops an effect. Naive recursion runs at memoized cost with no source changes. See [Design](/implementation/design) for the full model.
 </Note>
 
 ## Generators
 
-`yield`-bearing functions produce sequences lazily. Pull with `next()` or iterate with `for`.
+A function containing `yield` produces its sequence lazily. Pull values with `next()` or iterate with `for`.
 
 ```python
 def squares(n):
@@ -408,6 +366,21 @@ for x in squares(5):
 ```
 
 ```python
+def gen():
+  yield 1
+  yield 2
+
+g = gen()
+print(next(g))
+print(next(g))
+```
+
+```text Output
+1
+2
+```
+
+```python
 # Materialize a generator
 def naturals(limit):
   n = 1
@@ -424,7 +397,7 @@ print(list(naturals(5)))
 
 ### yield from
 
-Delegate to another generator (or any iterable).
+Delegate to another generator or any iterable.
 
 ```python
 def nums():
@@ -438,7 +411,7 @@ print(list(nums()))
 [0, 1, 2, 10, 20]
 ```
 
-`yield from` is also an expression: it evaluates to the subgenerator's return value (the value carried by its `return` or `StopIteration`), so a `def` can `return` a result back to its delegating caller.
+`yield from` is also an expression. It evaluates to the subgenerator's return value, so a generator can pass a result back to its delegating caller.
 
 ```python
 def sub():
@@ -459,12 +432,12 @@ returned done
 ```
 
 <Note>
-Generators are one-way: producer to consumer. `gen.send(value)`, `gen.throw(exc)`, and `gen.close()` are not exposed. Bidirectional communication is a procedural pattern, inconsistent with the functional paradigm. For bidirectional flow, use the [cooperative scheduler](/language/async) (`run` / `sleep` / `gather`). Pass values through arguments and return values.
+Generators are one-way producers. `gen.send(value)`, `gen.throw(exc)`, and `gen.close()` are not exposed. For bidirectional flow, use the [cooperative scheduler](/language/async) and pass values through arguments and return values.
 </Note>
 
 ## Generator expressions
 
-Generators inline:
+A generator inline.
 
 ```python
 print(sum(x * x for x in range(5)))
@@ -478,7 +451,7 @@ print(max(i for i in [3, 1, 4, 1, 5]))
 
 ## Decorators
 
-A decorator wraps another callable. It applies to both functions and classes (see [Classes](/language/classes#class-decorators)):
+A decorator wraps another callable. It applies to both functions and classes (see [Classes](/language/classes#class-decorators)).
 
 ```python
 def trace(f):
@@ -499,7 +472,7 @@ calling with (3, 4)
 7
 ```
 
-Stacked decorators apply bottom-up:
+Stacked decorators apply bottom-up.
 
 ```python
 def double_result(f):
@@ -521,7 +494,7 @@ print(base(5))
 12
 ```
 
-Parameterised decorators are factories. A function takes the decorator args and returns the actual decorator. The wrapped function captures both scopes.
+A parameterized decorator is a factory. The outer function takes the decorator arguments and returns the actual decorator. The wrapped function captures both scopes.
 
 ```python
 def repeat(n):

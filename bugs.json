@@ -1,0 +1,596 @@
+{
+  "bugs": [
+    {
+      "id": "bug-001",
+      "file": "src/vm/globals/numeric.rs",
+      "line": 443,
+      "title": "int ** negative int exponent truncates i64 exponent to i32",
+      "description": "pow_vals negative-exponent path calls fpowi(ai as f64, exp as i32). The `as i32` cast wraps for exponents outside i32 range (inline ints go to ±2^47), so e.g. -4294967296 becomes 0 and fpowi returns 1.0.",
+      "repro": "print(2 ** -4294967296)",
+      "actual": "1.0",
+      "expected": "0.0 (2 ** -4294967296 underflows to 0.0; Python prints 0.0)"
+    },
+    {
+      "id": "bug-002",
+      "file": "src/vm/globals/numeric.rs",
+      "line": 443,
+      "title": "0 ** negative and 0.0 ** negative return inf instead of raising ZeroDivisionError",
+      "description": "pow_vals: `0 ** -1` goes through fpowi(0.0, -1) = 1.0/0.0 = inf; `0.0 ** -0.5` goes through fpowf -> libm::pow = inf. Python raises ZeroDivisionError for 0 to a negative power.",
+      "repro": "print(0 ** -1)\nprint(0.0 ** -0.5)",
+      "actual": "inf\ninf",
+      "expected": "ZeroDivisionError: 0.0 cannot be raised to a negative power"
+    },
+    {
+      "id": "bug-003",
+      "file": "src/vm/format_spec.rs",
+      "line": 132,
+      "title": "Non-empty format spec on a float with no precision renders fixed-6 instead of str()",
+      "description": "apply() ty==0 branch routes a float with a non-empty spec but no precision into format_float(v, s, b'f', heap), whose default precision is 6. Python formats with str(float) semantics when no type/precision is given, only applying alignment/width/sign.",
+      "repro": "print(f\"{1.5:>10}\")\nprint(\"{:>8}\".format(2.5))",
+      "actual": "'  1.500000' and '2.500000'",
+      "expected": "'       1.5' and '     2.5' (Python: format(1.5, '>10') == '       1.5')"
+    },
+    {
+      "id": "bug-004",
+      "file": "src/vm/format_spec.rs",
+      "line": 441,
+      "title": "Format spec on a container renders as empty string (padding only)",
+      "description": "format_value -> apply() ty==0 falls through to display_inline(), whose fallback for non-scalar heap objects (list/tuple/dict/set/...) is String::new(). So f\"{[1,2]:>10}\" produces 10 spaces. Python applies the spec to str(value).",
+      "repro": "print(f\"{[1,2]:>10}|\")\nprint(\"{:>10}|\".format((1,2)))",
+      "actual": "'          |' twice (blank)",
+      "expected": "'    [1, 2]|' and '    (1, 2)|'"
+    },
+    {
+      "id": "bug-005",
+      "file": "src/vm/value_ops.rs",
+      "line": 261,
+      "title": "repr/str of a user function is malformed: '<function 0' (no name, no closing '>')",
+      "description": "display_d for HeapObj::Func builds s!(\"<function \", int *i) — it prints the raw function-table index and never closes the angle bracket.",
+      "repro": "def foo(x):\n    return x\nprint(foo)",
+      "actual": "<function 0",
+      "expected": "something well-formed like '<function foo>' (Python: '<function foo at 0x...>')"
+    },
+    {
+      "id": "bug-006",
+      "file": "src/vm/value_ops.rs",
+      "line": 423,
+      "title": "bytes + bytes and bytes * int are unsupported (TypeError)",
+      "description": "add_vals has no (Bytes, Bytes) concatenation arm and mul_vals' repetition arm only accepts Str/List/Tuple, so b\"ab\" + b\"cd\" and b\"\\xff\" * 3 raise TypeError. Python supports both.",
+      "repro": "print(b\"ab\" + b\"cd\")\nprint(b\"\\xff\" * 3)",
+      "actual": "TypeError: unsupported operand type(s) for +: 'bytes' and 'bytes'",
+      "expected": "b'abcd' and b'\\xff\\xff\\xff'"
+    },
+    {
+      "id": "bug-007",
+      "file": "src/vm/value_ops.rs",
+      "line": 485,
+      "title": "bool as sequence-repetition count is rejected (True * [1,2] raises TypeError)",
+      "description": "mul_vals repetition requires b.is_int() (inline int) and explicitly skips LongInt; bool is neither, so True * [1,2] and 'x' * True fail. Everywhere else bool unifies with int (as_i128 handles it). Python: True * [1,2] == [1,2].",
+      "repro": "print(True * [1,2])\nprint(\"x\" * True)",
+      "actual": "TypeError: unsupported operand type(s) for *: 'bool' and 'list'",
+      "expected": "[1, 2] and 'x'"
+    },
+    {
+      "id": "bug-008",
+      "file": "src/vm/methods/numeric.rs",
+      "line": 47,
+      "title": "int.from_bytes silently truncates values wider than i128",
+      "description": "from_bytes accumulates with (acc << 8) | b on i128 with no overflow check; bits shifted past bit 127 are silently dropped. A 17-byte input returns a wrong small value instead of raising.",
+      "repro": "print(int.from_bytes(b\"\\x01\" + b\"\\x00\" * 16, \"big\"))",
+      "actual": "0 (2^128 silently wrapped away)",
+      "expected": "an OverflowError (engine ints cap at i128) — certainly not 0"
+    },
+    {
+      "id": "bug-009",
+      "file": "src/value/eq.rs",
+      "line": 72,
+      "title": "float/LongInt equality contradicts hashing: equal values, different hashes",
+      "description": "eq_vals_depth compares float vs LongInt via num_as_f64 (lossy f64 rounding), so 1e16 == 10**16+1 is True (Python: False — it converts the float exactly). But hash_depth hashes the integral float as i64(1e16) and the LongInt as i64(10^16+1): different hashes for 'equal' values. Dict/get and ValSet operations disagree: d={1e16:'x'}; d.get(10**16+1) misses while 10**16+1 in {1e16} is True (contains uses a linear eq scan) and {1e16} & {10**16+1} is empty (ValSet uses hashes).",
+      "repro": "d = {1e16: \"found\"}\nprint(1e16 == 10**16 + 1)\nprint(d.get(10**16 + 1, \"missing\"))\nprint(hash(1e16) == hash(10**16 + 1))",
+      "actual": "True / 'missing' / False",
+      "expected": "Python: False / 'missing' / False — i.e. Python says not-equal so the miss is consistent; here eq says equal but the dict still misses, which is an internal invariant violation either way"
+    },
+    {
+      "id": "bug-010",
+      "file": "src/vm/globals/sequence.rs",
+      "line": 407,
+      "title": "next() on a plain list mutates it (removes the front element)",
+      "description": "call_next accepts any heap List and does v.remove(0) on the caller's list (list.__next__ does the same). Python raises TypeError: 'list' object is not an iterator. The design intends this for iter() results, but iter() returns a fresh list anyway, so the destructive path only bites user-owned lists.",
+      "repro": "xs = [1, 2, 3]\nprint(next(xs))\nprint(xs)",
+      "actual": "1 then [2, 3] (xs was mutated)",
+      "expected": "TypeError: 'list' object is not an iterator (Python); at minimum xs must not be mutated"
+    },
+    {
+      "id": "bug-011",
+      "file": "src/vm/globals/numeric.rs",
+      "line": 397,
+      "title": "pow(a, b, mod) with negative modulus returns positive result",
+      "description": "call_pow takes modulus.unsigned_abs() and uses rem_euclid, so pow(2, 3, -5) returns 3. Python's three-arg pow returns a result with the sign of the modulus: pow(2, 3, -5) == -2.",
+      "repro": "print(pow(2, 3, -5))",
+      "actual": "3",
+      "expected": "-2"
+    },
+    {
+      "id": "bug-012",
+      "file": "src/parser/types.rs",
+      "line": 473,
+      "title": "Bytes literals don't decode octal escapes (b\"\\101\" stays literal)",
+      "description": "parse_bytes_literal handles \\xHH and a single \\0, but multi-digit octal like \\101 falls into the `other` arm which keeps the backslash verbatim. String literals decode octal correctly (push_escape), bytes don't.",
+      "repro": "print(b\"\\101\")",
+      "actual": "b'\\\\101' (four bytes: backslash, '1', '0', '1')",
+      "expected": "b'A'"
+    },
+    {
+      "id": "bug-013",
+      "file": "src/native/builtins/time.rs",
+      "line": 16,
+      "title": "time.time_ns() returns a str, not an int",
+      "description": "The time_ns binding allocates HeapObj::Str(now_ns().to_string()) while its siblings monotonic_ns/perf_counter_ns correctly produce ints via int_val. type(time.time_ns()) is <class 'str'>.",
+      "repro": "import time\nprint(type(time.time_ns()))\nprint(type(time.monotonic_ns()))",
+      "actual": "<class 'str'> then <class 'int'>",
+      "expected": "<class 'int'> for both"
+    },
+    {
+      "id": "bug-014",
+      "file": "src/native/builtins/time.rs",
+      "line": 245,
+      "title": "strptime %y maps 69-99 to 2069-2099 instead of 1969-1999",
+      "description": "time_strptime does `'y' => y = 2000 + v` unconditionally. Python (and POSIX) maps 0-68 -> 2000-2068 and 69-99 -> 1969-1999. Same bug in the JS twin host/time/src/fmt.js:57.",
+      "repro": "import time\nprint(time.strptime(\"31 Dec 99\", \"%d %b %y\"))",
+      "actual": "[2099,12,31,0,0,0,3,365,-1]",
+      "expected": "year 1999"
+    },
+    {
+      "id": "bug-015",
+      "file": "std/math/src/int.rs",
+      "line": 65,
+      "title": "math.isqrt(i128::MAX) returns a huge negative number",
+      "description": "isqrt starts y = (x + 1) / 2 with x = n; for n = i128::MAX the x+1 overflows. In release builds it wraps and the Newton loop converges to -2^126; in debug it panics. (2^127-1 is representable as an Edge int, e.g. (2**126 - 1) * 2 + 1.)",
+      "repro": "import math\nbig = (2**126 - 1) * 2 + 1\nprint(math.isqrt(big))",
+      "actual": "-85070591730234615865843651857942052864",
+      "expected": "13043817825332782212"
+    },
+    {
+      "id": "bug-016",
+      "file": "std/math/src/int.rs",
+      "line": 41,
+      "title": "math.gcd(i128::MIN) returns a negative gcd",
+      "description": "gcd/lcm call i128::abs(); for i128::MIN (-2^127, reachable as (-2**126) * 2) abs() wraps to itself in release (panics in debug), so gcd returns -2^127 and lcm computes garbage.",
+      "repro": "import math\nneg = (-2**126) * 2\nprint(math.gcd(neg))",
+      "actual": "-170141183460469231731687303715884105728",
+      "expected": "170141183460469231731687303715884105728 or an overflow error"
+    },
+    {
+      "id": "bug-017",
+      "file": "std/math/src/float.rs",
+      "line": 86,
+      "title": "math.log(x, 1) returns inf instead of raising",
+      "description": "The two-arg log guards base <= 0.0 but not base == 1.0, so it computes ln(x) / ln(1) = ln(x) / 0.0 = inf. Python raises ZeroDivisionError.",
+      "repro": "import math\nprint(math.log(2, 1))",
+      "actual": "inf",
+      "expected": "ZeroDivisionError (Python: 'float division by zero' from log base 1)"
+    },
+    {
+      "id": "bug-018",
+      "file": "std/math/src/float.rs",
+      "line": 183,
+      "title": "math.floor/ceil/trunc reject exactly -2^127 though it fits i128",
+      "description": "to_int rejects x.abs() >= 2^127 symmetrically, but i128::MIN is exactly -2^127 and is representable. floor(-170141183460469231731687303715884105728.0) wrongly raises.",
+      "repro": "import math\nprint(math.floor(-170141183460469231731687303715884105728.0))",
+      "actual": "ValueError: int too large to convert",
+      "expected": "-170141183460469231731687303715884105728"
+    },
+    {
+      "id": "bug-019",
+      "file": "std/math/src/float.rs",
+      "line": 75,
+      "title": "math.pow(0.0, -1.0) returns inf; overflow returns inf instead of raising",
+      "description": "pow uses nan2! which only maps NaN results to 'math domain error'. libm::pow(0.0, -1.0) is inf (not NaN), so no error; Python raises ValueError. Likewise pow(1e308, 2) -> inf where Python raises OverflowError.",
+      "repro": "import math\nprint(math.pow(0.0, -1.0))",
+      "actual": "inf",
+      "expected": "ValueError: math domain error"
+    },
+    {
+      "id": "bug-020",
+      "file": "std/math/src/int.rs",
+      "line": 79,
+      "title": "math.comb reports overflow for results that fit in i128",
+      "description": "comb multiplies the accumulator by (n - k + i) before dividing by i, so the intermediate can exceed i128 even when the final result fits. E.g. comb(13128212440888706149, 2): true result ~8.6e37 < 2^127, but acc=(n-1) then *n overflows.",
+      "repro": "import math\nprint(math.comb(13128212440888706149, 2))",
+      "actual": "ValueError: comb() result exceeds the i128 range",
+      "expected": "8611688640165321165375073557166751 (fits i128)"
+    },
+    {
+      "id": "bug-021",
+      "file": "std/math/src/float.rs",
+      "line": 114,
+      "title": "math.hypot overflows/underflows: no scaling",
+      "description": "hypot sums v*v directly, so hypot(1e308, 1e308) = inf (v*v overflows) where Python returns 1.4142135623730951e+308; tiny inputs similarly underflow to 0.0. The comment claims it matches math.hypot(*coordinates).",
+      "repro": "import math\nprint(math.hypot(1e308, 1e308))",
+      "actual": "inf",
+      "expected": "1.4142135623730951e+308"
+    },
+    {
+      "id": "bug-022",
+      "file": "std/json/src/tokenizer.rs",
+      "line": 152,
+      "title": "json.loads accepts invalid JSON numbers (leading zeros, trailing dot)",
+      "description": "read_number doesn't enforce JSON's number grammar: loads(\"01\") returns 1 and loads(\"1.\") returns 1.0. Both are rejected by Python's json.loads and by the JSON spec.",
+      "repro": "import json\nprint(json.loads(\"01\"))\nprint(json.loads(\"1.\"))",
+      "actual": "1 and 1.0",
+      "expected": "ValueError (Python: Expecting value / Extra data)"
+    },
+    {
+      "id": "bug-023",
+      "file": "std/re/src/parser.rs",
+      "line": 315,
+      "title": "Numeric backreference to a nonexistent group compiles and matches empty",
+      "description": "\\\\1 in a pattern with no groups parses to Node::Backref(1) with no validation; matcher treats the missing slot as an unmatched (empty) group. Python raises 'invalid group reference 1' at compile time; the std/re README also promises invalid patterns raise ValueError.",
+      "repro": "import re\nprint(re.search(r\"\\1\", \"abc\"))",
+      "actual": "matches the empty string at position 0 (prints a blank match)",
+      "expected": "ValueError: invalid group reference 1"
+    },
+    {
+      "id": "bug-024",
+      "file": "src/abi.rs",
+      "line": 208,
+      "title": "FFI float encode does not canonicalize NaN (tag-space collision)",
+      "description": "classify_encode returns EncodeRequest::Direct(f64::from_le_bytes(buf).to_bits()) without the CANON_NAN mapping Val::float performs (src/value/mod.rs:92). A plugin encoding a NaN whose bits collide with the tag space (e.g. 0x7FFC_0000_0000_0001 == TAG_NONE) injects a Val the VM reads as None/int. Reasoning-confirmed from code; reaching it needs a hand-written wasm plugin returning such NaN bits.",
+      "repro": "wasm plugin calls edge_encode(tag::FLOAT, bits=0x7FFC000000000001); the Python side receives None instead of nan",
+      "actual": "NaN payload bits reinterpreted as tag values (None/int)",
+      "expected": "canonical NaN, same as Val::float produces internally"
+    },
+    {
+      "id": "bug-025",
+      "file": "src/bridge.rs",
+      "line": 191,
+      "title": "Plugin __call__ with >= 256 args wraps the packed Call operand",
+      "description": "operand = args.len() as u16 is decoded by parse_call_args as lo byte = positional count, hi byte = kw pairs. argc = 256 wraps to operand 0x0100 = 0 positional + 1 kw pair, desyncing the VM stack. No arity guard on the FFI path.",
+      "repro": "plugin does Handle::call(\"__call__\", argv) with argv.len() >= 256",
+      "actual": "wrong argc decoded; stack desync / garbage results",
+      "expected": "either a clean arity error or correct dispatch"
+    },
+    {
+      "id": "bug-026",
+      "file": "src/bridge.rs",
+      "line": 296,
+      "title": "FFI Op::Len / Op::Iter reject bytes handles",
+      "description": "dispatch_len and dispatch_iter have no HeapObj::Bytes arm, although in-language len(b'..') works and bytes are iterable (iter_to_vec handles them). A plugin calling len/iter on a bytes handle gets 'object of type bytes has no len()' / 'is not iterable'. Also falsifies the 'flatten any iterable' comment on dispatch_iter.",
+      "repro": "plugin: edge_op(Len, bytes_handle) or edge_op(Iter, bytes_handle)",
+      "actual": "TypeError from the FFI op",
+      "expected": "byte length / list of ints, matching in-language semantics"
+    },
+    {
+      "id": "bug-027",
+      "file": "src/vm/snapshot.rs",
+      "line": 558,
+      "title": "limits_of() discards the recorded op budget and reports ops: 1",
+      "description": "The snapshot blob stores the remaining budget; limits_of reads it (let _budget = r.usz()?) then returns ops: 1 for sandboxed snapshots, contradicting its doc 'Sandbox profile recorded at save time'. Currently masked because both callers re-read the budget inside restore(); any other consumer gets a wrong profile.",
+      "repro": "save a snapshot with sandbox limits, inspect via limits_of()",
+      "actual": "ops == 1",
+      "expected": "the budget recorded at save time"
+    },
+    {
+      "id": "bug-028",
+      "file": "src/devkit.rs",
+      "line": 147,
+      "title": "devkit JSON parser rejects valid \\b and \\f escapes",
+      "description": "Cursor::string() handles \\\" \\\\ \\/ \\n \\t \\r \\uXXXX only; spec-valid \\b and \\f produce 'unsupported escape'. This parser feeds the native network builtins, so third-party JSON containing \\b/\\f fails to parse.",
+      "repro": "native network binding receives a JSON payload containing \\b or \\f",
+      "actual": "'unsupported escape' parse error",
+      "expected": "decoded backspace / form-feed characters"
+    },
+    {
+      "id": "bug-029",
+      "file": "cli/src/cmd/build.rs",
+      "line": 127,
+      "title": "edge build re-ingests the previous dist/ output (skip guard never fires)",
+      "description": "walk() skips the output dir via `if path == out_dir { continue; }`, but out_dir is the bare relative 'dist' while read_dir(\".\") yields './dist' — Path equality preserves the leading './', so the guard never matches. Second and later builds collect the stale dist/*.py (and vendored test.py) and copy them to dist/dist/..., growing the output each build.",
+      "repro": "edge build twice in a project whose scripts import the test package (or with any dist/ present)",
+      "actual": "dist/dist/... appears; script count inflates per build",
+      "expected": "dist/ is excluded from collection on every build"
+    },
+    {
+      "id": "bug-030",
+      "file": "cli/src/cmd/build.rs",
+      "line": 159,
+      "title": "`import a, b` only vendors package `a`",
+      "description": "crawl_imports breaks after the first token of an import line, so for `import a, b` the second module is never recorded and not vendored into dist/; the bundled app fails to resolve `b` at run time.",
+      "repro": "project with 'import json, re' at top level, then edge build",
+      "actual": "only json is vendored",
+      "expected": "both json and re vendored"
+    },
+    {
+      "id": "bug-031",
+      "file": "cli/src/cmd/build.rs",
+      "line": 232,
+      "title": "find_entry returns bare 'main.py' for a nested match, breaking the generated index.html",
+      "description": "The preferred-name loop checks s.file_name() == c but then returns the bare constant c. If the only main.py is at sub/main.py, index.html points at dist/main.py which does not exist (the file was copied to dist/sub/main.py).",
+      "repro": "project whose only entry candidate is sub/main.py, then edge build",
+      "actual": "index.html references /main.py (404)",
+      "expected": "index.html references /sub/main.py"
+    },
+    {
+      "id": "bug-032",
+      "file": "cli/src/cmd/pkg.rs",
+      "line": 77,
+      "title": "edge add with a .py URL misclassifies a std package as a host library",
+      "description": "kind_from_url only treats .wasm as std, so `edge add test=https://example.com/test.py` lands in the host map even though std packages shipped as pure .py are explicitly supported (manifest.rs special-cases test; build.rs preserves .py when vendoring Kind::Std). The runtime then loads a Python file as a main-thread JS library.",
+      "repro": "edge add test=https://example.com/test.py",
+      "actual": "entry written under host:",
+      "expected": "entry under std/imports, mirroring the .py handling in build.rs"
+    },
+    {
+      "id": "bug-033",
+      "file": "cli/src/engine/native.rs",
+      "line": 92,
+      "title": "Piped stdin keeps trailing \\r on CRLF input",
+      "description": "The native session splits piped stdin on '\\n' only, so each input() line from CRLF sources (Windows pipes/files) ends with '\\r', diverging from Python's input() semantics.",
+      "repro": "printf 'hello\\r\\n' | edge run script_that_calls_input.py",
+      "actual": "input() returns 'hello\\r'",
+      "expected": "'hello'"
+    },
+    {
+      "id": "bug-034",
+      "file": "cli/src/cmd/serve.rs",
+      "line": 144,
+      "title": "Live-reload fingerprint truncates mtimes to whole seconds",
+      "description": "The watch fingerprint sums d.as_secs() (and sizes). An edit within the same second that keeps total size identical produces the same fingerprint, so the page never reloads — plausible with the 400ms poll.",
+      "repro": "edge serve; save a same-byte-length fix-up twice within one second",
+      "actual": "no reload triggered",
+      "expected": "reload on any content change (use as_millis/nanos or hash per file)"
+    },
+    {
+      "id": "bug-035",
+      "file": "cli/src/cmd/uninstall.rs",
+      "line": 23,
+      "title": "Uninstall writes a script to a predictable world-writable temp path",
+      "description": "std::env::temp_dir().join(\"edge-uninstall.sh\") + fs::write follows pre-existing symlinks, letting another user on a shared machine pre-plant a symlink and have the uninstalling user overwrite an arbitrary file they own.",
+      "repro": "ln -s ~victim/.bashrc /tmp/edge-uninstall.sh; victim runs edge uninstall",
+      "actual": "victim's file is overwritten with the uninstall script",
+      "expected": "unique temp file or OpenOptions::create_new(true)"
+    },
+    {
+      "id": "bug-036",
+      "file": "runtime/src/worker/engine.js",
+      "line": 250,
+      "title": "pause() reports 'parked' but only PREEMPTED yields actually hold the program",
+      "description": "settlePause(true) fires at the top of the drive loop for every yield kind, but the resumeGate await exists only in the STATUS_PREEMPTED branch. For PENDING_TIMER/FRAME/HOST_CALL the driver services the yield and calls run_resume() — the program keeps running after pause() resolved true. A pause during a long sleep() is also only noticed after the timer fires. Contradicts the pause doc in runtime/src/index.js:122 and the README.",
+      "repro": "program with sleep(5); call pause() from the host; it resolves true yet the program continues after the sleep",
+      "actual": "pause() resolves true but execution continues on the next serviced yield",
+      "expected": "program stays parked until resume()"
+    },
+    {
+      "id": "bug-037",
+      "file": "runtime/src/worker/engine.js",
+      "line": 72,
+      "title": "IndexedDB cache wiped on every page load when version is omitted (the default)",
+      "description": "`if (!version || stored !== version) { await cache.clear(); }` — version defaults to null (and element.js never passes one), so !version is always true and the persistent cache is cleared on every createWorker, making it useless across page loads. README documents invalidation only on version mismatch.",
+      "repro": "createWorker without a version; reload the page; cache is empty again",
+      "actual": "cache cleared on every load",
+      "expected": "cache persists; cleared only when a provided version mismatches"
+    },
+    {
+      "id": "bug-038",
+      "file": "runtime/src/prefetch.js",
+      "line": 85,
+      "title": "Synthetic root packages.json shadows a physical one",
+      "description": "Whenever the resolution table is non-empty, prefetch does fetchedSources.set('packages.json', synthetic). The walk-up then finds 'packages.json' already cached and never fetches the real file, silently dropping its imports/host/extends for programmatic runs with entryDir=''.",
+      "repro": "programmatic run with a real root packages.json next to the entry plus any imports",
+      "actual": "the physical packages.json is never fetched",
+      "expected": "synthetic defaults merge with, not replace, the physical manifest"
+    },
+    {
+      "id": "bug-039",
+      "file": "runtime/src/index.js",
+      "line": 156,
+      "title": "Cross-origin worker bootstrap failure hangs createWorker forever",
+      "description": "On dynamic-import failure the blob bootstrap posts { type: 'error', message: 'worker bootstrap failed: ...' } with no reqId; the main-thread handler does pending.get(data.reqId) -> undefined and returns early, so the send('load') promise never settles and no onerror fires.",
+      "repro": "embed cross-origin with an unreachable CDN URL",
+      "actual": "createWorker() promise never resolves or rejects",
+      "expected": "rejects with the bootstrap error"
+    },
+    {
+      "id": "bug-040",
+      "file": "host/time/src/fmt.js",
+      "line": 63,
+      "title": "strptime with an unknown month name silently rolls back to December of the previous year",
+      "description": "monthIndex('Foo') returns -1, so mo = -1 + 1 = 0 and Date.UTC(Y, -1, d) normalizes to December of year Y-1 instead of raising 'does not match format'. Out-of-range %m/%d fields similarly normalize instead of erroring.",
+      "repro": "strptime('Foo 15 2021', '%b %d %Y') in the web runtime",
+      "actual": "[2020,12,15,...]",
+      "expected": "time data ... does not match format error"
+    },
+    {
+      "id": "bug-041",
+      "file": "host/network/src/ws.js",
+      "line": 30,
+      "title": "ws_close(h, None) throws InvalidAccessError instead of a clean close",
+      "description": "Python None arrives as JS null, but the guard is `code !== undefined`, so ws.close(null, '') runs; WebIDL coerces null to close-code 0, which is invalid and throws. Every other optional-arg handler in host/ also treats null as absent.",
+      "repro": "ws_close(h, None) from Python in the web runtime",
+      "actual": "InvalidAccessError",
+      "expected": "clean close (code 1000 default)"
+    },
+    {
+      "id": "bug-042",
+      "file": "src/lexer/mod.rs",
+      "line": 90,
+      "title": "match cannot take a parenthesized subject",
+      "description": "The lexer demotes the soft keyword `match` to a Name when followed by Lpar (lines 90-99), so `match (1, 2):` lexes as a call and the parser errors. Python accepts a parenthesized subject.",
+      "repro": "match (1, 2):\n  case _:\n    print(\"ok\")",
+      "actual": "error: expected expression",
+      "expected": "ok"
+    },
+    {
+      "id": "bug-043",
+      "file": "src/vm/opcodes/arith.rs",
+      "line": 256,
+      "title": "Set -= rebinds instead of mutating in place",
+      "description": "There is no InPlaceSub opcode; only InPlaceBitOr/And/Xor are handled (dispatch.rs:628). `s -= x` rebinds s to a new set, so aliases keep the old value. |=, &=, ^= mutate correctly.",
+      "repro": "s = {1, 2, 3}\nt = s\ns -= {1}\nprint(sorted(t))",
+      "actual": "[1, 2, 3] (t unchanged, s was rebound)",
+      "expected": "[2, 3] (Python: set.difference_update mutates in place)"
+    },
+    {
+      "id": "bug-044",
+      "file": "src/vm/format_spec.rs",
+      "line": 264,
+      "title": "Format spec 'n' rejects floats",
+      "description": "The 'n' type routes through int_to_decimal_parts, which requires an integer, so f\"{1234.5:n}\" raises. Python applies locale-unaware grouping to floats and prints 1234.5.",
+      "repro": "print(f\"{1234.5:n}\")",
+      "actual": "ValueError: format spec requires an integer",
+      "expected": "1234.5"
+    },
+    {
+      "id": "bug-045",
+      "file": "src/vm/value_ops.rs",
+      "line": 223,
+      "title": "type_name returns 'object' for every user instance",
+      "description": "Error messages never name the user's class. Surfaced at dispatch.rs:830: `with AC(): pass` on a class without the protocol reports 'object' instead of 'AC'.",
+      "repro": "class AC:\n  pass\nwith AC():\n  pass",
+      "actual": "TypeError: 'object' object does not support the context manager protocol",
+      "expected": "TypeError: 'AC' object does not support the context manager protocol"
+    },
+    {
+      "id": "bug-046",
+      "file": "src/vm/dispatch.rs",
+      "line": 918,
+      "title": "__iter__ returning a built-in iterator is silently treated as empty",
+      "description": "__next__ is probed via try_call_dunder (opcodes/dunder.rs:157-171, 185), which only works on user Instances; a miss is treated as end of iteration. A class whose __iter__ returns iter([1,2,3]) iterates as empty and `in` returns False.",
+      "repro": "class S:\n  def __iter__(self):\n    return iter([1, 2, 3])\nprint(list(S()))",
+      "actual": "[]",
+      "expected": "[1, 2, 3]"
+    },
+    {
+      "id": "bug-047",
+      "file": "src/vm/globals/async_ops.rs",
+      "line": 321,
+      "title": "gather re-raises the last error in time, not the first in argument order",
+      "description": "raise_into_outer reuses self.pending.exc_val (the most recently raised exception) instead of building one from the error it was handed, defeating the deliberate first-in-argument-order first_err pick at line 281.",
+      "repro": "async def bad1():\n  raise ValueError(\"from bad1\")\nasync def bad2():\n  raise ValueError(\"from bad2\")\ntry:\n  await gather(bad1(), bad2())\nexcept ValueError as e:\n  print(\"caught:\", e)",
+      "actual": "caught: from bad2 (whichever coroutine errored last in time)",
+      "expected": "caught: from bad1 (first in argument order, per the code's own intent at line 281)"
+    },
+    {
+      "id": "bug-048",
+      "file": "src/vm/globals/numeric.rs",
+      "line": 104,
+      "title": "int() rejects the string form of i128::MIN",
+      "description": "The magnitude is parsed with i128::from_str_radix, which rejects 2^127, and the sign is applied after, so the one representable negative extreme fails while its positive sibling parses.",
+      "repro": "print(int(\"-170141183460469231731687303715884105728\"))",
+      "actual": "ValueError: int(): invalid literal",
+      "expected": "-170141183460469231731687303715884105728"
+    },
+    {
+      "id": "bug-049",
+      "file": "src/vm/opcodes/function.rs",
+      "line": 908,
+      "title": "Keyword arguments break when a builtin is called through an alias",
+      "description": "dispatch_native rejects kwargs for every builtin except Sorted, bypassing the kwarg handling in call_print, call_minmax, call_enumerate, and call_dict that the dedicated opcodes reach on a direct call.",
+      "repro": "f = min\nprint(f([], default=0))",
+      "actual": "TypeError: native function takes no keyword arguments",
+      "expected": "0 (matches the direct call min([], default=0))"
+    },
+    {
+      "id": "bug-050",
+      "file": "src/vm/globals/bytes_helpers.rs",
+      "line": 103,
+      "title": "import_module() NameError message is doubly wrapped",
+      "description": "A full sentence is passed into VmErr::Name, whose renderer wraps it again as name '<X>' is not defined, producing nested quoting.",
+      "repro": "from json import dumps\nimport_module(\"json\")",
+      "actual": "NameError: name 'module 'json' not imported in this scope' is not defined",
+      "expected": "NameError: module 'json' not imported in this scope"
+    },
+    {
+      "id": "bug-051",
+      "file": "src/vm/dispatch.rs",
+      "line": 236,
+      "title": "MemoryError from a full heap is uncatchable",
+      "description": "Entering an except handler allocates (the message string and the ExcInstance, via heap.alloc at dispatch.rs:236-241). When the heap is exhausted that allocation re-fails and the error propagates past the handler. A MemoryError raised by a pre-flight size check IS caught, confirming the mechanism.",
+      "repro": "try:\n  xs = []\n  while True:\n    xs.append([])\nexcept MemoryError:\n  pass\nprint(\"survived\")",
+      "actual": "MemoryError: heap limit, exit code 1 (handler never runs)",
+      "expected": "survived",
+      "notes": "Also misformatted on the way out: the uncaught MemoryError prints bare to stdout instead of the normal 'error: ... --> file:line' stderr format other uncaught errors use."
+    },
+    {
+      "id": "bug-052",
+      "file": "src/vm/globals/identity.rs",
+      "line": 115,
+      "title": "hash() does not unify value-equal numerics",
+      "description": "call_hash hashes floats by their raw f64 bits while ints hash as themselves, so 1 == 1.0 but hash(1) != hash(1.0), violating the hash/eq contract at the user level. Related to bug-009 (the internal hash_depth in value/eq.rs has its own float/LongInt disagreement).",
+      "repro": "print(1 == 1.0)\nprint(hash(1))\nprint(hash(1.0))",
+      "actual": "True / 1 / 0",
+      "expected": "True / 1 / 1 (Python parity)"
+    },
+    {
+      "id": "bug-053",
+      "file": "unknown (likely src/vm/opcodes/ or src/vm/dispatch.rs)",
+      "line": 0,
+      "title": "User-defined __delitem__ corrupts subsequent method dispatch on the instance",
+      "description": "After `del s[key]` runs a user __delitem__, any later method call or `in` check on the instance fails with AttributeError: 'object' object has no attribute '<attr>'. The deletion itself works. Plain del obj.attr and del list[i] are unaffected.",
+      "repro": "class Store:\n  def __init__(self):\n    self.data = {}\n  def __setitem__(self, key, value):\n    self.data[key] = value\n  def __delitem__(self, key):\n    del self.data[key]\n  def show(self):\n    return self.data\ns = Store()\ns[\"a\"] = 1\ndel s[\"a\"]\nprint(s.show())",
+      "actual": "AttributeError: 'object' object has no attribute 'data'",
+      "expected": "{}"
+    },
+    {
+      "id": "bug-054",
+      "file": "unknown (exception str/repr path, likely src/vm/value_ops.rs)",
+      "line": 0,
+      "title": "str() of a bare AssertionError returns the class name instead of an empty string",
+      "description": "str(AssertionError()) is 'AssertionError' instead of ''. Side effect: the std test harness prints 'FAIL - name (AssertionError: AssertionError)' with the class name doubled for a bare failed assert.",
+      "repro": "print(str(AssertionError()))",
+      "actual": "AssertionError",
+      "expected": "(empty string)"
+    },
+    {
+      "id": "bug-055",
+      "file": "std/json/src/serializer.rs",
+      "line": 0,
+      "title": "json.dumps of a native module function raises a bogus NameError",
+      "description": "Serializing a native function (e.g. dumps itself) raises NameError: name 'dumps' is not defined, while a user-defined function correctly raises TypeError: 'function' is not JSON-serializable.",
+      "repro": "from json import dumps\nprint(dumps({\"fn\": dumps}))",
+      "actual": "NameError: name 'dumps' is not defined",
+      "expected": "TypeError: 'function' is not JSON-serializable"
+    },
+    {
+      "id": "bug-056",
+      "file": "src/vm/dispatch.rs",
+      "line": 0,
+      "title": "Op-limit RuntimeError is effectively uncatchable",
+      "description": "When the operation budget runs out, the except handler is entered but its first operation re-raises because the budget stays exceeded. Possibly by design, but the docs do not state it. Also takes ~33 s to trigger under the CLI at the sandbox budget.",
+      "repro": "n = 0\ntry:\n  while True:\n    n = n + 1\nexcept RuntimeError:\n  print(\"caught\")",
+      "actual": "the error re-raises inside the handler (caret lands on the print)",
+      "expected": "either 'caught' or a documented uncatchable-error note"
+    }
+  ],
+  "outdated_comments": [
+    {"file": "src/vm/globals/numeric.rs", "line": 48, "comment_says": "/* `int(s, base)` parsing: optional sign, optional 0x/0o/0b prefix ... */ placed directly above round_int_banker", "code_does": "round_int_banker rounds ints to -k digits; the comment describes parse_int_radix two functions below (line 59). Misplaced comment."},
+    {"file": "src/wasm/mod.rs", "line": 23, "comment_says": "native hosts wire host_now_ns 'to Instant::now().as_nanos()'", "code_does": "the native hook is SystemTime::now().duration_since(UNIX_EPOCH) (src/native/mod.rs:33), wall-clock since epoch, not a monotonic Instant"},
+    {"file": "src/abi.rs", "line": 199, "comment_says": "'Fits in 47-bit inline range' (also line 173 '47-bit signed', and src/value/mod.rs:42 '47-bit int')", "code_does": "INT_PAYLOAD_MASK is 48 bits (0x0000_FFFF_FFFF_FFFF) with sign extension (raw << 16) >> 16, giving a 48-bit two's-complement range [-2^47, 2^47-1]; '47-bit' reads as ±2^46"},
+    {"file": "std/json/src/parser.rs", "line": 147, "comment_says": "'Python hands list[tuple] but wasm-pdk has no new_tuple (the hook can tuple(p) for p in pairs if it needs them)'", "code_does": "Handle::new_tuple exists now (pdk/src/lib.rs:583) and is already used by std/math/src/float.rs:197; the stated constraint is gone"},
+    {"file": "std/math/src/float.rs", "line": 110, "comment_says": "'Variadic Euclidean norm, matching math.hypot(*coordinates)'", "code_does": "naive sum-of-squares with no scaling; hypot(1e308, 1e308) overflows to inf where math.hypot returns 1.414e308 (see bug-021)"},
+    {"file": "src/vm/opcodes/dunder.rs", "line": 27, "comment_says": "compare_dunder_names returns '(forward, reflected, negate)'; '__ne__' is negated '__eq__'", "code_does": "negate is false for every opcode including NotEq; the actual __ne__ fallback (negate __eq__) lives in try_compare_dunder lines 104-108, so the negate field/branch is dead"},
+    {"file": "runtime/src/worker/engine.js", "line": 59, "comment_says": "'Re-applied at every run since resetNativeTable clears them.'", "code_does": "hostImportMap(registerHost, incremental) deliberately skips re-registration in incremental/REPL mode (engine.js:131-132, 209)"},
+    {"file": "runtime/src/fetch.js", "line": 2, "comment_says": "'Null on 404 (opportunistic ok), throws on drift.'", "code_does": "the function returns null on any network failure or non-ok status (fetch.js:23-32), not just 404"},
+    {"file": "host/dom/src/media.js", "line": 14, "comment_says": "'NaN until metadata loads; coerce to 0...'", "code_does": "code coerces any non-finite duration (isFinite check), including Infinity from live streams, to 0"},
+    {"file": "cli/src/engine/web.rs", "line": 92, "comment_says": "doc on `pub fn run`: 'Write a raw stdout chunk (byte-stream...) and flush so streaming output appears at once.'", "code_does": "run writes nothing itself; that sentence describes engine::emit_chunk (engine/mod.rs:23-28). Misplaced leftover doc line"},
+    {"file": "cli/src/manifest.rs", "line": 36, "comment_says": "'Official package registry. Mirrors the runtime's built-in default manifest.' directly above pub enum Kind", "code_does": "Kind is just the Std/Host tag; the registry is the registry() function at line 45. Comment sits on the wrong item"},
+    {"file": "src/parser/types.rs", "line": 438, "comment_says": "comment says bytes escapes \\u/\\U/\\N are 'rejected'", "code_does": "the code passes them through verbatim (print(b\"\\u00e9\") gives b'\\\\u00e9'), and it omits that octal escapes are not decoded either (bug-012)"},
+    {"file": "src/vm/opcodes/dunder.rs", "line": 157, "comment_says": "'User instance container with __iter__: walk via the iterator protocol'", "code_does": "the walk silently returns false/empty when __iter__ returns a non-Instance (built-in) iterator; the miss at line 166 is treated as 'no items' (bug-046)"},
+    {"file": "src/vm/globals/async_ops.rs", "line": 219, "comment_says": "'enforce timeouts, then wake any whose tracked tasks are all terminal, finalizing per WaitKind' and the WaitKind::Gather comment at line 477 'raises the first child error'", "code_does": "raise_into_outer at lines 321-322 reuses pending.exc_val, so the last error in time wins instead of the first in argument order (bug-047)"},
+    {"file": "src/vm/globals/io.rs", "line": 76, "comment_says": "call_input 'Returns empty string in sandbox; no stdin access in WASM.'", "code_does": "the strict/sandbox path raises RuntimeError and never returns an empty string; the native non-strict path does read stdin"},
+    {"file": "src/vm/globals/io.rs", "line": 93, "comment_says": "wasm32 error string says 'input() requires host data in WASM (use set_input)'", "code_does": "no set_input export exists in src/wasm/exports.rs; the inp buffer is dead surface, so the message points users at a nonexistent API"},
+    {"file": "src/vm/methods/mod.rs", "line": 179, "comment_says": "dict.update(**kwargs) is 'the one builtin method taking keywords'", "code_does": "list.sort(key=, reverse=) also takes keywords, intercepted before the dispatcher at src/vm/opcodes/function.rs:426-429; accurate only for the dispatcher path"},
+    {"file": "src/value/mod.rs", "line": 162, "comment_says": "comment on HeapObj::Class says resolve_attr 'DFS-walks them on miss'", "code_does": "the VM uses a cached C3 linearization (c3_merge, mro_cache in src/vm/opcodes/attr_lookup.rs:39-56 and src/vm/dispatch.rs:1035-1041)"},
+    {"file": "runtime/src/index.js", "line": 2, "comment_says": "'See README for options'", "code_does": "runtime/README.md was deleted and its content absorbed into docs/content/reference/modules.md and wasm-abi.md; the comment points at a file that no longer exists"}
+  ],
+  "disorder": [
+    {"file": "std/json/src/serializer.rs", "line": 34, "kind": "dead-code", "action": "cleaned", "description": "SerCtx.depth field was written once at construction and never read (actual depth is threaded through the separate `depth` parameter). Removed the field and its initializer; cargo check --manifest-path std/json/Cargo.toml passes."},
+    {"file": "src/wasm/resolver.rs", "line": 145, "kind": "other", "action": "reported", "description": "Step comments are numbered 1. and 3. with no 2. (renumbering leftover; the unnumbered call_id comment at line 150 is the de-facto step 2). Comment-only fix left for the user."},
+    {"file": "src/devkit.rs", "line": 43, "kind": "dead-code", "action": "reported", "description": "Duplicated JSON string escapers: devkit.rs `escape` and snapshot.rs:708 `json_escape` implement the same escaping with slightly different \\u handling. Not merged: devkit is std-only while snapshot is no_std, so removal is not trivially safe."},
+    {"file": "cli/src/cmd/serve.rs", "line": 31, "kind": "dead-code", "action": "reported", "description": "`.split('?').next().unwrap_or(\"/\")` — str::split always yields at least one item, so the unwrap_or is dead (same pattern at engine/web.rs:232). Harmless; left in place."},
+    {"file": "std/test/src/entry.py", "line": 55, "kind": "other", "action": "reported", "description": "Output format typo: PASS/FAIL lines use 'PASS - {description}' / 'FAIL - {description}' but the ERROR line is 'ERROR {description}' (missing ' - '). Baked into std/test/test.json expectations, so changing it needs a corpus update."},
+    {"file": "src/vm/methods/mod.rs", "line": 170, "kind": "other", "action": "reported", "description": "dict 'clear' is registered twice in ALL_METHODS (the appended group exists to keep snapshot method ids stable; lookup_method takes the first). Intentional per the comment, noted only for awareness."},
+    {"file": "src/wasm/resolver.rs", "line": 0, "kind": "other", "action": "reported", "description": "Message-shape inconsistency between src/wasm/resolver.rs and src/native/resolver.rs for the same hermetic-resolution failure: the browser says 'alias '<name>' not declared in '<manifest>'' while the CLI says 'no packages.json above '<dir>' declares '<name>''. Worth unifying."}
+  ],
+  "docs_gaps": []
+}

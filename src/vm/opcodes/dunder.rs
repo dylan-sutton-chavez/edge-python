@@ -45,7 +45,7 @@ impl<'a> VM<'a> {
         let HeapObj::Instance(cls_val, _) = self.heap.get(recv) else { return Ok(None); };
         let cls_val = *cls_val;
 
-        // Special methods resolve on the type's MRO, bypassing the instance __dict__, like CPython.
+        // Special methods resolve on the type's MRO, bypassing the instance __dict__, like Python.
         let Some((func, class)) = self.lookup_class_member(cls_val, name) else { return Ok(None); };
         // Only plain functions bind as methods; data attributes never dispatch implicitly.
         if !(func.is_heap() && matches!(self.heap.get(func), HeapObj::Func(..))) { return Ok(None); }

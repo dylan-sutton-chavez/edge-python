@@ -36,7 +36,7 @@ impl<'a> VM<'a> {
         }
     }
 
-    /* C3 merge of the bases' linearizations plus the bases list itself, the tail of `L[cls] = cls :: merge(...)`. `cls` is prepended by the caller (it isn't allocated yet at validation time). Errs on an inconsistent hierarchy, matching CPython's `TypeError` at class creation. */
+    /* C3 merge of the bases' linearizations plus the bases list itself, the tail of `L[cls] = cls :: merge(...)`. `cls` is prepended by the caller (it isn't allocated yet at validation time). Errs on an inconsistent hierarchy, matching Python's `TypeError` at class creation. */
     pub(crate) fn c3_merge(&self, bases: &[Val]) -> Result<alloc::vec::Vec<Val>, VmErr> {
         let mut seqs: alloc::vec::Vec<alloc::vec::Vec<Val>> = bases.iter().map(|&b| self.mro_of(b)).collect();
         if !bases.is_empty() { seqs.push(bases.to_vec()); }
@@ -144,7 +144,7 @@ impl<'a> VM<'a> {
                 return Err(VmErr::Attribute(s!("'", str ty, "' object has no attribute '", str bare, "'")));
             }
 
-        // Bound methods expose their receiver; user methods also their function. Builtin bound methods have no `__func__`, like CPython.
+        // Bound methods expose their receiver; user methods also their function. Builtin bound methods have no `__func__`, like Python.
         if obj.is_heap() {
             match self.heap.get(obj) {
                 HeapObj::BoundUserMethod(recv, func, _) => match bare {

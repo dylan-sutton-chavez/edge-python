@@ -175,7 +175,7 @@ impl<'a> VM<'a> {
             if had { attrs.borrow_mut().remove(&key, &self.heap); }
             had
         } else { false };
-        // Deleting a missing attribute raises AttributeError, matching CPython.
+        // Deleting a missing attribute raises AttributeError, matching Python.
         if !existed {
             let ty = self.type_name(obj);
             return Err(VmErr::Attribute(s!("'", str ty, "' object has no attribute '", str name, "'")));
@@ -225,7 +225,7 @@ impl<'a> VM<'a> {
         self.alloc_and_push_dict(dm)
     }
 
-    /* `globals()`, module-level bindings as a dict. User top-level names only (entry-chunk slots + module state); builtins live in a separate namespace, matching CPython. Returned dict is a copy. */
+    /* `globals()`, module-level bindings as a dict. User top-level names only (entry-chunk slots + module state); builtins live in a separate namespace, matching Python. Returned dict is a copy. */
     pub fn call_globals(&mut self, chunk: &crate::parser::SSAChunk, slots: &[Val]) -> Result<(), VmErr> {
         let mut out: crate::util::hash::FxHashMap<String, Val> = crate::util::hash::FxHashMap::default();
         // Inside a function, entry slots sit at the bottom of `live_slots`; at top-level, use `slots` as-is.

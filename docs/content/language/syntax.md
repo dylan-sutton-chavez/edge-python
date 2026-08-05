@@ -1,26 +1,40 @@
 ---
 title: "Syntax"
-description: "Operators, literals, and language surface."
+description: "Lexical and grammatical rules of the language subset."
 ---
 
 ## Comments
 
-```python
-# Single-line comment
-x = 1 # Trailing comment
+`#` starts a comment that runs to the end of the line.
 
-"""
-Triple-quoted strings used as
-module-level documentation are
-parsed but discarded.
-"""
+```python
+# A comment on its own line
+x = 1  # A trailing comment
 ```
 
-The same applies to `def` and `class` docstrings: parsed for compatibility, then discarded — there is no `__doc__` at runtime.
+A string literal as the first statement of a module, function, or class body parses and is discarded. There is no `__doc__` at runtime.
+
+## Line joining
+
+A statement continues on the next line after a trailing backslash, or freely inside `()`, `[]`, and `{}`.
+
+```python
+total = 1 + \
+    2
+names = [
+  "a",
+  "b",
+]
+print(total, names)
+```
+
+```text Output
+3 ['a', 'b']
+```
 
 ## Identifiers and assignment
 
-Identifiers follow Python rules: letters, digits, underscores, plus any non-ASCII letter.
+Identifiers start with a letter or underscore and continue with letters, digits, and underscores. Non-ASCII characters are allowed.
 
 ```python
 counter = 0
@@ -57,7 +71,7 @@ print(x, y)
 10 20
 ```
 
-Targets can also be attributes, subscripts, parenthesized lists, or nested:
+Targets can also be attributes, subscripts, parenthesized lists, or nested patterns.
 
 ```python
 class Point:
@@ -79,11 +93,11 @@ print(a, b, h, i, j)
 3 4 5 6 7
 ```
 
-Starred targets (`first, *rest = ...`) must be plain names.
+A starred target such as `*middle` must be a plain name.
 
 ### Walrus operator
 
-Assignment as expression. Useful in conditions and comprehensions.
+`:=` assigns as an expression. Useful in conditions and comprehensions.
 
 ```python
 data = [1, 2, 3]
@@ -97,7 +111,7 @@ if (n := len(data)) > 0:
 
 ## Numbers
 
-Integer literals: hex (`0x`), octal (`0o`), binary (`0b`). `_` separates digits. Range and promotion: [Data types, Integer](/language/data-types#integer).
+Integer literals are decimal by default, with `0x` hex, `0o` octal, and `0b` binary forms. `_` may separate digits. The value range and overflow behavior: [Data types](/language/data-types).
 
 ```python
 print(0xDEAD_BEEF)
@@ -113,17 +127,15 @@ print(1_000_000)
 1000000
 ```
 
-Underscores are validated: `1_`, `1__2`, `0x_1`, `1e_5` -> `SyntaxError`. Must sit between two digits.
+An underscore must sit between two digits. `1_`, `1__2`, and `0x_1` are rejected.
+
+Float literals are IEEE-754 doubles.
 
 ```python
-# Floats: IEEE-754 doubles
 print(3.14)
 print(1e-5)
 print(.5)
-print(1e16) # repr switches to scientific notation
-
-# Mixed arithmetic coerces to float
-print(2 + 3.0)
+print(1e16)  # repr switches to scientific notation
 ```
 
 ```text Output
@@ -131,20 +143,21 @@ print(2 + 3.0)
 1e-05
 0.5
 1e+16
-5.0
 ```
 
-Complex literals (`1j`, `2+3j`) are not part of the language.
+Complex literals such as `1j` do not exist.
 
 ## Strings
+
+Strings take single, double, or triple quotes. An `r` prefix makes a raw string where backslashes stay literal. Adjacent literals concatenate into one. A `b` prefix builds [bytes](/language/data-types) instead of a string.
 
 ```python
 print('single')
 print("double")
 print("""triple
 quoted""")
-print(r'raw\n') # backslash not escaped
-print('hello' ' world') # implicit concatenation
+print(r'raw\n')  # backslash not escaped
+print('hello' ' world')  # implicit concatenation
 ```
 
 ```text Output
@@ -158,20 +171,20 @@ hello world
 
 ### Escape sequences
 
-Supported: `\n`, `\t`, `\r`, `\a`, `\b`, `\f`, `\v`, `\\`, `\'`, `\"`, `\0`, `\xHH`, `\uHHHH`, `\UHHHHHHHH`, `\NNN` (1–3 octal digits). Named-char escapes (`\N{GREEK SMALL LETTER ALPHA}`) are not supported. Use `\u`.
+Supported escapes are `\n`, `\t`, `\r`, `\a`, `\b`, `\f`, `\v`, `\\`, `\'`, `\"`, `\0`, `\xHH`, `\uHHHH`, `\UHHHHHHHH`, and `\NNN` with 1 to 3 octal digits. An unknown escape keeps its backslash. Named escapes such as `\N{GREEK SMALL LETTER ALPHA}` are not supported and stay literal.
 
 ```python
 print('\n line break')
 print('\t tab')
 print('\x41 hex')
 print('\u00e9 unicode')
-print('\101') # octal escape, 'A'
+print('\101')  # octal escape, 'A'
 ```
 
 ```text Output
 
  line break
-     tab
+	 tab
 A hex
 é unicode
 A
@@ -185,10 +198,10 @@ n = 42
 pi = 3.14159
 print(f"hello {name}")
 print(f"answer is {n + 1}")
-print(f"{n:04d}") # zero-padded width
-print(f"{pi:.3f}") # float precision
-print(f"{255:#x}") # hex with prefix
-print(f"{name!r}") # !r conversion
+print(f"{n:04d}")  # zero-padded width
+print(f"{pi:.3f}")  # float precision
+print(f"{255:#x}")  # hex with prefix
+print(f"{name!r}")  # !r conversion
 print(f"{{literal braces}}")
 ```
 
@@ -202,13 +215,11 @@ answer is 43
 {literal braces}
 ```
 
-Full format mini-language: `[[fill]align][sign][#][0][width][,|_][.precision][type]`, with `!r` / `!s` / `!a` conversions before the spec. Type chars: `b o c d e E f F g G n s x X %`. The `,` and `_` group digits (every three for decimals/floats; `_` groups `b`/`o`/`x`/`X` every four).
-
-f-string literals process [escape sequences](#escape-sequences) like any string — `\r`, for instance, rewinds the cursor to the line start so a single output line can redraw in place.
+The format spec is `[[fill]align][sign][#][0][width][,|_][.precision][type]`. The conversions `!r`, `!s`, and `!a` come before the spec. Type characters are `b c d e E f F g G n o s x X %`. The `,` and `_` options group digits, every three for decimal output and every four for `_` with `b`, `o`, `x`, or `X`.
 
 ## Booleans and None
 
-The literals are `True`, `False`, and `None`; `not` negates. Truthiness rules and the full falsy table: see [Data types](/language/data-types#truthy-and-falsy).
+The literals are `True`, `False`, and `None`. `not` negates. Truthiness rules: [Data types](/language/data-types).
 
 ```python
 print(True, False, None)
@@ -236,17 +247,25 @@ print(-5, +5)
 -5 5
 ```
 
-`/` always yields a float; `//` and `%` follow floored division (the result of `%` takes the divisor's sign). With a string left operand, `%` is printf-style formatting instead of modulo (see [Formatting](/reference/methods#formatting)).
+`/` always yields a float. `//` and `%` use floored division, so the result of `%` takes the sign of the divisor. With a string on the left, `%` is printf-style formatting (see [Methods](/reference/methods)).
+
+```python
+print("%d of %s" % (3, "pies"))
+```
+
+```text Output
+3 of pies
+```
 
 ### Comparison and chaining
 
-Ordering comparisons (`<`, `>`, `<=`, `>=`) work on numbers, strings, bytes, and tuples/lists (compared lexicographically). Mixing un-orderable types raises `TypeError`.
+Comparisons chain. Ordering works on numbers, strings, bytes, and on lists or tuples compared lexicographically. Mixing types that cannot be ordered raises `TypeError`.
 
 ```python
-print(1 < 2 < 3) # chained
+print(1 < 2 < 3)  # chained
 print(0 < 5 < 10)
 print(1 == 1 == 1)
-print([1, 2] < [1, 3]) # lexicographic
+print([1, 2] < [1, 3])  # lexicographic
 ```
 
 ```text Output
@@ -256,9 +275,20 @@ True
 True
 ```
 
+```python
+try:
+  1 < "a"
+except TypeError:
+  print("cannot order")
+```
+
+```text Output
+cannot order
+```
+
 ### Logical
 
-Short-circuiting `and` / `or` return the operand, not a coerced bool:
+`and` and `or` short-circuit and return the deciding operand, not a coerced bool.
 
 ```python
 print(True and "second")
@@ -288,12 +318,14 @@ print(1 << 4, 32 >> 2)
 
 ```python
 print(2 in [1, 2, 3])
+print(4 not in [1, 2, 3])
 print('a' in {'a': 1})
 print(None is None)
 print(1 is not 2)
 ```
 
 ```text Output
+True
 True
 True
 True
@@ -328,20 +360,34 @@ big
 
 ## Containers
 
-Literals: `[1, 2, 3]` (list), `(1, 2, 3)` / `(1,)` / `()` (tuple), `{"a": 1}` (dict), `{1, 2, 3}` (set, empty is `set()` since `{}` is a dict). See [Data types](/language/data-types) for semantics, mutation, methods.
-
-### Slicing
+Literal forms: `[1, 2, 3]` is a list, `(1, 2, 3)` a tuple, `(1,)` a one-element tuple, `()` an empty tuple, `{"a": 1}` a dict, `{1, 2, 3}` a set. `{}` is an empty dict, so the empty set is `set()`. Semantics and methods: [Data types](/language/data-types) and [Methods](/reference/methods).
 
 ```python
-a = [1, 2, 3, 4, 5]
-print(a[1:4]) # [start:stop]
-print(a[:2])
-print(a[3:])
-print(a[::2]) # every 2nd
-print(a[::-1]) # reversed
+print((1,), ())
+print(type({}), type(set()))
 ```
 
 ```text Output
+(1,) ()
+<class 'dict'> <class 'set'>
+```
+
+### Indexing and slicing
+
+Indices start at 0. Negative indices count back from the end. Slices take `[start:stop:step]`, and any part may be omitted. A negative step walks backwards.
+
+```python
+a = [1, 2, 3, 4, 5]
+print(a[0], a[-1])  # first and last
+print(a[1:4])  # [start:stop]
+print(a[:2])
+print(a[3:])
+print(a[::2])  # every 2nd
+print(a[::-1])  # reversed
+```
+
+```text Output
+1 5
 [2, 3, 4]
 [1, 2]
 [4, 5]
@@ -357,7 +403,7 @@ print([x for x in range(10) if x % 2 == 0])
 print([(i, j) for i in range(2) for j in range(2)])
 print([[x for x in range(y)] for y in range(3)])
 print({x: x * x for x in range(4)})
-print(sorted({x % 3 for x in range(10)})) # set order is implementation-defined; sort to compare
+print(sorted({x % 3 for x in range(10)}))  # set order is arbitrary, sort to compare
 ```
 
 ```text Output
@@ -369,11 +415,11 @@ print(sorted({x % 3 for x in range(10)})) # set order is implementation-defined;
 [0, 1, 2]
 ```
 
-Generator expressions: see [Functions](/language/functions#generator-expressions).
+Generator expressions: [Functions](/language/functions).
 
 ## Type annotations
 
-Annotations parse on variables, parameters, and return positions but have no runtime effect. The parser drains them; they never reach the VM. No `__annotations__`, no runtime check. Treat them as docs for humans and static analysers.
+Annotations parse on variables, parameters, and return positions. They have no runtime effect. There is no `__annotations__` and no runtime check. Treat them as documentation for humans and static analyzers.
 
 ```python
 counter: int = 0
@@ -383,7 +429,7 @@ def add(a: int, b: int) -> int:
   return a + b
 
 print(add(3, 4))
-print(add("a", "b")) # annotations don't enforce: int+str logic decides
+print(add("a", "b"))  # annotations do not enforce
 ```
 
 ```text Output

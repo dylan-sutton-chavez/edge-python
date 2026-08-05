@@ -1,6 +1,6 @@
 ---
 title: "Data types"
-description: "Numbers, strings, sequences, mappings, sets, and None."
+description: "The builtin types, their values, and their behavior."
 ---
 
 ## Type checks
@@ -29,32 +29,35 @@ print(type(True))
 <class 'bool'>
 ```
 
-For runtime membership in a type, use [`isinstance`](/reference/builtins#isinstance).
+Use [`isinstance`](/reference/builtins) to test whether a value belongs to a type.
 
 ## Integer
 
-One `int` type, transparently two-tier. A fast inline path auto-promotes to wide integers, capped at ±2¹²⁷ (full mechanics in [Integer width](/reference/limits-and-errors#integer-width)). No CPython unbounded ints. No complex (`1j`, `2+3j`).
+One `int` type with a signed 128-bit range, from `-(2**127)` to `2**127 - 1`. Going out of range raises `OverflowError`. Details: [Limits and errors](/reference/limits-and-errors). There is no complex type.
 
 ```python
-# Modular exponentiation
-print(pow(7, 13, 19))
-print(divmod(17, 5))
+big = (2**126 - 1) * 2 + 1
+print(big)
+try:
+  big + 1
+except OverflowError:
+  print("overflow")
 ```
 
 ```text Output
-7
-(3, 2)
+170141183460469231731687303715884105727
+overflow
 ```
 
 ## Float
 
-IEEE-754 double precision. Mixed arithmetic with int coerces to float.
+IEEE-754 double precision. Mixing int and float in arithmetic yields a float.
 
 ```python
 print(0.1 + 0.2 == 0.3)
 print(-0.0 == 0.0)
-print(1 / 3)
-print(round(2.5)) # banker's rounding
+print(2 + 3.0)
+print(round(2.5))  # ties round to even
 print(round(0.5))
 print(round(1.55, 1))
 ```
@@ -62,18 +65,34 @@ print(round(1.55, 1))
 ```text Output
 False
 True
-0.3333333333333333
+5.0
 2
 0
 1.6
 ```
 
-## String
+## Boolean
 
-Strings are immutable. Indexing returns a single-character string.
+`bool` has two values, `True` and `False`. It is a subclass of `int`.
 
 ```python
-s = "hello"
+print(isinstance(True, int))
+print(True + True)
+```
+
+```text Output
+True
+2
+```
+
+Which values count as true: [Truthy and falsy](#truthy-and-falsy) below.
+
+## String
+
+Immutable sequence of Unicode code points. Indexing returns a one-character string. `len` counts code points, not bytes. Iteration yields characters.
+
+```python
+s = "héllo"
 print(s[0], s[-1])
 print(s[1:4])
 print(len(s))
@@ -84,92 +103,68 @@ print("ll" in s)
 
 ```text Output
 h o
-ell
+éll
 5
-hello world
-hellohello
+héllo world
+héllohéllo
 True
 ```
 
-Iteration yields characters:
-
-```python
-for ch in "abc":
-  print(ch)
-```
-
-```text Output
-a
-b
-c
-```
-
-`len(s)` measures code points, not bytes; padding methods do the same (see [Methods, padding](/reference/methods#padding)).
+Literal forms, quotes, and escapes: [Syntax](/language/syntax). Methods: [Methods](/reference/methods).
 
 ## Bytes
 
-Immutable sequence of bytes (each 0-255). Distinct from `str`: it stores raw octets, not Unicode. Indexing returns an `int`, not a single-byte slice.
+Immutable sequence of octets, each 0 to 255. `bytes` stores raw data, not text. Indexing returns an int, and iteration yields ints.
 
 ```python
 data = b"hello"
 print(data)
-print(type(data))
 print(len(data))
-print(data[0]) # int, the byte value
-print(data[1:4]) # bytes, slice
-```
+print(data[0])  # int, the byte value
+print(data[1:4])  # bytes slice
 
-```text Output
-b'hello'
-<class 'bytes'>
-5
-104
-b'ell'
-```
-
-```python
-# Hex escapes for arbitrary bytes
-raw = b"\x00\x01\xff"
-print(raw)
-print(raw.hex())
-```
-
-```text Output
-b'\x00\x01\xff'
-0001ff
-```
-
-```python
-# Iteration yields ints, not bytes
 for byte in b"abc":
   print(byte)
 ```
 
 ```text Output
+b'hello'
+5
+104
+b'ell'
 97
 98
 99
 ```
 
-The four constructor forms (`bytes()`, `bytes(n)`, from int iterable, from encoded string): see [bytes](/reference/builtins#bytes).
+`bytes` never equals `str`, even for valid UTF-8. Non-ASCII characters in a bytes literal are stored as their UTF-8 encoding.
 
 ```python
-# Round-tripping with str
-s = "Edge Python"
-encoded = s.encode("utf-8")
-decoded = encoded.decode("utf-8")
-print(encoded, decoded)
+print(b"abc" == "abc")
+print(b"é")  # stored as UTF-8
+```
+
+```text Output
+False
+b'\xc3\xa9'
+```
+
+Encoding round-trips use `str.encode` and `bytes.decode`.
+
+```python
+encoded = "Edge Python".encode("utf-8")
+print(encoded, encoded.decode("utf-8"))
 ```
 
 ```text Output
 b'Edge Python' Edge Python
 ```
 
-`bytes` is hashable and comparable to other `bytes`. `bytes == str` is always `False`, even for valid UTF-8. Methods include `decode`, `hex`, `find`, `count`, `replace`, `split`, `startswith`, `endswith`, `lower`, `upper`, `strip`, `join`, and the `bytes.fromhex` classmethod (see [Methods](/reference/methods#bytes-methods)). Encodings: `"utf-8"` (default), `"ascii"`.
+Constructor forms (`bytes()`, `bytes(n)`, from an int iterable, from an encoded string): [Builtins](/reference/builtins). Methods such as `hex`, `split`, and `fromhex`: [Methods](/reference/methods).
 
 ## List
 
-Mutable sequence.
+Mutable sequence. Assignment copies the reference, so aliases share mutations.
 
 ```python
 xs = [1, 2, 3]
@@ -178,7 +173,7 @@ xs.append(4)
 print(xs)
 print(len(xs))
 
-# Aliasing, both names see mutation
+# Aliasing, both names see the mutation
 ys = xs
 ys.append(5)
 print(xs)
@@ -190,8 +185,9 @@ print(xs)
 [99, 2, 3, 4, 5]
 ```
 
+Equality is structural.
+
 ```python
-# Equality is structural
 print([1, 2, 3] == [1, 2, 3])
 print([1, [2, 3]] == [1, [2, 3]])
 ```
@@ -201,17 +197,16 @@ True
 True
 ```
 
+Slice assignment with step 1 resizes the list in place. Slice deletion removes a range. Assigning into an empty slice inserts.
+
 ```python
-# Slice assignment (step=1) resizes the list in place
 xs = [1, 2, 3, 4, 5]
 xs[1:3] = [20, 30, 40]
 print(xs)
 
-# Slice deletion
 del xs[2:4]
 print(xs)
 
-# Insertion via empty slice
 xs[1:1] = [99]
 print(xs)
 ```
@@ -222,7 +217,7 @@ print(xs)
 [1, 99, 20, 4, 5]
 ```
 
-`+=` on a list extends in place, so aliases see it:
+`+=` on a list extends it in place, so aliases see it.
 
 ```python
 xs = [1, 2, 3]
@@ -237,140 +232,149 @@ print(ys)
 
 ## Tuple
 
-Immutable sequence. It is the fastest container for fixed-size data. It is also the usual hashable container for compound dict keys (frozensets also work).
+Immutable sequence. A tuple is hashable when its elements are, which makes it the usual compound dict key.
 
 ```python
 t = (1, 2, 3)
 print(t[0])
 print(t + (4, 5))
-print((1,)) # one-element needs trailing comma
-print(()) # empty
+print({(1, 2): "key"}[(1, 2)])
 ```
 
 ```text Output
 1
 (1, 2, 3, 4, 5)
-(1,)
-()
+key
 ```
+
+Literal forms such as the trailing comma in `(1,)`: [Syntax](/language/syntax).
 
 ## Dict
 
-Insertion-ordered mapping. Keys must be hashable: numbers, strings, bytes, bools, `None`, frozensets, tuples of hashables. Mutable containers as keys -> `TypeError: unhashable type`. Numerically equal keys (`1`/`1.0`, `True`/`1`) collapse. The second insertion overwrites.
+Insertion-ordered mapping. Keys must be hashable: numbers, strings, bytes, bools, `None`, frozensets, and tuples of hashables. An unhashable key raises `TypeError`. Numerically equal keys collapse, so `1`, `1.0`, and `True` are one key and the latest assignment wins. Iteration yields keys.
 
 ```python
 d = {"a": 1, "b": 2}
 print(d["a"])
 d["c"] = 3
 print(d)
-print(list(d.keys()))
-print(list(d.values()))
-print(list(d.items()))
-```
 
-```text Output
-1
-{'a': 1, 'b': 2, 'c': 3}
-['a', 'b', 'c']
-[1, 2, 3]
-[('a', 1), ('b', 2), ('c', 3)]
-```
+e = {1: "int"}
+e[1.0] = "float"
+e[True] = "bool"
+print(e)  # 1, 1.0, and True are one key
 
-```python
-# Iteration yields keys
 for k in {"x": 1, "y": 2}:
   print(k)
 ```
 
 ```text Output
+1
+{'a': 1, 'b': 2, 'c': 3}
+{1: 'bool'}
 x
 y
 ```
 
+```python
+try:
+  d = {[1, 2]: "x"}
+except TypeError:
+  print("unhashable key")
+```
+
+```text Output
+unhashable key
+```
+
+Methods such as `keys`, `values`, `items`, and `get`: [Methods](/reference/methods).
+
 ## Set
 
-Unordered, no duplicates, hashable values. Mutators (`add`, `remove`, `discard`, `pop`, `clear`, `update`) and algebraic operators (`|`, `&`, `-`, `^` and named methods). See [Methods](/reference/methods). Augmented `|=` `&=` `^=` mutate the set in place (aliases observe it); plain `|` `&` `^` build a new set.
+Unordered collection of unique, hashable values. The operators `|`, `&`, `-`, and `^` build new sets. The augmented forms `|=`, `&=`, and `^=` update the set in place, so aliases observe the change. `<=` and `<` test subsets.
 
 ```python
 s = {1, 2, 2, 3}
 s.add(4)
-print(sorted(s)) # set order is implementation-defined; sort to compare
 print(len(s))
-
-# Empty set literal is set(), not {}
-print(set())
-print(type({})) # this is a dict
+print(sorted(s))  # set order is arbitrary, sort to compare
 
 # Algebra
 print(sorted({1, 2, 3} | {3, 4}))
 print(sorted({1, 2, 3} & {2, 3, 4}))
-print({1, 2} <= {1, 2, 3}) # subset
+print({1, 2} <= {1, 2, 3})
+
+# Augmented forms mutate in place
+t = s
+s |= {5}
+print(sorted(t))
 ```
 
 ```text Output
-[1, 2, 3, 4]
 4
-set()
-<class 'dict'>
+[1, 2, 3, 4]
 [1, 2, 3, 4]
 [2, 3]
 True
+[1, 2, 3, 4, 5]
 ```
+
+The empty set is `set()`, since `{}` makes a dict (see [Syntax](/language/syntax)). Named operations such as `union` and `issubset`: [Methods](/reference/methods).
 
 ## Frozenset
 
-Immutable, hashable set. Build with `frozenset(iterable)`. Supports `len`, iteration, membership (`in`), tuple-unpacking (`a, b = fs`), the algebra operators `|` `&` `-` `^`, the subset/superset comparisons `<` `<=` `>` `>=` `==` `!=`, and use as a dict key or set element. In mixed `set` / `frozenset` algebra the result takes the **left** operand's type (`frozenset | set` is a `frozenset`, `set | frozenset` is a `set`).
-
-It has **no methods**: the named set operations (`union`, `intersection`, `difference`, `symmetric_difference`, `issubset`, `issuperset`, `isdisjoint`) and `copy` raise `AttributeError`. Use the operators, or convert with `set(fs)` for the named-method / mutating API.
+Immutable, hashable set built with `frozenset(iterable)`. It supports `len`, iteration, membership, unpacking, the algebra operators, and the subset comparisons. In mixed `set` and `frozenset` algebra the result takes the type of the left operand. A frozenset has no named methods. `frozenset({1}).union({2})` raises `AttributeError`. Convert with `set(fs)` for the method API.
 
 ```python
 fs = frozenset({1, 2, 3})
 print(len(fs))
 print(2 in fs)
 
-a, b, c = fs # tuple-unpacking
+a, b, c = fs  # unpacking
 print(sorted([a, b, c]))
 
-# Operators yield a set; the result type follows the left operand (see above).
-print(sorted(fs | frozenset({4})))
-print(sorted(fs - frozenset({1})))
-print(fs <= frozenset({1, 2, 3, 4})) # subset
+print(type(fs | {4}))   # left operand wins
+print(type({4} | fs))
 
-print({fs: "ok"}[frozenset({3, 2, 1})]) # hashable: usable as a key
+print(sorted(fs | frozenset({4})))
+print(fs <= frozenset({1, 2, 3, 4}))  # subset
+
+print({fs: "ok"}[frozenset({3, 2, 1})])  # hashable, usable as a key
 ```
 
 ```text Output
 3
 True
 [1, 2, 3]
+<class 'frozenset'>
+<class 'set'>
 [1, 2, 3, 4]
-[2, 3]
 True
 ok
 ```
 
 ## Unpacking in literals
 
-`*` spreads an iterable into a list/set literal. `**` spreads a mapping into a dict literal. Mix freely with regular elements. For dicts, later keys win.
+`*` spreads an iterable into a list or set literal. `**` spreads a mapping into a dict literal. Both mix freely with regular elements. For dicts, later keys win.
 
 ```python
 xs = [1, 2]
-print([*xs, 3, *xs]) # list spread
-print({*xs, 2, 3})   # set spread (deduped)
+print([*xs, 3, *xs])  # list spread
+print(sorted({*xs, 2, 3}))  # set spread, deduped
 
 a = {"x": 1}
-print({**a, "y": 2, **{"x": 9}}) # dict spread, later key wins
+print({**a, "y": 2, **{"x": 9}})  # dict spread, later key wins
 ```
 
 ```text Output
 [1, 2, 3, 1, 2]
-{1, 2, 3}
+[1, 2, 3]
 {'x': 9, 'y': 2}
 ```
 
 ## Range
 
-Lazy integer sequence. `range(stop)`, `range(start, stop)`, `range(start, stop, step)`.
+Lazy integer sequence. `range(stop)`, `range(start, stop)`, or `range(start, stop, step)`.
 
 ```python
 print(list(range(5)))
@@ -404,7 +408,7 @@ True
 
 ## Ellipsis
 
-`...` is a singleton of type `ellipsis`. It compares equal only to itself. It is distinct from `'...'`.
+`...` is a singleton of type `ellipsis`. It compares equal only to itself and is distinct from the string `'...'`.
 
 ```python
 print(...)
@@ -422,13 +426,13 @@ False
 
 ## Conversions
 
-Every constructor (`int`, `float`, `str`, `bool`, `list`, `tuple`, `set`) doubles as a converter; the full matrix lives in [Built-in functions](/reference/builtins#type-conversion). The two gotchas worth remembering:
+Every constructor (`int`, `float`, `str`, `bool`, `list`, `tuple`, `set`) doubles as a converter. The full matrix: [Builtins](/reference/builtins). The two gotchas worth remembering:
 
 ```python
-print(int(3.7)) # truncates toward zero, no rounding
+print(int(3.7))  # truncates toward zero, no rounding
 print(int(-3.7))
-print(bool([])) # empty collections are falsy
-print(bool([0])) # non-empty is truthy, even [0]
+print(bool([]))  # empty collections are falsy
+print(bool([0]))  # non-empty is truthy, even [0]
 ```
 
 ```text Output
@@ -447,7 +451,21 @@ Falsy values (everything else is truthy):
 | `None` |
 | `False` |
 | `0`, `0.0` |
-| `""` (empty string) |
+| `""`, `b""` |
 | `[]`, `()` |
-| `{}`, `set()` |
+| `{}`, `set()`, `frozenset()` |
 | `range(0)` |
+
+```python
+for v in [None, 0, "", [], [0], "x"]:
+  print(bool(v))
+```
+
+```text Output
+False
+False
+False
+False
+True
+True
+```

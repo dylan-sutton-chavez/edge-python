@@ -174,7 +174,7 @@ fn isinf(x: f64) -> bool { x.is_infinite() }
 #[plugin_fn]
 fn isfinite(x: f64) -> bool { x.is_finite() }
 
-// `floor`/`ceil`/`trunc` return an int; reject non-finite or out-of-i128 values like CPython int conversion.
+// `floor`/`ceil`/`trunc` return an int; reject non-finite or out-of-i128 values like Python int conversion.
 fn to_int(x: f64) -> Result<i128> {
     if !x.is_finite() {
         return Err(Error::Value(String::from("cannot convert float NaN or infinity to integer")));

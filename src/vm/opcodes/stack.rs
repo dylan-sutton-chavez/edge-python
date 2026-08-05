@@ -179,7 +179,7 @@ impl<'a> VM<'a> {
             }
             OpCode::Del => {
                 let slot = operand as usize;
-                // Deleting an already-unbound name raises NameError, matching CPython.
+                // Deleting an already-unbound name raises NameError, matching Python.
                 match slots.get_mut(slot) {
                     Some(s) if !s.is_undef() => *s = Val::undef(),
                     _ => {
