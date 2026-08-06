@@ -43,11 +43,11 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
             try { return r.fulfill({ contentType: "application/wasm", body: readFileSync(file) }); }
             catch { return r.continue(); } // no local std build: use the deployed wasm
         }
-        if (u.host === CDN_HOST && u.pathname.startsWith("/host/")) {
-            // Production (Pages) flattens host/<cap>/src/* to host/<cap>/*; map back to the tree layout.
-            const repoPath = u.pathname.replace(/^\/host\/([^/]+)\//, "/$1/src/");
+        if (u.host === CDN_HOST && u.pathname.startsWith("/web/builtins/")) {
+            // Production (Pages) flattens builtins/<cap>/src/* to builtins/<cap>/*, map back to the tree layout.
+            const repoPath = u.pathname.replace(/^\/web\/builtins\/([^/]+)\//, "/$1/src/");
             try { return r.fulfill({ contentType: "text/javascript", body: readFileSync(HOST_DIR + repoPath) }); }
-            catch { return r.continue(); } // no local host source: use the deployed module
+            catch { return r.continue(); } // no local host source, use the deployed module
         }
         // Prefer in-tree wasm so new exports are testable.
         if (u.host === CDN_HOST && u.pathname === "/compiler.wasm") {
@@ -177,9 +177,9 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
         // Laziness: only what the corpus imports gets fetched; declared-but-unused stays untouched.
         if (!reqd("/app/ui.js")) throw new Error("host ui was used but ui.js never loaded");
         if (!reqd("json.wasm")) throw new Error("json default imported but json.wasm never fetched");
-        if (!reqd("/host/time")) throw new Error("time host default imported but never loaded");
+        if (!reqd("/web/builtins/time")) throw new Error("time host default imported but never loaded");
         if (reqd("re.wasm")) throw new Error("re default never imported yet re.wasm was fetched (not lazy)");
-        if (reqd("/host/network")) throw new Error("network host default never imported yet fetched (not lazy)");
+        if (reqd("/web/builtins/network")) throw new Error("network host default never imported yet fetched (not lazy)");
     } finally {
         await browser.close();
     }
