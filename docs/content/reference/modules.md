@@ -129,14 +129,14 @@ The browser runtime and the CLI both resolve the official names by bare name wit
 - **Overridable.** Your `packages.json`, `imports`, or `hostModules` entry wins for the same name, so you can pin a version or URL.
 - **Opt-out.** Pass `defaults: false` to `createWorker` to disable the defaults entirely.
 
-Defaults are a feature of these two runtimes, not of the compiler. `compiler.wasm` stays hermetic and resolves bare names only through the manifest the host provides. The prebuilt assets live at `https://cdn.edgepython.com/std/<name>.wasm` (`test` ships as `test.py`, `dom` as a facade at `host/dom/entry.py`) and `https://cdn.edgepython.com/host/<name>/index.js`.
+Defaults are a feature of these two runtimes, not of the compiler. `compiler.wasm` stays hermetic and resolves bare names only through the manifest the host provides. The prebuilt assets live at `https://cdn.edgepython.com/std/<name>.wasm` (`test` ships as `test.py`, `dom` as a facade at `web/builtins/dom/entry.py`) and `https://cdn.edgepython.com/web/builtins/<name>/index.js`.
 
 ## The `<edge-python>` element
 
 The declarative alternative to `createWorker`. Include the script, drop a tag, and a `.py` file runs.
 
 ```html
-<script type="module" src="https://cdn.edgepython.com/runtime/src/element.js"></script>
+<script type="module" src="https://cdn.edgepython.com/web/src/element.js"></script>
 <edge-python entry="./app/main.py" packages="./app/packages.json"></edge-python>
 ```
 
@@ -209,7 +209,7 @@ export const dom = ({ pushEvent }) => {
 
 ```html
 <script type="module">
-  import { createWorker } from "https://cdn.edgepython.com/runtime/src/index.js";
+  import { createWorker } from "https://cdn.edgepython.com/web/src/index.js";
   import { dom } from "./dom.js";
 
   const worker = await createWorker({

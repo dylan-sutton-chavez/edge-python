@@ -10,8 +10,8 @@ use std::time::Instant;
 
 use crate::manifest::{Kind, Manifest};
 
-// Production layout we mirror into dist/runtime/ and dist/.
-const RUNTIME_BASE: &str = "https://cdn.edgepython.com/runtime/";
+// Production layout we mirror into dist/web/ and dist/.
+const RUNTIME_BASE: &str = "https://cdn.edgepython.com/web/";
 const COMPILER_WASM: &str = "https://cdn.edgepython.com/compiler.wasm";
 const RUNTIME_FILES: &[&str] = &[
     "src/index.js",
@@ -89,7 +89,7 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
     Ok(())
 }
 
-/// Fetch the runtime JS modules into `dist/runtime/` mirroring their CDN layout.
+/// Fetch the runtime JS modules into `dist/web/` mirroring their CDN layout.
 fn vendor_runtime(out_dir: &Path) -> Result<()> {
     // Test hook: local runtime instead of CDN.
     let local = std::env::var("EDGE_RUNTIME_DIR").ok();

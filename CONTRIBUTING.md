@@ -28,7 +28,7 @@ The test suite (`tests/`, fixtures in `tests/cases/vm.json`) runs every case und
 
 ```bash
 cargo wasm && cd cli
-EDGE_RUNTIME_DIR=../runtime EDGE_COMPILER_WASM=../target/wasm32-unknown-unknown/release/compiler.wasm cargo test
+EDGE_RUNTIME_DIR=../web EDGE_COMPILER_WASM=../target/wasm32-unknown-unknown/release/compiler.wasm cargo test
 ```
 
 A CI job will be run by the maintainer after the PR has been created.

@@ -1,6 +1,6 @@
 // Shared Edge Python runtime for doc playgrounds. One Web Worker per page (lazy init): loads CDN runtime + compiler.wasm, streams stdout to the active block.
 const WASM_URL = 'https://cdn.edgepython.com/compiler.wasm'
-const RUNTIME_URL = 'https://cdn.edgepython.com/runtime/src/index.js'
+const RUNTIME_URL = 'https://cdn.edgepython.com/web/src/index.js'
 
 const RUN_TIMEOUT_MS = 10000 // hard per-run wall-clock cap so a hung snippet can't wedge the page queue
 

@@ -46,28 +46,28 @@ runs:
     - name: Stage site
       shell: bash
       run: |
-        mkdir -p _site/runtime _site/std _site/host _site/cli
+        mkdir -p _site/web _site/std _site/cli
 
         # compiler: served at /compiler.wasm as brotli-11; _headers tags the encoding.
         brotli -q 11 -c /tmp/compiler/compiler.wasm > _site/compiler.wasm
         printf '/compiler.wasm\n  Content-Type: application/wasm\n  Content-Encoding: br\n  Cache-Control: public, max-age=0, must-revalidate\n' > _site/_headers
 
-        # runtime package: served under /runtime/ (public embed URLs); tests/ not shipped.
-        cp -r runtime/src _site/runtime/src
+        # web package served under /web/ (public embed URLs); tests/ not shipped.
+        cp -r web/src _site/web/src
         # Compat alias: cached index.js builds resolve ../worker/worker.js.
-        cp -r runtime/src/worker _site/runtime/worker
+        cp -r web/src/worker _site/web/src/worker
 
         # std: <pkg>.wasm / <pkg>.py.
         cp -r /tmp/std/. _site/std/
 
-        # host: flatten each capability's src/ into _site/host/<cap>/.
-        for dir in host/*/src; do
+        # host: flatten each capability src into _site/web/builtins/<cap>.
+        for dir in web/builtins/*/src; do
           cap="$(basename "$(dirname "$dir")")"
-          mkdir -p "_site/host/$cap"
-          cp -r "$dir"/. "_site/host/$cap/"
+          mkdir -p "_site/web/builtins/$cap"
+          cp -r "$dir"/. "_site/web/builtins/$cap/"
           # entry.py resolves `_<cap>` via this manifest.
           if [ -f "$dir/entry.py" ]; then
-            printf '{ "host": { "_%s": "./index.js" } }\n' "$cap" > "_site/host/$cap/packages.json"
+            printf '{ "host": { "_%s": "./index.js" } }\n' "$cap" > "_site/web/builtins/$cap/packages.json"
           fi
         done
 

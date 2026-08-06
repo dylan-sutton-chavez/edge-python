@@ -52,7 +52,7 @@ Here `items` and `total` live in the VM heap, and the only freeze point is the `
 The round trip runs from the host through `createWorker`.
 
 ```js
-import { createWorker } from "https://cdn.edgepython.com/runtime/src/index.js";
+import { createWorker } from "https://cdn.edgepython.com/web/src/index.js";
 
 // Wait until the VM is parked on an event so saveState() can capture it.
 async function untilParked(worker) {
@@ -128,7 +128,7 @@ The `<edge-python>` element spins up the worker and exposes it on `el.worker`. E
 <edge-python></edge-python>
 
 <script type="module">
-  import "https://cdn.edgepython.com/runtime/src/element.js";
+  import "https://cdn.edgepython.com/web/src/element.js";
 
   const el = document.querySelector("edge-python");
   const store = await caches.open("edge-python");

@@ -271,7 +271,7 @@ fn harness_page() -> String {
     }
     if std::env::var("EDGE_RUNTIME_DIR").is_ok() {
         page = page
-            .replacen("https://cdn.edgepython.com/runtime/src/element.js", "/runtime/src/element.js", 1)
+            .replacen("https://cdn.edgepython.com/web/src/element.js", "/web/src/element.js", 1)
             // The worker resolves no relative URLs, so the wasm override must be absolute.
             .replacen(
                 "<script type=\"module\">",
@@ -289,7 +289,7 @@ fn local_stack_file(path: &str) -> Option<(Vec<u8>, &'static str)> {
         let wasm = std::env::var("EDGE_COMPILER_WASM").ok()?;
         return Some((std::fs::read(wasm).ok()?, "application/wasm"));
     }
-    let rel = path.strip_prefix("/runtime/")?;
+    let rel = path.strip_prefix("/web/")?;
     if rel.contains("..") { return None; }
     let body = std::fs::read(std::path::Path::new(&dir).join(rel)).ok()?;
     let mime = if rel.ends_with(".js") { "text/javascript" } else { "application/octet-stream" };

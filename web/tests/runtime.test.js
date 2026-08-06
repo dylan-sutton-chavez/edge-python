@@ -1,7 +1,7 @@
 /*
 Drives <edge-python> through index.html: boots one tag, then feeds every runtime.json case to its worker
 via run(), comparing #app for output cases and the run trace for error cases.
-Run: deno test --allow-all runtime/tests/runtime.test.js
+Run: deno test --allow-all web/tests/runtime.test.js
 */
 
 import { chromium } from "npm:playwright@latest";
@@ -32,7 +32,7 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
     page.on("request", (q) => requested.push(q.url()));
 
     const STD_DIR = new URL("../../std", import.meta.url).pathname;
-    const HOST_DIR = new URL("../../host", import.meta.url).pathname;
+    const HOST_DIR = new URL("../../web/builtins", import.meta.url).pathname;
     await page.route("**/*", (r) => {
         const u = new URL(r.request().url());
         // Prefer the in-tree std/ and host/ artifacts; if absent (CI checks out only the js/ subset), fall back to the CDN-deployed copy.
@@ -60,7 +60,7 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
         try { return r.fulfill({ contentType: TYPES[ext] ?? "application/octet-stream", body: readFileSync(REPO + u.pathname.slice(1)) }); }
         catch { return r.fulfill({ status: 404 }); }
     });
-    await page.goto("http://localhost/runtime/tests/index.html");
+    await page.goto("http://localhost/web/tests/index.html");
 
     try {
         // Boot one tag without an entry, then reuse its worker for every case via run().

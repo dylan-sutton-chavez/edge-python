@@ -7,7 +7,7 @@
 <body>
   <script type="module">
     // Self-contained launcher; bypasses <edge-python> since its wasmUrl is hardcoded to the CDN.
-    import { createWorker } from "./runtime/src/index.js";
+    import { createWorker } from "./web/src/index.js";
     const pkgs = await fetch("./packages.json").then((r) => r.json());
     const src = await fetch("./__EDGE_ENTRY__").then((r) => r.text());
     const worker = await createWorker({

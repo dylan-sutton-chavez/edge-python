@@ -32,9 +32,8 @@ A Cargo workspace at the repo root holds the engine, `abi` and `pdk`. `cli/`, `f
 │       └── engine
 ├── docs
 ├── fuzz
-├── host
 ├── pdk
-├── runtime
+├── web
 ├── src
 │   ├── lexer
 │   ├── native
@@ -68,14 +67,14 @@ deno test --allow-all std/harness/ # STDPKG=<name> narrows to one package
 
 To add a std package, create `std/<name>/` with the crate (or `src/entry.py` for a script-only package) plus its corpus. No harness edits needed.
 
-The host libraries in `host/*` are plain ESM, tested through headless Chromium. Their corpora add optional `html`, `http_mocks`, and `ws_mocks` fixtures per case:
+The host libraries in `web/builtins/*` are plain ESM, tested through headless Chromium. Their corpora add optional `html`, `http_mocks`, and `ws_mocks` fixtures per case:
 
 ```bash
 deno run -A npm:playwright install --with-deps chromium # once
-cd host && HOSTCAP=<dom|network|storage|time> deno test --allow-all tests/
+cd web/builtins && HOSTCAP=<dom|network|storage|time> deno test --allow-all tests/
 ```
 
-The browser runtime lints and tests with Deno too, `deno lint runtime/` and `deno test --allow-all runtime/tests/runtime.test.js`.
+The browser runtime lints and tests with Deno too, `deno lint web/` and `deno test --allow-all web/tests/runtime.test.js`.
 
 ## Architecture
 
@@ -116,7 +115,7 @@ edge -h # List all commands
 <html>
 <head>
   <meta charset="UTF-8">
-  <script type="module" src="https://cdn.edgepython.com/runtime/src/element.js"></script>
+  <script type="module" src="https://cdn.edgepython.com/web/src/element.js"></script>
 </head>
 <body>
   <edge-python entry="./app/main.py" packages="./app/packages.json"></edge-python>

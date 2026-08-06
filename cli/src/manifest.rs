@@ -46,13 +46,13 @@ pub fn registry(name: &str) -> Option<(Kind, String)> {
     if STD.contains(&name) {
         Some((Kind::Std, std_url(name)))
     } else if HOST.contains(&name) {
-        Some((Kind::Host, format!("https://cdn.edgepython.com/host/{name}/index.js")))
+        Some((Kind::Host, format!("https://cdn.edgepython.com/web/builtins/{name}/index.js")))
     } else {
         None
     }
 }
 
-/// CDN url for a std package. Most ship as `.wasm`; `test` is pure Edge Python, served as `.py`. Mirrors runtime/src/defaults.js.
+/// CDN url for a std package. Most ship as `.wasm`; `test` is pure Edge Python, served as `.py`. Mirrors web/src/defaults.js.
 fn std_url(name: &str) -> String {
     let ext = if name == "test" { "py" } else { "wasm" };
     format!("https://cdn.edgepython.com/std/{name}.{ext}")

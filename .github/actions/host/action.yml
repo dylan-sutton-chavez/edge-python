@@ -17,12 +17,12 @@ runs:
       uses: actions/cache@v5
       with:
         path: ~/.cache/deno
-        key: deno-${{ runner.os }}-${{ hashFiles('host/**/deno.json', 'host/**/deno.lock') }}
+        key: deno-${{ runner.os }}-${{ hashFiles('web/builtins/**/deno.json', 'web/builtins/**/deno.lock') }}
         restore-keys: deno-${{ runner.os }}-
 
     - name: Lint src/
       shell: bash
-      working-directory: host/${{ inputs.capability }}
+      working-directory: web/builtins/${{ inputs.capability }}
       run: deno lint src/
 
     # ~150MB Chromium; cached so only the first run pays the download.
@@ -39,7 +39,7 @@ runs:
     # HOSTCAP narrows test discovery to this capability's corpus.
     - name: Test tests/
       shell: bash
-      working-directory: host
+      working-directory: web/builtins
       env:
         HOSTCAP: ${{ inputs.capability }}
       run: deno test --allow-all tests/

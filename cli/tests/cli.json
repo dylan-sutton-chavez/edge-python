@@ -28,7 +28,7 @@
     "given": { "packages.json": "{}\n" },
     "run": ["add", "network"],
     "stdout": ["+ network", "host"],
-    "contains": { "packages.json": "cdn.edgepython.com/host/network/index.js" }
+    "contains": { "packages.json": "cdn.edgepython.com/web/builtins/network/index.js" }
   },
   {
     "given": { "packages.json": "{}\n" },

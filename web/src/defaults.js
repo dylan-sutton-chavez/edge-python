@@ -10,13 +10,13 @@ export const DEFAULT_IMPORTS = {
     math: 'https://cdn.edgepython.com/std/math.wasm',
     struct: 'https://cdn.edgepython.com/std/struct.wasm',
     test: 'https://cdn.edgepython.com/std/test.py',
-    dom: 'https://cdn.edgepython.com/host/dom/entry.py', // e.g., `dom` is a .py facade over the `_dom` host module.
+    dom: 'https://cdn.edgepython.com/web/builtins/dom/entry.py', // e.g., `dom` is a .py facade over the `_dom` host module.
 };
 
-/* Main-thread host libraries (ESM). Pages flattens each `<name>/src/` to `cdn.edgepython.com/host/<name>/`. Same lazy + opt-out rules; merged under any user `host` entries. */
+/* Main-thread host libraries (ESM). Pages flattens each `<name>/src/` to `cdn.edgepython.com/web/builtins/<name>/`. Same lazy + opt-out rules; merged under any user `host` entries. */
 export const DEFAULT_HOST = {
-    _dom: 'https://cdn.edgepython.com/host/dom/index.js',
-    network: 'https://cdn.edgepython.com/host/network/index.js',
-    storage: 'https://cdn.edgepython.com/host/storage/index.js',
-    time: 'https://cdn.edgepython.com/host/time/index.js',
+    _dom: 'https://cdn.edgepython.com/web/builtins/dom/index.js',
+    network: 'https://cdn.edgepython.com/web/builtins/network/index.js',
+    storage: 'https://cdn.edgepython.com/web/builtins/storage/index.js',
+    time: 'https://cdn.edgepython.com/web/builtins/time/index.js',
 };
