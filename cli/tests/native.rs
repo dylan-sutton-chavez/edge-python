@@ -123,19 +123,29 @@ fn test_runner_verdicts_come_from_system_exit() {
     assert_eq!(code, 1);
 }
 
+#[derive(serde::Deserialize)]
+struct CorpusCase {
+    src: String,
+    output: Vec<String>,
+}
+
+// Runs the shared time corpus against the native engine, the same cases the web host runs in Chromium.
 #[test]
 fn builtin_time_module_mirrors_the_web_api() {
-    let dir = scratch("host");
-    std::fs::write(dir.join("main.py"), concat!(
-        "import time\n",
-        "t = time.gmtime(0)\n",
-        "print(t)\n",
-        "print(time.strftime(\"%Y-%m-%d\", t), time.tzname())\n",
-        "print(time.ctime(86400))\n",
-    )).unwrap();
-    let (out, _, code) = run_in(&dir, &["run", "main.py"], None);
-    assert_eq!(out, "[1970,1,1,0,0,0,3,1,-1]\n1970-01-01 UTC\nFri Jan  2 00:00:00 1970\n");
-    assert_eq!(code, 0);
+    let corpus = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/cases/builtins/time.json");
+    let cases: Vec<CorpusCase> = serde_json::from_str(&std::fs::read_to_string(corpus).unwrap()).unwrap();
+    let mut failures = Vec::new();
+    for (i, case) in cases.iter().enumerate() {
+        let dir = scratch("time-corpus");
+        // The web harness prepends the same star import, bare names resolve to the module exports.
+        std::fs::write(dir.join("main.py"), format!("from time import *\n{}\n", case.src)).unwrap();
+        let (out, err, code) = run_in(&dir, &["run", "main.py"], None);
+        let want = format!("{}\n", case.output.join("\n"));
+        if code != 0 || out != want {
+            failures.push(format!("case {i} {:?}\n  got  {:?} (code {code}, err {err})\n  want {:?}", case.src, out, want));
+        }
+    }
+    assert!(failures.is_empty(), "{} time corpus case(s) failed:\n{}", failures.len(), failures.join("\n"));
 }
 
 #[test]

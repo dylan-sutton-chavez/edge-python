@@ -1,4 +1,4 @@
-/* Agnostic driver: feeds each <cap>/<cap>.json corpus to the <edge-python> tag. Run: deno test --allow-all tests/ */
+/* Agnostic driver, feeds each capability corpus to the <edge-python> tag. Web-only corpora sit beside the module, shared ones live in tests/cases/builtins. Run deno test --allow-all tests/ */
 
 import { chromium } from "npm:playwright";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
@@ -6,17 +6,21 @@ import { DEFAULT_IMPORTS } from "../../src/defaults.js";
 
 const ROOT = new URL("../", import.meta.url).pathname;
 const RUNTIME = new URL("../../", import.meta.url).pathname;
+const CORPUS = new URL("../../../tests/cases/builtins/", import.meta.url).pathname;
 const CDN_HOST = new URL(Object.values(DEFAULT_IMPORTS)[0]).host;
 const MANIFEST = "/_packages.json"; // synthesized; keeps the agnostic <cap>/ folder free of test artifacts
 
-/* Repo-root dirs with a `<cap>/<cap>.json` corpus are host capabilities. `HOSTCAP=<name>` narrows discovery to one capability, used by the matrix-fanned CI to isolate per-shard work. */
+// Corpus path per capability. Shared web-native corpora live under CORPUS, web-only ones sit beside the module.
+const corpusPath = (cap) => existsSync(`${CORPUS}${cap}.json`) ? `${CORPUS}${cap}.json` : `${ROOT}${cap}/${cap}.json`;
+
+/* A capability is any module dir with a corpus, plus any shared corpus under tests/cases/builtins. `HOSTCAP=<name>` narrows to one, used by the matrix-fanned CI to isolate per-shard work. */
 const only = Deno.env.get("HOSTCAP");
-const capabilities = readdirSync(ROOT).filter((name) => {
+const local = readdirSync(ROOT).filter((name) => {
     const dir = ROOT + name;
-    if (!statSync(dir).isDirectory()) return false;
-    if (only && name !== only) return false;
-    return existsSync(`${dir}/${name}.json`);
+    return statSync(dir).isDirectory() && existsSync(`${dir}/${name}.json`);
 });
+const shared = readdirSync(CORPUS).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -5));
+const capabilities = [...new Set([...local, ...shared])].filter((name) => !only || name === only);
 
 const TYPES = {
     ".html": "text/html",
@@ -33,7 +37,7 @@ async function runCapability(cap) {
     // Import the capability's `.py` entry when it has one, else the JS host module.
     const hasPy = existsSync(`${dir}/src/entry.py`);
 
-    const cases = JSON.parse(readFileSync(`${dir}/${cap}.json`, "utf-8"));
+    const cases = JSON.parse(readFileSync(corpusPath(cap), "utf-8"));
     // The tag's packages.json: a capability may pin its own (e.g. python wrapper + host module pairs), else synthesized: python to entry.py as a code module; else the JS host module.
     const manifest = existsSync(`${dir}/packages.json`)
         ? readFileSync(`${dir}/packages.json`, "utf-8")

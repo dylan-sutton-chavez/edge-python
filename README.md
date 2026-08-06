@@ -67,7 +67,7 @@ deno test --allow-all std/harness/ # STDPKG=<name> narrows to one package
 
 To add a std package, create `std/<name>/` with the crate (or `src/entry.py` for a script-only package) plus its corpus. No harness edits needed.
 
-The host libraries in `web/builtins/*` are plain ESM, tested through headless Chromium. Their corpora add optional `html`, `http_mocks`, and `ws_mocks` fixtures per case:
+The host libraries in `web/builtins/*` are plain ESM, tested through headless Chromium. Web-only corpora sit beside the module, corpora shared with the native engine live in `tests/cases/builtins/`. Cases add optional `html`, `http_mocks`, and `ws_mocks` fixtures:
 
 ```bash
 deno run -A npm:playwright install --with-deps chromium # once
