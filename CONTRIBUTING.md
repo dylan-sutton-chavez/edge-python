@@ -20,9 +20,7 @@ Run the following commands before sending a pull request to ensure code quality:
 - `cargo shear` Detect unused dependencies.
 - For significant changes, execute the [fuzzer](https://edgepython.com/implementation/fuzzing/) to check for new crashes or performance regressions.
 
-The test suite (`tests/`, fixtures in `tests/cases/vm.json`) runs every case under `Limits::sandbox()`, not the default `none()`. The budget, heap, and call-depth guards short-circuit under `none` (`sandbox_off`), so only the bounded profile exercises them. 
-
-That way a regression that lets a loop run unbounded, recurse without limit, or materialise an oversized collection becomes a failing `MemoryError` or `RecursionError` assertion instead of a hang. Every fixture must stay within the sandbox budget.
+The test suite (`tests/`, fixtures in `tests/cases/vm.json`) runs every case under `Limits::sandbox()`, not the default `none()`, so budget, heap, and call-depth regressions surface as a `MemoryError` or `RecursionError` assertion instead of a hang. Every fixture must stay within the sandbox budget.
 
 *Other packages have their own build and test setup. See the repository layout section of the root README for the per-package commands.*
 
@@ -36,3 +34,7 @@ EDGE_RUNTIME_DIR=../runtime EDGE_COMPILER_WASM=../target/wasm32-unknown-unknown/
 A CI job will be run by the maintainer after the PR has been created.
 
 PRs that introduce new behavior without test coverage, or that update documentation without reflecting the actual code change, will not be accepted.
+
+## Comments and Docs
+
+Keep comments minimal. One line, at most one per block, deleted when redundant. Match the length of the docs you edit rather than expanding them. No colons, semicolons, or em-dashes in comment or doc prose.

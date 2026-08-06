@@ -207,7 +207,7 @@ timed out
 
 ## cancel
 
-`cancel(coro)` flags a registered coroutine for cancellation. On its next scheduler tick it transitions to cancelled and stops. The body does not observe a `CancelledError`. Cancellation is cooperative and silent.
+`cancel(coro)` flags a registered coroutine for cancellation. On its next scheduler tick it raises `CancelledError` at the suspension point, runs every enclosing `finally`, and stops. It cannot be caught or suppressed.
 
 A coroutine in a tight synchronous loop without `await` or `sleep` cannot be cancelled until it yields:
 
@@ -279,14 +279,15 @@ run(main())
 | Exception | When |
 |---|---|
 | `TimeoutError` | `with_timeout` deadline expired |
-| `CancelledError` | reserved for user code. `cancel()` does not raise it |
+| `CancelledError` | raised by `cancel()`, runs `finally` but cannot be caught |
 
-Both live in the built-in exception namespace and match `except` clauses normally.
+`TimeoutError` matches `except` normally. `CancelledError` subclasses `BaseException`, so `except Exception` does not catch it.
 
 ## Limitations
 
+- **No background tasks.** There is no `create_task`. All concurrency is structural: a coroutine only progresses while awaited inside `run(...)` or `gather(...)`.
 - **No preemption between coroutines.** `while True: pass` inside a coroutine blocks the scheduler. The host can still force a pause via the preempt interval, see [Snapshots](/language/snapshots).
-- **Silent cancellation.** `cancel(coro)` stops the coroutine and the body does not see `CancelledError`. Use `with_timeout` for deadline-as-exception.
+- **No suspending in a cancelled `finally`.** A `finally` running from `cancel()` cannot `await` or `sleep`, doing so raises `RuntimeError`.
 - **Cooperative host loop.** The scheduler suspends to the host when it cannot progress synchronously (pending timer, frame, or event). The embedder resumes via `run_start` / `run_resume` / `run_push_event`, and can serialize a parked run with `save_state` / `restore_state`. See [Snapshots](/language/snapshots) and the [WASM ABI](/reference/wasm-abi).
 - **No async comprehensions.** `[x async for x in it]` is a parse error.
 - **No `gen.send` / `throw` / `close`.** Generators and coroutines are one-way producers. For bidirectional flow, use `run` / `gather` and pass messages via arguments.

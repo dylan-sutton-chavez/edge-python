@@ -407,11 +407,41 @@ impl<'a> VM<'a> {
         }
     }
 
+    /* Run a CancelPending coroutine's `finally` bodies then terminate it, skipping `except`. */
+    fn run_cancellation(&mut self, coro: Val) -> CoroState {
+        // A suspended sync helper holds cleanup this unwind can't reach.
+        let has_sync = matches!(self.heap.get(coro),
+            HeapObj::Coroutine(_, _, _, _, _, sf, _) if !sf.is_empty());
+        if has_sync {
+            return CoroState::Errored(VmErr::Runtime(
+                "cannot cancel a coroutine suspended inside a synchronous helper"));
+        }
+        self.pending.sleep_until_ns = None;
+        self.pending.host_frame_request = false;
+        self.pending.event_wait_request = false;
+        self.pending.host_call_request = false;
+        self.pending.waiting_for_children = None;
+        self.pending_exec_safe = true;
+        self.cancelling = true;
+        self.cancel_raise = true;
+        let result = self.resume_coroutine(coro);
+        let yielded = self.yielded;
+        self.yielded = false;
+        self.cancelling = false;
+        self.cancel_raise = false;
+        match result {
+            Err(VmErr::Raised(ref s)) if s == "CancelledError" => CoroState::Cancelled,
+            Ok(_) if yielded => CoroState::Errored(VmErr::Runtime(
+                "cannot suspend (await/sleep) in a finally during cancellation")),
+            Err(e) => CoroState::Errored(e),
+            Ok(_) => CoroState::Cancelled,
+        }
+    }
+
     fn scheduler_step(&mut self, idx: usize) -> Result<(), VmErr> {
         let coro = self.scheduler[idx].coro;
-        // CancelPending -> inject a CancelledError raise instead of resuming.
         if matches!(self.scheduler[idx].state, CoroState::CancelPending) {
-            self.scheduler[idx].state = CoroState::Cancelled;
+            self.scheduler[idx].state = self.run_cancellation(coro);
             return Ok(());
         }
         // Snapshot before resume so a yield during sleep / frame / receive / run can read it.
@@ -520,10 +550,11 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* cancel(coro), flag the coroutine for cancellation. */
+    /* cancel(coro) flags the coroutine for cancellation, ignored once it is terminal. */
     pub fn call_cancel(&mut self) -> Result<(), VmErr> {
         let coro = self.pop()?;
-        if let Some(h) = self.scheduler.iter_mut().find(|h| h.coro == coro) {
+        if let Some(h) = self.scheduler.iter_mut().find(|h| h.coro == coro)
+            && !matches!(h.state, CoroState::Done(_) | CoroState::Errored(_) | CoroState::Cancelled) {
             h.state = CoroState::CancelPending;
         }
         self.push(Val::none()); Ok(())

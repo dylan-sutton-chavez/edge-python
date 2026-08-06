@@ -109,7 +109,7 @@ Runtime errors raise as typed exceptions, catchable with `try` / `except`.
 | `StopIteration` | Iterator exhausted |
 | `AssertionError` | Failed `assert` |
 | `TimeoutError` | `with_timeout` deadline expired |
-| `CancelledError` | User-thrown cancellation |
+| `CancelledError` | Coroutine cancelled by `cancel()` |
 | `SystemExit` | `raise SystemExit(code)`. Uncaught, the host exits with that code |
 | `RecursionError` | Past the call-depth limit |
 | `MemoryError` | Past the live-object limit |
@@ -177,8 +177,8 @@ A user `raise X` re-raises whatever class or instance `X` is. Raising a value th
 
 - `Exception` sits under `BaseException`. Everything catchable in normal code derives from `Exception`.
 - `LookupError` groups `IndexError` and `KeyError`. `ArithmeticError` groups `OverflowError` and `ZeroDivisionError`. `RuntimeError` parents `RecursionError` and `NotImplementedError`.
-- `OSError`, `NameError`, `StopIteration`, `StopAsyncIteration`, `AssertionError`, `MemoryError`, `TimeoutError`, and `CancelledError` sit directly under `Exception`.
-- `SystemExit` sits directly under `BaseException`, so `except Exception` does not catch it. Use `except SystemExit` or a bare `except`.
+- `OSError`, `NameError`, `StopIteration`, `StopAsyncIteration`, `AssertionError`, `MemoryError`, and `TimeoutError` sit directly under `Exception`.
+- `SystemExit` and `CancelledError` sit directly under `BaseException`, so `except Exception` does not catch them. Use their own name or a bare `except`.
 
 ```python
 try:

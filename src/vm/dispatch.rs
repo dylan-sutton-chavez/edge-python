@@ -185,7 +185,14 @@ impl<'a> VM<'a> {
                 }
 
                 let rip = ip;
-                match self.dispatch(chunk, slots, &mut cache, insns, consts, &mut ip, exc_base) {
+                // One-shot raise of CancelledError from the coroutine's park point.
+                let step = if self.cancel_raise {
+                    self.cancel_raise = false;
+                    Err(VmErr::Raised(alloc::string::String::from("CancelledError")))
+                } else {
+                    self.dispatch(chunk, slots, &mut cache, insns, consts, &mut ip, exc_base)
+                };
+                match step {
                     Ok(None) => {
                         if self.yielded {
                             // Event yields keep the None placeholder (overwritten by `run_push_event` before resume). Sync sub-call yields pushed nothing, the helper's return lands on the stack when its frame completes, so don't pop and don't skip the next PopTop. Child-wait yields keep the placeholder (wake-loop overwrites it with the target's result). Host-call yields keep the placeholder (overwritten by `set_host_result`).
@@ -215,6 +222,19 @@ impl<'a> VM<'a> {
                         // HostYield is a control-flow signal, not a Python exception, bypass try/except.
                         if matches!(e, VmErr::HostYield(_)) {
                             return Err(e);
+                        }
+                        // Cancellation runs `finally` bodies and skips `except`, propagating out when none remain.
+                        if self.cancelling {
+                            self.error_byte_pos = None;
+                            self.call_stack.clear();
+                            match self.next_cleanup_handler(exc_base) {
+                                Some(h) => {
+                                    self.unwind_stack.push(Unwind::Reraise(e));
+                                    ip = h;
+                                    continue;
+                                }
+                                None => return Err(e),
+                            }
                         }
                         // Innermost frame wins; cleared below on swallow so later errors re-anchor.
                         if self.error_byte_pos.is_none() {
@@ -727,7 +747,8 @@ impl<'a> VM<'a> {
             }
             OpCode::WithJudge => {
                 let r = self.pop()?;
-                if matches!(self.unwind_stack.last(), Some(Unwind::Reraise(_))) && self.truthy(r) {
+                // A truthy `__exit__` suppresses the exception, but never a cancel.
+                if !self.cancelling && matches!(self.unwind_stack.last(), Some(Unwind::Reraise(_))) && self.truthy(r) {
                     // Suppress: turn the re-raise into a normal exit and drop the exc identity.
                     if let Some(top) = self.unwind_stack.last_mut() { *top = Unwind::Normal; }
                     self.pending.exc_val = None;

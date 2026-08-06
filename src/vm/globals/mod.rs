@@ -35,7 +35,8 @@ const EXC_PARENTS: &[(&str, &str)] = &[
     ("RecursionError", "RuntimeError"),
     ("MemoryError", "Exception"),
     ("TimeoutError", "Exception"),
-    ("CancelledError", "Exception"),
+    // Under `BaseException` so no `except Exception` or bare `except` can swallow a cancellation.
+    ("CancelledError", "BaseException"),
     ("Exception", "BaseException"),
 ];
 
