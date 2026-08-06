@@ -1,6 +1,6 @@
 /* Agnostic driver, feeds each capability corpus to the <edge-python> tag. Web-only corpora sit beside the module, shared ones live in tests/cases/builtins. Run deno test --allow-all tests/ */
 
-import { chromium } from "npm:playwright";
+import { chromium } from "npm:playwright@latest";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { DEFAULT_IMPORTS } from "../../src/defaults.js";
 
