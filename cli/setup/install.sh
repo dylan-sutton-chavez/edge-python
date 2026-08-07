@@ -128,5 +128,5 @@ fi
 "$INSTALL_DIR/edge" --version
 
 if [ -n "$rc_changed" ]; then
-  echo "run 'source $rc' or open a new shell to pick up the new environment"
+  echo "open a new terminal to pick up the new environment (or run 'exec \$SHELL')"
 fi
