@@ -104,7 +104,7 @@ fn vendor_runtime(out_dir: &Path) -> Result<()> {
                 fetch(&url).with_context(|| format!("fetching {url}"))?
             }
         };
-        let path = out_dir.join("runtime").join(rel);
+        let path = out_dir.join("web").join(rel);
         if let Some(p) = path.parent() {
             fs::create_dir_all(p)?;
         }

@@ -56,9 +56,9 @@ async function runCapability(cap) {
     /* Serve repo files from disk; synthesize the manifest. External CDNs (cdn.edgepython.com) pass through. */
     await page.route("**/*", (route) => {
         const url = new URL(route.request().url());
-        // In-tree runtime first; CI must test the checkout, not the deploy.
-        if (url.host === CDN_HOST && url.pathname.startsWith("/runtime/")) {
-            const path = RUNTIME + url.pathname.slice("/runtime/".length);
+        // In-tree runtime first, CI must test the checkout not the deploy.
+        if (url.host === CDN_HOST && url.pathname.startsWith("/web/")) {
+            const path = RUNTIME + url.pathname.slice("/web/".length);
             try {
                 return route.fulfill({ body: readFileSync(path), contentType: TYPES[path.slice(path.lastIndexOf("."))] ?? "application/octet-stream" });
             } catch {
