@@ -560,6 +560,16 @@
       "repro": "n = 0\ntry:\n  while True:\n    n = n + 1\nexcept RuntimeError:\n  print(\"caught\")",
       "actual": "the error re-raises inside the handler (caret lands on the print)",
       "expected": "either 'caught' or a documented uncatchable-error note"
+    },
+    {
+      "id": "bug-057",
+      "file": "src/parser/expr.rs",
+      "line": 409,
+      "title": "Unbounded parser recursion in the call/subscript/method chain overflows the stack and aborts the process",
+      "description": "The MAX_EXPR_DEPTH guard in expr_bp (expr.rs:71-88, types.rs:7) catches nested operator/paren/list expressions but not nested calls, subscripts, or method calls. The cycle parse_atom -> call -> parse_args_body -> comma_list -> name -> call (literals.rs:362,486,489,509) recurses after expr_bp already decremented expr_depth, so depth never accumulates across argument nesting and there is no other guard. MAX_INSTRUCTIONS does not help since each level costs about 3 instructions. Because release sets panic = abort a stack overflow is a hard SIGABRT, not a catchable panic, and it happens at parse time before the sandbox op/heap/call budgets run. Confirmed with a compiled proof of concept, about 4800 deep on an 8 MB stack and about 600 on a 1 MB worker thread.",
+      "repro": "f(f(f(f(f(f(x))))))  # scale the nesting, or a.m(a.m(a.m(a)))",
+      "actual": "thread has overflowed its stack, fatal runtime error, aborting (exit 134)",
+      "expected": "a parse error at a fixed nesting depth, like the [[[...]]] case, never a crash"
     }
   ],
   "outdated_comments": [
