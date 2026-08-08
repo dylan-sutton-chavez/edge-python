@@ -39,4 +39,4 @@ True
 RuntimeError
 ```
 
-Known limitations: on the native engine only `fetch`, `fetch_text`, and `fetch_json` are available, and `fetch` blocks instead of suspending. WebSocket and SSE are web-only.
+Known limitations: the native engine suspends on `fetch` and supports WebSocket and SSE like the browser. The irreducible difference is CORS, a browser rule that does not apply natively, and per-host connection limits that differ between the two.

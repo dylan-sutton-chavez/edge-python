@@ -184,7 +184,7 @@ print(gather(status("https://api.github.com/zen"), status("https://nope.invalid/
 ['ok', 'failed']
 ```
 
-In a browser host, `fetch_text` runs the browser's `fetch()` inside a Web Worker and is subject to CORS. See [network](/packages/host/network).
+In a browser host, `fetch_text` runs the browser's `fetch()` inside a Web Worker and is subject to CORS. The native engine multiplexes the same calls on its own reactor, so `gather` overlaps them there too, with no CORS. See [network](/packages/host/network).
 
 ## with_timeout
 
@@ -296,3 +296,5 @@ run(main())
 ## Time
 
 The scheduler reads wall time from a host hook. WASM hosts wire it to `Date.now()` via the `host_now_ns` import. Native hosts use `std::time::Instant`. Without a hook, `sleep` advances a virtual clock so deterministic tests interleave correctly.
+
+To run many of these programs side by side as message-passing tasks, see [Workers](/reference/workers).

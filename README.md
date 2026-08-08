@@ -8,13 +8,14 @@
 
 <br/>
 
-Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Python subset. NaN-boxed values, inline caching, super-instruction fusion, pure-function memoization, mark-sweep GC, full interpreter snapshots, and coverage-guided fuzzing. Runs in the browser as a WebAssembly module and natively inside the CLI.
+Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Python subset. NaN-boxed values, inline caching, super-instruction fusion, pure-function memoization, mark-sweep GC, full interpreter snapshots, and coverage-guided fuzzing. Runs in the browser as a WebAssembly module, or natively in the CLI as a single script, a standalone binary, or a pool of cooperative workers.
 
 - Secure by default. No file, network, or environment access, unless explicitly enabled by the [host](https://edgepython.com/reference/modules#host-libraries).
-- Around 200 KB footprint. The full compiler and runtime ship as a single WASM binary.
+- Around 200 KB footprint. The full compiler and runtime ship as a single WASM binary for the browser or a native engine in the CLI.
 - Compile-time imports. Every module resolves at parse time, no dynamic loading, no runtime surprises.
-- No AST. Source compiles directly to bytecode in a single pass: O(n).
+- No AST. Source compiles directly to bytecode in a single O(n) pass.
 - Snapshots. Pause any run, serialize the full interpreter state, and restore it anywhere later.
+- Workers. Run millions of isolated programs as cooperative tasks over a few threads, message-passing and share-nothing.
 
 ## More about it
 
@@ -22,7 +23,7 @@ Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Pyt
 
 ## Repository layout
 
-A Cargo workspace at the repo root holds the engine, `abi` and `pdk`. `cli/`, `fuzz/` and each `std/*` package are standalone workspaces with their own build and test commands; the commands below run from the repo root.
+A Cargo workspace at the repo root holds the engine, `abi`, `pdk` and `rt`. `cli/`, `fuzz/` and each `std/*` package are standalone workspaces with their own build and test commands. The commands below run from the repo root.
 
 ```text
 ├── abi
@@ -37,7 +38,9 @@ A Cargo workspace at the repo root holds the engine, `abi` and `pdk`. `cli/`, `f
 ├── src
 │   ├── lexer
 │   ├── native
-│   │   └── builtins
+│   │   ├── builtins
+│   │   ├── io
+│   │   └── swarm
 │   ├── packages
 │   ├── parser
 │   ├── util
@@ -78,14 +81,14 @@ The browser runtime lints and tests with Deno too, `deno lint web/` and `deno te
 
 ## Architecture
 
-Single-pass pipeline: source -> SSA bytecode chunk; stack interpreter with adaptive inline caching and pure-function memoization.
+Single-pass pipeline, source to SSA bytecode chunk, run by a stack interpreter with adaptive inline caching and pure-function memoization.
 
 * **Lexer** (`src/lexer/`) LUT-driven, offset-based tokens.
 * **Parser** (`src/parser/`) Pratt precedence, SSA-versioned bytecode with `Phi` at joins, no AST.
 * **Optimizer** (`src/optimizer.rs`) constant folding, Phi-noop elimination, dead-code compaction.
 * **Values** (`src/value/`) NaN-boxed 64-bit `Val`, heap objects, and the mark-and-sweep arena the whole pipeline shares.
-* **VM** (`src/vm/`) flat-match dispatch, scalar + instance-dunder inline caches, pure-function template memoization; `opcodes/` implements opcodes, `globals/` the global functions, `methods/` the builtin-type methods.
-* **Resolver** (`src/packages/`) host-injected; native imports register for `CallExtern` dispatch.
+* **VM** (`src/vm/`) flat-match dispatch, scalar + instance-dunder inline caches, pure-function template memoization. `opcodes/` implements opcodes, `globals/` the global functions, `methods/` the builtin-type methods.
+* **Resolver** (`src/packages/`) host-injected, native imports register for `CallExtern` dispatch.
 
 Full rationale, NaN-box patterns, IC thresholds, GC roots, and intentional omissions: [Design](https://edgepython.com/implementation/design). Lexer and parser internals: [Lexical](https://edgepython.com/implementation/lexical), [Syntax](https://edgepython.com/implementation/parsing).
 
@@ -106,32 +109,24 @@ cargo install --path cli
 edge -h # List all commands
 ```
 
-`run`, `repl` and `test` execute in the built-in native engine; `--web` hosts the runtime in a headless Chromium instead, and `install.sh` downloads a pinned `chrome-headless-shell` into `~/.cache/edge` unless a system Chrome/Chromium is already installed (`EDGE_NO_BROWSER=1` skips it).
+`run`, `repl` and `test` execute in the built-in native engine. `--web` hosts the runtime in a headless Chromium instead, and `install.sh` downloads a pinned `chrome-headless-shell` into `~/.cache/edge` unless a system Chrome/Chromium is already installed (`EDGE_NO_BROWSER=1` skips it).
 
 ### Browser
 
 ```html
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <script type="module" src="https://cdn.edgepython.com/web/src/element.js"></script>
-</head>
-<body>
-  <edge-python entry="./app/main.py" packages="./app/packages.json"></edge-python>
-</body>
-</html>
+<script type="module" src="https://cdn.edgepython.com/web/src/element.js"></script>
+<edge-python entry="./app/main.py" packages="./app/packages.json"></edge-python>
 ```
 
 The runtime spawns a Web Worker that pre-fetches imports, dispatches native calls, and streams `print()` output back.
 
 ### Rust host
 
-Edge Python is a `cdylib`: a Rust host can instantiate `compiler.wasm` and call its exports directly, the same `.wasm` that ships to browsers; the host owns I/O. The crate fetches nothing at build time, so vendor the `.wasm` from a tagged release and pin it by checksum, see [Consuming the release](https://edgepython.com/reference/wasm-abi#consuming-the-release-from-a-rust-crate). To add native modules from your own crate, implement the `Resolver` trait, see [Writing modules](https://edgepython.com/reference/modules).
+Edge Python is a `cdylib`, so a Rust host can instantiate `compiler.wasm` and call its exports directly, the same `.wasm` that ships to browsers, and the host owns I/O. The crate fetches nothing at build time, so vendor the `.wasm` from a tagged release and pin it by checksum, see [Consuming the release](https://edgepython.com/reference/wasm-abi#consuming-the-release-from-a-rust-crate). To add native modules from your own crate, implement the `Resolver` trait, see [Writing modules](https://edgepython.com/reference/modules).
 
 ### Native
 
-`edge run`, `edge repl`, and `edge test` execute in the CLI's in-process native engine by default (`--web` restores Chromium); tagged releases and the CDN's `/native/` route carry each std package as a native plugin library ([native engine](https://edgepython.com/reference/modules#the-native-engine)).
+`edge run`, `edge repl`, and `edge test` execute in the CLI's in-process native engine by default (`--web` restores Chromium). Tagged releases and the CDN's `/native/` route carry each std package as a native plugin library ([native engine](https://edgepython.com/reference/modules#the-native-engine)).
 
 ```python
 # hello.py
@@ -164,9 +159,28 @@ $ edge run app.py
 {"result":42}
 ```
 
+`edge build` packs a project and its imports into a standalone `.edge` binary that runs anywhere with nothing installed:
+
+```text
+$ edge build
+  packed app.edge (3 files)
+$ ./app.edge
+{"result":42}
+```
+
+`edge swarm` runs many programs as cooperative workers over a few threads, message-passing and share-nothing ([workers](https://edgepython.com/reference/workers)):
+
+```yaml
+# swarm.yml
+groups:
+  worker:
+    run: app
+    replicas: 100000   # ceiling, workers spawn on demand
+```
+
 ## What it is
 
-Edge Python targets sandboxed execution, in the browser and in the CLI's native engine: a dynamic, multi-paradigm Python subset with classes, async/await, structural pattern matching, and compile-time module resolution. There is no bundled stdlib, modules are external artifacts.
+Edge Python targets sandboxed execution, in the browser and in the CLI's native engine. It is a dynamic, multi-paradigm Python subset with classes, async/await, structural pattern matching, and compile-time module resolution. There is no bundled stdlib, modules are external artifacts.
 
 Full language reference, scope, and what intentionally isn't supported: [What Edge Python is](https://edgepython.com/getting-started/introduction).
 
@@ -182,7 +196,7 @@ Any `python` code block immediately followed by a `text Output` block becomes an
 
 ## CI/CD
 
-One workflow [`.github/workflows/main.yml`](.github/workflows/main.yml) runs the complete CI/CD; each package's logic lives in a composite action under [`.github/actions/`](.github/actions).
+One workflow [`.github/workflows/main.yml`](.github/workflows/main.yml) runs the complete CI/CD, and each package's logic lives in a composite action under [`.github/actions/`](.github/actions).
 
 On pushes to `main` it deploys two Cloudflare Pages projects: `edge-python-cdn` (the bundled package artifacts) and `edge-python-docs` (served at `edgepython.com`).
 

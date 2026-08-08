@@ -1,20 +1,21 @@
 ---
 title: "Command line interface"
-description: "The edge CLI: run, serve, repl, test, init, package management, build, and uninstall."
+description: "The edge CLI: run, serve, repl, test, init, package management, build, swarm, and uninstall."
 ---
 
 The `edge` CLI runs on macOS, Linux, and WSL. `run`, `repl`, and `test` execute in the built-in [native engine](/reference/modules#the-native-engine) by default, in-process with millisecond startup. The `--web` flag drives the browser runtime in headless Chromium instead, for scripts that need the browser (`dom`, `frame()`, sockets). Under `--web` the CLI is the loop around the browser: it launches Chromium, serves your code, and streams output back to the terminal.
 
 ```bash
-edge run app.py     # run a script
-edge serve          # dev server with live reload
-edge repl           # interactive shell
-edge test           # run *_test.py files
-edge init my-app    # scaffold a project
-edge add network    # add a package to packages.json
-edge remove network # remove a package from packages.json
-edge build          # bundle to dist/
-edge uninstall      # remove the binary, PATH entry, optionally the bundled browser
+edge run app.py       # run a script, a .edge, or stdin
+edge build            # pack a standalone .edge (--bundle, --web)
+edge swarm swarm.yml  # run a swarm of cooperative nodes
+edge serve            # dev server with live reload
+edge repl             # interactive shell
+edge test             # run *_test.py files
+edge init my-app      # scaffold a project
+edge add network      # add a package to packages.json
+edge remove network   # remove a package from packages.json
+edge uninstall        # remove the binary, PATH entry, optionally the bundled browser
 ```
 
 ## Install
@@ -47,7 +48,7 @@ error: ZeroDivisionError: division by zero
 
 `raise SystemExit(code)` with no argument or an integer exits cleanly with that code and no traceback. A string argument surfaces as a regular error and exits 1.
 
-With no path, `edge run` reads the script from piped stdin (`cat app.py | edge run`) and errors when stdin is a terminal. With a path, piped stdin instead feeds [`input()`](/reference/builtins) one line per call.
+With no path, `edge run` reads the script from piped stdin (`cat app.py | edge run`) and errors when stdin is a terminal. With a path, piped stdin instead feeds [`input()`](/reference/builtins) one line per call. A packed `.edge` or `.package` also runs here, `edge run app.edge` unpacks and runs it exactly as `./app.edge` would.
 
 Flags: the [native-engine flags](/reference/modules#run-flags) `--events`, `--save-state`, `--restore-state`, and `--preempt`. They are native-only and combining any of them with `--web` is an error.
 
@@ -125,23 +126,36 @@ $ edge add math network
 
 Point a name at a custom URL with `edge add foo=https://example.com/foo.wasm`. The kind is inferred from the URL: `.wasm` means std, anything else means host. `edge remove` deletes entries the same way.
 
-## `edge build`: portable bundle
+## `edge build`: pack the app
 
-Bundles the app into a self-contained `dist/` for offline use or self-hosting: the runtime, `compiler.wasm`, your scripts, and every package they import, with `packages.json` rewritten to the vendored paths.
+Packs the project and its imports into one artifact, in one of three modes for three targets.
+
+| Command | Output | Runs on |
+|---------|--------|---------|
+| `edge build` | a standalone `.edge` binary | any host of the same OS, nothing installed |
+| `edge build --bundle` | a lightweight `.package` | a host that already has `edge`, or a swarm |
+| `edge build --web` | a self-contained `dist/` | any browser |
+
+The default `.edge` is this `edge` binary with the project appended, so `./app.edge` runs it directly and it honors the run flags `--save-state`, `--restore-state`, `--preempt`, and `--events`. The `.package` carries only the code and its custom imports, since the runtime is already present where it lands. `--web` vendors the browser runtime, `compiler.wasm`, and every package into `dist/`, rewriting `packages.json` to the vendored paths. Std packages resolve by name at run time, so an `.edge` or `.package` needs no network for them.
 
 ```text
 $ edge build
 
-  bundled to dist/
+  packed app.edge (3 files)
+  4.20 MB
 
-  13 runtime files + compiler.wasm
-  1 packages
-  3 scripts
-
-  0.65 MB · 3.7s
+  run  ./app.edge   flags  --save-state --restore-state --preempt --events
 ```
 
-Flags: `--out <dir>` (default `dist`).
+Flags: `--out <path>` (mode-specific default), `--bundle`, `--web`.
+
+## `edge swarm`: worker pool
+
+Runs many edge-python programs as cooperative workers over a few threads, described by a `swarm.yml`. See [Workers](/reference/workers) for the manifest, groups, server, and untrusted code.
+
+```bash
+edge swarm swarm.yml
+```
 
 ## `edge uninstall`
 
@@ -153,7 +167,8 @@ Removes the binary and its `PATH` entry, and asks before removing the bundled `c
 |------|--------|
 | `--packages <file>` | Use a specific manifest instead of `./packages.json` |
 | `--web` | Drive the browser runtime instead of the native engine (`run`, `repl`, `test`) |
-| `--version`, `-V` | Print the version |
+| `--version`, `-v` | Print the version |
+| `--help`, `-h` | Print the command list |
 
 `Ctrl+C` cancels a running command with exit code 130.
 
