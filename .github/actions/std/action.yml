@@ -9,7 +9,7 @@ inputs:
 runs:
   using: composite
   steps:
-    # Stable for clippy, nightly for the build-std wasm build.
+    # Stable lints the cdylib, nightly drives the build-std wasm build.
     - name: Toolchain (stable)
       uses: dtolnay/rust-toolchain@stable
       with:
@@ -22,21 +22,18 @@ runs:
         targets: wasm32-unknown-unknown
         components: rust-src
 
-    - uses: denoland/setup-deno@v2
+    - name: Setup Deno
+      uses: denoland/setup-deno@v2
       with:
         deno-version: v2.x
 
-    - name: Cache Cargo
-      uses: actions/cache@v5
+    - name: Cache Rust
+      uses: Swatinem/rust-cache@v2
       with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          std/${{ inputs.package }}/target
-        key: cargo-std-${{ runner.os }}-${{ inputs.package }}-${{ hashFiles(format('std/{0}/Cargo.toml', inputs.package)) }}
-        restore-keys: cargo-std-${{ runner.os }}-${{ inputs.package }}-
+        workspaces: std/${{ inputs.package }} -> std/${{ inputs.package }}/target
+        key: ${{ inputs.package }}
 
-    - name: Cache Deno modules
+    - name: Cache Deno
       uses: actions/cache@v5
       with:
         path: ~/.cache/deno
@@ -69,14 +66,14 @@ runs:
           | tar -xz --strip-components=2 -C /usr/local/bin "binaryen-version_121/bin/wasm-opt"
         wasm-opt --version
 
-    # Lint only the cdylib; --all-targets clashes with its panic handler.
+    # Lint only the cdylib, --all-targets clashes with its panic handler.
     - name: Clippy
       if: inputs.package != 'test'
       shell: bash
       working-directory: std/${{ inputs.package }}
       run: cargo +stable clippy --release --target wasm32-unknown-unknown -- -D warnings
 
-    # `test` is pure Edge Python (entry.py): no crate to build.
+    # `test` is pure Edge Python via entry.py with no crate to build.
     - name: Build
       if: inputs.package != 'test'
       shell: bash
@@ -101,7 +98,7 @@ runs:
       shell: bash
       run: ls -lh "std/${{ inputs.package }}/target/wasm32-unknown-unknown/release/${{ inputs.package }}.wasm"
 
-    # Two passes: -Oz with traps-never-happen, then reflatten for a fresh CFG.
+    # Two passes, -Oz traps-never-happen, then reflatten for a fresh CFG.
     - name: Optimize
       if: inputs.package != 'test'
       shell: bash

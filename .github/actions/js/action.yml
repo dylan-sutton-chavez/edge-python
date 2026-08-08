@@ -9,11 +9,12 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: denoland/setup-deno@v2
+    - name: Setup Deno
+      uses: denoland/setup-deno@v2
       with:
         deno-version: v2.x
 
-    - name: Cache Deno modules
+    - name: Cache Deno
       uses: actions/cache@v5
       with:
         path: ~/.cache/deno
@@ -33,7 +34,7 @@ runs:
         name: compiler_wasm
         path: target/wasm32-unknown-unknown/release/
 
-    # ~150MB Chromium; cached so only the first run pays the download.
+    # A 150MB Chromium, cached so only the first run pays the download.
     - name: Cache Playwright browsers
       if: inputs.mode == 'test'
       uses: actions/cache@v5

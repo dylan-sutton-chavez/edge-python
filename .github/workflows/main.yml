@@ -1,6 +1,6 @@
 name: CI / CD
 
-# Single pipeline for the whole monorepo. Each job's logic lives in a composite action under .github/actions/<pkg>; this file only wires the dependency graph.
+# Single pipeline for the monorepo, each job's logic lives in a composite action, this file wires the graph.
 
 on:
   push:
@@ -58,8 +58,8 @@ jobs:
         with:
           mode: test
 
-  host:
-    name: Host / ${{ matrix.capability }}
+  web:
+    name: Web / ${{ matrix.capability }}
     needs: [js]
     runs-on: ubuntu-latest
     strategy:
@@ -68,7 +68,7 @@ jobs:
         capability: [dom, network, storage, time]
     steps:
       - uses: actions/checkout@v6
-      - uses: ./.github/actions/host
+      - uses: ./.github/actions/web
         with:
           capability: ${{ matrix.capability }}
 
@@ -86,9 +86,9 @@ jobs:
         with:
           package: ${{ matrix.package }}
 
-  # std packages as native plugin cdylibs for the CLI's in-process engine. Assets ship to the CDN and tag Releases.
+  # std packages as native plugin cdylibs for the in-process engine, shipped to the CDN and tag Releases.
   native:
-    name: Native / ${{ matrix.package }} (${{ matrix.target }})
+    name: Native std / ${{ matrix.package }} (${{ matrix.target }})
     needs: [compiler-check]
     permissions:
       contents: write
@@ -115,7 +115,7 @@ jobs:
           target: ${{ matrix.target }}
           github-token: ${{ github.token }}
 
-  # Clippy + check once (no matrix); gates the release build.
+  # Clippy and check once with no matrix, gates the release build.
   cli-lint:
     name: CLI / Lint and Check
     runs-on: ubuntu-latest
@@ -125,7 +125,7 @@ jobs:
         with:
           mode: lint
 
-  # Heavy release build per target; starts as soon as cli-lint is green.
+  # Heavy release build per target, starts as soon as cli-lint is green.
   cli-release:
     name: CLI / Release (${{ matrix.target }})
     needs: [cli-lint]
@@ -133,13 +133,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
-          - target: x86_64-apple-darwin
-            runner: macos-15
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
           - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-apple-darwin
             runner: macos-15
     runs-on: ${{ matrix.runner }}
     steps:
@@ -150,14 +150,19 @@ jobs:
           target: ${{ matrix.target }}
 
   cli-test:
-    name: CLI / Test
-    needs: [host, std, native, cli-release]
+    name: CLI / Test / ${{ matrix.suite }}
+    needs: [web, std, native, cli-release]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [engine, network, workers]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/cli
         with:
           mode: test
+          suite: ${{ matrix.suite }}
 
   cdn:
     name: Cloudflare Upload (CDN)
@@ -182,7 +187,7 @@ jobs:
         with:
           mode: build
 
-  # Tail of the docs build -> deploy chain; main pushes only.
+  # Tail of the docs build and deploy chain, main pushes only.
   docs-deploy:
     name: Docs / Deploy
     needs: [docs-build]

@@ -137,7 +137,7 @@
   },
   {
     "given": { "main.py": "print('ok')\n", "packages.json": "{}\n" },
-    "run": ["build"],
+    "run": ["build", "--web"],
     "creates": ["dist/index.html", "dist/main.py", "dist/compiler.wasm"]
   },
   {

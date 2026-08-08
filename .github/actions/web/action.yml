@@ -1,5 +1,5 @@
-name: Host capability
-description: Deno-lint and smoke-test one host capability (all JS) in Chromium. No release.
+name: Web capability
+description: Deno-lint and smoke-test one web capability (all JS) in Chromium. No release.
 
 inputs:
   capability:
@@ -9,11 +9,12 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: denoland/setup-deno@v2
+    - name: Setup Deno
+      uses: denoland/setup-deno@v2
       with:
         deno-version: v2.x
 
-    - name: Cache Deno modules
+    - name: Cache Deno
       uses: actions/cache@v5
       with:
         path: ~/.cache/deno
@@ -25,7 +26,7 @@ runs:
       working-directory: web/builtins/${{ inputs.capability }}
       run: deno lint src/
 
-    # ~150MB Chromium; cached so only the first run pays the download.
+    # A 150MB Chromium, cached so only the first run pays the download.
     - name: Cache Playwright browsers
       uses: actions/cache@v5
       with:
@@ -35,6 +36,20 @@ runs:
     - name: Install Chromium
       shell: bash
       run: deno run -A npm:playwright install --with-deps chromium
+
+    # The network corpus hits a loopback fixture, built here for deno to spawn.
+    - name: Toolchain (stable)
+      if: inputs.capability == 'network'
+      uses: dtolnay/rust-toolchain@stable
+    - name: Cache Rust
+      if: inputs.capability == 'network'
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: cli -> cli/target
+    - name: Build network fixture
+      if: inputs.capability == 'network'
+      shell: bash
+      run: cargo build --manifest-path cli/Cargo.toml --bin mock
 
     # HOSTCAP narrows test discovery to this capability's corpus.
     - name: Test tests/
