@@ -62,6 +62,15 @@ pub fn build_report(dir: &std::path::Path, runtime_files: usize, packages: usize
     println!("  {:.2} MB · {:.1}s", size as f64 / 1_000_000.0, elapsed.as_secs_f64());
 }
 
+/// Closing lines for `edge build`, `hint` names the other modes so they stay discoverable.
+pub fn packed(out: &std::path::Path, files: usize, size: u64, hint: &str) {
+    println!();
+    println!("  packed {} ({files} files)", out.display());
+    println!("  {:.2} MB", size as f64 / 1_000_000.0);
+    println!();
+    println!("  {hint}");
+}
+
 /// Render an error to stderr. `{:#}` joins the cause chain so the root reason isn't swallowed.
 pub fn error(e: &anyhow::Error) {
     eprintln!("error: {e:#}");

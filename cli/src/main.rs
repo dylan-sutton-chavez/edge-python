@@ -14,8 +14,32 @@ use std::path::{Path, PathBuf};
 
 use manifest::Manifest;
 
+// Hand-written so the three top-level help forms print identically.
+const HELP: &str = "\
+The Edge Python developer CLI
+
+Usage  edge <command> [options]
+
+Commands
+  run <file|.edge>   Run a script, a .edge, or stdin
+  build              Pack a standalone .edge  (--bundle, --web)
+  swarm <file>       Run a swarm from swarm.yml
+  serve              Dev server with live reload
+  repl               Interactive shell
+  test [path]        Run *_test.py files
+  init <name>        Scaffold a new project
+  add <pkgs>         Add packages to packages.json
+  remove <pkgs>      Remove packages from packages.json
+  uninstall          Remove the edge binary and PATH entry
+
+Native run flags   --events <f>  --save-state <f>  --restore-state <f>  --preempt <n>
+Global             --packages <file>   manifest, default packages.json
+                   --web               browser runtime instead of native
+
+edge <command> -h for details \u{00b7} -v for version \u{00b7} edgepython.com";
+
 #[derive(Parser)]
-#[command(name = "edge", version, about = "The Edge Python developer command line interface.", after_help = "Press Ctrl+C at any time to exit cleanly.", after_long_help = "Docs: https://edgepython.com/", color = clap::ColorChoice::Never)]
+#[command(name = "edge", disable_help_subcommand = true, color = clap::ColorChoice::Never)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -33,6 +57,7 @@ struct Cli {
 enum Cmd {
     /// Run a script.
     Run {
+        /// Script, packed .edge or .package, or stdin when omitted.
         file: Option<PathBuf>,
         /// Feed each line of this file (or FIFO) into one receive() call. Native only.
         #[arg(long)]
@@ -54,35 +79,82 @@ enum Cmd {
         /// Bind address; use 0.0.0.0 to expose on your LAN.
         #[arg(long, default_value = "127.0.0.1")]
         host: String,
+        /// Port to listen on.
         #[arg(long, default_value_t = 5173)]
         port: u16,
+        /// Open the app in a browser once the server is up.
         #[arg(long)]
         open: bool,
     },
     /// Run *_test.py files.
-    Test { path: Option<PathBuf> },
+    Test {
+        /// Directory or file to run, the tree is searched when omitted.
+        path: Option<PathBuf>,
+    },
     /// Scaffold a new project.
     Init {
+        /// Project directory to create, the current one when omitted.
         name: Option<String>,
+        /// Skip the browser index.html, scaffold only main.py and packages.json.
         #[arg(long)]
         bare: bool,
     },
     /// Add packages to packages.json.
-    Add { pkgs: Vec<String> },
+    Add {
+        /// Package names to add.
+        pkgs: Vec<String>,
+    },
     /// Remove packages from packages.json.
-    Remove { pkgs: Vec<String> },
-    /// Bundle the app into dist/.
+    Remove {
+        /// Package names to remove.
+        pkgs: Vec<String>,
+    },
+    /// Pack the app: a standalone binary by default, --bundle for a swarm, --web for the browser.
     Build {
+        /// Output path, defaults to app.edge, app.package, or dist/ per mode.
         #[arg(long)]
         out: Option<PathBuf>,
+        /// Vendor the browser runtime into dist/ instead of a native artifact.
+        #[arg(long)]
+        web: bool,
+        /// Emit a lightweight .package for a swarm that already ships the runtime.
+        #[arg(long)]
+        bundle: bool,
     },
     /// Remove the edge binary, its PATH entry, and optionally the bundled browser cache.
     Uninstall,
+    /// Run a swarm of nodes from a swarm.yml manifest.
+    Swarm {
+        /// Path to the swarm.yml manifest.
+        file: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
     ctrlc::set_handler(|| std::process::exit(130)).ok();
+
+    // A standalone .edge carries its project, run that instead of parsing subcommands.
+    if let Some(payload) = cmd::build::embedded_payload() {
+        let result = run_embedded(&payload);
+        if let Err(e) = result {
+            ui::error(&e);
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
+
+    // Only the top-level help is intercepted, `edge run -h` still falls through to clap.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.is_empty() || matches!(args.first().map(String::as_str), Some("-h" | "--help")) {
+        println!("{HELP}");
+        return Ok(());
+    }
+    if matches!(args.first().map(String::as_str), Some("-v" | "--version")) {
+        println!("edge {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
+    let cli = Cli::parse();
 
     let manifest_path = cli.packages.clone().unwrap_or_else(|| PathBuf::from("packages.json"));
 
@@ -112,14 +184,54 @@ fn main() -> Result<()> {
             }
         }
         Cmd::Repl => cmd::repl::run(&manifest_path, cli.packages.as_deref(), cli.web),
-        Cmd::Build { out } => cmd::build::run(&manifest_path, out.unwrap_or_else(|| PathBuf::from("dist"))),
+        Cmd::Build { out, web, bundle } => {
+            if web {
+                cmd::build::run(&manifest_path, out.unwrap_or_else(|| PathBuf::from("dist")))
+            } else if bundle {
+                cmd::build::bundle(&manifest_path, out.unwrap_or_else(|| PathBuf::from("app.package")))
+            } else {
+                cmd::build::standalone(&manifest_path, out.unwrap_or_else(|| PathBuf::from("app.edge")))
+            }
+        }
         Cmd::Uninstall => cmd::uninstall::run(),
+        Cmd::Swarm { file } => cmd::swarm::run(&file),
         Cmd::Test { path } => cmd::test::run(&manifest_path, cli.packages.as_deref(), cli.web, path.as_deref()),
     };
 
     if let Err(e) = result {
         ui::error(&e);
         std::process::exit(1);
+    }
+    Ok(())
+}
+
+/// The run flags a standalone .edge understands, mirroring `edge run`.
+#[derive(Parser)]
+#[command(name = "edge-app", disable_help_flag = true)]
+struct Embedded {
+    #[arg(long)]
+    save_state: Option<PathBuf>,
+    #[arg(long)]
+    restore_state: Option<PathBuf>,
+    #[arg(long)]
+    preempt: Option<usize>,
+    #[arg(long)]
+    events: Option<PathBuf>,
+}
+
+/// Runs the project embedded in this standalone .edge, honoring the run flags.
+fn run_embedded(payload: &[u8]) -> Result<()> {
+    let flags = Embedded::parse();
+    let opts = compiler::native::RunOpts {
+        packages: None,
+        preempt: flags.preempt.unwrap_or(0),
+        events: flags.events.map(|p| p.to_string_lossy().into_owned()),
+        save_state: flags.save_state.map(|p| p.to_string_lossy().into_owned()),
+        restore_state: flags.restore_state.map(|p| p.to_string_lossy().into_owned()),
+    };
+    let code = engine::native::run_bundle(payload, &opts)?;
+    if code != 0 {
+        std::process::exit(code);
     }
     Ok(())
 }

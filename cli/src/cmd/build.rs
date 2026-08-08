@@ -1,14 +1,121 @@
 /*
-`edge build`: vendor the runtime, compiler.wasm, used packages, and user scripts into a self-contained dist/.
+`edge build`: pack a project into a self-contained native binary, a swarm .package, or a browser dist/.
 */
 
 use anyhow::{anyhow, Context, Result};
+use compiler::native::pack::{Bundle, Entry};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::manifest::{Kind, Manifest};
+
+// Marks a standalone binary, its trailer holds the payload length before it.
+const STANDALONE_MAGIC: &[u8] = b"EDGESFX\x01";
+
+/* Packs the project as a standalone binary, this exe with the bundle and a trailer appended. */
+pub fn standalone(manifest_path: &Path, out: PathBuf) -> Result<()> {
+    let bundle = collect_bundle(manifest_path)?;
+    let exe = std::env::current_exe().context("locating the edge binary")?;
+    let mut image = fs::read(&exe).with_context(|| format!("reading {}", exe.display()))?;
+    let payload = bundle.encode();
+    image.extend_from_slice(&payload);
+    image.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+    image.extend_from_slice(STANDALONE_MAGIC);
+    fs::write(&out, &image).with_context(|| format!("writing {}", out.display()))?;
+    make_executable(&out)?;
+    let run = out.display();
+    crate::ui::packed(&out, bundle.files.len(), image.len() as u64,
+        &format!("run  ./{run}   flags  --save-state --restore-state --preempt --events"));
+    Ok(())
+}
+
+/* Packs the project as a lightweight .package for a swarm that already has the runtime. */
+pub fn bundle(manifest_path: &Path, out: PathBuf) -> Result<()> {
+    let bundle = collect_bundle(manifest_path)?;
+    let payload = bundle.encode();
+    fs::write(&out, &payload).with_context(|| format!("writing {}", out.display()))?;
+    let run = out.display();
+    crate::ui::packed(&out, bundle.files.len(), payload.len() as u64,
+        &format!("run  edge run {run}   or send it to a swarm eval group"));
+    Ok(())
+}
+
+/* Reads every project .py plus its packages.json into a bundle, std resolves by name at run time. */
+fn collect_bundle(manifest_path: &Path) -> Result<Bundle> {
+    let project = match manifest_path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    let scripts = collect_scripts(&project, Path::new(""));
+    if scripts.is_empty() {
+        return Err(anyhow!("no .py files found under {}", project.display()));
+    }
+    let mut files = Vec::new();
+    for s in &scripts {
+        let rel = s.strip_prefix(&project).unwrap_or(s).to_string_lossy().replace('\\', "/");
+        files.push(Entry { path: rel, bytes: fs::read(s).with_context(|| format!("reading {}", s.display()))? });
+    }
+    if manifest_path.exists() {
+        files.push(Entry { path: "packages.json".to_string(), bytes: fs::read(manifest_path)? });
+    }
+    Ok(Bundle { entry: find_entry(&scripts, &project), files })
+}
+
+#[cfg(unix)]
+fn make_executable(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = fs::metadata(path)?.permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(path, perms).with_context(|| format!("setting mode on {}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn make_executable(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
+/* Trailer of a standalone binary, `Some(payload)` when this exe carries a bundle.
+   Reads only the tail so a plain `edge` invocation never loads the whole binary. */
+pub fn embedded_payload() -> Option<Vec<u8>> {
+    trailer_payload(&std::env::current_exe().ok()?)
+}
+
+/* Bundle carried by a file, either a raw .package or a standalone .edge with a trailer. */
+pub fn file_payload(path: &Path) -> Option<Vec<u8>> {
+    let mut head = [0u8; 8];
+    if let Ok(mut f) = fs::File::open(path) {
+        use std::io::Read;
+        if f.read_exact(&mut head).is_ok() && head.starts_with(compiler::native::pack::MAGIC) {
+            return fs::read(path).ok();
+        }
+    }
+    trailer_payload(path)
+}
+
+/* Reads the appended payload of a standalone binary, None when the trailer is absent. */
+fn trailer_payload(path: &Path) -> Option<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = fs::File::open(path).ok()?;
+    let trailer = (8 + STANDALONE_MAGIC.len()) as u64;
+    let total = file.seek(SeekFrom::End(0)).ok()?;
+    if total < trailer {
+        return None;
+    }
+    file.seek(SeekFrom::End(-(trailer as i64))).ok()?;
+    let mut buf = [0u8; 8 + 8];
+    file.read_exact(&mut buf[..trailer as usize]).ok()?;
+    if &buf[8..trailer as usize] != STANDALONE_MAGIC {
+        return None;
+    }
+    let len = u64::from_le_bytes(buf[..8].try_into().ok()?);
+    let start = total.checked_sub(trailer + len)?;
+    let mut payload = vec![0u8; len as usize];
+    file.seek(SeekFrom::Start(start)).ok()?;
+    file.read_exact(&mut payload).ok()?;
+    Some(payload)
+}
 
 // Production layout we mirror into dist/web/ and dist/.
 const RUNTIME_BASE: &str = "https://cdn.edgepython.com/web/";

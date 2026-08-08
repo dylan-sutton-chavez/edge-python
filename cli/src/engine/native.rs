@@ -63,6 +63,11 @@ pub fn run(file: Option<&Path>, opts: &RunOpts) -> Result<i32> {
     if let Some(state) = &opts.restore_state {
         return Ok(restore_and_run(state, opts));
     }
+    // A packed .edge or .package runs its unpacked entry, matching a direct `./app.edge`.
+    if let Some(path) = file
+        && let Some(payload) = crate::cmd::build::file_payload(path) {
+        return run_bundle(&payload, opts);
+    }
     let mut stdin = std::io::stdin();
     let (src, name) = match file {
         Some(p) => (std::fs::read_to_string(p).map_err(|e| anyhow::anyhow!("reading {}: {e}", p.display()))?, path_spec(p)),
@@ -92,6 +97,22 @@ pub fn run(file: Option<&Path>, opts: &RunOpts) -> Result<i32> {
             vm.input_buffer = buf.split('\n').map(String::from).collect();
         }
     }
+    Ok(drive(&mut vm, &src, Some(&name), opts))
+}
+
+/// Unpacks a bundle into a temp dir and runs its entry.
+pub fn run_bundle(payload: &[u8], opts: &RunOpts) -> Result<i32> {
+    let bundle = compiler::native::pack::Bundle::decode(payload).map_err(|e| anyhow::anyhow!("corrupt bundle: {e}"))?;
+    let dir = tempfile::tempdir().map_err(|e| anyhow::anyhow!("creating a temp dir: {e}"))?;
+    let entry = bundle.write_to(dir.path()).map_err(|e| anyhow::anyhow!("unpacking the bundle: {e}"))?;
+    let src = std::fs::read_to_string(&entry).map_err(|e| anyhow::anyhow!("reading the entry: {e}"))?;
+    let name = path_spec(&entry);
+    let d = compiler::packages::dir_of(&name).to_string();
+    let chunk = match parse_source(&src, &d, None) {
+        Ok(c) => c,
+        Err(rendered) => { crate::ui::traceback(&rendered); return Ok(1); }
+    };
+    let mut vm = boot_vm(chunk, Limits::sandbox(), opts.preempt);
     Ok(drive(&mut vm, &src, Some(&name), opts))
 }
 

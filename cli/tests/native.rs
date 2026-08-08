@@ -126,26 +126,82 @@ fn test_runner_verdicts_come_from_system_exit() {
 #[derive(serde::Deserialize)]
 struct CorpusCase {
     src: String,
+    #[serde(default)]
     output: Vec<String>,
+    // An expected error substring, the case passes when the run fails carrying it.
+    error: Option<String>,
 }
 
-// Runs the shared time corpus against the native engine, the same cases the web host runs in Chromium.
+// The network fixture, spawned per test run and killed on drop.
+struct MockServer {
+    child: std::process::Child,
+    port: u16,
+}
+
+impl MockServer {
+    // Starts the mock binary and reads the port it prints on its first stdout line.
+    fn start() -> Self {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_mock"))
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn mock");
+        let mut line = String::new();
+        std::io::BufRead::read_line(&mut std::io::BufReader::new(child.stdout.take().unwrap()), &mut line).unwrap();
+        let port = line.trim().parse().expect("mock port");
+        MockServer { child, port }
+    }
+
+    // The base url cases interpolate with {BASE}, plaintext http against loopback.
+    fn base(&self) -> String {
+        format!("http://127.0.0.1:{}", self.port)
+    }
+}
+
+impl Drop for MockServer {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+// Runs every shared builtins corpus against the native engine, mirroring the web host cases.
 #[test]
-fn builtin_time_module_mirrors_the_web_api() {
-    let corpus = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/cases/builtins/time.json");
-    let cases: Vec<CorpusCase> = serde_json::from_str(&std::fs::read_to_string(corpus).unwrap()).unwrap();
+fn builtin_corpora_mirror_the_web_api() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/cases/builtins");
+    // The fixture serves network cases, its base and ws base replace the corpus placeholders.
+    let mock = MockServer::start();
+    let base = mock.base();
+    let ws_base = base.replacen("http://", "ws://", 1);
     let mut failures = Vec::new();
-    for (i, case) in cases.iter().enumerate() {
-        let dir = scratch("time-corpus");
-        // The web harness prepends the same star import, bare names resolve to the module exports.
-        std::fs::write(dir.join("main.py"), format!("from time import *\n{}\n", case.src)).unwrap();
-        let (out, err, code) = run_in(&dir, &["run", "main.py"], None);
-        let want = format!("{}\n", case.output.join("\n"));
-        if code != 0 || out != want {
-            failures.push(format!("case {i} {:?}\n  got  {:?} (code {code}, err {err})\n  want {:?}", case.src, out, want));
+    let mut ran = 0;
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let cap = path.file_stem().unwrap().to_string_lossy().into_owned();
+        let cases: Vec<CorpusCase> = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        for (i, case) in cases.iter().enumerate() {
+            ran += 1;
+            let scratch = scratch(&format!("{cap}-corpus"));
+            let src = case.src.replace("{BASE}", &base).replace("{WS_BASE}", &ws_base);
+            // The web harness prepends the same star import, bare names resolve to the module exports.
+            std::fs::write(scratch.join("main.py"), format!("from {cap} import *\n{src}\n")).unwrap();
+            let (out, err, code) = run_in(&scratch, &["run", "main.py"], None);
+            if let Some(want) = &case.error {
+                if code == 0 || !err.contains(want) {
+                    failures.push(format!("[{cap} #{i}] expected error {want:?}, got code {code} err {err:?}"));
+                }
+                continue;
+            }
+            let want = format!("{}\n", case.output.join("\n"));
+            if code != 0 || out != want {
+                failures.push(format!("[{cap} #{i}] {:?}\n  got  {:?} (code {code}, err {err})\n  want {:?}", case.src, out, want));
+            }
         }
     }
-    assert!(failures.is_empty(), "{} time corpus case(s) failed:\n{}", failures.len(), failures.join("\n"));
+    assert!(ran > 0, "no native corpus cases ran, discovery is broken");
+    assert!(failures.is_empty(), "{} corpus case(s) failed:\n{}", failures.len(), failures.join("\n"));
 }
 
 #[test]
@@ -191,6 +247,47 @@ fn a_cached_module_is_pinned_to_its_first_bytes() {
     let (_, err, code) = run_in(&dir, &["run", "main.py"], None);
     assert!(err.contains("integrity drift"), "stderr was: {err}");
     assert_eq!(code, 1);
+}
+
+/* edge build packs a project into a standalone .edge that runs on its own, imports and all. */
+#[test]
+fn standalone_edge_runs_the_packed_project() {
+    let dir = scratch("standalone");
+    std::fs::create_dir_all(dir.join("lib")).unwrap();
+    std::fs::write(dir.join("lib/util.py"), "def greet():\n    return \"packed\"\n").unwrap();
+    std::fs::write(dir.join("packages.json"), "{ \"imports\": { \"util\": \"./lib/util.py\" } }\n").unwrap();
+    std::fs::write(dir.join("main.py"), "import util\nprint(util.greet())\n").unwrap();
+
+    let (_, err, code) = run_in(&dir, &["build", "--out", "app.edge"], None);
+    assert_eq!(code, 0, "build stderr was: {err}");
+
+    let app = dir.join("app.edge");
+    let out = Command::new(&app).current_dir(&dir).stdin(Stdio::null()).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "packed\n");
+    assert_eq!(out.status.code().unwrap_or(-1), 0);
+}
+
+/* edge run accepts a packed .edge, matching a direct ./app.edge invocation. */
+#[test]
+fn run_accepts_a_packed_edge() {
+    let dir = scratch("run-edge");
+    std::fs::write(dir.join("main.py"), "print(\"ran the bundle\")\n").unwrap();
+    let (_, err, code) = run_in(&dir, &["build", "--out", "app.edge"], None);
+    assert_eq!(code, 0, "build stderr was: {err}");
+    let (out, err, code) = run_in(&dir, &["run", "app.edge"], None);
+    assert_eq!(out, "ran the bundle\n", "stderr was: {err}");
+    assert_eq!(code, 0);
+}
+
+/* edge build --bundle writes a lightweight .package carrying the project tree. */
+#[test]
+fn bundle_writes_a_package_file() {
+    let dir = scratch("bundle");
+    std::fs::write(dir.join("main.py"), "print(\"hi\")\n").unwrap();
+    let (_, err, code) = run_in(&dir, &["build", "--bundle", "--out", "app.package"], None);
+    assert_eq!(code, 0, "build stderr was: {err}");
+    let bytes = std::fs::read(dir.join("app.package")).unwrap();
+    assert!(bytes.starts_with(b"EDGEPKG\x01"), "missing bundle magic");
 }
 
 // Locates a staged or locally built plugin, a staged one missing is a wiring bug.
