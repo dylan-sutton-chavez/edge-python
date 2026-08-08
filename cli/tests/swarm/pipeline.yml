@@ -1,0 +1,32 @@
+# A seed flows through a three-stage pipeline, plus per-group limits and a null-output producer.
+groups:
+  ingest:
+    replicas: 1
+    limits:
+      heap: 65536
+      preempt: 500
+    code: |
+      from swarm import send
+      msg = receive()
+      send("transform", msg + "-ingested")
+    seed:
+      - raw
+  transform:
+    replicas: 1
+    code: |
+      from swarm import send
+      msg = receive()
+      send("sink", msg + "-transformed")
+  sink:
+    replicas: 1
+    code: |
+      msg = receive()
+      print("sink:", msg)
+  noisy:
+    replicas: 1
+    out: "null"
+    code: |
+      print("discarded")
+
+expect:
+  - "sink: raw-ingested-transformed"

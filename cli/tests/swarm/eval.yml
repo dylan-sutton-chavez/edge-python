@@ -1,0 +1,17 @@
+# An eval group compiles each published message as its own program, print output proves execution.
+runtime:
+  listen: tcp://127.0.0.1:7789
+  durable: tmp/swarm/log
+
+groups:
+  runners:
+    replicas: 4
+    eval: true
+
+publish:
+  - "runners print('two plus three is', 2 + 3)"
+  - "runners print('hello from a snippet')"
+
+expect:
+  - "two plus three is 5"
+  - "hello from a snippet"

@@ -1,0 +1,8 @@
+# A run target that is a directory boots its main.py and resolves the project's own packages.json.
+groups:
+  builder:
+    seed: ["go"]
+    run: proj
+
+expect:
+  - "project group says hello from a project dir"

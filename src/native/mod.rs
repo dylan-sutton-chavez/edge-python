@@ -5,8 +5,11 @@ use std::io::Write;
 
 mod driver;
 mod builtins;
+mod io;
 mod loader;
+pub mod pack;
 mod resolver;
+pub mod swarm;
 
 pub use driver::{drive, drive_session, restore_and_run, Step};
 

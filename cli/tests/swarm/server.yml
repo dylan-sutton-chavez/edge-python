@@ -1,0 +1,24 @@
+# A live server echoes ingress messages and reports its state, exercising listen, wal and control.
+runtime:
+  listen: tcp://127.0.0.1:7788
+  control: tcp://127.0.0.1:9788
+  durable: tmp/swarm/log
+
+groups:
+  echoer:
+    replicas: 1
+    code: |
+      while True:
+          msg = receive()
+          print("got:", msg)
+
+publish:
+  - "echoer alpha"
+  - "echoer beta"
+
+expect:
+  - "got: alpha"
+  - "got: beta"
+
+# Substring the /status body must contain once the swarm has settled.
+expect_status: "\"nodes\":1"

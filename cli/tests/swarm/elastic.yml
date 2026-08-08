@@ -1,0 +1,28 @@
+# A dispatcher fans five jobs into a lazily-grown worker pool under a high ceiling and max_nodes cap.
+runtime:
+  max_nodes: 100000
+
+groups:
+  dispatcher:
+    replicas: 1
+    code: |
+      from swarm import send
+      receive()
+      i = 0
+      while i < 5:
+          send("workers", "job")
+          i = i + 1
+    seed:
+      - go
+  workers:
+    replicas: 1000000
+    code: |
+      job = receive()
+      print("done")
+
+expect:
+  - "done"
+  - "done"
+  - "done"
+  - "done"
+  - "done"

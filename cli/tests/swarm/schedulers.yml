@@ -1,0 +1,27 @@
+# A fixed scheduler count shards groups across threads, a cross-shard pipeline still completes.
+runtime:
+  schedulers: 4
+
+groups:
+  a:
+    replicas: 1
+    code: |
+      from swarm import send
+      msg = receive()
+      send("b", msg + "-a")
+    seed:
+      - x
+  b:
+    replicas: 1
+    code: |
+      from swarm import send
+      msg = receive()
+      send("c", msg + "-b")
+  c:
+    replicas: 1
+    code: |
+      msg = receive()
+      print("c:", msg)
+
+expect:
+  - "c: x-a-b"

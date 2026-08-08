@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Python subset. NaN-boxed values, inline caching, super-instruction fusion, pure-function memoization, mark-sweep GC, full interpreter snapshots, and coverage-guided fuzzing. Runs in the browser as a WebAssembly module and natively inside the CLI."
+description = "Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Python subset. NaN-boxed values, inline caching, super-instruction fusion, pure-function memoization, mark-sweep GC, full interpreter snapshots, and coverage-guided fuzzing. Runs in the browser as a WebAssembly module, or natively in the CLI as a single script, a standalone binary, or a pool of cooperative workers."
 readme = "README.md"
 autotests = false
 autobins = false
@@ -21,7 +21,7 @@ path = "tests/main.rs"
 
 [features]
 # Gates the native engine module (resolver, dlopen loader, host modules) out of wasm and plain lib builds.
-native = ["dep:libloading", "dep:ureq"]
+native = ["dep:libloading", "dep:ureq", "dep:rt", "dep:polling", "dep:slab", "dep:rustls", "dep:webpki-roots", "dep:httparse", "dep:tempfile"]
 
 [dependencies]
 wasm-abi = { workspace = true }
@@ -32,6 +32,19 @@ libm = { workspace = true }
 # Native-engine only, dlopen for std plugins and blocking https for URL imports.
 libloading = { version = "0.9", optional = true }
 ureq = { version = "3.3.0", optional = true }
+
+# Native async reactor, the rt executor drives polling on the VM thread.
+rt = { path = "rt", optional = true }
+polling = { version = "3", optional = true }
+slab = { version = "0.4", optional = true }
+
+# Native async fetch, sans-io TLS and HTTP over the reactor sockets.
+rustls = { version = "0.23", optional = true, default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = { version = "1", optional = true }
+httparse = { version = "1", optional = true }
+
+# Isolated temp dir for an untrusted bundle sent to an eval group.
+tempfile = { version = "3", optional = true }
 
 # WASM-only global allocator. Pulled into wasm32 builds automatically; absent on host builds (where std's allocator is fine and `compiler.wasm` is just a library artifact, not the runtime target).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -44,9 +57,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 [workspace]
-members = ["abi", "pdk", "pdk/macros", "pdk/example"]
+members = ["abi", "pdk", "pdk/macros", "pdk/example", "rt"]
 # `pdk/example` is wasm-only: kept in `members` so it shares the lockfile and resolves path deps, but excluded from `default-members` so default workspace commands skip it. Build it explicitly with `-p slugify-mod --target wasm32-unknown-unknown`.
-default-members = [".", "abi", "pdk", "pdk/macros"]
+default-members = [".", "abi", "pdk", "pdk/macros", "rt"]
 resolver = "2"
 
 [workspace.package]

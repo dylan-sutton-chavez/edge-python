@@ -2,6 +2,7 @@ use crate::packages::Resolved;
 use crate::vm::types::{HeapObj, HeapPool, Val, VmErr};
 
 mod network;
+pub(crate) mod swarm;
 mod time;
 
 /* Built-in host modules, resolved after the manifest so user entries always win. */
@@ -9,6 +10,7 @@ pub(crate) fn resolve(name: &str) -> Option<Resolved> {
     let bindings = match name {
         "time" => time::bindings(),
         "network" => network::bindings(),
+        "swarm" => swarm::bindings(),
         _ => return None,
     };
     Some(Resolved::Native { bindings, classes: Vec::new(), consts: Vec::new(), canonical: format!("native:{name}") })
@@ -28,6 +30,14 @@ fn opt_str_arg(heap: &HeapPool, args: &[Val], i: usize, who: &'static str) -> Re
         None => Ok(None),
         Some(v) if v.is_none() => Ok(None),
         Some(_) => str_arg(heap, args, i, who).map(Some),
+    }
+}
+
+// Reads an int argument, the shape socket handles take.
+fn int_arg(args: &[Val], i: usize, who: &'static str) -> Result<i64, VmErr> {
+    match args.get(i) {
+        Some(v) if v.is_int() => Ok(v.as_int()),
+        _ => Err(VmErr::TypeMsg(format!("{who} expects an int at argument {}", i + 1))),
     }
 }
 
