@@ -18,15 +18,30 @@ pub(crate) struct BridgeState {
     pub current_vm: Option<NonNull<VM<'static>>>,
 }
 
-static mut BRIDGE: BridgeState = BridgeState {
-    handles: HandleTable::new(),
-    error_stash: ErrorStash::new(),
-    current_vm: None,
-};
+impl BridgeState {
+    const fn new() -> Self {
+        BridgeState { handles: HandleTable::new(), error_stash: ErrorStash::new(), current_vm: None }
+    }
+}
 
-// SAFETY holds because WASM and the native engine are single-threaded, re-entry routes through `with_vm`.
+// WASM is single-threaded, one process-wide bridge, re-entry routes through `with_vm`.
+#[cfg(target_arch = "wasm32")]
+static mut BRIDGE: BridgeState = BridgeState::new();
+
+#[cfg(target_arch = "wasm32")]
 pub(crate) fn with_bridge<R>(f: impl FnOnce(&mut BridgeState) -> R) -> R {
     unsafe { f(&mut *core::ptr::addr_of_mut!(BRIDGE)) }
+}
+
+// The swarm runs a scheduler per core, each thread owns its bridge so VMs never cross threads.
+#[cfg(not(target_arch = "wasm32"))]
+thread_local! {
+    static BRIDGE: RefCell<BridgeState> = const { RefCell::new(BridgeState::new()) };
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn with_bridge<R>(f: impl FnOnce(&mut BridgeState) -> R) -> R {
+    BRIDGE.with(|b| f(&mut b.borrow_mut()))
 }
 
 pub fn put_val(v: Val) -> u32 { with_bridge(|b| b.handles.put(v.0)) }

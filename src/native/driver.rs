@@ -21,6 +21,7 @@ fn pending_name(status: &SchedulerStatus) -> &'static str {
 /* Serves one run to completion, `src` and `name` feed tracebacks, `opts` wires events and snapshots. */
 pub fn drive(vm: &mut VM<'static>, src: &str, name: Option<&str>, opts: &RunOpts) -> i32 {
     let mut events: Option<std::io::BufReader<std::fs::File>> = None;
+    let _ = super::io::install();
     loop {
         // The guard publishes the VM so `.so` plugin callbacks can re-enter through `edge_op`.
         let result = { let _guard = VmGuard::new(vm); vm.run() };
@@ -31,6 +32,12 @@ pub fn drive(vm: &mut VM<'static>, src: &str, name: Option<&str>, opts: &RunOpts
                 if deadline > now { std::thread::sleep(std::time::Duration::from_nanos(deadline - now)); }
             }
             Err(VmErr::HostYield(SchedulerStatus::Preempted)) => {}
+            // Streamed events from the reactor (sse and ws) feed receive() first.
+            Err(VmErr::HostYield(SchedulerStatus::PendingEvent)) if super::io::has_pending() => {
+                if !drive_events(vm) {
+                    return park(vm, src, &SchedulerStatus::PendingEvent, opts);
+                }
+            }
             Err(VmErr::HostYield(SchedulerStatus::PendingEvent)) if opts.events.is_some() => {
                 match next_event(&mut events, opts.events.as_deref().unwrap_or_default()) {
                     Some(line) => {
@@ -41,6 +48,12 @@ pub fn drive(vm: &mut VM<'static>, src: &str, name: Option<&str>, opts: &RunOpts
                     }
                     // A drained events file can never serve the wait, park terminally.
                     None => return park(vm, src, &SchedulerStatus::PendingEvent, opts),
+                }
+            }
+            // Native async host calls, drive the reactor then inject any finished results.
+            Err(VmErr::HostYield(SchedulerStatus::PendingHostCall)) if super::io::has_pending() => {
+                if !drive_host_calls(vm) {
+                    return park(vm, src, &SchedulerStatus::PendingHostCall, opts);
                 }
             }
             Err(VmErr::HostYield(status)) => return park(vm, src, &status, opts),
@@ -54,6 +67,48 @@ pub fn drive(vm: &mut VM<'static>, src: &str, name: Option<&str>, opts: &RunOpts
             }
         }
     }
+}
+
+// Advances the async runtime one step and injects finished host calls, false when nothing services it.
+fn drive_host_calls(vm: &mut VM<'static>) -> bool {
+    let drained = super::io::with(|net| {
+        // One reactor tick advances the fetch tasks, completions land in the shared buffer.
+        net.executor.poll();
+        core::mem::take(&mut net.completions.borrow_mut().done)
+    });
+    let Some(done) = drained else { return false };
+    if done.is_empty() {
+        // Nothing finished yet, block the thread on the reactor until an event wakes a task.
+        super::io::with(|net| net.reactor.tick(None));
+        return true;
+    }
+    for (id, result) in done {
+        match result {
+            Ok(json) => { let _ = vm.push_host_result_by_id(id, &json); }
+            Err(msg) => { vm.inject_host_error_by_id(id, VmErr::Raised(format!("RuntimeError: {msg}"))); }
+        }
+    }
+    true
+}
+
+// Advances the runtime and pushes any streamed events into the VM queue, false when unserviced.
+fn drive_events(vm: &mut VM<'static>) -> bool {
+    let drained = super::io::with(|net| {
+        net.executor.poll();
+        core::mem::take(&mut net.completions.borrow_mut().events)
+    });
+    let Some(events) = drained else { return false };
+    if events.is_empty() {
+        // No event yet, block on the reactor until a stream task wakes.
+        super::io::with(|net| net.reactor.tick(None));
+        return true;
+    }
+    for json in events {
+        if vm.push_event(&json).is_err() {
+            return false;
+        }
+    }
+    true
 }
 
 /* The park report, web-only waits point at --web, host-servable ones at their flag. */

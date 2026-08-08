@@ -1,22 +1,22 @@
 [
   {
-    "src": "body = fetch_text('https://httpbin.org/json')\nprint('slideshow' in body)",
-    "http_mocks": [{"url": "**/httpbin.org/json", "body": "{\"slideshow\":{\"title\":\"Sample\"}}"}],
+    "src": "print(fetch_text('{BASE}/text'))",
+    "output": ["hello from mock"]
+  },
+  {
+    "src": "resp = fetch('{BASE}/json')\nprint('\"status\":200' in resp and '\"ok\":true' in resp)",
     "output": ["True"]
   },
   {
-    "src": "resp = fetch('https://httpbin.org/uuid')\nprint('\"status\"' in resp)",
-    "http_mocks": [{"url": "**/httpbin.org/uuid", "body": "{\"uuid\":\"00000000-0000-0000-0000-000000000000\"}"}],
+    "src": "async def get(path):\n    return fetch_text('{BASE}' + path)\nprint(gather(get('/text'), get('/text'), get('/text')))",
+    "output": ["['hello from mock', 'hello from mock', 'hello from mock']"]
+  },
+  {
+    "src": "h = sse_open('{BASE}/sse', 'e')\nseen = []\nwhile len(seen) < 3:\n    ev = receive()\n    if '\"type\":\"message\"' in ev:\n        seen.append(ev)\nopen_state = sse_state(h)\nsse_close(h)\nprint('event 1' in seen[0], 'event 3' in seen[2], open_state == 1)",
+    "output": ["True True True"]
+  },
+  {
+    "src": "sock = ws_open('{WS_BASE}/ws', 'echo')\ngot = None\nwhile True:\n    ev = receive()\n    if '\"type\":\"open\"' in ev:\n        ws_send(sock, 'hello')\n    elif '\"type\":\"message\"' in ev:\n        got = 'hello' in ev\n        ws_close(sock)\n    elif '\"type\":\"close\"' in ev:\n        break\nprint(got)",
     "output": ["True"]
-  },
-  {
-    "src": "async def get(url):\n    return fetch_text(url)\nprint(gather(get('https://api.test/a'), get('https://api.test/b'), get('https://api.test/c')))",
-    "http_mocks": [{"url": "**/api.test/a", "body": "A"}, {"url": "**/api.test/b", "body": "B"}, {"url": "**/api.test/c", "body": "C"}],
-    "output": ["['A', 'B', 'C']"]
-  },
-  {
-    "src": "sock = ws_open('wss://echo.websocket.org', 'echo')\ngot = None\nwhile True:\n    ev = receive()\n    if '\"type\":\"open\"' in ev:\n        ws_send(sock, 'hello')\n    elif '\"type\":\"message\"' in ev:\n        got = 'echo'\n        ws_close(sock)\n    elif '\"type\":\"close\"' in ev:\n        break\nprint(got)",
-    "ws_mocks": [{"url": "**/echo.websocket.org/**", "echo": true}],
-    "output": ["echo"]
   }
 ]

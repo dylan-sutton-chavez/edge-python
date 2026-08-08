@@ -15,6 +15,7 @@ pub use math::*;
 pub use scheduler::*;
 
 /* Per-execution caps: recursion depth, op budget, heap quota. */
+#[derive(Clone, Copy)]
 pub struct Limits { pub calls: usize, pub ops: usize, pub heap: usize }
 
 impl Limits {

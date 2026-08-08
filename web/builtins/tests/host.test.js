@@ -32,6 +32,20 @@ const TYPES = {
     ".css": "text/css",
 };
 
+// Boots the network fixture shared with the native runner, its port fills the corpus placeholders.
+async function startMock() {
+    const bin = new URL(`../../../cli/target/debug/mock${Deno.build.os === "windows" ? ".exe" : ""}`, import.meta.url).pathname;
+    if (!existsSync(bin)) {
+        throw new Error(`need the mock server, build it first: cargo build --manifest-path cli/Cargo.toml --bin mock`);
+    }
+    const child = new Deno.Command(bin, { stdout: "piped" }).spawn();
+    // The fixture prints its port on the first stdout line.
+    const reader = child.stdout.getReader();
+    const line = new TextDecoder().decode((await reader.read()).value);
+    reader.releaseLock();
+    return { child, port: parseInt(line, 10) };
+}
+
 async function runCapability(cap) {
     const dir = `${ROOT}${cap}`;
     // Import the capability's `.py` entry when it has one, else the JS host module.
@@ -47,14 +61,23 @@ async function runCapability(cap) {
                 : { host: { [cap]: `/${cap}/src/index.js` } },
         );
 
-    const browser = await chromium.launch();
+    // The fixture serves from loopback, Chromium's Local Network Access guard would block the test page
+    // reaching it, so disable that check for the test browser (never shipped, only the CI Chromium).
+    const browser = await chromium.launch({ args: ["--disable-features=LocalNetworkAccessChecks,LocalNetworkAccessChecksWebSockets"] });
     const page = await browser.newPage();
     const errors = [];
     page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
     page.on("pageerror", (e) => errors.push(e.message));
 
-    /* Serve repo files from disk; synthesize the manifest. External CDNs (cdn.edgepython.com) pass through. */
-    await page.route("**/*", (route) => {
+    // Network cases hit the fixture over loopback, its base and ws base replace the corpus placeholders.
+    const needsMock = cases.some((c) => c.src.includes("{BASE}") || c.src.includes("{WS_BASE}"));
+    const mock = needsMock ? await startMock() : null;
+    const base = mock ? `http://127.0.0.1:${mock.port}` : "";
+    const wsBase = base.replace("http://", "ws://");
+
+    /* Serve repo files from disk; synthesize the manifest. The fixture host is left unrouted so its real
+       responses, including sse keep-alive streams, reach the browser directly rather than buffered. */
+    await page.route((url) => url.host === "localhost" || url.host === CDN_HOST, (route) => {
         const url = new URL(route.request().url());
         // In-tree runtime first, CI must test the checkout not the deploy.
         if (url.host === CDN_HOST && url.pathname.startsWith("/web/")) {
@@ -65,7 +88,7 @@ async function runCapability(cap) {
                 return route.continue();
             }
         }
-        if (url.host !== "localhost") return route.continue();
+        if (url.host === CDN_HOST) return route.continue();
         if (url.pathname === MANIFEST) return route.fulfill({ contentType: "application/json", body: manifest });
         const path = ROOT + url.pathname.slice(1);
         try {
@@ -75,28 +98,6 @@ async function runCapability(cap) {
             return route.fulfill({ status: 404 });
         }
     });
-
-    /* Per-case mocks; uninstalled after each case so they don't leak into later ones. */
-    const httpMocks = [];
-    const installMocks = async (c) => {
-        for (const m of c.http_mocks ?? []) {
-            const handler = (route) => route.fulfill({
-                status: m.status ?? 200,
-                contentType: m.contentType ?? "application/json",
-                body: m.body ?? "",
-            });
-            await page.route(m.url, handler);
-            httpMocks.push({ url: m.url, handler });
-        }
-        for (const m of c.ws_mocks ?? []) {
-            await page.routeWebSocket(m.url, (ws) => {
-                if (m.echo) ws.onMessage((message) => ws.send(message));
-            });
-        }
-    };
-    const uninstallMocks = async () => {
-        for (const { url, handler } of httpMocks.splice(0)) await page.unroute(url, handler);
-    };
 
     const failures = [];
     try {
@@ -117,8 +118,8 @@ async function runCapability(cap) {
         }, MANIFEST);
 
         for (const [i, c] of cases.entries()) {
-            await installMocks(c);
-            const src = `from ${cap} import *\n${c.src}`;
+            const body = c.src.replaceAll("{BASE}", base).replaceAll("{WS_BASE}", wsBase);
+            const src = `from ${cap} import *\n${body}`;
             const result = await page.evaluate(async ({ s, html }) => {
                 document.body.innerHTML = html ?? "";
                 localStorage.clear();
@@ -136,7 +137,6 @@ async function runCapability(cap) {
                 const output = globalThis.chunks.map((c) => c.replace(/\n$/, ""));
                 return { output, error: out || null };
             }, { s: src, html: c.html });
-            await uninstallMocks();
 
             if (c.error) {
                 if (!result.error || !result.error.includes(c.error)) {
@@ -157,6 +157,10 @@ async function runCapability(cap) {
         if (errors.length) failures.push(`[${cap}] console errors: ${errors.join(" | ")}`);
     } finally {
         await browser.close();
+        if (mock) {
+            mock.child.kill();
+            await mock.child.status;
+        }
     }
 
     if (failures.length) throw new Error("\n" + failures.join("\n"));

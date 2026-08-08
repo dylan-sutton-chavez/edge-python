@@ -24,6 +24,9 @@ pub mod util {
     pub mod hash;
     pub mod fstr;
     pub mod sha256;
+    /* RFC 6455 codec, shared by the native websocket client and the test mock. */
+    #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+    pub mod ws;
 }
 
 /* NaN-boxed values and the mark-and-sweep heap; the layer both the frontend and the VM build on. */
