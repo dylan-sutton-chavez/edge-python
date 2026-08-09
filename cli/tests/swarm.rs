@@ -13,7 +13,7 @@ struct Case {
     // Lines fed to the ingress after boot, only for cases that listen.
     #[serde(default)]
     publish: Vec<String>,
-    // Substring the /status body must contain, only for cases with a control port.
+    // Substring the /stats body must contain, only for cases with a control port.
     #[serde(default)]
     expect_status: Option<String>,
     // POSTs against the control port, each reply body must carry expect as a substring.
@@ -86,7 +86,7 @@ fn run_batch(path: &std::path::Path) -> Vec<String> {
     String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect()
 }
 
-// A server swarm stays alive, publish feeds its ingress, then output, /status and posts are read.
+// A server swarm stays alive, publish feeds its ingress, then output, /stats and posts are read.
 // The manifest is copied into a tempdir so its default wal lands there, never in the repo.
 fn run_server(path: &std::path::Path, listen: &str, publish: &[String], control: Option<&str>, posts: &[Post]) -> (Vec<String>, String, Vec<String>) {
     let addr = listen.strip_prefix("tcp://").unwrap_or(listen);
@@ -167,11 +167,11 @@ fn eval_group_runs_a_bundled_project_over_the_wire() {
     assert_eq!(got, vec!["bundled and run"], "stdout was {got:?}, stderr {err:?}");
 }
 
-// Fetches /status over a bare HTTP GET, returning just the response body.
+// Fetches /stats over a bare HTTP GET, returning just the response body.
 fn get_status(addr: &str) -> String {
     use std::io::Read;
     let Ok(mut sock) = TcpStream::connect(addr) else { return String::new() };
-    let _ = write!(sock, "GET /status HTTP/1.0\r\nHost: {addr}\r\n\r\n");
+    let _ = write!(sock, "GET /stats HTTP/1.0\r\nHost: {addr}\r\n\r\n");
     let mut resp = String::new();
     let _ = sock.read_to_string(&mut resp);
     resp.split_once("\r\n\r\n").map(|(_, body)| body.to_string()).unwrap_or_default()

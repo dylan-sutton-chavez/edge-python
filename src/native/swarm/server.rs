@@ -32,7 +32,7 @@ impl Stats {
         self.dead.fetch_add(1, Ordering::Relaxed);
     }
 
-    // Renders the counters as a flat JSON object for the /status route.
+    // Renders the counters as a flat JSON object for the /stats route.
     pub fn to_json(&self) -> String {
         format!(
             "{{\"nodes\":{},\"active\":{},\"idle\":{},\"pending\":{},\"crashes\":{},\"dead\":{}}}",

@@ -163,7 +163,7 @@ const MAX_BODY: u64 = 16 << 20;
 
 type HttpResp = tiny_http::Response<std::io::Cursor<Vec<u8>>>;
 
-// Serves counters at /status, publishing at /send/<group> and eval replies at /run/<group>.
+// Serves counters at /stats, publishing at /pub/<group> and eval replies at /eval/<group>.
 fn spawn_control(addr: &str, tx: std::sync::mpsc::Sender<Message>, wal: std::sync::Arc<std::sync::Mutex<compiler::native::swarm::Wal>>, groups: Vec<String>, eval: Vec<String>, stats: std::sync::Arc<compiler::native::swarm::Stats>) {
     let Ok(server) = tiny_http::Server::http(addr) else {
         eprintln!("warning: cannot bind control endpoint '{addr}'");
@@ -173,17 +173,14 @@ fn spawn_control(addr: &str, tx: std::sync::mpsc::Sender<Message>, wal: std::syn
         for mut req in server.incoming_requests() {
             let url = req.url().to_string();
             let post = *req.method() == tiny_http::Method::Post;
-            let resp = if url == "/status" {
-                json(stats.to_json())
-            } else if post && let Some(group) = url.strip_prefix("/run/") {
-                run_eval(group, &mut req, &tx, &eval)
-            } else if post && let Some(group) = url.strip_prefix("/send/") {
-                match read_body(&mut req) {
-                    Ok(body) => publish(group, body, &tx, &wal, &groups),
+            let resp = match (post, url.as_str()) {
+                (_, "/stats") => json(stats.to_json()),
+                (true, p) if let Some(g) = p.strip_prefix("/eval/") => run_eval(g, &mut req, &tx, &eval),
+                (true, p) if let Some(g) = p.strip_prefix("/pub/") => match read_body(&mut req) {
+                    Ok(body) => publish(g, body, &tx, &wal, &groups),
                     Err(resp) => resp,
-                }
-            } else {
-                not_found()
+                },
+                _ => not_found(),
             };
             let _ = req.respond(resp);
         }

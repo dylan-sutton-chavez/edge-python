@@ -21,11 +21,11 @@ expect:
   - "got: beta"
   - "got: gamma"
 
-# Substring the /status body must contain once the swarm has settled.
+# Substring the /stats body must contain once the swarm has settled.
 expect_status: "\"nodes\":1"
 
-# A POST to /send/<group> queues a message over HTTP, the echoer prints it like a tcp one.
+# A POST to /pub/<group> queues a message over HTTP, the echoer prints it like a tcp one.
 post:
-  - path: "/send/echoer"
+  - path: "/pub/echoer"
     body: "gamma"
     expect: "{\"ok\":true}"
