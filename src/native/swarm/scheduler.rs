@@ -1,4 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+
+use slab::Slab;
 
 use crate::parser::SSAChunk;
 use crate::vm::Limits;
@@ -19,7 +21,12 @@ struct GroupState {
     limits: Limits,
     preempt: usize,
     out: Out,
-    nodes: Vec<Node>,
+    // Stable keys survive removal, so the work queues below never dangle.
+    nodes: Slab<Node>,
+    // Keys with work to run, drained each tick instead of scanning every node.
+    ready: VecDeque<usize>,
+    // Keys parked in receive(), popped first when a message needs a node.
+    idle_free: Vec<usize>,
 }
 
 // The single-threaded cooperative loop, one instance owns every node in the swarm.
@@ -133,7 +140,7 @@ impl Scheduler {
         let mut nodes = 0;
         let mut idle = 0;
         for g in &self.groups {
-            for n in &g.nodes {
+            for (_, n) in &g.nodes {
                 nodes += 1;
                 if n.idle {
                     idle += 1;
@@ -148,35 +155,48 @@ impl Scheduler {
         let msgs = core::mem::take(&mut self.pending);
         for m in msgs {
             let Some(&gi) = self.by_name.get(&m.group) else { continue };
-            if let Some(ni) = self.groups[gi].pick() {
-                self.groups[gi].nodes[ni].deliver(m);
+            let g = &mut self.groups[gi];
+            if let Some(key) = g.pick() {
+                g.nodes[key].deliver(m);
+                g.ready.push_back(key);
             }
         }
     }
 
-    // Runs every runnable node once, collecting what they send, false when none progressed.
+    // Runs each queued node once, collecting what they send, false when none progressed.
     fn tick(&mut self) -> bool {
         let mut progressed = false;
         for gi in 0..self.groups.len() {
-            for ni in 0..self.groups[gi].nodes.len() {
-                let node = &self.groups[gi].nodes[ni];
-                // Only run a node with work, fresh boot or delivered mail.
+            for _ in 0..self.groups[gi].ready.len() {
+                let Some(key) = self.groups[gi].ready.pop_front() else { break };
+                let Some(node) = self.groups[gi].nodes.get(key) else { continue };
                 if node.done || (node.mailbox.is_empty() && node.ran) {
                     continue;
                 }
                 progressed = true;
                 let src = self.groups[gi].source.clone();
-                let step = self.groups[gi].nodes[ni].step(&src);
+                let step = self.groups[gi].nodes[key].step(&src);
                 self.collect_sends();
-                if let Step::Failed(tb, msg) = step {
-                    self.crashes.push(tb);
-                    self.handle_crash(gi, msg);
-                }
+                self.settle(gi, key, step);
             }
-            self.groups[gi].nodes.retain(|n| !n.done);
         }
         self.publish_stats();
         progressed
+    }
+
+    // Re-queues a node by its step outcome, retiring it from the slab on a crash.
+    fn settle(&mut self, gi: usize, key: usize, step: Step) {
+        let g = &mut self.groups[gi];
+        match step {
+            Step::Failed(tb, msg) => {
+                g.nodes.remove(key);
+                self.crashes.push(tb);
+                self.handle_crash(gi, msg);
+            }
+            _ if g.nodes[key].done => { g.nodes.remove(key); }
+            _ if g.nodes[key].idle => g.idle_free.push(key),
+            _ => g.ready.push_back(key),
+        }
     }
 
     // Retries a crashed message on another node up to the group's retry count, else drops it dead.
@@ -219,7 +239,9 @@ impl GroupState {
             limits: g.limits,
             preempt: g.preempt,
             out: g.out,
-            nodes: Vec::new(),
+            nodes: Slab::new(),
+            ready: VecDeque::new(),
+            idle_free: Vec::new(),
         })
     }
 
@@ -236,22 +258,23 @@ impl GroupState {
             }
             None => Node::eval(self.dir.clone(), self.limits, self.preempt),
         };
-        self.nodes.push(node);
-        self.nodes.len() - 1
+        let key = self.nodes.insert(node);
+        self.ready.push_back(key);
+        key
     }
 
     /* Picks a node for a message, an idle one first, else a fresh spawn under the ceiling,
        else the least-loaded live node when the group is saturated. */
     fn pick(&mut self) -> Option<usize> {
-        if let Some(i) = (0..self.nodes.len()).find(|&i| self.nodes[i].idle && !self.nodes[i].done) {
-            return Some(i);
+        while let Some(key) = self.idle_free.pop() {
+            if self.nodes.get(key).is_some_and(|n| n.idle && !n.done) {
+                return Some(key);
+            }
         }
         if self.nodes.len() < self.max {
             return Some(self.spawn());
         }
-        (0..self.nodes.len())
-            .filter(|&i| !self.nodes[i].done)
-            .min_by_key(|&i| self.nodes[i].mailbox.len())
+        self.nodes.iter().filter(|(_, n)| !n.done).min_by_key(|(_, n)| n.mailbox.len()).map(|(k, _)| k)
     }
 }
 
