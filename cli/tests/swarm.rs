@@ -110,6 +110,8 @@ fn run_server(path: &std::path::Path, listen: &str, publish: &[String], control:
         Some(c) => posts.iter().map(|p| post_eval(c, &p.path, &p.body)).collect(),
         None => Vec::new(),
     };
+    // A /send is accepted once queued, give the workers a beat to print before the kill.
+    std::thread::sleep(Duration::from_millis(400));
     let _ = child.kill();
     let out = child.wait_with_output().unwrap();
     let _ = std::fs::remove_dir_all(&scratch);

@@ -79,16 +79,14 @@ runtime:
   max_nodes: 1000000   # ceiling across every group
 ```
 
-A client connects and sends one `<group> <body>` line per message. The body reaches a worker of that group through `receive()`.
+A client connects and sends one `<group> <body>` line per message over tcp, or posts the body to `/send/<group>` on the control address when http fits better. Either way the body reaches a worker of that group through `receive()`.
 
-```python
-import socket
-
-sock = socket.create_connection(("127.0.0.1", 7777))
-sock.sendall(b"worker hello\n")   # delivered to the worker group
+```bash
+$ curl -X POST localhost:9090/send/worker -d 'hello'
+{"ok":true}   # 202, fire and forget like the tcp line
 ```
 
-A `durable:` path logs every message and replays what was unprocessed on restart, so a crash loses nothing. A `control:` address serves live counts at `/status`, and the response itself proves the pool is alive. It also answers eval runs at `/run/<group>`, covered in untrusted code below.
+A `durable:` path logs every message and replays what was unprocessed on restart, so a crash loses nothing. A `control:` address serves live counts at `/status`, and the response itself proves the pool is alive. It also takes published messages at `/send/<group>` and answers eval runs at `/run/<group>`, covered in untrusted code below.
 
 ```bash
 $ curl localhost:9090/status

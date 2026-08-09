@@ -117,11 +117,12 @@ pub fn run(path: &Path) -> Result<()> {
                 (c.strip_prefix("tcp://").unwrap_or(c).to_string(), std::sync::Arc::new(compiler::native::swarm::Stats::default()))
             });
             let stats = control.as_ref().map(|(_, s)| s.clone());
-            // The eval groups the control endpoint answers, captured before config moves into serve.
+            // The groups the control endpoint answers, captured before config moves into serve.
             let eval: Vec<String> = config.groups.iter().filter(|g| g.eval).map(|g| g.name.clone()).collect();
-            compiler::native::swarm::serve(config, addr, &wal, stats, move |tx| {
+            let names: Vec<String> = config.groups.iter().map(|g| g.name.clone()).collect();
+            compiler::native::swarm::serve(config, addr, &wal, stats, move |tx, wal| {
                 if let Some((addr, stats)) = control {
-                    spawn_control(&addr, tx, eval, stats);
+                    spawn_control(&addr, tx, wal, names, eval, stats);
                 }
             })
         }
@@ -157,8 +158,13 @@ fn resolve_schedulers(value: Option<&serde_yaml_ng::Value>) -> usize {
     }
 }
 
-// Serves live counters at /status and eval replies at /run/<group>, a response also proves liveness.
-fn spawn_control(addr: &str, tx: std::sync::mpsc::Sender<Message>, eval: Vec<String>, stats: std::sync::Arc<compiler::native::swarm::Stats>) {
+// Caps a request body, an eval bundle can be a few MB of base64.
+const MAX_BODY: u64 = 16 << 20;
+
+type HttpResp = tiny_http::Response<std::io::Cursor<Vec<u8>>>;
+
+// Serves counters at /status, publishing at /send/<group> and eval replies at /run/<group>.
+fn spawn_control(addr: &str, tx: std::sync::mpsc::Sender<Message>, wal: std::sync::Arc<std::sync::Mutex<compiler::native::swarm::Wal>>, groups: Vec<String>, eval: Vec<String>, stats: std::sync::Arc<compiler::native::swarm::Stats>) {
     let Ok(server) = tiny_http::Server::http(addr) else {
         eprintln!("warning: cannot bind control endpoint '{addr}'");
         return;
@@ -166,26 +172,46 @@ fn spawn_control(addr: &str, tx: std::sync::mpsc::Sender<Message>, eval: Vec<Str
     std::thread::spawn(move || {
         for mut req in server.incoming_requests() {
             let url = req.url().to_string();
+            let post = *req.method() == tiny_http::Method::Post;
             let resp = if url == "/status" {
                 json(stats.to_json())
-            } else if *req.method() == tiny_http::Method::Post
-                && let Some(group) = url.strip_prefix("/run/") {
+            } else if post && let Some(group) = url.strip_prefix("/run/") {
                 run_eval(group, &mut req, &tx, &eval)
+            } else if post && let Some(group) = url.strip_prefix("/send/") {
+                match read_body(&mut req) {
+                    Ok(body) => publish(group, body, &tx, &wal, &groups),
+                    Err(resp) => resp,
+                }
             } else {
-                tiny_http::Response::from_string("not found").with_status_code(404)
+                not_found()
             };
             let _ = req.respond(resp);
         }
     });
 }
 
-// Answers an eval run, the request body is a snippet or an EDGEPKG bundle and the reply its print.
-fn run_eval(group: &str, req: &mut tiny_http::Request, tx: &std::sync::mpsc::Sender<Message>, eval: &[String]) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
-    if !eval.iter().any(|g| g == group) {
-        return tiny_http::Response::from_string("not found").with_status_code(404);
+// Queues a message for a group, appended to the wal first like the tcp ingress does.
+fn publish(group: &str, body: String, tx: &std::sync::mpsc::Sender<Message>, wal: &std::sync::Arc<std::sync::Mutex<compiler::native::swarm::Wal>>, groups: &[String]) -> HttpResp {
+    if !groups.iter().any(|g| g == group) {
+        return not_found();
     }
-    let mut body = String::new();
-    let _ = req.as_reader().read_to_string(&mut body);
+    let msg = Message { group: group.to_string(), body, attempts: 0, reply: None };
+    wal.lock().unwrap().append(&msg);
+    if tx.send(msg).is_err() {
+        return tiny_http::Response::from_string("swarm is down").with_status_code(503);
+    }
+    json("{\"ok\":true}".to_string()).with_status_code(202)
+}
+
+// Answers an eval run, the request body is a snippet or an EDGEPKG bundle and the reply its print.
+fn run_eval(group: &str, req: &mut tiny_http::Request, tx: &std::sync::mpsc::Sender<Message>, eval: &[String]) -> HttpResp {
+    if !eval.iter().any(|g| g == group) {
+        return not_found();
+    }
+    let body = match read_body(req) {
+        Ok(body) => body,
+        Err(resp) => return resp,
+    };
     let (reply, result) = std::sync::mpsc::channel();
     let msg = Message { group: group.to_string(), body, attempts: 0, reply: Some(reply) };
     if tx.send(msg).is_err() {
@@ -196,6 +222,21 @@ fn run_eval(group: &str, req: &mut tiny_http::Request, tx: &std::sync::mpsc::Sen
         Ok(Err(e)) => json(format!("{{\"ok\":false,\"error\":{}}}", json_str(&e))).with_status_code(500),
         Err(_) => tiny_http::Response::from_string("eval timed out").with_status_code(504),
     }
+}
+
+// Reads a request body up to the cap, 413 when it spills over.
+fn read_body(req: &mut tiny_http::Request) -> Result<String, HttpResp> {
+    use std::io::Read;
+    let mut body = String::new();
+    let _ = req.as_reader().take(MAX_BODY + 1).read_to_string(&mut body);
+    if body.len() as u64 > MAX_BODY {
+        return Err(tiny_http::Response::from_string("body too large").with_status_code(413));
+    }
+    Ok(body)
+}
+
+fn not_found() -> HttpResp {
+    tiny_http::Response::from_string("not found").with_status_code(404)
 }
 
 // A JSON response with the content type set.
