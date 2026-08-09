@@ -15,7 +15,8 @@ enum Mode {
 // One live node plus the mailbox its work drains from.
 pub struct Node {
     mode: Mode,
-    pub mailbox: Vec<Message>,
+    // A deque so draining the oldest message is O(1) instead of shifting the whole buffer.
+    pub mailbox: std::collections::VecDeque<Message>,
     pub done: bool,
     // False until the first step, a fresh fixed node runs once to reach its first receive().
     pub ran: bool,
@@ -38,17 +39,17 @@ pub enum Step {
 impl Node {
     // A fixed node wraps a booted VM sharing the group chunk.
     pub fn fixed(vm: VM<'static>) -> Self {
-        Node { mode: Mode::Fixed(Box::new(vm)), mailbox: Vec::new(), done: false, ran: false, idle: false, in_flight: None }
+        Node { mode: Mode::Fixed(Box::new(vm)), mailbox: std::collections::VecDeque::new(), done: false, ran: false, idle: false, in_flight: None }
     }
 
     // An eval node holds only the settings to boot a fresh VM per snippet.
     pub fn eval(dir: String, limits: Limits, preempt: usize) -> Self {
-        Node { mode: Mode::Eval { dir, limits, preempt }, mailbox: Vec::new(), done: false, ran: false, idle: false, in_flight: None }
+        Node { mode: Mode::Eval { dir, limits, preempt }, mailbox: std::collections::VecDeque::new(), done: false, ran: false, idle: false, in_flight: None }
     }
 
     // Delivers a message to the mailbox, waking the node from its idle wait.
     pub fn deliver(&mut self, msg: Message) {
-        self.mailbox.push(msg);
+        self.mailbox.push_back(msg);
         self.idle = false;
     }
 
@@ -64,9 +65,9 @@ impl Node {
     fn step_fixed(&mut self, src: &str) -> Step {
         let Mode::Fixed(vm) = &mut self.mode else { unreachable!() };
         loop {
-            if let Some(msg) = self.mailbox.first()
+            if let Some(msg) = self.mailbox.front()
                 && vm.push_event(&msg.body).is_ok() {
-                self.in_flight = Some(self.mailbox.remove(0));
+                self.in_flight = self.mailbox.pop_front();
             }
             let result = { let _guard = VmGuard::new(vm); vm.run() };
             match result {
@@ -101,8 +102,7 @@ impl Node {
     fn step_eval(&mut self) -> Step {
         let Mode::Eval { dir, limits, preempt } = &self.mode else { unreachable!() };
         let (dir, limits, preempt) = (dir.clone(), *limits, *preempt);
-        while let Some(msg) = self.mailbox.first().cloned() {
-            self.mailbox.remove(0);
+        while let Some(msg) = self.mailbox.pop_front() {
             // A bundled project rides base64 behind a marker, unpacked to an isolated temp dir.
             let (source, base, _hold) = match unbundle(&msg.body) {
                 // The resolver walks up from `{base}packages.json`, so the temp dir base needs a trailing slash.
