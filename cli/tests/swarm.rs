@@ -16,8 +16,19 @@ struct Case {
     // Substring the /status body must contain, only for cases with a control port.
     #[serde(default)]
     expect_status: Option<String>,
+    // POSTs against the control port, each reply body must carry expect as a substring.
+    #[serde(default)]
+    post: Vec<Post>,
     #[serde(default)]
     runtime: Runtime,
+}
+
+// One POST to the control port, path and body go out, expect matches the reply.
+#[derive(serde::Deserialize)]
+struct Post {
+    path: String,
+    body: String,
+    expect: String,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -44,9 +55,9 @@ fn swarm_cases_match_their_expected_output() {
         let text = std::fs::read_to_string(&path).unwrap();
         let case: Case = serde_yaml_ng::from_str(&text).unwrap();
 
-        let (got, status) = match &case.runtime.listen {
-            Some(addr) => run_server(&path, addr, &case.publish, case.runtime.control.as_deref()),
-            None => (run_batch(&path), String::new()),
+        let (got, status, replies) = match &case.runtime.listen {
+            Some(addr) => run_server(&path, addr, &case.publish, case.runtime.control.as_deref(), &case.post),
+            None => (run_batch(&path), String::new(), Vec::new()),
         };
         // Order across groups is not fixed, compare as a sorted multiset of lines.
         let (mut got, mut expected) = (got, case.expect.clone());
@@ -59,6 +70,11 @@ fn swarm_cases_match_their_expected_output() {
             && !status.contains(want.as_str()) {
             failures.push(format!("[{name}] status missing {want:?}, got {status:?}"));
         }
+        for (i, (p, reply)) in case.post.iter().zip(&replies).enumerate() {
+            if !reply.contains(p.expect.as_str()) {
+                failures.push(format!("[{name}] post #{i} reply missing {:?}, got {reply:?}", p.expect));
+            }
+        }
     }
     assert!(ran > 0, "no swarm cases found");
     assert!(failures.is_empty(), "{} swarm case(s) failed:\n{}", failures.len(), failures.join("\n"));
@@ -70,9 +86,9 @@ fn run_batch(path: &std::path::Path) -> Vec<String> {
     String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect()
 }
 
-// A server swarm stays alive, publish feeds its ingress, then output and /status are read.
+// A server swarm stays alive, publish feeds its ingress, then output, /status and posts are read.
 // The manifest is copied into a tempdir so its default wal lands there, never in the repo.
-fn run_server(path: &std::path::Path, listen: &str, publish: &[String], control: Option<&str>) -> (Vec<String>, String) {
+fn run_server(path: &std::path::Path, listen: &str, publish: &[String], control: Option<&str>, posts: &[Post]) -> (Vec<String>, String, Vec<String>) {
     let addr = listen.strip_prefix("tcp://").unwrap_or(listen);
     let scratch = std::env::temp_dir().join(format!("edge-swarm-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&scratch);
@@ -88,11 +104,27 @@ fn run_server(path: &std::path::Path, listen: &str, publish: &[String], control:
         let _ = sock.flush();
     }
     std::thread::sleep(Duration::from_millis(400));
-    let status = control.map(|c| get_status(c.strip_prefix("tcp://").unwrap_or(c))).unwrap_or_default();
+    let control_addr = control.map(|c| c.strip_prefix("tcp://").unwrap_or(c));
+    let status = control_addr.map(get_status).unwrap_or_default();
+    let replies = match control_addr {
+        Some(c) => posts.iter().map(|p| post_eval(c, &p.path, &p.body)).collect(),
+        None => Vec::new(),
+    };
     let _ = child.kill();
     let out = child.wait_with_output().unwrap();
     let _ = std::fs::remove_dir_all(&scratch);
-    (String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect(), status)
+    (String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect(), status, replies)
+}
+
+// POSTs the body to a control path over a bare HTTP request, returning just the reply body.
+fn post_eval(addr: &str, path: &str, body: &str) -> String {
+    use std::io::Read;
+    let Ok(mut sock) = TcpStream::connect(addr) else { return String::new() };
+    let req = format!("POST {path} HTTP/1.0\r\nHost: {addr}\r\nContent-Length: {}\r\n\r\n{body}", body.len());
+    let _ = sock.write_all(req.as_bytes());
+    let mut resp = String::new();
+    let _ = sock.read_to_string(&mut resp);
+    resp.split_once("\r\n\r\n").map(|(_, body)| body.to_string()).unwrap_or_default()
 }
 
 /* An untrusted client sends a whole project bundle to an eval group, which runs it in isolation. */

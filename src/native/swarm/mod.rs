@@ -16,8 +16,10 @@ pub fn run(config: SwarmConfig, threads: usize) -> i32 {
 }
 
 /* Runs the swarm as a live server, an ingress on `addr` feeds it and the wal at `wal_path`
-   survives restarts by replaying unprocessed messages. `stats` publishes live counts when set. */
-pub fn serve(config: SwarmConfig, addr: &str, wal_path: &Path, stats: Option<Arc<Stats>>) -> i32 {
+   survives restarts by replaying unprocessed messages. `stats` publishes live counts when set.
+   `on_ingress` receives the queue sender so the caller can feed messages of its own, the cli
+   uses it for the control endpoint that answers eval runs. */
+pub fn serve(config: SwarmConfig, addr: &str, wal_path: &Path, stats: Option<Arc<Stats>>, on_ingress: impl FnOnce(std::sync::mpsc::Sender<Message>)) -> i32 {
     let (wal, recovered) = match server::Wal::open(wal_path) {
         Ok(pair) => pair,
         Err(e) => { eprintln!("error: cannot open wal '{}': {e}", wal_path.display()); return 1; }
@@ -32,6 +34,7 @@ pub fn serve(config: SwarmConfig, addr: &str, wal_path: &Path, stats: Option<Arc
     for m in recovered {
         let _ = tx.send(m);
     }
+    on_ingress(tx.clone());
     let wal = Arc::new(Mutex::new(wal));
     if let Err(e) = server::spawn_ingress(addr, tx, wal.clone()) {
         eprintln!("error: cannot bind ingress '{addr}': {e}");

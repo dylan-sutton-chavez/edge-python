@@ -13,11 +13,19 @@ const MAX_FETCH_BYTES: u64 = 64 << 20;
 pub struct FileResolver {
     dir: String,
     packages: Option<String>,
+    // Set for untrusted eval compiles, the swarm module is withheld from them.
+    untrusted: bool,
 }
 
 impl FileResolver {
     pub fn new(dir: &str, packages: Option<&str>) -> Self {
-        Self { dir: dir.to_string(), packages: packages.map(String::from) }
+        Self { dir: dir.to_string(), packages: packages.map(String::from), untrusted: false }
+    }
+
+    // Marks the compile as untrusted, an eval snippet cannot orchestrate swarm groups.
+    pub fn untrusted(mut self) -> Self {
+        self.untrusted = true;
+        self
     }
 }
 
@@ -43,7 +51,7 @@ impl Resolver for FileResolver {
     }
 
     fn child(&self, spec: &str) -> Box<dyn Resolver> {
-        Box::new(FileResolver { dir: dir_of(spec).to_string(), packages: self.packages.clone() })
+        Box::new(FileResolver { dir: dir_of(spec).to_string(), packages: self.packages.clone(), untrusted: self.untrusted })
     }
 }
 
@@ -53,6 +61,9 @@ impl FileResolver {
         if let Some((dir, target)) = self.lookup_bare(name, start_dir)? {
             let canonical = join_relative(&dir, &target);
             return self.resolve_canonical(&canonical);
+        }
+        if self.untrusted && name == "swarm" {
+            return Err("module 'swarm' is not available to untrusted eval runs".to_string());
         }
         if let Some(resolved) = super::builtins::resolve(name) {
             return Ok(resolved);

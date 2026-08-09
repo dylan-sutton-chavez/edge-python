@@ -103,14 +103,18 @@ impl Node {
         let Mode::Eval { dir, limits, preempt } = &self.mode else { unreachable!() };
         let (dir, limits, preempt) = (dir.clone(), *limits, *preempt);
         while let Some(msg) = self.mailbox.pop_front() {
+            if msg.reply.is_some() {
+                super::scheduler::capture_begin();
+            }
+            let mut failed = None;
             // A bundled project rides base64 behind a marker, unpacked to an isolated temp dir.
             let (source, base, _hold) = match unbundle(&msg.body) {
                 // The resolver walks up from `{base}packages.json`, so the temp dir base needs a trailing slash.
                 Some((src, tmp)) => { let p = format!("{}/", tmp.path().to_string_lossy()); (src, p, Some(tmp)) }
                 None => (msg.body.clone(), dir.clone(), None),
             };
-            match crate::native::parse_source(&source, &base, None) {
-                Err(_) => continue,
+            match crate::native::parse_eval(&source, &base, None) {
+                Err(e) => failed = Some(e),
                 Ok(chunk) => {
                     let chunk: Box<crate::parser::SSAChunk> = Box::new(chunk);
                     // SAFETY the chunk outlives the vm here, both are dropped at the end of this block.
@@ -124,13 +128,23 @@ impl Node {
                         let result = { let _guard = VmGuard::new(&mut vm); vm.run() };
                         match result {
                             Err(VmErr::HostYield(SchedulerStatus::Preempted)) => continue,
-                            Err(VmErr::HostYield(_)) => break,
-                            _ => break,
+                            Err(VmErr::HostYield(_)) | Ok(_) => break,
+                            Err(e) => {
+                                failed = Some(e.render_traceback(&source, vm.error_pos(), None, vm.call_stack_frames(), vm.function_names_ref()));
+                                break;
+                            }
                         }
                     }
                     // vm dropped before chunk, then chunk dropped, no leak.
                     drop(vm);
                 }
+            }
+            if let Some(reply) = msg.reply {
+                let out = super::scheduler::capture_take();
+                let _ = reply.send(match failed {
+                    Some(e) => Err(e),
+                    None => Ok(out),
+                });
             }
         }
         self.idle = true;

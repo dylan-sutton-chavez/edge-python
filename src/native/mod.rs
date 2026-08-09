@@ -40,8 +40,20 @@ pub(crate) fn now_ns() -> u64 {
 
 /* Lex and parse with the disk resolver, Err is rendered diagnostics. */
 pub fn parse_source(src: &str, dir: &str, packages: Option<&str>) -> Result<SSAChunk, String> {
+    parse(src, dir, packages, false)
+}
+
+/* Parses untrusted eval code, the resolver withholds the swarm module from it. */
+pub fn parse_eval(src: &str, dir: &str, packages: Option<&str>) -> Result<SSAChunk, String> {
+    parse(src, dir, packages, true)
+}
+
+fn parse(src: &str, dir: &str, packages: Option<&str>, untrusted: bool) -> Result<SSAChunk, String> {
     let (tokens, lex_errs) = lex(src);
-    let r = FileResolver::new(dir, packages);
+    let mut r = FileResolver::new(dir, packages);
+    if untrusted {
+        r = r.untrusted();
+    }
     let mut p = Parser::with_resolver(src, tokens.into_iter(), Box::new(r));
     for e in lex_errs {
         p.errors.push(Diagnostic { start: e.start, end: e.end, msg: e.msg.into() });

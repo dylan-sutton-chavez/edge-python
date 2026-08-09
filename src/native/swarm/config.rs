@@ -38,4 +38,6 @@ pub struct Message {
     pub body: String,
     // Failed delivery attempts so far, a retrying group drops it past its retry count.
     pub attempts: usize,
+    // A live caller waiting on the result, set only by the control endpoint for eval runs.
+    pub reply: Option<std::sync::mpsc::Sender<Result<String, String>>>,
 }

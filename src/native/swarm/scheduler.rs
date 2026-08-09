@@ -49,7 +49,7 @@ impl Scheduler {
         let mut pending = Vec::new();
         for g in config.groups {
             by_name.insert(g.name.clone(), groups.len());
-            pending.extend(g.inbox.iter().map(|m| Message { group: m.group.clone(), body: m.body.clone(), attempts: 0 }));
+            pending.extend(g.inbox.iter().map(|m| Message { group: m.group.clone(), body: m.body.clone(), attempts: 0, reply: None }));
             groups.push(GroupState::boot(g, config.max_nodes)?);
         }
         Ok(Scheduler { groups, by_name, pending, crashes: Vec::new(), router: None, stats: None })
@@ -213,7 +213,7 @@ impl Scheduler {
     // Drains what the nodes just sent, routing cross-shard groups out and keeping local ones.
     fn collect_sends(&mut self) {
         for out in crate::native::builtins::swarm::drain_outbox() {
-            let msg = Message { group: out.group, body: out.body, attempts: 0 };
+            let msg = Message { group: out.group, body: out.body, attempts: 0, reply: None };
             match &self.router {
                 Some(r) if !self.by_name.contains_key(&msg.group) => r.route(msg),
                 _ => self.pending.push(msg),
@@ -287,8 +287,32 @@ fn wire_output(vm: &mut crate::vm::VM<'static>, out: &Out) {
     }
 }
 
+thread_local! {
+    // Set while an eval run replies to a caller, its print accrues here instead of stdout.
+    static CAPTURE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+// Starts accruing print output for the eval run about to execute on this thread.
+pub(super) fn capture_begin() {
+    CAPTURE.with(|c| *c.borrow_mut() = Some(String::new()));
+}
+
+// Drains the accrued output, restoring plain stdout printing.
+pub(super) fn capture_take() -> String {
+    CAPTURE.with(|c| c.borrow_mut().take().unwrap_or_default())
+}
+
 pub(super) fn print_stdout(s: &str) {
     use std::io::Write;
+    if CAPTURE.with(|c| {
+        let mut c = c.borrow_mut();
+        match c.as_mut() {
+            Some(buf) => { buf.push_str(s); true }
+            None => false,
+        }
+    }) {
+        return;
+    }
     let mut out = std::io::stdout().lock();
     let _ = out.write_all(s.as_bytes());
     let _ = out.flush();

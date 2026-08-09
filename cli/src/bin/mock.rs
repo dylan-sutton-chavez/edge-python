@@ -106,11 +106,8 @@ fn ws_echo(mut stream: TcpStream, mut reader: BufReader<TcpStream>, key: &str) {
             buf.drain(..consumed);
             match opcode {
                 // Echo text back unmasked, the server side never masks.
-                0x1 => {
-                    if stream.write_all(&encode_frame(0x1, &payload, None)).is_err() {
-                        return;
-                    }
-                }
+                0x1 if stream.write_all(&encode_frame(0x1, &payload, None)).is_ok() => {}
+                0x1 => return,
                 0x8 => {
                     let _ = stream.write_all(&encode_frame(0x8, &payload, None));
                     return;

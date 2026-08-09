@@ -1,6 +1,7 @@
 # An eval group compiles each published message as its own program, print output proves execution.
 runtime:
   listen: tcp://127.0.0.1:7789
+  control: tcp://127.0.0.1:9789
   durable: tmp/swarm/log
 
 groups:
@@ -15,3 +16,13 @@ publish:
 expect:
   - "two plus three is 5"
   - "hello from a snippet"
+
+# A POST to /run/<group> runs the body on the eval group and replies with what it printed.
+post:
+  - path: "/run/runners"
+    body: "print('answered over http')"
+    expect: "{\"ok\":true,\"stdout\":\"answered over http\\n\"}"
+  # Untrusted code cannot orchestrate, importing swarm fails the run with a clear message.
+  - path: "/run/runners"
+    body: "from swarm import send"
+    expect: "\"ok\":false,\"error\":\"error: module 'swarm' is not available to untrusted eval runs"

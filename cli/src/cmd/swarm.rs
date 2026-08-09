@@ -84,7 +84,7 @@ pub fn run(path: &Path) -> Result<()> {
             ops: spec.limits.ops.unwrap_or(sandbox.ops),
             calls: spec.limits.calls.unwrap_or(sandbox.calls),
         };
-        let inbox = spec.seed.into_iter().map(|body| Message { group: name.clone(), body, attempts: 0 }).collect();
+        let inbox = spec.seed.into_iter().map(|body| Message { group: name.clone(), body, attempts: 0, reply: None }).collect();
         groups.push(Group {
             name,
             source,
@@ -112,13 +112,18 @@ pub fn run(path: &Path) -> Result<()> {
                 Some(d) => Path::new(&dir).join(d),
                 None => Path::new(&dir).join("swarm.wal"),
             };
-            // A control address serves healthz and stats from a shared counter on its own thread.
-            let stats = manifest.runtime.control.as_deref().map(|c| {
-                let stats = std::sync::Arc::new(compiler::native::swarm::Stats::default());
-                spawn_control(c.strip_prefix("tcp://").unwrap_or(c), stats.clone());
-                stats
+            // A control address serves healthz, stats and eval replies on its own thread.
+            let control = manifest.runtime.control.as_deref().map(|c| {
+                (c.strip_prefix("tcp://").unwrap_or(c).to_string(), std::sync::Arc::new(compiler::native::swarm::Stats::default()))
             });
-            compiler::native::swarm::serve(config, addr, &wal, stats)
+            let stats = control.as_ref().map(|(_, s)| s.clone());
+            // The eval groups the control endpoint answers, captured before config moves into serve.
+            let eval: Vec<String> = config.groups.iter().filter(|g| g.eval).map(|g| g.name.clone()).collect();
+            compiler::native::swarm::serve(config, addr, &wal, stats, move |tx| {
+                if let Some((addr, stats)) = control {
+                    spawn_control(&addr, tx, eval, stats);
+                }
+            })
         }
         None => compiler::native::swarm::run(config, resolve_schedulers(manifest.runtime.schedulers.as_ref())),
     };
@@ -152,22 +157,70 @@ fn resolve_schedulers(value: Option<&serde_yaml_ng::Value>) -> usize {
     }
 }
 
-// Serves the live counters at /status on a background thread, a response also proves liveness.
-fn spawn_control(addr: &str, stats: std::sync::Arc<compiler::native::swarm::Stats>) {
+// Serves live counters at /status and eval replies at /run/<group>, a response also proves liveness.
+fn spawn_control(addr: &str, tx: std::sync::mpsc::Sender<Message>, eval: Vec<String>, stats: std::sync::Arc<compiler::native::swarm::Stats>) {
     let Ok(server) = tiny_http::Server::http(addr) else {
         eprintln!("warning: cannot bind control endpoint '{addr}'");
         return;
     };
     std::thread::spawn(move || {
-        for req in server.incoming_requests() {
-            let resp = match req.url() {
-                "/status" => tiny_http::Response::from_string(stats.to_json())
-                    .with_header("Content-Type: application/json".parse::<tiny_http::Header>().unwrap()),
-                _ => tiny_http::Response::from_string("not found").with_status_code(404),
+        for mut req in server.incoming_requests() {
+            let url = req.url().to_string();
+            let resp = if url == "/status" {
+                json(stats.to_json())
+            } else if *req.method() == tiny_http::Method::Post
+                && let Some(group) = url.strip_prefix("/run/") {
+                run_eval(group, &mut req, &tx, &eval)
+            } else {
+                tiny_http::Response::from_string("not found").with_status_code(404)
             };
             let _ = req.respond(resp);
         }
     });
+}
+
+// Answers an eval run, the request body is a snippet or an EDGEPKG bundle and the reply its print.
+fn run_eval(group: &str, req: &mut tiny_http::Request, tx: &std::sync::mpsc::Sender<Message>, eval: &[String]) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+    if !eval.iter().any(|g| g == group) {
+        return tiny_http::Response::from_string("not found").with_status_code(404);
+    }
+    let mut body = String::new();
+    let _ = req.as_reader().read_to_string(&mut body);
+    let (reply, result) = std::sync::mpsc::channel();
+    let msg = Message { group: group.to_string(), body, attempts: 0, reply: Some(reply) };
+    if tx.send(msg).is_err() {
+        return tiny_http::Response::from_string("swarm is down").with_status_code(503);
+    }
+    match result.recv_timeout(std::time::Duration::from_secs(30)) {
+        Ok(Ok(stdout)) => json(format!("{{\"ok\":true,\"stdout\":{}}}", json_str(&stdout))),
+        Ok(Err(e)) => json(format!("{{\"ok\":false,\"error\":{}}}", json_str(&e))).with_status_code(500),
+        Err(_) => tiny_http::Response::from_string("eval timed out").with_status_code(504),
+    }
+}
+
+// A JSON response with the content type set.
+fn json(body: String) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+    tiny_http::Response::from_string(body)
+        .with_header("Content-Type: application/json".parse::<tiny_http::Header>().unwrap())
+}
+
+// Renders s as a quoted JSON string, escaping the characters JSON reserves.
+fn json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 // Maps the out uri to a sink, stdout by default.

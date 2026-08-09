@@ -88,7 +88,7 @@ sock = socket.create_connection(("127.0.0.1", 7777))
 sock.sendall(b"worker hello\n")   # delivered to the worker group
 ```
 
-A `durable:` path logs every message and replays what was unprocessed on restart, so a crash loses nothing. A `control:` address serves live counts at `/status`, and the response itself proves the pool is alive.
+A `durable:` path logs every message and replays what was unprocessed on restart, so a crash loses nothing. A `control:` address serves live counts at `/status`, and the response itself proves the pool is alive. It also answers eval runs at `/run/<group>`, covered in untrusted code below.
 
 ```bash
 $ curl localhost:9090/status
@@ -126,6 +126,15 @@ groups:
   runners:
     eval: true         # every message is untrusted, no send, no shared state
 ```
+
+A client that wants the result posts the snippet or bundle to `/run/<group>` on the control address, and the reply carries what the run printed.
+
+```bash
+$ curl -X POST localhost:9090/run/runners -d 'print(2 + 3)'
+{"ok":true,"stdout":"5\n"}
+```
+
+A run that raises answers `{"ok":false,"error":...}` with its traceback, and the caller waits thirty seconds at most before a 504. The TCP ingress stays fire and forget, only these posts get a reply.
 
 ## A three-stage pipeline
 

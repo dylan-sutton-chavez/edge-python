@@ -99,7 +99,7 @@ fn encode(m: &Message) -> String {
 
 fn decode(line: &str) -> Option<Message> {
     let (g, b) = line.split_once('\t')?;
-    Some(Message { group: unesc(g), body: unesc(b), attempts: 0 })
+    Some(Message { group: unesc(g), body: unesc(b), attempts: 0, reply: None })
 }
 
 fn esc(s: &str) -> String {
@@ -133,7 +133,7 @@ pub fn spawn_ingress(addr: &str, tx: Sender<Message>, wal: Arc<Mutex<Wal>>) -> s
             let reader = BufReader::new(stream);
             for line in reader.lines().map_while(Result::ok) {
                 let Some((group, body)) = line.split_once(' ') else { continue };
-                let msg = Message { group: group.to_string(), body: body.to_string(), attempts: 0 };
+                let msg = Message { group: group.to_string(), body: body.to_string(), attempts: 0, reply: None };
                 wal.lock().unwrap().append(&msg);
                 if tx.send(msg).is_err() {
                     return;
