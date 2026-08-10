@@ -334,6 +334,7 @@ The bitwise and shift operators follow the same forward/reflected protocol.
 | `a ^ b` | `__xor__` | `__rxor__` |
 | `a << b` | `__lshift__` | `__rlshift__` |
 | `a >> b` | `__rshift__` | `__rrshift__` |
+| `~a` | `__invert__` | - |
 
 ### Comparison
 
@@ -404,7 +405,7 @@ False True
 | `del obj[i]` | `__delitem__` | `(self, i)` |
 | `v in obj` | `__contains__` | `(self, value)` |
 
-Slices pass as a `slice` object, so `obj[1:3]` calls `__getitem__(self, slice(1, 3, None))`.
+Slices pass as a `slice` object, so `obj[1:3]` calls `__getitem__(self, slice(1, 3, None))`. Indexes on built-in sequences coerce via `__index__`, including slice bounds. Dict keys never coerce.
 
 Without `__contains__`, `v in obj` falls back to iterating `obj` and comparing with `__eq__`.
 
@@ -518,7 +519,7 @@ Built-in dict and set compare instance keys by identity. A user `__hash__` is re
 | `f"{x:spec}"` | `__format__` | built-in format spec engine |
 | `f"{x!r}"` | `__repr__` | - |
 
-`__format__(spec)` receives the spec string and must return `str`. `int(x)` on an instance calls `__int__`, which is also used by `%d` / `%x` / `%X` / `%o` formatting.
+`__format__(spec)` receives the spec string and must return `str`. `int(x)` on an instance calls `__int__`, which is also used by `%d` / `%x` / `%X` / `%o` formatting. `float(x)` calls `__float__` and falls back to `__index__`. `abs(x)` calls `__abs__`.
 
 ```python
 class P:

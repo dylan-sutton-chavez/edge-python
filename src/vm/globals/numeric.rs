@@ -107,8 +107,13 @@ fn parse_int_radix(s: &str, base: i64) -> Result<i128, VmErr> {
 
 impl<'a> VM<'a> {
 
-    pub fn call_abs(&mut self) -> Result<(), VmErr> {
+    pub fn call_abs(&mut self, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         let o = self.pop()?;
+        // Honor a user `__abs__` and pass any return type through.
+        if let Some(r) = self.try_call_dunder(o, "__abs__", &[], chunk, slots)? {
+            self.push(r);
+            return Ok(());
+        }
         let v = if o.is_float() {
             Val::float(o.as_float().abs())
         } else if let Some(i) = self.as_i128(o) {
@@ -169,7 +174,7 @@ impl<'a> VM<'a> {
     }
 
     /* Converts int or parseable string to floating point. */
-    pub fn call_float(&mut self, argc: u16) -> Result<(), VmErr> {
+    pub fn call_float(&mut self, argc: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         if argc == 0 { self.push(Val::float(0.0)); return Ok(()); } // `float()` is 0.0.
         let o = self.pop()?;
         let f = if o.is_float() { o.as_float() }
@@ -184,6 +189,18 @@ impl<'a> VM<'a> {
                     t.chars().filter(|&c| c != '_').collect::<alloc::string::String>()
                 } else { alloc::string::String::from(t) };
                 cleaned.parse().map_err(|_| cold_value("float(): invalid literal"))?
+            }
+            else if o.is_heap() && matches!(self.heap.get(o), HeapObj::Instance(..)) {
+                // Honor a user `__float__` and fall back to `__index__` like CPython.
+                match self.try_call_dunder(o, "__float__", &[], chunk, slots)? {
+                    Some(r) if r.is_float() => r.as_float(),
+                    Some(_) => return Err(cold_type("__float__ returned non-float")),
+                    None => match self.try_call_dunder(o, "__index__", &[], chunk, slots)? {
+                        Some(r) if r.is_int() || r.is_bool() => self.as_i128(r).unwrap_or(r.as_bool() as i128) as f64,
+                        Some(_) => return Err(cold_type("__index__ returned non-int")),
+                        None => return Err(cold_type("float() requires a number or string")),
+                    },
+                }
             }
             else { return Err(cold_type("float() requires a number or string")); };
         self.push(Val::float(f)); Ok(())

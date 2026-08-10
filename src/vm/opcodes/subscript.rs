@@ -35,7 +35,34 @@ impl<'a> VM<'a> {
             return Ok(true);
         }
 
+        let idx = self.coerce_index(obj, idx, chunk, slots)?;
         self.get_item_builtin(obj, idx)
+    }
+
+    /* Instance indexes coerce via `__index__`, including slice bounds. Dict keys never coerce, they look up by hash and eq. */
+    fn coerce_index(&mut self, cont: Val, idx: Val, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<Val, VmErr> {
+        if !idx.is_heap() { return Ok(idx); }
+        if cont.is_heap() && matches!(self.heap.get(cont), HeapObj::Dict(_)) { return Ok(idx); }
+        match self.heap.get(idx).clone() {
+            HeapObj::Instance(..) => match self.try_call_dunder(idx, "__index__", &[], chunk, slots)? {
+                Some(r) if r.is_int() || r.is_bool() => {
+                    // Normalize bool to int, the builtin paths below accept only `is_int`.
+                    let i = self.as_i128(r).unwrap_or(r.as_bool() as i128);
+                    self.int_to_val(Some(i))
+                }
+                Some(_) => Err(cold_type("__index__ returned non-int")),
+                None => Ok(idx),
+            },
+            HeapObj::Slice(start, stop, step) => {
+                let is_inst = |v: &Val| v.is_heap() && matches!(self.heap.get(*v), HeapObj::Instance(..));
+                if !is_inst(&start) && !is_inst(&stop) && !is_inst(&step) { return Ok(idx); }
+                let start = self.coerce_index(cont, start, chunk, slots)?;
+                let stop = self.coerce_index(cont, stop, chunk, slots)?;
+                let step = self.coerce_index(cont, step, chunk, slots)?;
+                self.heap.alloc(HeapObj::Slice(start, stop, step))
+            }
+            _ => Ok(idx),
+        }
     }
 
     /* No-dunder indexing path. Used by callers without a bytecode frame (FFI re-entry); also the post-dunder fallback inside `get_item`. */
@@ -203,6 +230,7 @@ impl<'a> VM<'a> {
         if self.try_call_dunder(cont, "__setitem__", &[idx_val, value], chunk, slots)?.is_some() {
             return Ok(());
         }
+        let idx_val = self.coerce_index(cont, idx_val, chunk, slots)?;
         self.store_item_builtin(cont, idx_val, value)
     }
 
@@ -244,6 +272,7 @@ impl<'a> VM<'a> {
         if self.try_call_dunder(cont, "__delitem__", &[idx_val], chunk, slots)?.is_some() {
             return Ok(());
         }
+        let idx_val = self.coerce_index(cont, idx_val, chunk, slots)?;
         // Slice deletion: `del xs[a:b]`, same step=1 restriction as `store_slice`. Reuses `store_slice` with an empty replacement vec.
         if idx_val.is_heap()
             && let HeapObj::Slice(start, stop, step) = self.heap.get(idx_val).clone()

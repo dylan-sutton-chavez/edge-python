@@ -262,6 +262,10 @@ impl<'a> VM<'a> {
         };
         if op == OpCode::BitNot {
             let v = self.pop()?;
+            if let Some(r) = self.try_call_dunder(v, "__invert__", &[], chunk, slots)? {
+                self.push(r);
+                return Ok(());
+            }
             let i = self.as_i128(v).ok_or(cold_type("~ requires an integer"))?;
             let out = self.int_to_val(Some(!i))?;
             self.push(out);
