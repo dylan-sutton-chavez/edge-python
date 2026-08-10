@@ -1,0 +1,19 @@
+[package]
+name = "skill"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Runs the executable cells of a SKILL.md through the edge CLI and checks each one against its expected block."
+autotests = false
+
+[[bin]]
+name = "skill"
+path = "src/main.rs"
+
+# Single integration test at the crate root, runs every native cell of SKILL.md.
+[[test]]
+name = "tests"
+path = "tests.rs"
+
+[dependencies]

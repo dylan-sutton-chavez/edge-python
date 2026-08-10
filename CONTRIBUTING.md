@@ -38,3 +38,5 @@ PRs that introduce new behavior without test coverage, or that update documentat
 ## Comments and Docs
 
 Keep comments minimal. One line, at most one per block, deleted when redundant. Match the length of the docs you edit rather than expanding them. No colons, semicolons, or em-dashes in comment or doc prose. No file-header comment or docstring at the top of a file.
+
+Changes that alter language, CLI, or package behavior must update `skill/SKILL.md` to match. Its examples are executable cells, so `cargo test -p skill` must stay green.

@@ -57,9 +57,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 [workspace]
-members = ["abi", "pdk", "pdk/macros", "pdk/example", "rt"]
+members = ["abi", "pdk", "pdk/macros", "pdk/example", "rt", "skill"]
 # `pdk/example` is wasm-only: kept in `members` so it shares the lockfile and resolves path deps, but excluded from `default-members` so default workspace commands skip it. Build it explicitly with `-p slugify-mod --target wasm32-unknown-unknown`.
-default-members = [".", "abi", "pdk", "pdk/macros", "rt"]
+default-members = [".", "abi", "pdk", "pdk/macros", "rt", "skill"]
 resolver = "2"
 
 [workspace.package]

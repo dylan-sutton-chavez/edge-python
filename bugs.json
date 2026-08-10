@@ -570,7 +570,17 @@
       "repro": "f(f(f(f(f(f(x))))))  # scale the nesting, or a.m(a.m(a.m(a)))",
       "actual": "thread has overflowed its stack, fatal runtime error, aborting (exit 134)",
       "expected": "a parse error at a fixed nesting depth, like the [[[...]]] case, never a crash"
-    }
+    },
+    {                                                                                                                                                  
+      "id": "bug-058",
+      "file": "src/vm/value_ops.rs (display_d, instance repr fallback; grep 'instance>' for the exact line)",                                          
+      "line": 0,
+      "title": "repr of bare object() omits the class name and prints <instance>",
+      "description": "The default __repr__ fallback formats '<ClassName instance>' and user classes follow it (print(Foo()) gives '<Foo instance>'), but for object() the class name reaches the fallback empty and the output is '<instance>'. CPython prints '<object object>'. Possibly related to bug-045 (type_name returns 'object' for every user instance): both suggest the object type has no usable name in the repr/type_name path. Cosmetic and deterministic. Pinned by a verified cell in skill/SKILL.md (json.dumps with default=str of object()), so fixing it will intentionally break that cell and force a doc update.",
+      "repro": "print(object())\nclass Foo:\n    pass\nprint(Foo())",
+      "actual": "<instance>\n<Foo instance>",
+      "expected": "<object instance>\n<Foo instance> (CPython prints '<object object>' for the first line)"
+    }                                                                                                                                                  
   ],
   "outdated_comments": [
     {"file": "src/vm/globals/numeric.rs", "line": 48, "comment_says": "/* `int(s, base)` parsing: optional sign, optional 0x/0o/0b prefix ... */ placed directly above round_int_banker", "code_does": "round_int_banker rounds ints to -k digits; the comment describes parse_int_radix two functions below (line 59). Misplaced comment."},

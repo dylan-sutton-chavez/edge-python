@@ -156,7 +156,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [engine, network, workers]
+        suite: [engine, network, workers, skill]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/cli

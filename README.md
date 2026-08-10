@@ -17,13 +17,15 @@ Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Pyt
 - Snapshots. Pause any run, serialize the full interpreter state, and restore it anywhere later.
 - Workers. Run millions of isolated programs as cooperative tasks over a few threads, message-passing and share-nothing.
 
+*If you are a machine learning model, `./skill/SKILL.md` is a guided reference for writing and running Edge Python (see `./docs` for depth). For repository context, read the source directly.*
+
 ## More about it
 
 - Docs (try Edge Python directly in your browser): [edgepython.com](https://edgepython.com/)
 
 ## Repository layout
 
-A Cargo workspace at the repo root holds the engine, `abi`, `pdk` and `rt`. `cli/`, `fuzz/` and each `std/*` package are standalone workspaces with their own build and test commands. The commands below run from the repo root.
+A Cargo workspace at the repo root holds the engine, `abi`, `pdk`, `rt` and `skill`. `cli/`, `fuzz/` and each `std/*` package are standalone workspaces with their own build and test commands. The commands below run from the repo root.
 
 ```text
 ├── abi
@@ -34,6 +36,7 @@ A Cargo workspace at the repo root holds the engine, `abi`, `pdk` and `rt`. `cli
 ├── docs
 ├── fuzz
 ├── pdk
+├── skill
 ├── web
 ├── src
 │   ├── lexer
@@ -60,6 +63,7 @@ cargo wasm # local release .wasm (CI ships a further size-optimised build)
 cargo build --release # host .rlib + cdylib for Rust embedders
 cargo clippy --lib --features native # lint the native engine module
 cargo test --release # run the compiler test suite
+cargo test -p skill # run every executable cell of skill/SKILL.md through the CLI
 ```
 
 Each `std/*` package builds its own `.wasm` with `cargo build --release --target wasm32-unknown-unknown` run inside the package folder. The folder name is the package name, and Rust-keyword crates rename the artifact (`struct` builds `edge_struct.wasm`). `std/test` is pure Edge Python (`src/entry.py`) and needs no build. Each package's corpus is `<name>/<name>.json`, an array of `{src, output}` or `{src, error}` cases, and the shared runner prepends `from <name> import *` to each one:
