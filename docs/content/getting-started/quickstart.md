@@ -67,17 +67,6 @@ edge run app.py
 
 To record the dependency in your project, run `edge add json`. It writes the package to `packages.json`. The package catalog lives in [Modules](/reference/modules#standard-packages) and the manifest format in [packages.json](/reference/modules#packagesjson).
 
-## Run it in the browser
-
-There is nothing to install, a script tag and a custom element run the same file:
-
-```html
-<script type="module" src="https://cdn.edgepython.com/web/src/element.js"></script>
-<edge-python entry="./hello.py"></edge-python>
-```
-
-The element boots the runtime in a sandboxed worker and runs `entry` on connect. Its attributes and the programmatic API behind `el.worker` live in [The `<edge-python>` element](/reference/modules#the-edge-python-element).
-
 ## Next steps
 
 - [Syntax](/language/syntax) walks through the language.
