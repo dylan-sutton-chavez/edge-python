@@ -141,46 +141,56 @@ pub(crate) fn binding_to_extern(b: &NativeBinding) -> crate::value::ExternFn {
     }
 }
 
-/* A scanned import: Quoted is a direct URL/path; Bare is a name resolved against the manifest chain. */
+/* A scanned import: Bare resolves against the manifest chain, Relative anchors at the importer dir, Root at the nearest packages.json dir. Paths carry the .py suffix, dots already mapped to '/'. */
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImportSpec {
-    Quoted(String),
     Bare(String),
+    Relative(String),
+    Root(String),
 }
 
-/* Content between the first quote and its matching close; tolerates string prefixes (r, b, f). Specs carry no escapes, so a raw slice suffices. */
-fn unquote(raw: &str) -> String {
-    let bytes = raw.as_bytes();
-    let Some(open) = bytes.iter().position(|&c| c == b'"' || c == b'\'') else { return raw.to_string() };
-    let quote = bytes[open] as char;
-    match raw[open + 1..].rfind(quote) {
-        Some(rel) => raw[open + 1..open + 1 + rel].to_string(),
-        None => raw.to_string(),
+/* Consumes `name(.name)*` at token `j`; returns ("a/b/c.py", segment count, index past). */
+fn dotted_path(src: &str, tokens: &[Token], j: usize) -> (String, usize, usize) {
+    let mut path = src[tokens[j].start..tokens[j].end].to_string();
+    let mut segs = 1;
+    let mut k = j + 1;
+    while tokens.get(k).map(|x| x.kind) == Some(TokenType::Dot)
+        && let Some(seg) = tokens.get(k + 1).filter(|s| s.kind == TokenType::Name)
+    {
+        path.push('/');
+        path.push_str(&src[seg.start..seg.end]);
+        segs += 1;
+        k += 2;
     }
+    path.push_str(".py");
+    (path, segs, k)
 }
 
-/* Reads the module spec at token `j`: a quoted string or a dotted bare name. Returns (spec, index past it). */
+/* Reads the module spec at token `j`: leading dots are importer-relative, dotted names root-relative, a plain name is Bare. Quoted strings are not specs. Returns (spec, index past it). */
 fn read_spec(src: &str, tokens: &[Token], j: usize) -> Option<(ImportSpec, usize)> {
     let t = tokens.get(j)?;
     match t.kind {
-        TokenType::String => Some((ImportSpec::Quoted(unquote(&src[t.start..t.end])), j + 1)),
+        TokenType::Dot => {
+            let mut ups = 1;
+            while tokens.get(j + ups).map(|x| x.kind) == Some(TokenType::Dot) { ups += 1; }
+            if tokens.get(j + ups).map(|x| x.kind) != Some(TokenType::Name) { return None; }
+            let (path, _, next) = dotted_path(src, tokens, j + ups);
+            let prefix = if ups == 1 { s!("./") } else { "../".repeat(ups - 1) };
+            Some((ImportSpec::Relative(s!(str &prefix, str &path)), next))
+        }
         TokenType::Name => {
-            let mut name = src[t.start..t.end].to_string();
-            let mut k = j + 1;
-            // Dotted segments: a.b.c.
-            while tokens.get(k).map(|x| x.kind) == Some(TokenType::Dot) {
-                let Some(seg) = tokens.get(k + 1).filter(|s| s.kind == TokenType::Name) else { break };
-                name.push('.');
-                name.push_str(&src[seg.start..seg.end]);
-                k += 2;
+            let (path, segs, next) = dotted_path(src, tokens, j);
+            if segs == 1 {
+                Some((ImportSpec::Bare(src[t.start..t.end].to_string()), next))
+            } else {
+                Some((ImportSpec::Root(path), next))
             }
-            Some((ImportSpec::Bare(name), k))
         }
         _ => None,
     }
 }
 
-/* Every import spec, classified Bare vs Quoted, via the lexer so a `from`/`import` inside a comment or string is never a false hit. */
+/* Every import spec, classified Bare vs path, via the lexer so a `from`/`import` inside a comment or string is never a false hit. */
 pub fn scan_imports(src: &str) -> Vec<ImportSpec> {
     let (tokens, _errs) = lex(src);
     let mut out = Vec::new();

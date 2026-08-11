@@ -3,7 +3,7 @@ title: "json (web, native)"
 description: "JSON parsing and serialization."
 ---
 
-`json` is `loads` and `dumps`. Import it by bare name, both runtimes resolve it with no manifest. To pin a different version, import it by URL or through a `packages.json` alias, see [Modules](/reference/modules#packagesjson).
+`json` is `loads` and `dumps`. Import it by bare name, both runtimes resolve it with no manifest. To pin a different version, use a `packages.json` alias, see [Modules](/reference/modules#packagesjson).
 
 `loads` accepts the `object_hook`, `object_pairs_hook`, `parse_float`, `parse_int`, and `parse_constant` callables. `dumps` accepts `indent`, `sort_keys`, `ensure_ascii`, `check_circular`, `allow_nan`, `skipkeys`, `default`, `separators`, and `cls`. Parse failures raise `ValueError`, and a non-serializable value raises `TypeError` unless `default` handles it. Integers cross as 128-bit values, so `loads` accepts numbers beyond 64 bits. Non-finite floats map to `NaN`, `Infinity`, and `-Infinity` on both sides, and integer-valued floats dump with a trailing `.0` so a round-trip preserves the type.
 

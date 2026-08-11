@@ -3,7 +3,7 @@ title: "test (web, native)"
 description: "A unit-test harness written in pure Edge Python."
 ---
 
-`test` is a unit-test harness written in pure Edge Python, not a compiled plugin. Import it by bare name, both runtimes resolve it with no manifest. To pin a different version, import it by URL or through a `packages.json` alias, see [Modules](/reference/modules#packagesjson).
+`test` is a unit-test harness written in pure Edge Python, not a compiled plugin. Import it by bare name, both runtimes resolve it with no manifest. To pin a different version, use a `packages.json` alias, see [Modules](/reference/modules#packagesjson).
 
 `@fixture` registers a factory under its function's name. `@test(description, *uses)` registers a test and the fixtures to inject by keyword. `raises(ExcType)` is a context manager asserting the block raises, and it accepts a class or a tuple of classes. `run()` executes every registered test, prints a `PASS -`, `FAIL -`, or `ERROR` line per test plus a summary, and raises `SystemExit(1)` if anything failed, else `SystemExit(0)`. Fixtures are flat and built fresh per test, with no scopes, autouse, or parametrization. One module-level registry holds every test, so `run()` executes all of them.
 

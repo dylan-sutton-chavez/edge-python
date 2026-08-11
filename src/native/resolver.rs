@@ -37,8 +37,12 @@ impl Resolver for FileResolver {
         }
         let canonical = if spec.contains("://") || spec.starts_with('/') {
             spec.to_string()
-        } else {
+        } else if spec.starts_with("./") || spec.starts_with("../") {
             join_relative(&self.dir, spec)
+        } else {
+            // A dotted import anchors at the nearest manifest dir.
+            let root = self.manifest_root(spec)?;
+            join_relative(&root, spec)
         };
         self.resolve_canonical(&canonical)
     }
@@ -75,7 +79,20 @@ impl FileResolver {
         if crate::devkit::HOST_PACKAGES.contains(&name) {
             return Err(format!("module '{name}' requires the web runtime (run with --web)"));
         }
-        Err(format!("no packages.json above '{start_dir}' declares '{name}'\nhelp: declare it, or use a quoted path"))
+        Err(format!("no packages.json above '{start_dir}' declares '{name}'\nhelp: declare it, or use a relative import"))
+    }
+
+    /* Nearest ancestor dir holding a packages.json; a --packages override is the only root. */
+    fn manifest_root(&self, spec: &str) -> Result<String, String> {
+        if let Some(m) = &self.packages {
+            return Ok(dir_of(m).to_string());
+        }
+        for dir in walk_up_dirs(&self.dir) {
+            if std::fs::metadata(format!("{dir}packages.json")).is_ok() {
+                return Ok(dir);
+            }
+        }
+        Err(format!("no packages.json above '{}' to resolve '{spec}'", self.dir))
     }
 
     /* Returns (manifest dir, target) following `extends`, None when no manifest declares `name`. */

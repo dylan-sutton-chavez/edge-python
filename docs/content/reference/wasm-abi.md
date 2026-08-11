@@ -212,10 +212,14 @@ cargo build --release --target wasm32-unknown-unknown
 # -> target/wasm32-unknown-unknown/release/slugify_mod.wasm
 ```
 
-Use it from a script:
+Use it from a script, through a `packages.json` alias:
+
+```json
+{ "imports": { "slugify_mod": "./slugify_mod.wasm" } }
+```
 
 ```python
-from "./slugify_mod.wasm" import slugify, repeat_n, sum_ints
+from slugify_mod import slugify, repeat_n, sum_ints
 
 print(slugify("Hello World"))   # hello-world
 print(repeat_n("ha", 3))        # hahaha
@@ -249,10 +253,10 @@ impl Slugger {
 }
 ```
 
-From Edge Python:
+From Edge Python, same manifest alias:
 
 ```python
-from "./slugify_mod.wasm" import Slugger
+from slugify_mod import Slugger
 s = Slugger()
 s.add("Hello")
 print(s.build())   # hello
@@ -356,7 +360,7 @@ Same `Cargo.toml` as the `wasm-pdk` example, minus `wasm-pdk`, plus `lol_alloc =
 
 ## How the host loads it
 
-For `from "<url>" import <names>` with a `.wasm` URL, the host:
+For `from <name> import <names>` where the manifest maps `<name>` to a `.wasm` URL, the host:
 
 1. Fetches the bytes, verifying any `#sha256-...` fragment.
 2. Instantiates with the 6 host imports.

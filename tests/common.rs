@@ -101,8 +101,11 @@ impl Resolver for TestResolver {
         }
         let canonical = if spec.contains("://") || spec.starts_with('/') {
             spec.to_string()
-        } else {
+        } else if spec.starts_with("./") || spec.starts_with("../") {
             join_relative(&self.dir, spec)
+        } else {
+            let root = self.manifest_root(spec)?;
+            join_relative(&root, spec)
         };
         self.resolve_canonical(&canonical)
     }
@@ -132,6 +135,17 @@ impl Resolver for TestResolver {
 }
 
 impl TestResolver {
+    /* Nearest ancestor dir with a fixture manifest, mirroring the native fs probe. */
+    fn manifest_root(&self, spec: &str) -> Result<String, String> {
+        let s = self.state.borrow();
+        for dir in walk_up_dirs(&self.dir) {
+            if s.manifests.contains_key(&dir) {
+                return Ok(dir);
+            }
+        }
+        Err(format!("no packages.json above '{}' to resolve '{}'", self.dir, spec))
+    }
+
     /* Walk up from `start_dir` for the nearest manifest declaring `name`; `extends` chains with cycle detection. */
     fn resolve_bare(&mut self, name: &str, start_dir: &str) -> Result<Resolved, String> {
         let mut visited: HashSet<String> = HashSet::new();
@@ -169,7 +183,7 @@ impl TestResolver {
                 search_dir = next;
                 continue;
             }
-            return Err(format!("alias '{}' not declared in '{}packages.json'\nhelp: declare it, add \"extends\": \"..\" to inherit, or use a quoted path", name, dir));
+            return Err(format!("alias '{}' not declared in '{}packages.json'\nhelp: declare it, add \"extends\": \"..\" to inherit, or use a relative import", name, dir));
         }
     }
 

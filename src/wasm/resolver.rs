@@ -23,8 +23,12 @@ impl Resolver for WasmHostResolver {
         }
         let canonical = if spec.contains("://") || spec.starts_with('/') {
             spec.to_string()
-        } else {
+        } else if spec.starts_with("./") || spec.starts_with("../") {
             join_relative(&self.dir, spec)
+        } else {
+            // A dotted import anchors at the nearest manifest dir.
+            let root = self.manifest_root(spec)?;
+            join_relative(&root, spec)
         };
         self.resolve_canonical(&canonical)
     }
@@ -89,9 +93,22 @@ impl WasmHostResolver {
                 search_dir = next;
                 continue;
             }
-            return Err(s!("alias '", str name, "' not declared in '", str &m_spec, "'\n", "help: declare it, add \"extends\": \"..\" to inherit, or use a quoted path",
+            return Err(s!("alias '", str name, "' not declared in '", str &m_spec, "'\n", "help: declare it, add \"extends\": \"..\" to inherit, or use a relative import",
             ));
         }
+    }
+
+    /* Nearest ancestor dir holding a packages.json, probed live like the bare-name walk-up. */
+    fn manifest_root(&mut self, spec: &str) -> Result<String, String> {
+        let start = self.dir.clone();
+        for dir in walk_up_dirs(&start) {
+            let m_spec = s!(str &dir, "packages.json");
+            let cached = with_runtime(|rt| rt.manifests.iter().any(|(s, _)| s == &m_spec));
+            if cached || self.fetch_bytes(&m_spec, None).is_ok() {
+                return Ok(dir);
+            }
+        }
+        Err(s!("no packages.json above '", str &self.dir, "' to resolve '", str spec, "'"))
     }
 
     #[allow(clippy::type_complexity)]

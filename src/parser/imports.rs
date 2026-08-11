@@ -7,8 +7,7 @@ use crate::s;
 use super::Parser;
 use super::types::{Diagnostic, ImportEntry, ImportKind, NativeClassEntry, OpCode, SSAChunk, parse_string, ssa_strip};
 use crate::lexer::{Token, TokenType, lex};
-use crate::packages::{Resolved, binding_to_extern, parse_integrity};
-use crate::util::sha256::{sha256, hex_encode};
+use crate::packages::{Resolved, binding_to_extern};
 use crate::util::hash::FxHashSet;
 
 use alloc::{string::{String, ToString}, vec::Vec};
@@ -19,21 +18,21 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     pub(super) fn import_stmt(&mut self) {
         self.advance(); // 'import'
         loop {
-            let (spec, span) = self.read_module_spec();
+            let Some((spec, alias_hint, span)) = self.read_module_spec() else { return; };
             let alias = if self.eat_if(TokenType::As) {
                 self.advance_text()
             } else {
-                spec.split('.').next().unwrap_or(&spec).to_string()
+                alias_hint
             };
             self.resolve_and_bind_all(&spec, span, &alias);
             if !self.eat_if(TokenType::Comma) { break; }
         }
     }
 
-    /* `from <spec> import names|*`: spec is URL, path, or bare name; `*` binds all exports. Names may be parenthesized for multi-line lists, trailing comma allowed. */
+    /* `from <spec> import names|*`: spec is a bare name or dotted path; `*` binds all exports. Names may be parenthesized for multi-line lists, trailing comma allowed. */
     pub(super) fn parse_from_stmt(&mut self) {
         self.advance(); // 'from'
-        let (spec, spec_span) = self.read_module_spec();
+        let Some((spec, _, spec_span)) = self.read_module_spec() else { return; };
         self.eat(TokenType::Import);
 
         if self.eat_if(TokenType::Star) {
@@ -58,40 +57,59 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.resolve_and_bind_named(&spec, spec_span, names);
     }
 
-    /* Reads a quoted or dotted spec; returns (spec, span) for diagnostics. */
-    fn read_module_spec(&mut self) -> (String, (usize, usize)) {
-        if matches!(self.peek(), Some(TokenType::String)) {
-            let t = self.advance();
-            let raw = self.lexeme(&t).to_string();
-            let unquoted = parse_string(&raw);
-            (unquoted, (t.start, t.end))
-        } else {
-            let first = self.advance();
-            let mut name = self.lexeme(&first).to_string();
-            let mut span = (first.start, first.end);
-            while self.eat_if(TokenType::Dot) {
-                let next = self.advance();
-                name.push('.');
-                name.push_str(self.lexeme(&next));
-                span.1 = next.end;
-            }
-            (name, span)
+    /* Reads a dotted module spec: leading dots anchor at the importer dir, a dotted name at the nearest packages.json dir, a plain name stays bare. Returns (resolver spec, default alias, span). */
+    fn read_module_spec(&mut self) -> Option<(String, String, (usize, usize))> {
+        let first = self.advance();
+        let first_start = first.start;
+        if first.kind == TokenType::String {
+            let spec = parse_string(self.lexeme(&first));
+            self.error_at(first.start, first.end, &s!("module '", str &spec, "' not found"));
+            return None;
         }
+        let ups = match first.kind {
+            TokenType::Dot => 1 + self.eat_dots(),
+            TokenType::Ellipsis => 3 + self.eat_dots(),
+            _ => 0,
+        };
+        let first_name = if ups > 0 {
+            // `from . import x` names no module, packages do that and Edge has none.
+            if !matches!(self.peek(), Some(TokenType::Name)) {
+                self.error_at(first.start, first.end, "expected a module name after '.'");
+                return None;
+            }
+            self.advance()
+        } else {
+            first
+        };
+        let (name, end) = self.dotted_name(first_name);
+        let alias = name.split('.').next().unwrap_or(&name).to_string();
+        let path = name.replace('.', "/");
+        let spec = match ups {
+            0 if name.contains('.') => s!(str &path, ".py"),
+            0 => name,
+            1 => s!("./", str &path, ".py"),
+            _ => s!(str &"../".repeat(ups - 1), str &path, ".py"),
+        };
+        Some((spec, alias, (first_start, end)))
     }
 
-    /* Verifies #sha256 fragment then resolves; parser re-hashes bytes as defence-in-depth. Returns clean URL. */
-    fn resolve_with_integrity(&mut self, spec: &str) -> Result<(String, Resolved), String> {
-        let (url, expected) = parse_integrity(spec)?;
-        if let Some(hash) = expected {
-            // Host verifies its side; parser re-hashes as defence-in-depth.
-            let bytes = self.resolver.fetch_bytes(url, Some(hash))?;
-            let computed = sha256(&bytes);
-            if computed != hash {
-                return Err(s!("integrity check failed for '", str url, "'\n expected sha256-", str &hex_encode(&hash), "\n got sha256-", str &hex_encode(&computed)));
-            }
+    /* Consumes `name(.name)*` given the first name token; returns (dotted name, end position). */
+    fn dotted_name(&mut self, first: Token) -> (String, usize) {
+        let mut name = self.lexeme(&first).to_string();
+        let mut end = first.end;
+        while self.eat_if(TokenType::Dot) {
+            let next = self.advance();
+            name.push('.');
+            name.push_str(self.lexeme(&next));
+            end = next.end;
         }
-        let resolved = self.resolver.resolve(url)?;
-        Ok((url.to_string(), resolved))
+        (name, end)
+    }
+
+    fn eat_dots(&mut self) -> usize {
+        let mut n = 0;
+        while self.eat_if(TokenType::Dot) { n += 1; }
+        n
     }
 
     /* Parses or returns cached SSAChunk. Only path/URL specs cached; bare names skipped to avoid cross-manifest collisions. */
@@ -185,7 +203,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
     /* Named import: registers module, emits LoadModule+LoadAttr+StoreName; Native also populates extern_table for functions. */
     fn resolve_and_bind_named(&mut self, spec: &str, span: (usize, usize), names: Vec<(String, String)>) {
-        let (_url, resolved) = match self.resolve_with_integrity(spec) {
+        let resolved = match self.resolver.resolve(spec) {
             Ok(r) => r,
             Err(msg) => { self.error_at(span.0, span.1, &msg); return; }
         };
@@ -232,7 +250,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
     /* `import X`: registers module, emits LoadModule+StoreName; VM builds a singleton Val at init. */
     fn resolve_and_bind_all(&mut self, spec: &str, span: (usize, usize), alias: &str) {
-        let (_url, resolved) = match self.resolve_with_integrity(spec) {
+        let resolved = match self.resolver.resolve(spec) {
             Ok(r) => r,
             Err(msg) => { self.error_at(span.0, span.1, &msg); return; }
         };
@@ -251,7 +269,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
     /* Star import: Native fills extern_index; Code scans top-level and emits LoadModule+LoadAttr+StoreName per export. */
     fn resolve_and_bind_star(&mut self, spec: &str, span: (usize, usize)) {
-        let (_url, resolved) = match self.resolve_with_integrity(spec) {
+        let resolved = match self.resolver.resolve(spec) {
             Ok(r) => r,
             Err(msg) => { self.error_at(span.0, span.1, &msg); return; }
         };

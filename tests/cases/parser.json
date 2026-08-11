@@ -490,7 +490,7 @@
     "constants": [],
     "names": [],
     "instructions": [["ReturnValue",0]],
-    "errors": ["module 'os.path' not found (no resolver configured)"]
+    "errors": ["module 'os/path.py' not found (no resolver configured)"]
   },
   {
     "src": "import numpy as np",

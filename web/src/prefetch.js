@@ -1,5 +1,5 @@
 /*
-Lazy prefetch over the dependency graph. The compiler classifies each import (bare vs quoted);
+Lazy prefetch over the dependency graph. The compiler classifies each import (bare, importer-relative, root-relative);
 bare names resolve against the manifest chain (defaults < user packages.json), and only the imports a module actually uses get fetched. Manifests are resolution tables, not download lists.
 */
 
@@ -25,7 +25,7 @@ function schemeHint(spec) {
     return null;
 }
 
-/* Imports of `src`, classified, via the compiler (single source of truth). Returns [{ bare, spec }]. */
+/* Imports of `src`, classified, via the compiler (single source of truth). Returns [{ kind, spec }] with kind b/r/R. */
 function scanImports(src, exports) {
     if (typeof exports.extract_imports !== 'function') {
         throw new Error('compiler is missing extract_imports; runtime and wasm are out of sync');
@@ -37,7 +37,7 @@ function scanImports(src, exports) {
     if (!outLen) return [];
     const text = TD.decode(new Uint8Array(exports.memory.buffer, exports.out_ptr(), outLen));
     return text.split('\n').filter(Boolean).map((line) => ({
-        bare: line[0] === 'b',
+        kind: line[0],
         spec: line.slice(line.indexOf('\t') + 1),
     }));
 }
@@ -52,6 +52,9 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
     const table = { ...(importsMap || {}) };
     // Bare names scanned before a manifest declared them; retried after each manifest merge.
     const pendingBare = new Map(); // name -> importer dirs, for relative targets
+    // Root-relative imports waiting on their importer's manifest chain to finish probing.
+    const pendingRoot = []; // { spec, dir }
+    const manifestDirs = new Set(); // dirs whose packages.json fetched successfully
     const hostEsmUrls = new Map(); // name -> ESM url from discovered `host` declarations
 
     const writeBytes = (bytes) => {
@@ -67,9 +70,33 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
         }
     };
 
-    /* A scanned import contributes at most one fetch target: quoted is direct, bare resolves via the table. */
+    /* Nearest dir at or above `dir` with a fetched manifest; undefined while probes are pending, null once fully probed bare. */
+    const rootFor = (dir) => {
+        for (let d = dir; d != null; d = parentDir(d)) {
+            const m = d + 'packages.json';
+            if (manifestDirs.has(d)) return d;
+            if (!visited.has(m) && !knownMissing.has(m)) return undefined;
+        }
+        return null;
+    };
+    const enqueueRoot = (spec, dir) => {
+        const root = rootFor(dir);
+        if (root === undefined) { pendingRoot.push({ spec, dir }); return; }
+        if (root !== null) queue.push(joinRel(root, spec)); // null: no manifest anywhere, the compiler reports it
+    };
+    const retryRoot = () => {
+        for (let i = pendingRoot.length - 1; i >= 0; i--) {
+            const { spec, dir } = pendingRoot[i];
+            if (rootFor(dir) === undefined) continue;
+            pendingRoot.splice(i, 1);
+            enqueueRoot(spec, dir);
+        }
+    };
+
+    /* A scanned import contributes at most one fetch target: paths queue directly, bare resolves via the table. */
     const enqueueImport = (imp, dir) => {
-        if (!imp.bare) { queue.push(joinRel(dir, imp.spec)); return; }
+        if (imp.kind === 'r') { queue.push(joinRel(dir, imp.spec)); return; }
+        if (imp.kind === 'R') { enqueueRoot(imp.spec, dir); return; }
         const target = table[imp.spec];
         if (target !== undefined) queue.push(joinRel(dir, target));
         else { const ds = pendingBare.get(imp.spec); ds ? ds.push(dir) : pendingBare.set(imp.spec, [dir]); } // a later manifest may declare it
@@ -118,6 +145,7 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
             if (!bytes) {
                 // packages.json probes are opportunistic 404s; only a real module import is worth flagging.
                 if (!spec.endsWith('packages.json')) failures.push(schemeHint(spec) ?? `could not fetch module '${spec}'`);
+                retryRoot(); // a settled probe may unblock a root-relative import
                 continue;
             }
             fetchedSources.set(spec, bytes);
@@ -126,8 +154,9 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
         if (spec.endsWith('packages.json')) {
             let parsed;
             try { parsed = JSON.parse(TD.decode(bytes)); }
-            catch { continue; }
+            catch { retryRoot(); continue; }
             const dir = dirOf(spec);
+            manifestDirs.add(dir);
             // Merge as a resolution table (nearer manifests already in `table` win), then resolve any deferred names.
             for (const [name, target] of Object.entries(parsed.imports || {})) {
                 if (!(name in table)) table[name] = joinRel(dir, target);
@@ -138,6 +167,7 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
                 if (!hostEsmUrls.has(name)) hostEsmUrls.set(name, joinRel(dir, target));
             }
             retryPending();
+            retryRoot();
             if (parsed.extends) {
                 const extDir = joinRel(dir, parsed.extends);
                 queue.push((extDir.endsWith('/') ? extDir : extDir + '/') + 'packages.json');
@@ -168,7 +198,7 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
             continue;
         }
 
-        // .py module: register, then scan ITS imports (bare + quoted) so transitive deps stay lazy too.
+        // .py module: register, then scan ITS imports (bare + path) so transitive deps stay lazy too.
         const specBytes = TE.encode(spec);
         exports.register_code_module(writeBytes(specBytes), specBytes.length, writeBytes(bytes), bytes.length);
 

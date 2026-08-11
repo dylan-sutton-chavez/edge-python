@@ -251,14 +251,15 @@ print(root(16.0), loads(dumps({"ok": True}))["ok"])
 4.0 True
 ```
 
-Quoted specs import files and URLs relative to the importing file.
+Dotted specs import files. A leading dot anchors at the importing file, one extra dot per directory up. Without it the spec anchors at the nearest `packages.json` dir. The `.py` suffix is implicit.
 
 ```python
-from "./lib/helpers.py" import slugify
-from "https://example.com/math.wasm#sha256-<64hex>" import add
+from .lib.helpers import slugify
+from ..shared.util import chunks
+from lib.helpers import slugify as sl
 ```
 
-Not supported. `from . import x`, dotted package paths like `import a.b.c` and any form of dynamic import.
+Not supported. `from . import x` and any form of dynamic import.
 
 Bare names resolve through `packages.json`, walking up from the importing file with the nearest manifest winning. The manifest maps names to paths or URLs under `imports`, JS host modules under `host`, and may `extend` a parent manifest.
 

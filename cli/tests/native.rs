@@ -42,11 +42,11 @@ fn runs_a_script_and_streams_stdout() {
 }
 
 #[test]
-fn resolves_quoted_imports_from_the_script_dir() {
+fn resolves_relative_imports_from_the_script_dir() {
     let dir = scratch("imports");
     std::fs::create_dir_all(dir.join("lib")).unwrap();
     std::fs::write(dir.join("lib/helper.py"), "def double(n):\n  return n * 2\n").unwrap();
-    std::fs::write(dir.join("main.py"), "from \"./lib/helper.py\" import double\nprint(double(21))\n").unwrap();
+    std::fs::write(dir.join("main.py"), "from .lib.helper import double\nprint(double(21))\n").unwrap();
     let (out, _, code) = run_in(&dir, &["run", "main.py"], None);
     assert_eq!(out, "42\n");
     assert_eq!(code, 0);

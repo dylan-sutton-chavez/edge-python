@@ -131,6 +131,26 @@
     "error_span_covers": "json"
   },
   {
+    "src": "import \"https://example.com/math.wasm\"\nprint(1)",
+    "error": "module 'https://example.com/math.wasm' not found",
+    "error_span_covers": "\"https://example.com/math.wasm\""
+  },
+  {
+    "src": "from \"https://example.com/utils.py\" import normalize\nprint(normalize('x'))",
+    "error": "module 'https://example.com/utils.py' not found",
+    "error_span_covers": "\"https://example.com/utils.py\""
+  },
+  {
+    "src": "from \"https://example.com/u.py#sha256-0000000000000000000000000000000000000000000000000000000000000000\" import f",
+    "error": "module 'https://example.com/u.py#sha256-0000000000000000000000000000000000000000000000000000000000000000' not found"
+  },
+  {
+    "src": "from cdn import double\nprint(double(21))",
+    "manifests": { "": { "imports": { "cdn": "https://example.com/helper.py" } } },
+    "modules": { "https://example.com/helper.py": { "code": "def double(n):\n    return n * 2" } },
+    "output": ["42"]
+  },
+  {
     "src": "from m import nope\nprint(nope())",
     "modules": { "m": { "native": ["add"] } },
     "error": "has no export 'nope'"
@@ -332,41 +352,12 @@
     "error": "unterminated string literal"
   },
   {
-    "src": "from \"m#sha256-ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\" import const_42\nprint(const_42())",
-    "modules": { "m": { "native": ["const_42"], "bytes": "abc" } },
-    "output": ["42"]
+    "src": "from \"./utils.py#sha256-0000000000000000000000000000000000000000000000000000000000000000\" import f",
+    "error": "not found"
   },
   {
-    "src": "from \"m#sha256-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\" import const_42\nprint(const_42())",
-    "modules": { "m": { "native": ["const_42"], "bytes": "" } },
-    "output": ["42"]
-  },
-  {
-    "src": "from \"m#sha256-248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1\" import const_42\nprint(const_42())",
-    "modules": { "m": { "native": ["const_42"], "bytes": "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq" } },
-    "output": ["42"]
-  },
-  {
-    "src": "from \"m#sha256-0000000000000000000000000000000000000000000000000000000000000000\" import const_42",
-    "modules": { "m": { "native": ["const_42"], "bytes": "abc" } },
-    "error": "integrity check failed"
-  },
-  {
-    "src": "from \"m#sha256-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\" import f",
-    "error": "invalid hex"
-  },
-  {
-    "src": "from \"m#sha256-deadbeef\" import f",
-    "error": "64 hex chars"
-  },
-  {
-    "src": "from \"m#md5-deadbeef\" import f",
-    "error": "unrecognized integrity fragment"
-  },
-  {
-    "src": "from \"m#sha256-0000000000000000000000000000000000000000000000000000000000000000\" import f",
-    "modules": { "m": { "native": ["const_42"] } },
-    "error": "integrity verification not supported"
+    "src": "from \"m#sha256-ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\" import const_42",
+    "error": "not found"
   },
   {
     "src": "from m import const_42\nprint(const_42())",
@@ -374,7 +365,7 @@
     "output": ["42"]
   },
   {
-    "src": "from \"./lib/a.py\" import run\nprint(run())",
+    "src": "from .lib.a import run\nprint(run())",
     "output": ["nested:hi"],
     "modules": {
       "./lib/a.py":       { "code": "from helpers import label\n\ndef run():\n    return 'nested:' + label()" },
@@ -385,7 +376,7 @@
     }
   },
   {
-    "src": "from \"./lib/a.py\" import run\nprint(run())",
+    "src": "from .lib.a import run\nprint(run())",
     "modules": {
       "./lib/a.py":  { "code": "from utils import slug\n\ndef run():\n    return slug('x')" },
       "./util.py":   { "code": "def slug(s):\n    return s" }
@@ -397,7 +388,7 @@
     "error": "alias 'utils' not declared in './lib/packages.json'"
   },
   {
-    "src": "from \"./lib/a.py\" import run\nprint(run())",
+    "src": "from .lib.a import run\nprint(run())",
     "output": ["root:hi"],
     "modules": {
       "./lib/a.py":  { "code": "from utils import slug\n\ndef run():\n    return 'root:' + slug('hi')" },
@@ -409,14 +400,14 @@
     }
   },
   {
-    "src": "from \"./lib/a.py\" import run\nprint(run())",
+    "src": "from .lib.a import run\nprint(run())",
     "modules": {
       "./lib/a.py": { "code": "from utils import slug\n\ndef run():\n    return slug('x')" }
     },
     "error": "no packages.json above './lib/' declares 'utils'"
   },
   {
-    "src": "from \"./svc_a/main.py\" import handle as ha\nfrom \"./svc_b/main.py\" import handle as hb\nprint(ha())\nprint(hb())",
+    "src": "from .svc_a.main import handle as ha\nfrom .svc_b.main import handle as hb\nprint(ha())\nprint(hb())",
     "output": ["postgres", "mysql"],
     "modules": {
       "./svc_a/main.py":     { "code": "from db import name\n\ndef handle():\n    return name()" },
@@ -430,7 +421,7 @@
     }
   },
   {
-    "src": "from \"./lib/a.py\" import run\nprint(run())",
+    "src": "from .lib.a import run\nprint(run())",
     "modules": {
       "./lib/a.py": { "code": "from missing import x\n\ndef run():\n    return x" }
     },
@@ -441,13 +432,49 @@
     "error": "circular extends chain"
   },
   {
-    "src": "from \"./lib/sub/x.py\" import f\nprint(f())",
+    "src": "from .lib.sub.x import f\nprint(f())",
     "output": ["root-helper"],
     "modules": {
       "./lib/sub/x.py": { "code": "from helper import h\n\ndef f():\n    return h()" },
       "./helper.py":    { "code": "def h():\n    return 'root-helper'" }
     },
     "aliases": { "helper": "./helper.py" }
+  },
+  {
+    "src": "from lib.a import run\nprint(run())",
+    "output": ["hi"],
+    "modules": {
+      "lib/a.py": { "code": "def run():\n    return 'hi'" }
+    },
+    "manifests": { "": { "imports": {} } }
+  },
+  {
+    "src": "from lib.a import run\nprint(run())",
+    "modules": {
+      "lib/a.py": { "code": "def run():\n    return 'hi'" }
+    },
+    "error": "no packages.json above '' to resolve 'lib/a.py'"
+  },
+  {
+    "src": "from .svc.main import handle\nprint(handle())",
+    "output": ["root-lib"],
+    "modules": {
+      "./svc/main.py": { "code": "from lib.util import f\n\ndef handle():\n    return f()" },
+      "lib/util.py":   { "code": "def f():\n    return 'root-lib'" }
+    },
+    "manifests": { "": { "imports": {} } }
+  },
+  {
+    "src": "from .lib.a import run\nprint(run())",
+    "output": ["up:ok"],
+    "modules": {
+      "./lib/a.py": { "code": "from ..util import f\n\ndef run():\n    return 'up:' + f()" },
+      "./util.py":  { "code": "def f():\n    return 'ok'" }
+    }
+  },
+  {
+    "src": "from . import x",
+    "error": "expected a module name after '.'"
   },
   {
     "src": "import prod\nimport dev\nm = import_module('prod')\nprint(m.handler())",

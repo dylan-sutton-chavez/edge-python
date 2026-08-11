@@ -149,7 +149,7 @@ pub unsafe extern "C" fn set_entry_dir(len: usize) {
     with_runtime(|rt| rt.entry_dir = dir);
 }
 
-/* Pre-fetch feed: each import as `b<TAB>name` (bare, resolve via manifest) or `q<TAB>spec` (quoted URL/path), one per line. */
+/* Pre-fetch feed: each import as `b<TAB>name` (bare, resolve via manifest), `r<TAB>path` (importer-relative) or `R<TAB>path` (manifest-root-relative), one per line. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn extract_imports(len: usize) -> usize {
     use crate::packages::{scan_imports, ImportSpec};
@@ -162,7 +162,8 @@ pub unsafe extern "C" fn extract_imports(len: usize) -> usize {
         if !buf.is_empty() { buf.push('\n'); }
         let (kind, name) = match &spec {
             ImportSpec::Bare(n) => ('b', n),
-            ImportSpec::Quoted(u) => ('q', u),
+            ImportSpec::Relative(p) => ('r', p),
+            ImportSpec::Root(p) => ('R', p),
         };
         buf.push(kind);
         buf.push('\t');

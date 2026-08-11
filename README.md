@@ -151,7 +151,7 @@ Imports, std packages, and the built-in `time` / `network` modules resolve witho
 ```python
 # app.py
 import json
-from "./lib/helper.py" import double
+from .lib.helper import double
 
 data = json.loads('{"n": 21}')
 await sleep(0.1)

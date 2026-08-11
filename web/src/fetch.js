@@ -7,6 +7,11 @@ import { sha256Hex } from './specs.js';
 export async function fetchWithLockfile(spec, lockfile, ctx) {
     const { cache, baseUrl, knownMissing, integrityActive } = ctx;
 
+    // An explicit #sha256- fragment pins the bytes; it stays in the cache key but leaves the request URL.
+    const fragAt = spec.indexOf('#sha256-');
+    const pin = fragAt === -1 ? null : spec.slice(fragAt + 8);
+    const target = fragAt === -1 ? spec : spec.slice(0, fragAt);
+
     if (integrityActive) {
         const expected = lockfile.get(spec);
         if (expected) {
@@ -18,7 +23,7 @@ export async function fetchWithLockfile(spec, lockfile, ctx) {
     let resp;
     try {
         // Specs are root-relative; the URL join clamps escapes at the origin.
-        const url = spec.includes('://') ? spec : new URL(spec, baseUrl ?? self.location.href).toString();
+        const url = target.includes('://') ? target : new URL(target, baseUrl ?? self.location.href).toString();
         resp = await fetch(url);
     } catch (e) {
         console.warn(`[edge-python] fetch failed for '${spec}':`, e);
@@ -32,7 +37,7 @@ export async function fetchWithLockfile(spec, lockfile, ctx) {
     }
 
     // A .wasm answered with HTML/text is a schemeless spec resolved relative and hitting an SPA fallback, not a module.
-    if (spec.endsWith('.wasm')) {
+    if (target.endsWith('.wasm')) {
         const ct = (resp.headers.get('content-type') || '').toLowerCase();
         if (ct.includes('html') || ct.startsWith('text/')) {
             console.warn(`[edge-python] '${spec}' served as '${ct || 'no content-type'}', not a wasm module`);
@@ -41,6 +46,13 @@ export async function fetchWithLockfile(spec, lockfile, ctx) {
     }
 
     const bytes = new Uint8Array(await resp.arrayBuffer());
+
+    if (pin) {
+        const hash = await sha256Hex(bytes);
+        if (pin !== hash) {
+            throw new Error(`[edge-python] integrity check failed for '${target}'\n expected sha256-${pin}\n got sha256-${hash}`);
+        }
+    }
 
     if (integrityActive) {
         const hash = await sha256Hex(bytes);

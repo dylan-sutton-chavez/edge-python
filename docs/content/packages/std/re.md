@@ -3,7 +3,7 @@ title: "re (web, native)"
 description: "Regular expressions on a backtracking engine."
 ---
 
-`re` is regular expressions on a backtracking engine. Import it by bare name, both runtimes resolve it with no manifest. To pin a different version, import it by URL or through a `packages.json` alias, see [Modules](/reference/modules#packagesjson).
+`re` is regular expressions on a backtracking engine. Import it by bare name, both runtimes resolve it with no manifest. To pin a different version, use a `packages.json` alias, see [Modules](/reference/modules#packagesjson).
 
 Functions are `match`, `search`, `fullmatch`, `findall`, `groups`, `span`, and `sub`, all taking `(pattern, string)`. `compile(pattern)` returns a pattern object with the same operations as methods. Flags go inline: `(?i)`, `(?s)`, `(?m)`.
 

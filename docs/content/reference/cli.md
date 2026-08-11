@@ -34,7 +34,7 @@ Linux needs glibc 2.17 or newer, the floor the prebuilt binaries are linked agai
 
 ## `edge run`: run a script
 
-Runs a script and streams its output to the terminal. Bare imports resolve through [`packages.json`](/reference/modules#packagesjson). Quoted relative imports resolve against the importing file. Uncaught errors print a traceback to stderr and exit 1.
+Runs a script and streams its output to the terminal. Bare imports resolve through [`packages.json`](/reference/modules#packagesjson). Relative imports resolve against the importing file. Uncaught errors print a traceback to stderr and exit 1.
 
 ```text
 $ edge run broken.py

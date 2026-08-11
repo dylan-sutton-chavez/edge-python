@@ -3,7 +3,7 @@ Importing a #[plugin_class] from Edge Python.
     Build slugify_mod.wasm `cargo build --release --target wasm32-unknown-unknown -p slugify-mod`
 """
 
-from "./slugify_mod.wasm" import Slugger
+from slugify_mod import Slugger
 
 s = Slugger()
 s.add("Hello World")

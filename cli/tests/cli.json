@@ -96,7 +96,7 @@
   {
     "given": {
       "sub/util.py": "def add(a, b):\n    return a + b\n",
-      "sub/s_test.py": "from \"./util.py\" import add\nfrom test import test\n\n@test(\"adds\")\ndef t_add():\n    assert add(2, 3) == 5\n"
+      "sub/s_test.py": "from .util import add\nfrom test import test\n\n@test(\"adds\")\ndef t_add():\n    assert add(2, 3) == 5\n"
     },
     "run": ["test"],
     "stdout": ["PASS - adds", "(successful) sub/s_test.py", "1/1 files passed"]
@@ -114,7 +114,7 @@
     "stdout": ["(unsuccessful) e_test.py: no tests registered"]
   },
   {
-    "given": { "u.py": "val = 5\n", "t.py": "from \"./u.py\" import val\nprint(\"got\", val)\n" },
+    "given": { "u.py": "val = 5\n", "t.py": "from .u import val\nprint(\"got\", val)\n" },
     "engine": "both",
     "run": ["run", "t.py"],
     "stdout": ["got 5"]

@@ -16,16 +16,16 @@ A module is one of two flavors. Both use the same import syntax, and the host's 
 
 ```python
 from json import dumps, loads                  # bare name, resolved through packages.json or the defaults
-from "./lib/helpers.py" import slugify         # quoted path, resolved against the importing file
-from "https://example.com/math.wasm" import add  # quoted URL
-from math import sqrt as root                  # alias with as
+from .lib.helpers import slugify               # relative to the importing file (./lib/helpers.py)
+from ..shared.util import chunks               # one dir up per extra dot (../shared/util.py)
+from lib.helpers import slugify as sl          # absolute from the nearest packages.json dir
 import math                                    # binds the module itself, use math.sqrt(2.0)
 from utils import *                            # every export becomes a flat name in scope
 ```
 
 Name lists can span lines inside parentheses, with an optional trailing comma.
 
-Every bare name must be declared in `packages.json` or be one of the [official defaults](#defaults). Quoted specs need no manifest. Three forms do not work: `from . import x` (use a quoted relative path), dotted paths like `import a.b.c` (parses, but nothing is auto-discovered, so declare each spec yourself), and dynamic imports (no `__import__`, no `importlib`, and the module set is fixed per compilation).
+Dots map to directories and the `.py` suffix is implicit. A leading dot anchors the spec at the importing file, a dotted name anchors at the nearest `packages.json` directory, and a plain name must be declared in `packages.json` or be one of the [official defaults](#defaults). Two forms do not work: `from . import x` (Edge has no packages, so a bare dot names nothing) and dynamic imports (no `__import__`, no `importlib`, and the module set is fixed per compilation).
 
 ## Module semantics
 
@@ -68,26 +68,30 @@ Resolution follows four rules.
 
 1. **Walk-up.** A bare name is resolved against the nearest `packages.json`, walking up from the importing file's directory. Each manifest is a package boundary, the same pattern as Node's `node_modules` discovery. The chain is capped at 32 hops.
 2. **Hermetic.** The nearest manifest wins. If it does not declare the name and has no `extends`, compilation fails. A deep dependency cannot borrow a parent's aliases.
-3. **Relative to the importer.** A quoted relative spec resolves against the file that contains the import, so a transitively imported `lib/a.py` doing `from "./b.py" import g` finds `lib/b.py`.
-4. **Spec shapes.** A spec containing `://` or starting with `/` is used as is. A spec starting with `./` or `../` is joined against the importer's directory. Anything else is a bare name for the walk-up.
+3. **Relative to the importer.** A leading-dot spec resolves against the file that contains the import, so a transitively imported `lib/a.py` doing `from .b import g` finds `lib/b.py`.
+4. **Spec shapes.** A spec containing `://` or starting with `/` is used as is. A spec starting with `./` or `../` is joined against the importer's directory. Any other spec with a `/` is joined against the nearest `packages.json` directory. Anything else is a bare name for the walk-up.
 
 ## Integrity
 
-Append `#sha256-<64 hex chars>` to a quoted spec to pin its content:
+Append `#sha256-<64 hex chars>` to a spec in `packages.json` to pin its content:
 
-```python
-from "https://example.com/utils.py#sha256-deadbeef0123456789abcdef0123456789abcdef0123456789abcdef01234567" import normalize
+```json
+{ "imports": { "utils": "https://example.com/utils.py#sha256-deadbeef0123456789abcdef0123456789abcdef0123456789abcdef01234567" } }
 ```
 
-The compiler asks the host for the raw bytes, hashes them, and refuses to compile on a mismatch. The diagnostic shows both digests:
+```python
+from utils import normalize
+```
+
+The runtime fetches the raw bytes, hashes them, and refuses to run on a mismatch. The diagnostic shows both digests:
 
 ```text
-error: integrity check failed for './utils.py'
- expected sha256-0000000000000000000000000000000000000000000000000000000000000000
+error: integrity check failed for 'https://example.com/utils.py'
+ expected sha256-deadbeef0123456789abcdef0123456789abcdef0123456789abcdef01234567
  got sha256-36e4838513e46116f258c86b494eaa826d64fa0a9abdf36e8720a31b3d2862e2
 ```
 
-Only `sha256` is supported. Other prefixes fail with `unrecognized integrity fragment`. Verification lives in the compiler, so every host enforces it the same way. A host that cannot supply raw bytes fails cleanly instead of skipping the check.
+Only `sha256` is supported. Other prefixes fail with `unrecognized integrity fragment`. Both runtimes enforce the pin the same way, the browser in its fetch layer and the CLI in its native resolver.
 
 The browser runtime additionally caches every fetched module in IndexedDB, in a `cas` store (hash to bytes) and a `lockfile` store (spec to hash). Repeat runs make no network requests. If a locked URL later serves different bytes, the run fails with an `integrity drift` error showing both digests. `clearCache()` on the worker wipes both stores. The CLI's native engine does the same on disk, see [the native engine](#the-native-engine).
 
@@ -165,10 +169,14 @@ Transit values are `None`, `bool`, `int` (128-bit), `float`, `str`, `bytes`, and
 
 ### CDN wasm
 
-The contract is the [WASM module ABI](/reference/wasm-abi), language-agnostic and sealed. Rust authors use the `wasm-pdk` crate's macros (`#[plugin_fn]`, `#[plugin_class]`, and friends) and write plain Rust. Other languages use community PDKs or hand-written wire boilerplate. The script side is an ordinary import:
+The contract is the [WASM module ABI](/reference/wasm-abi), language-agnostic and sealed. Rust authors use the `wasm-pdk` crate's macros (`#[plugin_fn]`, `#[plugin_class]`, and friends) and write plain Rust. Other languages use community PDKs or hand-written wire boilerplate. The script side imports it through a manifest alias:
+
+```json
+{ "imports": { "slugify_mod": "https://example.com/slugify_mod.wasm" } }
+```
 
 ```python
-from "https://example.com/slugify_mod.wasm" import slugify
+from slugify_mod import slugify
 print(slugify("Hello World"))
 ```
 
@@ -228,7 +236,7 @@ Handlers take decoded JS values and return plain JS values. Opaque objects like 
 
 ### Module resolution
 
-Quoted paths load from disk relative to the importing file. Bare names go through the `packages.json` walk-up. URL specs download once into `~/.cache/edge-native` (`$XDG_CACHE_HOME` is honored) with a 64 MB cap. A downloaded file is pinned by a `.lock` sidecar holding its SHA-256, and later runs refuse on drift until you remove the cache entry. A `.so` or `.dylib` target loads as a native plugin. The official std `.wasm` specs that `edge add` writes swap transparently to their `.so` twins, so one manifest serves both engines. With no manifest entry, `json`, `re`, `math`, and `struct` default to the CDN `.so` for the host architecture and `test` to the CDN `test.py`. Set `EDGE_STD_DIR` to a local checkout to serve these from disk instead.
+Relative imports load from disk relative to the importing file, dotted imports from the nearest `packages.json` dir. Bare names go through the `packages.json` walk-up. Manifest URLs download once into `~/.cache/edge-native` (`$XDG_CACHE_HOME` is honored) with a 64 MB cap. A downloaded file is pinned by a `.lock` sidecar holding its SHA-256, and later runs refuse on drift until you remove the cache entry. A `.so` or `.dylib` target loads as a native plugin. The official std `.wasm` specs that `edge add` writes swap transparently to their `.so` twins, so one manifest serves both engines. With no manifest entry, `json`, `re`, `math`, and `struct` default to the CDN `.so` for the host architecture and `test` to the CDN `test.py`. Set `EDGE_STD_DIR` to a local checkout to serve these from disk instead.
 
 Two modules are compiled into the binary. `time` carries the clocks and the calendar functions, always UTC (there is no timezone database, so `tzname()` is `"UTC"`). `network` exposes a blocking `fetch(url, options_json?)` returning `{id, ok, status, headers, body}`, plus `fetch_text` and `fetch_json`. A manifest entry with the same name always wins over a built-in.
 

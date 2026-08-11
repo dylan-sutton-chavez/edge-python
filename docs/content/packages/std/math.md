@@ -3,7 +3,7 @@ title: "math (web, native)"
 description: "Scalar math plus a batch path over bytes buffers."
 ---
 
-`math` is scalar math on `libm`, with `ValueError: math domain error` for domain errors. Import it by bare name, both runtimes resolve it with no manifest. To pin a different version, import it by URL or through a `packages.json` alias, see [Modules](/reference/modules#packagesjson).
+`math` is scalar math on `libm`, with `ValueError: math domain error` for domain errors. Import it by bare name, both runtimes resolve it with no manifest. To pin a different version, use a `packages.json` alias, see [Modules](/reference/modules#packagesjson).
 
 Module constants are `pi`, `e`, `tau`, `inf`, `nan` (values, not calls). Integer helpers are `factorial`, `gcd`, `lcm`, `isqrt`, `comb`, `perm`, bounded by the VM's 128-bit integers. `hypot` and `gcd` are variadic. `modf` and `frexp` return tuples, and `floor`, `ceil`, and `trunc` return `int`. The rest of the scalar surface, by group:
 

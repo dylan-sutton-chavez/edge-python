@@ -1,0 +1,1 @@
+{ "imports": { "slugify_mod": "./slugify_mod.wasm" } }
