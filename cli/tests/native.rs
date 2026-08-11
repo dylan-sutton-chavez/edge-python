@@ -249,6 +249,54 @@ fn a_cached_module_is_pinned_to_its_first_bytes() {
     assert_eq!(code, 1);
 }
 
+/* A #sha256- fragment on a manifest target verifies the fetched bytes on every run. */
+#[test]
+fn a_manifest_pin_verifies_the_target_bytes() {
+    let dir = scratch("fragpin");
+    let src = "def double(n):\n    return n * 2\n";
+    std::fs::write(dir.join("helper.py"), src).unwrap();
+    let pin = compiler::util::sha256::hex_encode(&compiler::util::sha256::sha256(src.as_bytes()));
+    std::fs::write(dir.join("packages.json"), format!("{{ \"imports\": {{ \"helper\": \"./helper.py#sha256-{pin}\" }} }}\n")).unwrap();
+    std::fs::write(dir.join("main.py"), "from helper import double\nprint(double(21))\n").unwrap();
+
+    let (out, err, code) = run_in(&dir, &["run", "main.py"], None);
+    assert_eq!(out, "42\n", "stderr was: {err}");
+    assert_eq!(code, 0, "stderr was: {err}");
+
+    let bad = "0".repeat(64);
+    std::fs::write(dir.join("packages.json"), format!("{{ \"imports\": {{ \"helper\": \"./helper.py#sha256-{bad}\" }} }}\n")).unwrap();
+    let (_, err, code) = run_in(&dir, &["run", "main.py"], None);
+    assert!(err.contains("integrity check failed"), "stderr was: {err}");
+    assert_eq!(code, 1);
+}
+
+/* Dotted imports anchor at the nearest packages.json dir, not at the importing file. */
+#[test]
+fn dotted_imports_anchor_at_the_manifest_root() {
+    let dir = scratch("rooted");
+    std::fs::create_dir_all(dir.join("lib")).unwrap();
+    std::fs::create_dir_all(dir.join("web")).unwrap();
+    std::fs::write(dir.join("packages.json"), "{ \"imports\": {} }\n").unwrap();
+    std::fs::write(dir.join("lib/util.py"), "def f():\n    return 'root-lib'\n").unwrap();
+    std::fs::write(dir.join("web/main.py"), "from lib.util import f\nprint(f())\n").unwrap();
+
+    let (out, err, code) = run_in(&dir, &["run", "web/main.py"], None);
+    assert_eq!(out, "root-lib\n", "stderr was: {err}");
+    assert_eq!(code, 0, "stderr was: {err}");
+}
+
+/* Quoted specs are not imports at all; they fail like any missing module. */
+#[test]
+fn quoted_imports_are_not_found() {
+    let dir = scratch("quoted");
+    std::fs::write(dir.join("helper.py"), "def double(n):\n    return n * 2\n").unwrap();
+    std::fs::write(dir.join("main.py"), "from \"./helper.py\" import double\n").unwrap();
+
+    let (_, err, code) = run_in(&dir, &["run", "main.py"], None);
+    assert!(err.contains("module './helper.py' not found"), "stderr was: {err}");
+    assert_eq!(code, 1);
+}
+
 /* edge build packs a project into a standalone .edge that runs on its own, imports and all. */
 #[test]
 fn standalone_edge_runs_the_packed_project() {

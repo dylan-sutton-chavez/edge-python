@@ -15,20 +15,16 @@ mod test {
 
     use crate::common::{TestResolver, test_native};
 
-    /* `native`/`code` drive resolve(); optional `bytes` drives fetch_bytes() for `#sha256-` cases. */
+    /* `native` drives resolve() with extern bindings, `code` splices a source module. */
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
     #[serde(untagged)]
     enum ModuleDef {
         Native {
             native: Vec<String>,
-            #[serde(default)]
-            bytes: Option<String>,
         },
         Code {
             code: String,
-            #[serde(default)]
-            bytes: Option<String>,
         },
     }
 
@@ -88,17 +84,15 @@ mod test {
         let mut r = TestResolver::new();
         for (spec, def) in modules {
             match def {
-                ModuleDef::Native { native, bytes } => {
+                ModuleDef::Native { native } => {
                     let bindings: Vec<NativeBinding> = native.iter()
                         .map(|n| test_native(n)
                         .unwrap_or_else(|| panic!("unknown test native: {}", n)))
                         .collect();
                     r = r.with_native(spec, bindings);
-                    if let Some(b) = bytes { r = r.with_bytes(spec, b.clone().into_bytes()); }
                 }
-                ModuleDef::Code { code, bytes } => {
+                ModuleDef::Code { code } => {
                     r = r.with_code(spec, code);
-                    if let Some(b) = bytes { r = r.with_bytes(spec, b.clone().into_bytes()); }
                 }
             }
             /* Auto self-alias bare-name modules so flat fixtures work without explicit `aliases`. */

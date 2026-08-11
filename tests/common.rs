@@ -23,8 +23,6 @@ struct TestResolverState {
     /* Manifests keyed by directory; walk-up checks each parent of the importer's location. */
     manifests: HashMap<String, Manifest>,
     in_flight: HashSet<String>,
-    /* Raw bytes per spec consumed by `fetch_bytes`; drives `#sha256-` integrity tests. */
-    bytes: HashMap<String, Vec<u8>>,
 }
 
 pub struct TestResolver {
@@ -65,12 +63,6 @@ impl TestResolver {
             spec.to_string(),
             Resolved::Code { src: src.to_string(), canonical: spec.to_string() },
         );
-        self
-    }
-
-    /* Bytes the parser will hash for `spec` when verifying `#sha256-...`. */
-    pub fn with_bytes(self, spec: &str, bytes: Vec<u8>) -> Self {
-        self.state.borrow_mut().bytes.insert(spec.to_string(), bytes);
         self
     }
 
@@ -119,18 +111,6 @@ impl Resolver for TestResolver {
             in_flight_marker: Some(canon),
             dir: dir_of(spec).to_string(),
         })
-    }
-
-    fn fetch_bytes(
-        &mut self,
-        spec: &str,
-        _expected_hash: Option<[u8; 32]>,
-    ) -> Result<Vec<u8>, String> {
-        // In-memory map; the parser still runs its hash check downstream.
-        match self.state.borrow().bytes.get(spec) {
-            Some(b) => Ok(b.clone()),
-            None => Err(format!("module '{}' integrity verification not supported by this resolver", spec)),
-        }
     }
 }
 
