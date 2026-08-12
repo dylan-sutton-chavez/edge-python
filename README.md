@@ -126,7 +126,7 @@ The runtime spawns a Web Worker that pre-fetches imports, dispatches native call
 
 ### Rust host
 
-Edge Python is a `cdylib`, so a Rust host can instantiate `compiler.wasm` and call its exports directly, the same `.wasm` that ships to browsers, and the host owns I/O. The crate fetches nothing at build time, so vendor the `.wasm` from a tagged release and pin it by checksum, see [Consuming the release](https://edgepython.com/reference/wasm-abi#consuming-the-release-from-a-rust-crate). To add native modules from your own crate, implement the `Resolver` trait, see [Writing modules](https://edgepython.com/reference/modules).
+Edge Python is a `cdylib`, so a Rust host can instantiate `compiler.wasm` and call its exports directly, the same `.wasm` that ships to browsers, and the host owns I/O. The crate fetches nothing at build time, so vendor the `.wasm` from a tagged release and pin it by checksum, see [Consuming the release](https://edgepython.com/reference/abi#consuming-the-release-from-a-rust-crate). To add native modules from your own crate, implement the `Resolver` trait, see [Writing modules](https://edgepython.com/reference/modules).
 
 ### Native
 

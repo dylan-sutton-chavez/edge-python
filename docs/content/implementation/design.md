@@ -80,7 +80,7 @@ Preemption supplies the parked state when a program never suspends on its own. `
 
 Chunk-derived tables (bytecode, name pools, the extern table) are not stored. They come from the re-parse, so only dynamic state crosses the wire. Restore runs in two passes because hashing reads the heap. First every slot is materialised (sets and frozensets land empty), then a rehash pass rebuilds dict indexes and fills the sets, and `rebuild_mro` recomputes each class linearization. IC and memoisation caches start empty and warm lazily. `Extern` handles resolve by name against the re-parsed chunk's extern table. Host-side resources such as in-flight host calls and DOM handles are not part of the snapshot. `state_globals` and `state_stack` introspect a parked run without resuming it.
 
-See [Snapshots](/language/snapshots) for the host-facing feature and the [WASM module ABI](/reference/wasm-abi#snapshot-exports) for the exports and blob layout.
+See [Snapshots](/language/snapshots) for the host-facing feature and the [ABI](/reference/abi#snapshot-exports) for the exports and blob layout.
 
 ## What the compiler intentionally does not do
 

@@ -1,5 +1,5 @@
 /*
-Plugin proc macros: `#[plugin_fn]` wraps a free fn as wasm-abi export.
+Plugin proc macros: `#[plugin_fn]` wraps a free fn as a plugin ABI export.
 `#[plugin_class]` synthesises state plumbing; `#[plugin_methods]` lowers an impl into `__class_<Name>_<method>` exports; `#[plugin_ctor]` tags the constructor.
 */
 

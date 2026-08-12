@@ -1,5 +1,5 @@
 /*
-Edge Python wasm-abi wire format. Shared by compiler (host) and wasm-pdk (guest). no_std, alloc only.
+Edge Python plugin ABI wire format. Shared by compiler (host) and wasm-pdk (guest). no_std, alloc only.
 */
 
 #![no_std]

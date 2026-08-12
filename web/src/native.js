@@ -8,7 +8,7 @@ export function resetNativeTable() {
     nativeTable.length = 0;
 }
 
-/* Build the 6 `env.edge_*` imports for wasm-pdk plugins; bridges guest <-> compiler memory. */
+/* Build the 6 `env.edge_*` imports for wasm-pdk plugins, bridging guest and compiler memory. */
 export function makeGuestEnv(compilerExports) {
     const compMem = () => new Uint8Array(compilerExports.memory.buffer);
     const compView = () => new DataView(compilerExports.memory.buffer);
@@ -96,7 +96,7 @@ async function builtinWasmPdkLoader(module, ctx) {
     if (typeof instance.exports.__edge_alloc !== 'function') {
         throw new Error(
             `native module missing '__edge_alloc(size: u32) -> *mut u8';` +
-            ` see /reference/wasm-abi for the contract`
+            ` see /reference/abi for the contract`
         );
     }
 

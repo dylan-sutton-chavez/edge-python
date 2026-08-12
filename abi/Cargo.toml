@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Wire-format constants shared by the Edge Python compiler and the wasm-pdk. no_std, zero deps."
+description = "Plugin ABI wire-format constants shared by the Edge Python compiler and the wasm-pdk. no_std, zero deps."
 
 [lib]
 crate-type = ["rlib"]

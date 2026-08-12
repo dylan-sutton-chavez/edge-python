@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Edge Python Plugin Development Kit, author-side runtime for writing plugin modules importable from Edge Python scripts, compiled to `.wasm` for the web runtime or to native `.so`/`.dylib` for the CLI's in-process engine. Provides `#[plugin_fn]` proc-macro, Handle/Value/Error types, and From/IntoValue traits over the v1 wasm-abi."
+description = "Edge Python Plugin Development Kit, author-side runtime for writing plugin modules importable from Edge Python scripts, compiled to `.wasm` for the web runtime or to native `.so`/`.dylib` for the CLI's in-process engine. Provides `#[plugin_fn]` proc-macro, Handle/Value/Error types, and From/IntoValue traits over the v1 plugin ABI."
 
 [lib]
 crate-type = ["rlib"]

@@ -10,7 +10,7 @@ A module is one of two flavors. Both use the same import syntax, and the host's 
 | Flavor | What it is |
 |---|---|
 | Code module | A `.py` file. Its top level runs once at startup, and its exports live on a module object shared by every importer. |
-| Native module | A `.wasm` plugin over the [WASM module ABI](/reference/wasm-abi), a native `.so` plugin loaded by the CLI, or bindings a host registers through the `Resolver` trait. |
+| Native module | A `.wasm` plugin over the [ABI](/reference/abi), a native `.so` plugin loaded by the CLI, or bindings a host registers through the `Resolver` trait. |
 
 ## Syntax
 
@@ -165,11 +165,11 @@ Four delivery paths, by decreasing reach:
 | Host capability | A custom `compiler.wasm` plus a matching host runtime | Rust, or any wasm32 target, inside the embedder | Transit values plus host services (DOM, FS, crypto) |
 | JS host module | Plain ESM on the browser main thread | JavaScript | Transit values plus `window` and `document` |
 
-Transit values are `None`, `bool`, `int` (128-bit), `float`, `str`, `bytes`, and nested `list` / `dict`. The exact wire tags are in the [WASM module ABI](/reference/wasm-abi).
+Transit values are `None`, `bool`, `int` (128-bit), `float`, `str`, `bytes`, and nested `list` / `dict`. The exact wire tags are in the [ABI](/reference/abi).
 
 ### CDN wasm
 
-The contract is the [WASM module ABI](/reference/wasm-abi), language-agnostic and sealed. Rust authors use the `wasm-pdk` crate's macros (`#[plugin_fn]`, `#[plugin_class]`, and friends) and write plain Rust. Other languages use community PDKs or hand-written wire boilerplate. The script side imports it through a manifest alias:
+The contract is the [ABI](/reference/abi), language-agnostic and sealed. Rust authors use the `wasm-pdk` crate's macros (`#[plugin_fn]`, `#[plugin_class]`, and friends) and write plain Rust. Other languages use community PDKs or hand-written wire boilerplate. The script side imports it through a manifest alias:
 
 ```json
 { "imports": { "slugify_mod": "https://example.com/slugify_mod.wasm" } }
@@ -265,6 +265,6 @@ cd std/json && cargo build --profile native   # any std package as a native plug
 
 ## See also
 
-- [WASM module ABI](/reference/wasm-abi): the wire contract behind `.wasm` and native plugins.
+- [ABI](/reference/abi): the wire contract behind `.wasm` and native plugins.
 - [CLI](/reference/cli): `edge add` writes manifest entries, `edge build` vendors packages for offline use.
 - [Limits and errors](/reference/limits-and-errors): the sandbox profile both engines run under.

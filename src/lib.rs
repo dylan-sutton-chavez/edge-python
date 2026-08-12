@@ -4,7 +4,7 @@ extern crate alloc;
 
 pub mod abi;
 
-/* Host bridge shared by the WASM ABI and the native engine. */
+/* Host bridge shared by the wasm build and the native engine. */
 #[cfg(any(target_arch = "wasm32", feature = "native"))]
 pub mod bridge;
 

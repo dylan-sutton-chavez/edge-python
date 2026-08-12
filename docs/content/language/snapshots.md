@@ -216,10 +216,10 @@ The `state` field reads `"waiting_event"` for a parked `receive()`, `"sleeping"`
 
 ## Limits
 
-Script-only state restores identically, including queued but unconsumed events. Live host resources (DOM handles, sockets, pending host calls) are not captured and must be recreated after restoring. The blob carries the whole heap, and `restoreState` loads it through the runtime's 1 MiB source buffer, so an oversized blob fails on restore with `snapshot exceeds 1048576 bytes`. Keep snapshotted state well under the ceiling. See [blob layout](/reference/wasm-abi#snapshot-exports).
+Script-only state restores identically, including queued but unconsumed events. Live host resources (DOM handles, sockets, pending host calls) are not captured and must be recreated after restoring. The blob carries the whole heap, and `restoreState` loads it through the runtime's 1 MiB source buffer, so an oversized blob fails on restore with `snapshot exceeds 1048576 bytes`. Keep snapshotted state well under the ceiling. See [blob layout](/reference/abi#snapshot-exports).
 
 ## See also
 
 - [Design](/implementation/design) for the serializer internals.
-- [WASM module ABI](/reference/wasm-abi#snapshot-exports) for the `compiler.wasm` exports and blob layout.
+- [ABI](/reference/abi#snapshot-exports) for the `compiler.wasm` exports and blob layout.
 - [CLI](/reference/cli) for the native snapshot flags.

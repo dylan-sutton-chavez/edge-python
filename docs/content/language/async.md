@@ -288,7 +288,7 @@ run(main())
 - **No background tasks.** There is no `create_task`. All concurrency is structural: a coroutine only progresses while awaited inside `run(...)` or `gather(...)`.
 - **No preemption between coroutines.** `while True: pass` inside a coroutine blocks the scheduler. The host can still force a pause via the preempt interval, see [Snapshots](/language/snapshots).
 - **No suspending in a cancelled `finally`.** A `finally` running from `cancel()` cannot `await` or `sleep`, doing so raises `RuntimeError`.
-- **Cooperative host loop.** The scheduler suspends to the host when it cannot progress synchronously (pending timer, frame, or event). The embedder resumes via `run_start` / `run_resume` / `run_push_event`, and can serialize a parked run with `save_state` / `restore_state`. See [Snapshots](/language/snapshots) and the [WASM ABI](/reference/wasm-abi).
+- **Cooperative host loop.** The scheduler suspends to the host when it cannot progress synchronously (pending timer, frame, or event). The embedder resumes via `run_start` / `run_resume` / `run_push_event`, and can serialize a parked run with `save_state` / `restore_state`. See [Snapshots](/language/snapshots) and the [ABI](/reference/abi).
 - **No async comprehensions.** `[x async for x in it]` is a parse error.
 - **No `gen.send` / `throw` / `close`.** Generators and coroutines are one-way producers. For bidirectional flow, use `run` / `gather` and pass messages via arguments.
 - **`receive()` can park indefinitely.** An empty queue with no `run_push_event` leaves the coroutine waiting. Pair with `with_timeout` for a deadline.

@@ -5,6 +5,6 @@ export default {
   modules: 'Modules',
   cli: 'CLI',
   workers: 'Workers',
-  'wasm-abi': 'WASM ABI',
+  'abi': 'ABI',
   'limits-and-errors': 'Limits and errors',
 }

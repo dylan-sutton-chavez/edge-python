@@ -1,4 +1,4 @@
-// The FFI safety contract lives in docs/reference/wasm-abi.md, per-fn sections would duplicate it.
+// The FFI safety contract lives in docs/content/reference/abi.md, per-fn sections would duplicate it.
 #![allow(clippy::missing_safety_doc)]
 
 use crate::abi::{classify_decode, classify_encode, DecodeBits, EncodeRequest, ErrorKind, ErrorStash, HandleTable, Op, PrimitiveBytes, TAG_INVALID};

@@ -42,7 +42,7 @@ impl Resolver for WasmHostResolver {
         if ptr.is_null() {
             return Err(s!("no bytes cached by host for '", str spec, "'"));
         }
-        // Host allocates via `wasm_alloc` (wasm-abi.md): copy into a guest Vec, then `wasm_free`. `Vec::from_raw_parts` would UB by freeing Box-laid memory through Vec's layout.
+        // Host allocates via `wasm_alloc` (abi.md): copy into a guest Vec, then `wasm_free`. `Vec::from_raw_parts` would UB by freeing Box-laid memory through Vec's layout.
         let len = len as usize;
         let bytes: Vec<u8> = unsafe { core::slice::from_raw_parts(ptr, len) }.to_vec();
         unsafe { wasm_free(ptr, len as u32) };

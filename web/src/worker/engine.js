@@ -24,7 +24,7 @@ const STATUS_ERROR = 4;
 const STATUS_PENDING_HOST_CALL = 5;
 const STATUS_EXIT = 6; // uncaught SystemExit: clean termination, low 8 bits = exit code
 const STATUS_PREEMPTED = 7; // preempt tick; resumes with no host action
-const ERR_RUNTIME = 2; // wasm-abi error_kind::RUNTIME, for failed deferred host calls
+const ERR_RUNTIME = 2; // abi/src/lib.rs error_kind::RUNTIME, for failed deferred host calls
 
 // Worker-lifetime state
 let wasmModule = null;

@@ -1,7 +1,7 @@
 /*
 Sealed module contract: op codes / tags / error kinds / HandleTable / ErrorStash / codec.
 Constants mirror `wasm-abi` byte-for-byte; extend host modules via new Op values, never new imports.
-Spec: docs/reference/wasm-abi.md.
+Spec: docs/content/reference/abi.md.
 */
 
 use alloc::{string::String, vec::Vec};
