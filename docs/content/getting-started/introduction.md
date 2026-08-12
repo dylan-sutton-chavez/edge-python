@@ -50,4 +50,4 @@ The [language guide](/language/syntax) covers everything that is supported.
 
 Machine learning models can load `skill/SKILL.md` from the repository for a self-verifying summary of the language and CLI.
 
-For questions or integration help, email [c.sutton.dylan@gmail.com](mailto:c.sutton.dylan@gmail.com).
+For questions or integration help, email [dylan@edgepython.com](mailto:dylan@edgepython.com).
