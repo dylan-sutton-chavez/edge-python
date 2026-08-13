@@ -184,7 +184,7 @@ print(gather(status("https://api.github.com/zen"), status("https://nope.invalid/
 ['ok', 'failed']
 ```
 
-In a browser host, `fetch_text` runs the browser's `fetch()` inside a Web Worker and is subject to CORS. The native engine multiplexes the same calls on its own reactor, so `gather` overlaps them there too, with no CORS. See [network](/packages/host/network).
+In a browser host, `fetch_text` runs the browser's `fetch()` inside a Web Worker and is subject to CORS. The native engine multiplexes the same calls on its own reactor, so `gather` overlaps them there too, with no CORS. See [network](/packages/system/network).
 
 ## with_timeout
 

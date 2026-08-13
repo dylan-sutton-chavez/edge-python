@@ -13,8 +13,10 @@ doctest = false
 [dependencies]
 wasm-abi = { workspace = true }
 wasm-pdk-macros = { path = "macros" }
+# The free-list allocator backs `module_fixed_pool!()` on every target, over a static pool so a
+# confined native plugin grows its heap without a syscall, exactly as wasm avoids `memory.grow`.
+linked_list_allocator = { version = "0.10", default-features = false }
 
-# Re-exported only so `wasm_pdk::module!()` / `module_fixed_pool!()` can refer to the symbol paths. Plugin authors who skip the macros and declare their own #[global_allocator] do not pay for this, Rust drops unused crates from the cdylib.
+# Re-exported only so `wasm_pdk::module!()` can refer to the symbol path. Plugin authors who skip the macros and declare their own #[global_allocator] do not pay for this, Rust drops unused crates from the cdylib.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 lol_alloc = "0.4"
-linked_list_allocator = { version = "0.10", default-features = false }

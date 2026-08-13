@@ -10,7 +10,7 @@
 
 Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Python subset. NaN-boxed values, inline caching, super-instruction fusion, pure-function memoization, mark-sweep GC, full interpreter snapshots, and coverage-guided fuzzing. Runs in the browser as a WebAssembly module, or natively in the CLI as a single script, a standalone binary, or a pool of cooperative workers.
 
-- Secure by default. No file, network, or environment access, unless explicitly enabled by the [host](https://edgepython.com/reference/modules#host-libraries).
+- Secure by default. No file, network, or environment access, unless explicitly enabled by a [system module](https://edgepython.com/reference/modules#system-libraries).
 - Around 200 KB footprint. The full compiler and runtime ship as a single WASM binary for the browser or a native engine in the CLI.
 - Compile-time imports. Every module resolves at parse time, no dynamic loading, no runtime surprises.
 - No AST. Source compiles directly to bytecode in a single O(n) pass.
@@ -54,8 +54,9 @@ A Cargo workspace at the repo root holds the engine, `abi`, `pdk`, `rt` and `ski
 │   │   └── opcodes
 │   └── wasm
 ├── std
-└── tests
-    └── cases
+├── tests
+│   └── cases
+└── trap
 ```
 
 ```bash
@@ -74,11 +75,11 @@ deno test --allow-all std/harness/ # STDPKG=<name> narrows to one package
 
 To add a std package, create `std/<name>/` with the crate (or `src/entry.py` for a script-only package) plus its corpus. No harness edits needed.
 
-The host libraries in `web/builtins/*` are plain ESM, tested through headless Chromium. Web-only corpora sit beside the module, corpora shared with the native engine live in `tests/cases/builtins/`. Cases add optional `html`, `http_mocks`, and `ws_mocks` fixtures:
+The system libraries in `web/builtins/*` are plain ESM, tested through headless Chromium. Web-only corpora sit beside the module, corpora shared with the native engine live in `tests/cases/builtins/`. Cases add optional `html`, `http_mocks`, and `ws_mocks` fixtures:
 
 ```bash
 deno run -A npm:playwright install --with-deps chromium # once
-cd web/builtins && HOSTCAP=<dom|network|storage|time> deno test --allow-all tests/
+cd web/builtins && SYSPKG=<dom|network|storage|time> deno test --allow-all tests/
 ```
 
 The browser runtime lints and tests with Deno too, `deno lint web/` and `deno test --allow-all web/tests/runtime.test.js`.
@@ -96,7 +97,7 @@ Single-pass pipeline, source to SSA bytecode chunk, run by a stack interpreter w
 
 Full rationale, NaN-box patterns, IC thresholds, GC roots, and intentional omissions: [Design](https://edgepython.com/implementation/design). Lexer and parser internals: [Lexical](https://edgepython.com/implementation/lexical), [Syntax](https://edgepython.com/implementation/parsing).
 
-Native modules ship via four delivery paths (CDN `.wasm`, native `.so`/`.dylib` plugin, host capability, JS host module), see [Writing modules](https://edgepython.com/reference/modules).
+Native modules ship via four delivery paths (CDN `.wasm`, native `.so`/`.dylib` plugin, system capability, JS system module), see [Writing modules](https://edgepython.com/reference/modules).
 
 ## Quick start
 

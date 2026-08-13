@@ -2,7 +2,7 @@
 Edge Python `math` package. Where scalar and integer surface over `libm`, plus a packed-f64 batch fast path.
 */
 
-#![cfg_attr(target_arch = "wasm32", no_std)]
+#![no_std]
 #![cfg_attr(target_arch = "wasm32", no_main)]
 
 extern crate alloc;

@@ -5,7 +5,7 @@ mod network;
 pub(crate) mod swarm;
 mod time;
 
-/* Built-in host modules, resolved after the manifest so user entries always win. */
+/* Built-in system modules, resolved after the manifest so user entries always win. */
 pub(crate) fn resolve(name: &str) -> Option<Resolved> {
     let bindings = match name {
         "time" => time::bindings(),

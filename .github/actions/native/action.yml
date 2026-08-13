@@ -59,11 +59,12 @@ runs:
         SIZE_FLAGS: -Z location-detail=none -Z fmt-debug=none -Z unstable-options -C panic=immediate-abort
       run: |
         export PATH="$HOME/.local/bin:$PATH"
+        # build-std drops default libs, a no_std cdylib still needs the C runtime for its loader stub.
         case "$TARGET" in
           *linux-gnu)
-            RUSTFLAGS="$SIZE_FLAGS" cargo +nightly zigbuild --profile native --target "${TARGET}.2.17" -Z build-std=std,panic_abort ;;
+            RUSTFLAGS="$SIZE_FLAGS -C link-arg=-lc" cargo +nightly zigbuild --profile native --target "${TARGET}.2.17" -Z build-std=std,panic_abort ;;
           *apple-darwin)
-            RUSTFLAGS="$SIZE_FLAGS -C link-arg=-undefined -C link-arg=dynamic_lookup" \
+            RUSTFLAGS="$SIZE_FLAGS -C link-arg=-undefined -C link-arg=dynamic_lookup -C link-arg=-lSystem" \
             cargo +nightly build --profile native --target "$TARGET" -Z build-std=std,panic_abort ;;
         esac
 

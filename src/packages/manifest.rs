@@ -11,7 +11,7 @@ pub struct Manifest {
     pub extends: Option<String>,
 }
 
-/* Parse `{ "imports": {...}, "host": {...}, "extends": "..." }`. All optional; unknown keys skipped for forward compat; numbers, arrays, bools rejected. */
+/* Parse `{ "imports": {...}, "system": {...}, "extends": "..." }`. All optional; unknown keys skipped for forward compat; numbers, arrays, bools rejected. */
 pub fn parse_manifest(bytes: &[u8]) -> Result<Manifest, String> {
     let src = core::str::from_utf8(bytes).map_err(|_| s!("packages.json is not valid UTF-8"))?;
     let mut p = Reader { src: src.as_bytes(), pos: 0 };
@@ -30,10 +30,10 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<Manifest, String> {
         p.skip_ws();
         match key.as_str() {
             "imports" => p.read_imports_into(&mut m.imports)?,
-            "host" => {
+            "system" => {
                 let mut pairs = Vec::new();
                 p.read_imports_into(&mut pairs)?;
-                // Host names fold in as `mt:` specs; urls are runtime-side.
+                // System names fold in as `mt:` specs; urls are runtime-side.
                 m.imports.extend(pairs.into_iter().map(|(name, _)| {
                     let spec = s!("mt:", str &name);
                     (name, spec)

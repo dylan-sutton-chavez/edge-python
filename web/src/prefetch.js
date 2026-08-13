@@ -55,7 +55,7 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
     // Root-relative imports waiting on their importer's manifest chain to finish probing.
     const pendingRoot = []; // { spec, dir }
     const manifestDirs = new Set(); // dirs whose packages.json fetched successfully
-    const hostEsmUrls = new Map(); // name -> ESM url from discovered `host` declarations
+    const systemEsmUrls = new Map(); // name -> ESM url from discovered `system` declarations
 
     const writeBytes = (bytes) => {
         const ptr = exports.wasm_alloc(Math.max(1, bytes.length));
@@ -123,16 +123,16 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
         if (visited.has(spec)) continue;
         visited.add(spec);
 
-        // Eager host (programmatic object) already registered before prefetch; nothing to fetch.
+        // Eager system (programmatic object) already registered before prefetch; nothing to fetch.
         if (mainThreadSpecs && mainThreadSpecs.has(spec)) continue;
 
-        // Lazy host: ask the page to load the ESM, then register its exports as `mt:<name>` stubs.
+        // Lazy system: ask the page to load the ESM, then register its exports as `mt:<name>` stubs.
         if (spec.startsWith('mt:')) {
             const name = spec.slice(3);
             let exportNames;
-            try { exportNames = await ctx.loadHost(name, hostEsmUrls.get(name)); }
-            catch (e) { failures.push(`host '${name}' failed to load: ${e?.message ?? e}`); continue; }
-            ctx.registerHost(name, exportNames);
+            try { exportNames = await ctx.loadSystem(name, systemEsmUrls.get(name)); }
+            catch (e) { failures.push(`system '${name}' failed to load: ${e?.message ?? e}`); continue; }
+            ctx.registerSystem(name, exportNames);
             mainThreadSpecs.add(spec);
             continue;
         }
@@ -161,10 +161,10 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
             for (const [name, target] of Object.entries(parsed.imports || {})) {
                 if (!(name in table)) table[name] = joinRel(dir, target);
             }
-            // `host` entries declare mt: stubs; the page imports the ESM.
-            for (const [name, target] of Object.entries(parsed.host || {})) {
+            // `system` entries declare mt: stubs; the page imports the ESM.
+            for (const [name, target] of Object.entries(parsed.system || {})) {
                 if (!(name in table)) table[name] = 'mt:' + name;
-                if (!hostEsmUrls.has(name)) hostEsmUrls.set(name, joinRel(dir, target));
+                if (!systemEsmUrls.has(name)) systemEsmUrls.set(name, joinRel(dir, target));
             }
             retryPending();
             retryRoot();

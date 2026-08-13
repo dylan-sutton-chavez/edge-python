@@ -3,7 +3,7 @@ title: "dom (web)"
 description: "The browser DOM, from element queries to observers and animations."
 ---
 
-`dom` wraps the browser DOM. It is a JavaScript module on the browser's main thread, where `document` and `window` live. Import it by bare name or declare it in the `host` field of `packages.json`. The native engine rejects `import dom` at compile time, see [the native engine](/reference/modules#the-native-engine).
+`dom` wraps the browser DOM. It is a JavaScript module on the browser's main thread, where `document` and `window` live. Import it by bare name or declare it in the `system` field of `packages.json`. The native engine rejects `import dom` at compile time, see [the native engine](/reference/modules#the-native-engine).
 
 The engine runs in a Web Worker, so each call crosses over `postMessage` and the script sees a synchronous call. Handlers that return a Promise suspend the calling coroutine and compose with `gather`, see [Async](/language/async).
 

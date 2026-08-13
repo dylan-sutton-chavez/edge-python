@@ -55,13 +55,13 @@ Bare names resolve through `packages.json`, the only manifest name. All fields a
 {
   "imports": { "utils": "./lib/utils.py", "fastmath": "./vendor/fastmath.wasm" },
   "extends": "..",
-  "host": { "dom": "./dom/index.js" }
+  "system": { "dom": "./dom/index.js" }
 }
 ```
 
 - `imports`: bare name to spec (path or URL).
 - `extends`: a directory whose `packages.json` is consulted when a name is not declared locally. Use it for monorepo sub-packages that share the parent's dependencies. Omit it for hermetic libraries. Cycles in the chain fail at compile time.
-- `host`: name to JS module URL, for [host libraries](#host-libraries) that run on the browser's main thread. The compiler folds each name into the import table as a main-thread spec. Loading the JS is the runtime's job.
+- `system`: name to JS module URL, for [system libraries](#system-libraries) that run on the browser's main thread. The compiler folds each name into the import table as a main-thread spec. Loading the JS is the runtime's job.
 - Unknown keys are ignored. Values must be strings or objects of strings. Numbers, arrays, and booleans are rejected. Supported string escapes are `\"`, `\\`, `\/`, `\n`, `\t`, `\r`. `\uXXXX` is not supported, so paste UTF-8 literally.
 
 Resolution follows four rules.
@@ -112,25 +112,25 @@ error: module 'json' has no export 'badname'
 
 This also covers modules Edge Python does not ship, like `os` or `sys`. They parse for syntactic compatibility and are then rejected here, before any code runs.
 
-## Standard packages and host libraries
+## Standard packages and system libraries
 
 <a id="standard-packages"></a>
-<a id="host-libraries"></a>
+<a id="system-libraries"></a>
 
 The official libraries each have their own page. Standard packages:
 
 - [json](/packages/std/json), [math](/packages/std/math), [re](/packages/std/re), [struct](/packages/std/struct), [test](/packages/std/test)
 
-Host libraries:
+System libraries:
 
-- [dom](/packages/host/dom), [network](/packages/host/network), [storage](/packages/host/storage), [time](/packages/host/time)
+- [dom](/packages/system/dom), [network](/packages/system/network), [storage](/packages/system/storage), [time](/packages/system/time)
 
 ## Defaults
 
-The browser runtime and the CLI both resolve the official names by bare name with no `packages.json` at all: the standard packages `json`, `re`, `math`, `struct`, `test` and the host libraries `dom`, `network`, `storage`, `time`. Three rules:
+The browser runtime and the CLI both resolve the official names by bare name with no `packages.json` at all: the standard packages `json`, `re`, `math`, `struct`, `test` and the system libraries `dom`, `network`, `storage`, `time`. Three rules:
 
 - **Lazy.** A default is fetched only when a run actually imports it.
-- **Overridable.** Your `packages.json`, `imports`, or `hostModules` entry wins for the same name, so you can pin a version or URL.
+- **Overridable.** Your `packages.json`, `imports`, or `systemModules` entry wins for the same name, so you can pin a version or URL.
 - **Opt-out.** Pass `defaults: false` to `createWorker` to disable the defaults entirely.
 
 Defaults are a feature of these two runtimes, not of the compiler. `compiler.wasm` stays hermetic and resolves bare names only through the manifest the host provides. The prebuilt assets live at `https://cdn.edgepython.com/std/<name>.wasm` (`test` ships as `test.py`, `dom` as a facade at `web/builtins/dom/entry.py`) and `https://cdn.edgepython.com/web/builtins/<name>/index.js`.
@@ -149,7 +149,7 @@ Importing `element.js` auto-registers the tag. On connect the element reads its 
 | Attribute | Description |
 |---|---|
 | `entry` | Optional URL of a `.py` file to run on connect, resolved against the document. Omit it to drive the worker with `el.worker.run()`. |
-| `packages` | Optional `packages.json` URL. One manifest drives both directions, `host` for main-thread libraries and `imports` for worker-side modules. |
+| `packages` | Optional `packages.json` URL. One manifest drives both directions, `system` for main-thread libraries and `imports` for worker-side modules. |
 | `wasm` | Optional absolute `compiler.wasm` URL, for self-hosting or pinning a build. Defaults to the CDN. |
 
 Where `customElements` is absent (Node, Deno, SSR), append `?setElement=false` to the script URL and register manually with the exported `defineElement(tag)`. When the runtime is served cross-origin, the worker spawns from a same-origin Blob URL that imports the cross-origin module, because Chromium rejects `new Worker()` on a cross-origin URL.
@@ -162,8 +162,8 @@ Four delivery paths, by decreasing reach:
 |---|---|---|---|
 | CDN wasm | Publish a `.wasm`, any host loads it by URL | Rust with `wasm-pdk`, or Zig, C, AssemblyScript | Transit values only |
 | Native plugin | A `.so` or `.dylib` the CLI loads in-process | Rust, the same crate as the wasm build | Transit values only |
-| Host capability | A custom `compiler.wasm` plus a matching host runtime | Rust, or any wasm32 target, inside the embedder | Transit values plus host services (DOM, FS, crypto) |
-| JS host module | Plain ESM on the browser main thread | JavaScript | Transit values plus `window` and `document` |
+| System capability | A custom `compiler.wasm` plus a matching host runtime | Rust, or any wasm32 target, inside the embedder | Transit values plus host services (DOM, FS, crypto) |
+| JS system module | Plain ESM on the browser main thread | JavaScript | Transit values plus `window` and `document` |
 
 Transit values are `None`, `bool`, `int` (128-bit), `float`, `str`, `bytes`, and nested `list` / `dict`. The exact wire tags are in the [ABI](/reference/abi).
 
@@ -188,15 +188,15 @@ The CLI's native engine loads `.so` (Linux) and `.dylib` (macOS) plugins with `d
 
 Build any std package as a native plugin with `cargo build --profile native`. The profile inherits `release` and raises `opt-level` to 3.
 
-### Host capability
+### System capability
 
-Some work cannot live in a CDN module because it happens outside the WASM sandbox. A `.wasm` plugin sees only the six sealed `env` imports and has no channel to the host. A host capability closes that gap: you ship a custom `compiler.wasm` that declares additional `env` imports, plus a host runtime that implements them. The scripts import the capability as an ordinary native module.
+Some work cannot live in a CDN module because it happens outside the WASM sandbox. A `.wasm` plugin sees only the six sealed `env` imports and has no channel to the host. A system library closes that gap: you ship a custom `compiler.wasm` that declares additional `env` imports, plus a host runtime that implements them. The scripts import the capability as an ordinary native module.
 
 This is the pattern `print` and `input` already use: `print` calls the embedder's `host_print` import. A browser distribution can register a `dom` module whose operations bridge to JS through its private imports. A WASI distribution can register `fs` against `wasi_snapshot_preview1`.
 
 It is a distribution pattern, not a third module flavor. Scripts still see code modules and native modules. The public language surface and the plugin ABI stay untouched, and vanilla `compiler.wasm` keeps working for everyone who does not load your runtime.
 
-### JS host module
+### JS system module
 
 To reach main-thread browser surface (DOM, dialogs, `FileReader`, observers) without shipping a custom compiler, ship the capability as plain JavaScript. A module is a factory `(ctx) => handlers`, or a plain `{name: handler}` object. The factory receives `{ pushEvent }`, which async callbacks use to wake a paused `receive()`. Each call is decoded in the worker, shipped to the main thread, executed, and encoded back. A handler that returns a Promise runs concurrently with other coroutines under `gather`, and a rejection raises a catchable exception in the calling coroutine only.
 
@@ -228,7 +228,7 @@ export const dom = ({ pushEvent }) => {
 </script>
 ```
 
-Handlers take decoded JS values and return plain JS values. Opaque objects like DOM nodes model as integer IDs into a registry the handlers own, the `alloc` pattern above. The per-call cost is a `postMessage` round trip, invisible at UI rate. The official [host libraries](#host-libraries) are reference implementations.
+Handlers take decoded JS values and return plain JS values. Opaque objects like DOM nodes model as integer IDs into a registry the handlers own, the `alloc` pattern above. The per-call cost is a `postMessage` round trip, invisible at UI rate. The official [system libraries](#system-libraries) are reference implementations.
 
 ## The native engine
 
@@ -239,6 +239,10 @@ Handlers take decoded JS values and return plain JS values. Opaque objects like 
 Relative imports load from disk relative to the importing file, dotted imports from the nearest `packages.json` dir. Bare names go through the `packages.json` walk-up. Manifest URLs download once into `~/.cache/edge-native` (`$XDG_CACHE_HOME` is honored) with a 64 MB cap. A downloaded file is pinned by a `.lock` sidecar holding its SHA-256, and later runs refuse on drift until you remove the cache entry. A `.so` or `.dylib` target loads as a native plugin. The official std `.wasm` specs that `edge add` writes swap transparently to their `.so` twins, so one manifest serves both engines. With no manifest entry, `json`, `re`, `math`, and `struct` default to the CDN `.so` for the host architecture and `test` to the CDN `test.py`. Set `EDGE_STD_DIR` to a local checkout to serve these from disk instead.
 
 Two modules are compiled into the binary. `time` carries the clocks and the calendar functions, always UTC (there is no timezone database, so `tzname()` is `"UTC"`). `network` exposes a blocking `fetch(url, options_json?)` returning `{id, ok, status, headers, body}`, plus `fetch_text` and `fetch_json`. A manifest entry with the same name always wins over a built-in.
+
+### Plugin confinement
+
+A native plugin shares the host process, so the engine confines it before the first call. It rewrites every syscall instruction in the plugin code to a trap and watches faults from that range, so a syscall the plugin reaches aborts the call as `standard packages can't make syscalls, move this to a system package`. This stops a plugin issuing syscalls from its own code, it does not yet stop one that calls a libc function by name, so put work that needs the kernel in a system package.
 
 ### Run flags
 

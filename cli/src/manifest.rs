@@ -7,13 +7,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-/* The manifest: `imports` for worker-side .wasm/.py modules, `host` for main-thread JS libraries. */
+/* The manifest: `imports` for worker-side .wasm/.py modules, `system` for main-thread JS libraries. */
 #[derive(Default, Serialize, Deserialize)]
 pub struct Manifest {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub imports: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub host: BTreeMap<String, String>,
+    pub system: BTreeMap<String, String>,
 }
 
 impl Manifest {
@@ -36,17 +36,17 @@ impl Manifest {
 /* Official package registry. Mirrors the runtime's built-in default manifest. */
 pub enum Kind {
     Std,
-    Host,
+    System,
 }
 
-use compiler::devkit::{HOST_PACKAGES as HOST, STD_PACKAGES as STD};
+use compiler::devkit::{STD_PACKAGES as STD, SYSTEM_PACKAGES as SYSTEM};
 
 /// Resolve a bare name against the official registry; user manifest overrides go through `resolve`.
 pub fn registry(name: &str) -> Option<(Kind, String)> {
     if STD.contains(&name) {
         Some((Kind::Std, std_url(name)))
-    } else if HOST.contains(&name) {
-        Some((Kind::Host, format!("https://cdn.edgepython.com/web/builtins/{name}/index.js")))
+    } else if SYSTEM.contains(&name) {
+        Some((Kind::System, format!("https://cdn.edgepython.com/web/builtins/{name}/index.js")))
     } else {
         None
     }
@@ -63,8 +63,8 @@ pub fn resolve(name: &str, manifest: &Manifest) -> Option<(Kind, String)> {
     if let Some(url) = manifest.imports.get(name) {
         return Some((Kind::Std, url.clone()));
     }
-    if let Some(url) = manifest.host.get(name) {
-        return Some((Kind::Host, url.clone()));
+    if let Some(url) = manifest.system.get(name) {
+        return Some((Kind::System, url.clone()));
     }
     registry(name)
 }

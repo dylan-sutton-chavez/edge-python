@@ -2,7 +2,7 @@
 Edge Python `re` package. Exposes `match`/`search`/`fullmatch`/`findall`/`sub`/`groups`/`span` over the `wasm-pdk` ABI. A small backtracking engine, Unicode aware via std char predicates so it ships no Unicode tables.
 */
 
-#![cfg_attr(target_arch = "wasm32", no_std)]
+#![no_std]
 #![cfg_attr(target_arch = "wasm32", no_main)]
 
 extern crate alloc;

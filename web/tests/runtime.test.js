@@ -8,14 +8,14 @@ import { chromium } from "npm:playwright@latest";
 import { readFileSync } from "node:fs";
 import { DEFAULT_IMPORTS } from "../src/defaults.js";
 
-// One CDN host now serves every family under a path prefix (/std, /host, /runtime); derive it from the manifest.
+// One CDN host now serves every family under a path prefix (/std, /system, /runtime); derive it from the manifest.
 const CDN_HOST = new URL(Object.values(DEFAULT_IMPORTS)[0]).host;
 
 const REPO = new URL("../../", import.meta.url).pathname; // edge-python/ repo root
 const cases = JSON.parse(readFileSync(new URL("./runtime.json", import.meta.url)));
 const PKG = JSON.parse(readFileSync(new URL("./app/packages.json", import.meta.url)));
-// star-import every module key, recursing through the imports/host category containers
-const star = (m) => Object.entries(m).flatMap(([k, v]) => (k === "imports" || k === "host" ? star(v) : `from ${k} import *`));
+// star-import every module key, recursing through the imports/system category containers
+const star = (m) => Object.entries(m).flatMap(([k, v]) => (k === "imports" || k === "system" ? star(v) : `from ${k} import *`));
 const PRELUDE = star(PKG).join("\n") + "\n";
 const TYPES = {
     ".js": "text/javascript", ".wasm": "application/wasm", ".html": "text/html",
@@ -32,10 +32,10 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
     page.on("request", (q) => requested.push(q.url()));
 
     const STD_DIR = new URL("../../std", import.meta.url).pathname;
-    const HOST_DIR = new URL("../../web/builtins", import.meta.url).pathname;
+    const SYSTEM_DIR = new URL("../../web/builtins", import.meta.url).pathname;
     await page.route("**/*", (r) => {
         const u = new URL(r.request().url());
-        // Prefer the in-tree std/ and host/ artifacts; if absent (CI checks out only the js/ subset), fall back to the CDN-deployed copy.
+        // Prefer the in-tree std/ and system/ artifacts; if absent (CI checks out only the js/ subset), fall back to the CDN-deployed copy.
         if (u.host === CDN_HOST && u.pathname.startsWith("/std/")) {
             // /std/<name>.wasm lives at <name>/target/wasm32-unknown-unknown/release/ in the tree.
             const name = u.pathname.slice("/std/".length).replace(/\.wasm$/, "");
@@ -46,8 +46,8 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
         if (u.host === CDN_HOST && u.pathname.startsWith("/web/builtins/")) {
             // Production (Pages) flattens builtins/<cap>/src/* to builtins/<cap>/*, map back to the tree layout.
             const repoPath = u.pathname.replace(/^\/web\/builtins\/([^/]+)\//, "/$1/src/");
-            try { return r.fulfill({ contentType: "text/javascript", body: readFileSync(HOST_DIR + repoPath) }); }
-            catch { return r.continue(); } // no local host source, use the deployed module
+            try { return r.fulfill({ contentType: "text/javascript", body: readFileSync(SYSTEM_DIR + repoPath) }); }
+            catch { return r.continue(); } // no local system source, use the deployed module
         }
         // Prefer in-tree wasm so new exports are testable.
         if (u.host === CDN_HOST && u.pathname === "/compiler.wasm") {
@@ -74,8 +74,8 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
         });
 
         const reqd = (frag) => requested.some((u) => u.includes(frag));
-        // Lazy host: a host ESM must not load at boot, only when a run first imports it.
-        if (reqd("/app/ui.js")) throw new Error("host ui.js loaded at boot; host modules must be lazy");
+        // Lazy system: a system ESM must not load at boot, only when a run first imports it.
+        if (reqd("/app/ui.js")) throw new Error("system ui.js loaded at boot; system modules must be lazy");
 
         for (const c of cases) {
             errors.length = 0;
@@ -175,11 +175,11 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
         if (tagged.out !== "") throw new Error(`preempt via element: run reported ${JSON.stringify(tagged.out)}`);
 
         // Laziness: only what the corpus imports gets fetched; declared-but-unused stays untouched.
-        if (!reqd("/app/ui.js")) throw new Error("host ui was used but ui.js never loaded");
+        if (!reqd("/app/ui.js")) throw new Error("system ui was used but ui.js never loaded");
         if (!reqd("json.wasm")) throw new Error("json default imported but json.wasm never fetched");
-        if (!reqd("/web/builtins/time")) throw new Error("time host default imported but never loaded");
+        if (!reqd("/web/builtins/time")) throw new Error("time system default imported but never loaded");
         if (reqd("re.wasm")) throw new Error("re default never imported yet re.wasm was fetched (not lazy)");
-        if (reqd("/web/builtins/network")) throw new Error("network host default never imported yet fetched (not lazy)");
+        if (reqd("/web/builtins/network")) throw new Error("network system default never imported yet fetched (not lazy)");
     } finally {
         await browser.close();
     }

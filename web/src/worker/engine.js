@@ -50,19 +50,19 @@ let pauseAck = null;
 let resumeGate = null;
 /* (name, args) => Promise<value>. Set by worker.js (postMessage round-trip) or by a main-thread embedder. */
 let hostCallDelegate = null;
-/* Host modules resolvable by bare name but loaded on demand; (name) => Promise<exportNames>. */
-let loadHostDelegate = null;
-let lazyHostNames = [];
+/* System modules resolvable by bare name but loaded on demand; (name) => Promise<exportNames>. */
+let loadSystemDelegate = null;
+let lazySystemNames = [];
 // Source/missing caches persist across runs so the BFS skips refetching modules and re-probing 404'd `packages.json` paths on every Run press. Wiped by `clearCache()`.
 const fetchedSources = new Map();
 const knownMissing = new Set();
 /* Synthetic native modules (handlers live on main thread). Re-applied at every `run` since `resetNativeTable` clears them. */
 let mainThreadManifests = [];
 
-export async function load({ wasmUrl, integrity = true, loaders: loaderUrls = [], imports = null, version = null, availableHosts = [] }, manifests = []) {
+export async function load({ wasmUrl, integrity = true, loaders: loaderUrls = [], imports = null, version = null, availableSystems = [] }, manifests = []) {
     const t0 = performance.now();
     importsMap = imports;
-    lazyHostNames = availableHosts;
+    lazySystemNames = availableSystems;
 
     cache = await openCache(integrity);
     integrityActive = cache instanceof MemoryCache ? false : Boolean(integrity);
@@ -126,10 +126,10 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
         exports = await makeInstance(onLine, lockfile, rt);
     }
 
-    const registerHost = makeRegisterHost(exports);
+    const registerSystem = makeRegisterSystem(exports);
 
     /* Both kinds graft `<name> -> mt:<name>` so the bare name resolves; eager ones (programmatic objects) register now, lazy ones (urls) load on first import during prefetch. In incremental mode the native table is preserved, so skip re-registration. */
-    const { mainThreadSpecs, augmentedImports } = hostImportMap(registerHost, incremental);
+    const { mainThreadSpecs, augmentedImports } = systemImportMap(registerSystem, incremental);
 
     const writePayload = () => new Uint8Array(exports.memory.buffer).set(payload, exports.src_ptr());
     writePayload();
@@ -146,12 +146,12 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
         compilerExports: exports,
         rt,
         loaders,
-        // Lazy host: fetch export names from the page, then register the mt: stubs here.
-        loadHost: (name, url) => {
-            if (!loadHostDelegate) throw new Error(`host '${name}' imported but no main-thread loader is wired`);
-            return loadHostDelegate(name, url);
+        // Lazy system: fetch export names from the page, then register the mt: stubs here.
+        loadSystem: (name, url) => {
+            if (!loadSystemDelegate) throw new Error(`system '${name}' imported but no main-thread loader is wired`);
+            return loadSystemDelegate(name, url);
         },
-        registerHost,
+        registerSystem,
     });
 
     // Compiler roots the entry's quoted imports at this directory.
@@ -177,7 +177,7 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
 }
 
 /* Register a main-thread module at `mt:<name>`: push a stub per export (the real call defers to the page) and tell the compiler its export names. */
-const makeRegisterHost = (exports) => (name, exportNames) => {
+const makeRegisterSystem = (exports) => (name, exportNames) => {
     const baseId = nativeTable.length;
     for (const fnName of exportNames) {
         const stub = () => {};
@@ -202,15 +202,15 @@ const makeRegisterHost = (exports) => (name, exportNames) => {
 };
 
 /* Eager mt: registrations plus the name -> mt:<name> import grafts shared by run() and restoreState(). */
-function hostImportMap(registerHost, skipRegistration) {
+function systemImportMap(registerSystem, skipRegistration) {
     const mainThreadSpecs = new Set();
     const augmentedImports = { ...(importsMap || {}) }; // defaults already folded in by the embedder (index.js)
     for (const m of mainThreadManifests) {
-        if (!skipRegistration) registerHost(m.name, m.exports);
+        if (!skipRegistration) registerSystem(m.name, m.exports);
         mainThreadSpecs.add(`mt:${m.name}`);
         augmentedImports[m.name] = `mt:${m.name}`;
     }
-    for (const name of lazyHostNames) {
+    for (const name of lazySystemNames) {
         if (!mainThreadSpecs.has(`mt:${name}`)) augmentedImports[name] = `mt:${name}`;
     }
     return { mainThreadSpecs, augmentedImports };
@@ -414,9 +414,9 @@ export function setHostCallDelegate(fn) {
     hostCallDelegate = fn;
 }
 
-/* Register the lazy host loader: (name) => Promise<exportNames>. worker.js wires the postMessage round-trip. */
-export function setLoadHostDelegate(fn) {
-    loadHostDelegate = fn;
+/* Register the lazy system loader: (name) => Promise<exportNames>. worker.js wires the postMessage round-trip. */
+export function setLoadSystemDelegate(fn) {
+    loadSystemDelegate = fn;
 }
 
 export function reset() {
@@ -442,8 +442,8 @@ export function dispose() {
     resetNativeTable();
     pendingHostCalls.clear();
     hostCallDelegate = null;
-    loadHostDelegate = null;
-    lazyHostNames = [];
+    loadSystemDelegate = null;
+    lazySystemNames = [];
     mainThreadManifests = [];
 }
 

@@ -15,7 +15,7 @@ pub const RUNTIME_CONTRACT: &str = "0.1.0";
 
 pub const STD_PACKAGES: [&str; 5] = ["json", "re", "math", "struct", "test"];
 
-pub const HOST_PACKAGES: [&str; 4] = ["dom", "network", "storage", "time"];
+pub const SYSTEM_PACKAGES: [&str; 4] = ["dom", "network", "storage", "time"];
 
 /* Collects *_test.py under `dir` recursively, skipping dist and hidden entries, sorted. */
 pub fn discover_tests(dir: &Path) -> Vec<PathBuf> {

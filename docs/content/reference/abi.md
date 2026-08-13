@@ -3,7 +3,7 @@ title: "ABI"
 description: "The wire contract a plugin module must follow to be importable by Edge Python."
 ---
 
-> **Sealed contract, plugin ABI v1.** Every signature, op code, tag, and error kind here is the public contract for plugin modules, shipped as `.wasm` over CDN or loaded natively via `dlopen`. New host packages arrive as new `Op` values, never new imports. A future wire-level break would ship as `env_v2.*` without removing v1. This contract is distinct from the `compiler<->host` interface embedders declare for [host capabilities](/reference/modules#host-capability), which are not bound by the 6-import limit here.
+> **Sealed contract, plugin ABI v1.** Every signature, op code, tag, and error kind here is the public contract for plugin modules, shipped as `.wasm` over CDN or loaded natively via `dlopen`. New system packages arrive as new `Op` values, never new imports. A future wire-level break would ship as `env_v2.*` without removing v1. This contract is distinct from the `compiler<->host` interface embedders declare for [system capabilities](/reference/modules#system-capability), which are not bound by the 6-import limit here.
 
 A plugin module imported via `from "<url>" import <names>` follows the contract below, compiled to `.wasm` for the CDN or to a native library for the CLI. The API is handle-based: the host owns all values, the guest sees only opaque `u32` handles, and one dispatch primitive (`edge_op`) covers every operation. New types, methods, and language features reach existing modules with no ABI change.
 

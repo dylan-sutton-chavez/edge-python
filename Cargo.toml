@@ -20,8 +20,8 @@ name = "tests"
 path = "tests/main.rs"
 
 [features]
-# Gates the native engine module (resolver, dlopen loader, host modules) out of wasm and plain lib builds.
-native = ["dep:libloading", "dep:ureq", "dep:rt", "dep:polling", "dep:slab", "dep:rustls", "dep:webpki-roots", "dep:httparse", "dep:tempfile"]
+# Gates the native engine module (resolver, dlopen loader, system modules) out of wasm and plain lib builds.
+native = ["dep:libloading", "dep:ureq", "dep:rt", "dep:polling", "dep:slab", "dep:rustls", "dep:webpki-roots", "dep:httparse", "dep:tempfile", "dep:findshlibs", "dep:trap"]
 
 [dependencies]
 wasm-abi = { workspace = true }
@@ -46,6 +46,12 @@ httparse = { version = "1", optional = true }
 # Isolated temp dir for an untrusted bundle sent to an eval group.
 tempfile = { version = "3", optional = true }
 
+# Portable dl_iterate_phdr and dyld query, marks the code range of a loaded plugin.
+findshlibs = { version = "0.10.2", optional = true }
+
+# Rewrites an untrusted plugin's own syscall instructions to traps and aborts the call when one fires.
+trap = { path = "trap", optional = true }
+
 # WASM-only global allocator. Pulled into wasm32 builds automatically; absent on host builds (where std's allocator is fine and `compiler.wasm` is just a library artifact, not the runtime target).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dlmalloc = { version = "0.2", default-features = false, features = ["global"] }
@@ -55,11 +61,13 @@ dlmalloc = { version = "0.2", default-features = false, features = ["global"] }
 hashbrown = { workspace = true, features = ["serde"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+libloading = "0.9"
+trap = { path = "trap" }
 
 [workspace]
-members = ["abi", "pdk", "pdk/macros", "pdk/example", "rt", "skill"]
+members = ["abi", "pdk", "pdk/macros", "pdk/example", "rt", "skill", "trap"]
 # `pdk/example` is wasm-only: kept in `members` so it shares the lockfile and resolves path deps, but excluded from `default-members` so default workspace commands skip it. Build it explicitly with `-p slugify-mod --target wasm32-unknown-unknown`.
-default-members = [".", "abi", "pdk", "pdk/macros", "rt", "skill"]
+default-members = [".", "abi", "pdk", "pdk/macros", "rt", "skill", "trap"]
 resolver = "2"
 
 [workspace.package]

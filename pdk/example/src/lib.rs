@@ -2,17 +2,19 @@
 Reference `wasm-pdk` module showcasing #[plugin_class], #[plugin_const], and variadic Args. Build with `cargo build --release --target wasm32-unknown-unknown -p slugify-mod`.
 */
 
-#![no_std]
-#![no_main]
+#![cfg_attr(target_arch = "wasm32", no_std, no_main)]
 
 extern crate alloc;
 
 use alloc::{string::{String, ToString}, vec::Vec};
 use wasm_pdk::*;
 
+// Native builds link std for the .so plugin path, wasm stays no_std with its own allocator.
+#[cfg(target_arch = "wasm32")]
 #[global_allocator]
 static A: lol_alloc::LeakingPageAllocator = lol_alloc::LeakingPageAllocator;
 
+#[cfg(target_arch = "wasm32")]
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! { core::arch::wasm32::unreachable() }
 

@@ -1,0 +1,21 @@
+[package]
+name = "trap"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Rewrites a native plugin's own syscall instructions to traps and aborts the call when one fires."
+
+[lib]
+crate-type = ["rlib"]
+doctest = false
+
+[[test]]
+name = "tests"
+path = "tests.rs"
+
+[dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+libc = "0.2"

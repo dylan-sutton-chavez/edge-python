@@ -16,14 +16,14 @@ engine.setHostCallDelegate((module, name, args) => new Promise((resolve, reject)
     self.postMessage({ type: 'host-call', reqId, module, name, args });
 }));
 
-/* Lazy host load: post `{type:'load-host', reqId, name, url}` to main and await `{type:'load-host-response'}` with export names. */
-let nextLoadHostReqId = 0;
-const pendingLoadHost = new Map();
+/* Lazy system load: post `{type:'load-system', reqId, name, url}` to main and await `{type:'load-system-response'}` with export names. */
+let nextLoadSystemReqId = 0;
+const pendingLoadSystem = new Map();
 
-engine.setLoadHostDelegate((name, url) => new Promise((resolve, reject) => {
-    const reqId = ++nextLoadHostReqId;
-    pendingLoadHost.set(reqId, { resolve, reject });
-    self.postMessage({ type: 'load-host', reqId, name, url });
+engine.setLoadSystemDelegate((name, url) => new Promise((resolve, reject) => {
+    const reqId = ++nextLoadSystemReqId;
+    pendingLoadSystem.set(reqId, { resolve, reject });
+    self.postMessage({ type: 'load-system', reqId, name, url });
 }));
 
 const handlers = {
@@ -49,11 +49,11 @@ const handlers = {
         if (data.error) cb.reject(new Error(data.error));
         else cb.resolve(data.value);
     },
-    /* Main thread loaded a lazy host module; resolve with its export names. */
-    'load-host-response': (data) => {
-        const cb = pendingLoadHost.get(data.reqId);
+    /* Main thread loaded a lazy system module; resolve with its export names. */
+    'load-system-response': (data) => {
+        const cb = pendingLoadSystem.get(data.reqId);
         if (!cb) return;
-        pendingLoadHost.delete(data.reqId);
+        pendingLoadSystem.delete(data.reqId);
         if (data.error) cb.reject(new Error(data.error));
         else cb.resolve(data.exports);
     },
@@ -68,7 +68,7 @@ self.onmessage = async ({ data }) => {
     try {
         const result = await handler(data);
         /* Fire-and-forget message types skip the response post; only reply when an outer reqId was attached. */
-        if (data.reqId != null && data.type !== 'host-call-response' && data.type !== 'load-host-response' && data.type !== 'push-event') {
+        if (data.reqId != null && data.type !== 'host-call-response' && data.type !== 'load-system-response' && data.type !== 'push-event') {
             self.postMessage({ type: 'response', reqId: data.reqId, result });
         }
     } catch (e) {

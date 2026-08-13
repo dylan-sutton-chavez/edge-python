@@ -13,7 +13,7 @@
     const worker = await createWorker({
       wasmUrl: "./compiler.wasm",
       imports: pkgs.imports || {},
-      hostModules: pkgs.host || {},
+      systemModules: pkgs.system || {},
       defaults: false,
     });
     // Byte-stream stdout: buffer raw chunks and console.log only whole lines (console.log adds its own newline).

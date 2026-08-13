@@ -114,17 +114,17 @@ $ edge init my-app
 
 ## `edge add` / `edge remove`: package management
 
-Edits [`packages.json`](/reference/modules#packagesjson) by name. The CLI knows the official packages, std (`json`, `re`, `math`, `struct`, `test`) and host (`dom`, `network`, `storage`, `time`), so you never paste URLs. Std entries go to `imports` (`.wasm` URLs, except the script-only `test` which resolves to `test.py`), host entries go to `host`. The full catalog is in [Modules](/reference/modules#standard-packages).
+Edits [`packages.json`](/reference/modules#packagesjson) by name. The CLI knows the official packages, std (`json`, `re`, `math`, `struct`, `test`) and system (`dom`, `network`, `storage`, `time`), so you never paste URLs. Std entries go to `imports` (`.wasm` URLs, except the script-only `test` which resolves to `test.py`), system entries go to `system`. The full catalog is in [Modules](/reference/modules#standard-packages).
 
 ```text
 $ edge add math network
   + math       std
-  + network    host
+  + network    system
 
   updated packages.json
 ```
 
-Point a name at a custom URL with `edge add foo=https://example.com/foo.wasm`. The kind is inferred from the URL: `.wasm` means std, anything else means host. `edge remove` deletes entries the same way.
+Point a name at a custom URL with `edge add foo=https://example.com/foo.wasm`. The kind is inferred from the URL: `.wasm` means std, anything else means system. `edge remove` deletes entries the same way.
 
 ## `edge build`: pack the app
 

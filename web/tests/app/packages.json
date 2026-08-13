@@ -2,7 +2,7 @@
     "imports": {
         "calc": "./calculator.py"
     },
-    "host": {
+    "system": {
         "ui": "./ui.js"
     }
 }

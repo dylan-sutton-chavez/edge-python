@@ -7,7 +7,7 @@ description: Write, run, test and package Edge Python programs with the edge CLI
 
 This document is self-verifying and its examples follow the cells v1 grammar. A `python` or `yml` block followed immediately by a `text` block is a runnable cell, and the `skill` crate in this directory executes every cell through the edge CLI and compares it against the `text` block. The tag on the `text` block picks the engine, `Output` runs on both, `Native` on the native engine only, `Web` on the web runtime only, and `Error` expects a failing run whose stderr contains the given text. A `python` block tagged `skip` never runs on any engine and never pairs with a `text` block, and it always says why with one comment at the exact construct that is nondeterministic. A `yml` block tagged `swarm` runs a trusted worker pool through `edge swarm`, while one tagged `untrusted` runs eval groups. Any `python` block without a `text` pair is illustrative only. Verify the whole file from the repository root with `cargo run -p skill -- skill/SKILL.md --engine both`.
 
-Edge Python is a sandboxed Python subset compiled in a single pass to bytecode and executed by a stack VM. It runs in the browser as WebAssembly and in the `edge` CLI as an in-process native engine. There is no bundled stdlib, every module is an external package resolved at compile time. Programs are deterministic, there is no file, network or environment access unless a host module grants it.
+Edge Python is a sandboxed Python subset compiled in a single pass to bytecode and executed by a stack VM. It runs in the browser as WebAssembly and in the `edge` CLI as an in-process native engine. There is no bundled stdlib, every module is an external package resolved at compile time. Programs are deterministic, there is no file, network or environment access unless a system module grants it.
 
 Use this skill to write correct Edge Python on the first try. The language looks like Python 3 but is a strict subset, and the differences matter more than the similarities. Read the delta section before writing non-trivial code.
 
@@ -72,7 +72,7 @@ A persistent interpreter across prompts. Imports, definitions and mutations surv
 
 ### edge init, edge add, edge remove
 
-`edge init [name]` scaffolds `main.py`, `packages.json` and `index.html`, with `--bare` skipping the HTML. `edge add json network` writes manifest entries for known packages, and `edge add foo=<url>` registers a custom URL, a `.wasm` URL is treated as a std package and anything else as a host module. `edge remove` deletes entries. Unknown names abort the whole command before any write.
+`edge init [name]` scaffolds `main.py`, `packages.json` and `index.html`, with `--bare` skipping the HTML. `edge add json network` writes manifest entries for known packages, and `edge add foo=<url>` registers a custom URL, a `.wasm` URL is treated as a std package and anything else as a system module. `edge remove` deletes entries. Unknown names abort the whole command before any write.
 
 ### edge serve
 
@@ -261,7 +261,7 @@ from lib.helpers import slugify as sl
 
 Not supported. `from . import x` and any form of dynamic import.
 
-Bare names resolve through `packages.json`, walking up from the importing file with the nearest manifest winning. The manifest maps names to paths or URLs under `imports`, JS host modules under `host`, and may `extend` a parent manifest.
+Bare names resolve through `packages.json`, walking up from the importing file with the nearest manifest winning. The manifest maps names to paths or URLs under `imports`, JS system modules under `system`, and may `extend` a parent manifest.
 
 ```json
 {
@@ -269,7 +269,7 @@ Bare names resolve through `packages.json`, walking up from the importing file w
     "utils": "./lib/utils.py",
     "mypkg": "https://example.com/mypkg.wasm"
   },
-  "host": {
+  "system": {
     "charts": "https://example.com/charts.js"
   }
 }
@@ -695,16 +695,16 @@ PASS - division by zero raises
 2 passed, 0 failed
 ```
 
-## Host modules
+## System modules
 
-Four host libraries plus the swarm module. Availability differs by engine, and importing a web-only module natively is a compile-time error telling you to rerun with `--web`.
+Four system libraries plus the swarm module. Availability differs by engine, and importing a web-only module natively is a compile-time error telling you to rerun with `--web`.
 
 | Module | Native CLI | Web runtime |
 |---|---|---|
-| `time` | Built into the binary, always UTC | Host JS module, IANA timezone |
-| `network` | Built into the binary, no CORS | Host JS module, CORS applies |
-| `storage` | Not available | Host JS module |
-| `dom` | Not available | Host JS module |
+| `time` | Built into the binary, always UTC | System JS module, IANA timezone |
+| `network` | Built into the binary, no CORS | System JS module, CORS applies |
+| `storage` | Not available | System JS module |
+| `dom` | Not available | System JS module |
 | `swarm` | Built into the binary, see workers | Not available |
 
 ### time

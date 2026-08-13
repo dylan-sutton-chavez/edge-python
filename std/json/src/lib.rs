@@ -2,7 +2,7 @@
 Edge Python `json` package. Exports `loads(text) -> value` and `dumps(value) -> text` over the `wasm-pdk` ABI.
 */
 
-#![cfg_attr(target_arch = "wasm32", no_std)]
+#![no_std]
 #![cfg_attr(target_arch = "wasm32", no_main)]
 
 extern crate alloc;

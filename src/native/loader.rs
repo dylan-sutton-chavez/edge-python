@@ -2,6 +2,7 @@ use crate::abi::{ErrorKind, EDGE_ABI_VERSION};
 use crate::bridge::{error_from_kind, get_val, put_val, release_handles, take_error};
 use crate::packages::NativeBinding;
 use crate::vm::types::{HeapPool, Val, VmErr};
+use findshlibs::{Segment, SharedLibrary, TargetSharedLibrary};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -52,6 +53,7 @@ pub(super) fn load(path: &Path) -> Result<Vec<NativeBinding>, String> {
     if got != EDGE_ABI_VERSION {
         return Err(format!("'{}' speaks ABI v{got}, this engine expects v{EDGE_ABI_VERSION}", path.display()));
     }
+    confine(path)?;
     let mut bindings = Vec::new();
     for name in names {
         // dlsym is the ground truth, a candidate that fails to resolve was string noise.
@@ -63,6 +65,28 @@ pub(super) fn load(path: &Path) -> Result<Vec<NativeBinding>, String> {
         return Err(format!("'{}' exports no __fn_/__class_/__const_ symbols", path.display()));
     }
     Ok(bindings)
+}
+
+/* Neutralizes the plugin's syscall instructions and registers its code so the guard traps the rest. */
+fn confine(path: &Path) -> Result<(), String> {
+    let want = std::fs::canonicalize(path).map_err(|e| format!("cannot resolve '{}': {e}", path.display()))?;
+    let mut found = false;
+    TargetSharedLibrary::each(|shlib| {
+        if std::fs::canonicalize(shlib.name()).map(|p| p == want).unwrap_or(false) {
+            found = true;
+            for seg in shlib.segments() {
+                if seg.is_code() {
+                    let base = seg.actual_virtual_memory_address(shlib).0 as *mut u8;
+                    unsafe { trap::neutralize(base, seg.len()) };
+                    trap::register_range(base as usize, base as usize + seg.len());
+                }
+            }
+        }
+    });
+    if !found {
+        return Err(format!("'{}' loaded but its code segments were not found to confine", path.display()));
+    }
+    Ok(())
 }
 
 /* libloading 0.9 renders a bare "dlopen failed", the dlerror text it wraps is the actionable part. */
@@ -79,7 +103,12 @@ fn bind(name: String, f: PluginFn) -> NativeBinding {
         let mut argv: Vec<u32> = args.iter().map(|v| put_val(*v)).collect();
         argv.push(kwargs.map_or(0, put_val));
         let mut out: u32 = 0;
-        let status = unsafe { f(argv.as_ptr(), argv.len() as u32, &mut out) };
+        let status = unsafe { trap::run_plugin(f, argv.as_ptr(), argv.len() as u32, &mut out) };
+        // A trapped syscall aborts the call, the guard reports it and we never read `out`.
+        if trap::take_block() {
+            release_handles(&argv);
+            return Err(error_from_kind(ErrorKind::Runtime as u32, trap::block_message().to_string()));
+        }
         // Status 2 means deferred, the scheduler parks the calling coroutine.
         if status == 2 {
             release_handles(&argv);

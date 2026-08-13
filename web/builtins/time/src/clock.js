@@ -12,7 +12,7 @@ export default () => ({
     perf_counter: () => performance.now() / 1000,
     perf_counter_ns: () => Math.round(performance.now() * 1e6),
     sleep: (secs) => new Promise((resolve) => setTimeout(resolve, secs * 1000)),
-    // Constants, exposed as callables since host modules export functions, not values.
+    // Constants, exposed as callables since system modules export functions, not values.
     timezone: () => Math.max(janOff(), julOff()) * 60,
     altzone: () => Math.min(janOff(), julOff()) * 60,
     daylight: () => (janOff() !== julOff() ? 1 : 0),

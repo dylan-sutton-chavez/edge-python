@@ -171,14 +171,14 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
     let scripts = collect_scripts(&project, &out_dir);
     let imports = crawl_imports(&scripts);
     let sp = crate::ui::spinner("vendoring packages");
-    let (vendored_imports, vendored_host) = match vendor_packages(&manifest, &imports, &out_dir) {
+    let (vendored_imports, vendored_system) = match vendor_packages(&manifest, &imports, &out_dir) {
         Ok(v) => v,
         Err(e) => { sp.fail("failed to vendor packages"); return Err(e); }
     };
     sp.done("vendored packages");
     let script_count = copy_scripts(&scripts, &project, &out_dir)?;
 
-    let rewritten = rewrite_manifest(&manifest, &vendored_imports, &vendored_host);
+    let rewritten = rewrite_manifest(&manifest, &vendored_imports, &vendored_system);
     let pretty = serde_json::to_string_pretty(&rewritten)?;
     fs::write(out_dir.join("packages.json"), format!("{pretty}\n"))?;
 
@@ -188,7 +188,7 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
     crate::ui::build_report(
         &out_dir,
         RUNTIME_FILES.len(),
-        vendored_imports.len() + vendored_host.len(),
+        vendored_imports.len() + vendored_system.len(),
         script_count,
         dir_size(&out_dir)?,
         t0.elapsed(),
@@ -276,7 +276,7 @@ fn vendor_packages(
     out_dir: &Path,
 ) -> Result<(BTreeMap<String, String>, BTreeMap<String, String>)> {
     let mut std_local = BTreeMap::new();
-    let mut host_local = BTreeMap::new();
+    let mut system_local = BTreeMap::new();
 
     for name in imports {
         // Unknown names are project-local .py modules; let the runtime resolve them at run time.
@@ -285,15 +285,15 @@ fn vendor_packages(
         let local = match kind {
             // std packages are .wasm, except pure-Python ones (test) served as .py; preserve the real extension.
             Kind::Std => format!("vendor/{name}.{}", if url.ends_with(".py") { "py" } else { "wasm" }),
-            Kind::Host => format!("vendor/{name}/index.js"),
+            Kind::System => format!("vendor/{name}/index.js"),
         };
         write_under(out_dir, &local, &bytes)?;
         match kind {
             Kind::Std => { std_local.insert(name.clone(), local); }
-            Kind::Host => { host_local.insert(name.clone(), local); }
+            Kind::System => { system_local.insert(name.clone(), local); }
         }
     }
-    Ok((std_local, host_local))
+    Ok((std_local, system_local))
 }
 
 fn write_under(root: &Path, rel: &str, bytes: &[u8]) -> Result<()> {
@@ -324,13 +324,13 @@ fn copy_scripts(scripts: &[PathBuf], project: &Path, out_dir: &Path) -> Result<u
 fn rewrite_manifest(
     manifest: &Manifest,
     vendored_imports: &BTreeMap<String, String>,
-    vendored_host: &BTreeMap<String, String>,
+    vendored_system: &BTreeMap<String, String>,
 ) -> Manifest {
     let mut out = Manifest::default();
     for (k, v) in &manifest.imports { out.imports.insert(k.clone(), v.clone()); }
-    for (k, v) in &manifest.host { out.host.insert(k.clone(), v.clone()); }
+    for (k, v) in &manifest.system { out.system.insert(k.clone(), v.clone()); }
     for (k, v) in vendored_imports { out.imports.insert(k.clone(), v.clone()); }
-    for (k, v) in vendored_host { out.host.insert(k.clone(), v.clone()); }
+    for (k, v) in vendored_system { out.system.insert(k.clone(), v.clone()); }
     out
 }
 

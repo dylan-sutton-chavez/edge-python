@@ -26,6 +26,13 @@ runs:
       working-directory: web/builtins/${{ inputs.capability }}
       run: deno lint src/
 
+    # Test against this run's compiler, not the deployed CDN copy.
+    - name: Download compiler wasm
+      uses: actions/download-artifact@v8
+      with:
+        name: compiler_wasm
+        path: target/wasm32-unknown-unknown/release/
+
     # A 150MB Chromium, cached so only the first run pays the download.
     - name: Cache Playwright browsers
       uses: actions/cache@v5
@@ -51,10 +58,10 @@ runs:
       shell: bash
       run: cargo build --manifest-path cli/Cargo.toml --bin mock
 
-    # HOSTCAP narrows test discovery to this capability's corpus.
+    # SYSPKG narrows test discovery to this capability's corpus.
     - name: Test tests/
       shell: bash
       working-directory: web/builtins
       env:
-        HOSTCAP: ${{ inputs.capability }}
+        SYSPKG: ${{ inputs.capability }}
       run: deno test --allow-all tests/

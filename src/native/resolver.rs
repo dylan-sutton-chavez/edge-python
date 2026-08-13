@@ -60,7 +60,7 @@ impl Resolver for FileResolver {
 }
 
 impl FileResolver {
-    /* Bare names try the manifest first, then built-in host modules, then std defaults. */
+    /* Bare names try the manifest first, then built-in system modules, then std defaults. */
     fn resolve_bare(&mut self, name: &str, start_dir: &str) -> Result<Resolved, String> {
         if let Some((dir, target)) = self.lookup_bare(name, start_dir)? {
             let canonical = join_relative(&dir, &target);
@@ -75,8 +75,8 @@ impl FileResolver {
         if let Some(url) = std_default(name) {
             return self.resolve_canonical(&url);
         }
-        // Browser-bound host packages fail with the canonical marker instead of a manifest hint.
-        if crate::devkit::HOST_PACKAGES.contains(&name) {
+        // Browser-bound system packages fail with the canonical marker instead of a manifest hint.
+        if crate::devkit::SYSTEM_PACKAGES.contains(&name) {
             return Err(format!("module '{name}' requires the web runtime (run with --web)"));
         }
         Err(format!("no packages.json above '{start_dir}' declares '{name}'\nhelp: declare it, or use a relative import"))

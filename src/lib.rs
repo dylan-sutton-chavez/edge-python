@@ -15,7 +15,7 @@ pub mod wasm;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod devkit;
 
-/* The native engine, resolver, plugin loader, host modules and drive loop shared by every native front end. */
+/* The native engine, resolver, plugin loader, system modules and drive loop shared by every native front end. */
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 pub mod native;
 

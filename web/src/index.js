@@ -2,7 +2,7 @@
 Public entry. `createWorker(opts)` spawns a Web Worker around `engine.js` and returns a proxy whose methods round-trip via postMessage. See README for options.
 */
 
-import { DEFAULT_HOST, DEFAULT_IMPORTS } from './defaults.js';
+import { DEFAULT_SYSTEM, DEFAULT_IMPORTS } from './defaults.js';
 
 export async function createWorker(opts) {
     // Chromium blocks `new Worker(crossOriginUrl)` even with `type:'module'`; cross-origin runtimes need the Blob bootstrap below.
@@ -30,14 +30,14 @@ export async function createWorker(opts) {
         }
     }
 
-    /* Lazy host modules: name -> ESM url, imported only when the worker reports the bare name is used. Base defaults sit under user entries; `defaults:false` opts out. */
-    const hostUrls = { ...(opts?.defaults !== false ? DEFAULT_HOST : {}), ...(opts?.hostModules || {}) };
-    const loadedHosts = new Map(); // name -> export names, memoized across runs
-    const loadHostModule = async (name, manifestUrl) => {
-        if (loadedHosts.has(name)) return loadedHosts.get(name);
-        // Embedder entries win; manifest-declared hosts supply their own url.
-        const url = hostUrls[name] ?? manifestUrl;
-        if (!url) throw new Error(`no host module registered for '${name}'`);
+    /* Lazy system modules: name -> ESM url, imported only when the worker reports the bare name is used. Base defaults sit under user entries; `defaults:false` opts out. */
+    const systemUrls = { ...(opts?.defaults !== false ? DEFAULT_SYSTEM : {}), ...(opts?.systemModules || {}) };
+    const loadedSystems = new Map(); // name -> export names, memoized across runs
+    const loadSystemModule = async (name, manifestUrl) => {
+        if (loadedSystems.has(name)) return loadedSystems.get(name);
+        // Embedder entries win; manifest-declared systems supply their own url.
+        const url = systemUrls[name] ?? manifestUrl;
+        if (!url) throw new Error(`no system module registered for '${name}'`);
         const mod = await import(url);
         const factory = mod[name] ?? mod.default;
         const handlers = typeof factory === 'function' ? factory({ pushEvent }) : factory;
@@ -45,7 +45,7 @@ export async function createWorker(opts) {
             mainThreadHandlers[`${name}:${fnName}`] = handler;
         }
         const exports = Object.keys(handlers);
-        loadedHosts.set(name, exports);
+        loadedSystems.set(name, exports);
         return exports;
     };
 
@@ -68,12 +68,12 @@ export async function createWorker(opts) {
             }
             return;
         }
-        if (data.type === 'load-host') {
+        if (data.type === 'load-system') {
             try {
-                const exports = await loadHostModule(data.name, data.url);
-                worker.postMessage({ type: 'load-host-response', reqId: data.reqId, exports });
+                const exports = await loadSystemModule(data.name, data.url);
+                worker.postMessage({ type: 'load-system-response', reqId: data.reqId, exports });
             } catch (e) {
-                worker.postMessage({ type: 'load-host-response', reqId: data.reqId, error: e?.message ?? String(e) });
+                worker.postMessage({ type: 'load-system-response', reqId: data.reqId, error: e?.message ?? String(e) });
             }
             return;
         }
@@ -96,12 +96,12 @@ export async function createWorker(opts) {
         worker.postMessage({ type, reqId, ...payload });
     });
 
-    /* Strip mainThreadModules/hostModules before crossing postMessage: not structured-cloneable / loaded on the page. The worker only needs eager manifests and the lazy host names. */
-    const { mainThreadModules: _drop, hostModules: _dropHosts, ...workerOpts } = opts || {};
+    /* Strip mainThreadModules/systemModules before crossing postMessage: not structured-cloneable / loaded on the page. The worker only needs eager manifests and the lazy system names. */
+    const { mainThreadModules: _drop, systemModules: _dropSystems, ...workerOpts } = opts || {};
     /* Fold the std .wasm defaults into imports here so the worker engine stays embedder-neutral; `defaults:false` opts out. */
     const imports = { ...(opts?.defaults !== false ? DEFAULT_IMPORTS : {}), ...(opts?.imports || {}) };
     const ready = await send('load', {
-        opts: { ...workerOpts, imports, availableHosts: Object.keys(hostUrls) },
+        opts: { ...workerOpts, imports, availableSystems: Object.keys(systemUrls) },
         mainThreadManifests: manifests,
     });
 

@@ -33,9 +33,9 @@ pub fn add(path: &Path, pkgs: &[String]) -> Result<()> {
                 m.imports.insert(name.to_string(), url);
                 ui::added(name, "std");
             }
-            Kind::Host => {
-                m.host.insert(name.to_string(), url);
-                ui::added(name, "host");
+            Kind::System => {
+                m.system.insert(name.to_string(), url);
+                ui::added(name, "system");
             }
         }
     }
@@ -52,12 +52,12 @@ pub fn remove(path: &Path, pkgs: &[String]) -> Result<()> {
     let names: Vec<&str> = pkgs.iter().map(|s| parse_spec(s).0).collect();
     // Validate every name exists first so a single bad one aborts before any write or print.
     for name in &names {
-        if !m.imports.contains_key(*name) && !m.host.contains_key(*name) {
+        if !m.imports.contains_key(*name) && !m.system.contains_key(*name) {
             bail!("'{name}' is not in {}", path.display());
         }
     }
     for name in names {
-        let _ = m.imports.remove(name).is_some() | m.host.remove(name).is_some();
+        let _ = m.imports.remove(name).is_some() | m.system.remove(name).is_some();
         ui::removed(name);
     }
     m.save(path)?;
@@ -73,12 +73,12 @@ fn parse_spec(spec: &str) -> (&str, Option<String>) {
     (spec, None)
 }
 
-/// A `.wasm` url is a worker-side std package; anything else is a host library.
+/// A `.wasm` url is a worker-side std package; anything else is a system package.
 fn kind_from_url(url: &str) -> Kind {
     if url.ends_with(".wasm") {
         Kind::Std
     } else {
-        Kind::Host
+        Kind::System
     }
 }
 

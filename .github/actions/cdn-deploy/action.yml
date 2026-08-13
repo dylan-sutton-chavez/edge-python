@@ -60,14 +60,14 @@ runs:
         # std: <pkg>.wasm / <pkg>.py.
         cp -r /tmp/std/. _site/std/
 
-        # host: flatten each capability src into _site/web/builtins/<cap>.
+        # system: flatten each capability src into _site/web/builtins/<cap>.
         for dir in web/builtins/*/src; do
           cap="$(basename "$(dirname "$dir")")"
           mkdir -p "_site/web/builtins/$cap"
           cp -r "$dir"/. "_site/web/builtins/$cap/"
           # entry.py resolves `_<cap>` via this manifest.
           if [ -f "$dir/entry.py" ]; then
-            printf '{ "host": { "_%s": "./index.js" } }\n' "$cap" > "_site/web/builtins/$cap/packages.json"
+            printf '{ "system": { "_%s": "./index.js" } }\n' "$cap" > "_site/web/builtins/$cap/packages.json"
           fi
         done
 
