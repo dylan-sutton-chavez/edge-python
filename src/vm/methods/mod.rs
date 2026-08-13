@@ -1,8 +1,3 @@
-/*
-Builtin-method descriptor table + dispatcher. Bodies live in per-type files (string/bytes/list/dict/set) as `pub fn`.
-Descriptor: name + fn ptr + mutating flag + arity range; dispatcher checks arity uniformly.
-*/
-
 mod prelude;
 mod recv;
 pub mod bytes;
@@ -18,8 +13,9 @@ use alloc::string::String;
 
 pub type MethodFn = fn(&mut VM, Val, &[Val]) -> Result<(), VmErr>;
 
+/* Builtin-method descriptor table + dispatcher. Bodies live in per-type files (string/bytes/list/dict/set) as `pub fn`, arity is checked uniformly by the dispatcher and `mutating` calls are marked impure there, so bodies do neither. A descriptor is name + fn ptr + mutating flag + arity range. */
 pub struct MethodDesc {
-    pub ty: &'static str, // receiver type ("str"/"bytes"/"list"/"dict"/"set"); drives lookup.
+    pub ty: &'static str, // receiver type ("str"/"bytes"/"list"/"dict"/"set"), drives lookup.
     pub name: &'static str,
     pub func: MethodFn,
     pub mutating: bool,
@@ -39,7 +35,7 @@ impl BuiltinMethodId {
     }
 }
 
-// Builds `ALL_METHODS` grouped by receiver type. `ro`/`rw` = read-only/mutating; `min..max` is the arity (max 255 = variadic).
+// Builds `ALL_METHODS` grouped by receiver type. `ro`/`rw` = read-only/mutating, `min..max` is the arity (max 255 = variadic).
 macro_rules! methods {
     ( $( $ty:literal { $( $name:literal => $func:path, $m:ident, $min:literal .. $max:literal );* $(;)? } )* ) => {
         &[ $( $( MethodDesc {
@@ -51,7 +47,7 @@ macro_rules! methods {
     (@m rw) => { true };
 }
 
-// Lookup scans by (ty, name), so order is irrelevant; group however reads best.
+// Lookup scans by (ty, name), so order is irrelevant, group however reads best.
 pub static ALL_METHODS: &[MethodDesc] = methods! {
     "str" {
         "encode" => string::encode, ro, 0..1;
@@ -166,7 +162,7 @@ pub static ALL_METHODS: &[MethodDesc] = methods! {
     "float" {
         "is_integer" => numeric::is_integer, ro, 0..0;
     }
-    // Appended group: keeps snapshot method ids stable.
+    // Appended group, keeps snapshot method ids stable.
     "dict" {
         "clear" => dict::clear, rw, 0..0;
     }
@@ -176,7 +172,7 @@ pub static ALL_METHODS: &[MethodDesc] = methods! {
 pub(crate) fn dispatch_method(vm: &mut VM, id: BuiltinMethodId, recv: Val, pos: &[Val], kw: &[Val]) -> Result<(), VmErr> {
     let m = &ALL_METHODS[id.0 as usize];
     if !kw.is_empty() {
-        // `dict.update(**kwargs)` is the one builtin method taking keywords: pack them into a dict and append as a positional, which `dict::update` already merges.
+        // `dict.update(**kwargs)` is the one builtin method taking keywords, pack them into a dict and append as a positional, which `dict::update` already merges.
         if m.ty == "dict" && m.name == "update" 
             && let Some(kwd) = VM::pack_kw_dict(&mut vm.heap, kw)? {
                 let mut p = alloc::vec::Vec::with_capacity(pos.len() + 1);
@@ -201,7 +197,7 @@ pub(crate) fn dispatch_method(vm: &mut VM, id: BuiltinMethodId, recv: Val, pos: 
 }
 
 pub fn lookup_method(ty: &str, attr: &str) -> Option<BuiltinMethodId> {
-    // Scan by (ty, name); order-independent, so new methods can be appended anywhere.
+    // Scan by (ty, name), order-independent, so new methods can be appended anywhere.
     ALL_METHODS
         .iter()
         .position(|m| m.ty == ty && m.name == attr)

@@ -1,7 +1,3 @@
-/*
-One file per `edge` subcommand. Each exposes the entry point `main.rs` dispatches to.
-*/
-
 pub mod build;
 pub mod init;
 pub mod pkg;

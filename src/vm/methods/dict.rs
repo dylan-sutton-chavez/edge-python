@@ -1,7 +1,3 @@
-/*
-Built-in methods for `dict` receivers. Arity is checked by the dispatcher; `mutating` is marked by the dispatcher when `MethodDesc::mutating` is true.
-*/
-
 use super::prelude::*;
 
 pub fn keys(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
@@ -26,7 +22,7 @@ pub fn items(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
     vm.alloc_and_push_list(items)
 }
 
-// `dict.copy()`, shallow copy; mutations don't affect the original.
+// `dict.copy()`, shallow copy, mutations don't affect the original.
 pub fn copy(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
     let entries = dict_entries(vm, recv)?;
     let mut dm = DictMap::with_capacity(entries.len());
@@ -42,7 +38,7 @@ pub fn clear(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
     vm.push(Val::none()); Ok(())
 }
 
-// `dict.popitem()`, pop the last (k, v); KeyError on empty dict.
+// `dict.popitem()`, pop the last (k, v), KeyError on empty dict.
 pub fn popitem(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
     let pair = dict_mut(vm, recv, "popitem: receiver is not a dict", |dict, heap| {
         let (k, v) = dict.entries.last().copied().ok_or(cold_key("popitem(): dictionary is empty"))?;
@@ -52,7 +48,7 @@ pub fn popitem(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
     vm.alloc_and_push_tuple(vec![pair.0, pair.1])
 }
 
-// `dict.fromkeys(iterable, value=None)` classmethod: new dict mapping each key to `value`.
+// `dict.fromkeys(iterable, value=None)` classmethod, new dict mapping each key to `value`.
 pub fn fromkeys(vm: &mut VM, _recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let keys = vm.extract_iter(pos[0], true)?;
     let value = pos.get(1).copied().unwrap_or(Val::none());
@@ -71,7 +67,7 @@ pub fn get(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
 }
 
 pub fn update(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
-    // Merge each source in order; dispatcher packs kwargs as trailing dict.
+    // Merge each source in order, dispatcher packs kwargs as trailing dict.
     let mut pairs: Vec<(Val, Val)> = Vec::new();
     for &src in pos {
         if let Some(HeapObj::Dict(rc)) = vm.heap.try_get(src) {

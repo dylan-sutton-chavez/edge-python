@@ -1,13 +1,9 @@
-/*
-The packages.json model and the official package registry.
-*/
-
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-/* The manifest: `imports` for worker-side .wasm/.py modules, `system` for main-thread JS libraries. */
+/* The manifest holds `imports` for worker-side .wasm/.py modules and `system` for main-thread JS libraries. */
 #[derive(Default, Serialize, Deserialize)]
 pub struct Manifest {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -41,7 +37,7 @@ pub enum Kind {
 
 use compiler::devkit::{STD_PACKAGES as STD, SYSTEM_PACKAGES as SYSTEM};
 
-/// Resolve a bare name against the official registry; user manifest overrides go through `resolve`.
+/// Resolve a bare name against the official registry, user manifest overrides go through `resolve`.
 pub fn registry(name: &str) -> Option<(Kind, String)> {
     if STD.contains(&name) {
         Some((Kind::Std, std_url(name)))
@@ -52,13 +48,13 @@ pub fn registry(name: &str) -> Option<(Kind, String)> {
     }
 }
 
-/// CDN url for a std package. Most ship as `.wasm`; `test` is pure Edge Python, served as `.py`. Mirrors web/src/defaults.js.
+/// CDN url for a std package. Most ship as `.wasm`, `test` is pure Edge Python served as `.py`. Mirrors web/src/defaults.js.
 fn std_url(name: &str) -> String {
     let ext = if name == "test" { "py" } else { "wasm" };
     format!("https://cdn.edgepython.com/std/{name}.{ext}")
 }
 
-/// Resolve `name` for the runtime: user manifest entry first, registry fallback.
+/// Resolve `name` for the runtime, user manifest entry first then the registry fallback.
 pub fn resolve(name: &str, manifest: &Manifest) -> Option<(Kind, String)> {
     if let Some(url) = manifest.imports.get(name) {
         return Some((Kind::Std, url.clone()));

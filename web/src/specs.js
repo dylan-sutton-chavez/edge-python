@@ -1,8 +1,4 @@
-/*
-Spec/URL helpers. Mirror `compiler::packages::manifest` so transitive imports canonicalize identically on both sides.
-*/
-
-/* Byte cap on any source handed to the compiler; mirrors the wasm SRC buffer (compiler SZ). */
+/* Byte cap on any source handed to the compiler, mirrors the wasm SRC buffer (compiler SZ). */
 export const SOURCE_LIMIT = 1 << 20;
 
 export const sha256Hex = async (bytes) => {
@@ -10,6 +6,7 @@ export const sha256Hex = async (bytes) => {
     return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
+/* Mirror `compiler::packages::manifest` so transitive imports canonicalize identically on both sides. */
 export const dirOf = (spec) => {
     const i = spec.lastIndexOf('/');
     return i === -1 ? '' : spec.slice(0, i + 1);

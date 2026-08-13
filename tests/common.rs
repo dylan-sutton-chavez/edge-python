@@ -1,7 +1,3 @@
-/*
-Test infra for `packages`: TestResolver (modules + nested manifests, walk-up parity), `test_native(name)`, fixtures for pure/impure/alloc/error/primitive paths.
-*/
-
 #![allow(dead_code)]
 
 use std::cell::RefCell;
@@ -14,13 +10,13 @@ use compiler::packages::{
 };
 use compiler::vm::types::{HeapObj, HeapPool, Val, VmErr};
 
-// TestResolver
+// TestResolver, modules and nested manifests with walk-up parity against the host resolver.
 
-/* Shared state across a TestResolver and its children; mirrors the WASM bridge's flat cache + in-flight set. */
+/* Shared state across a TestResolver and its children, mirroring the WASM bridge's flat cache + in-flight set. */
 #[derive(Default)]
 struct TestResolverState {
     modules: HashMap<String, Resolved>,
-    /* Manifests keyed by directory; walk-up checks each parent of the importer's location. */
+    /* Manifests keyed by directory, walk-up checks each parent of the importer's location. */
     manifests: HashMap<String, Manifest>,
     in_flight: HashSet<String>,
 }
@@ -28,7 +24,7 @@ struct TestResolverState {
 pub struct TestResolver {
     state: Rc<RefCell<TestResolverState>>,
     in_flight_marker: Option<String>,
-    dir: String, // Scoped dir for this resolver; bare-name imports walk up from here. Empty = entry script.
+    dir: String, // Scoped dir for this resolver, bare-name imports walk up from here. Empty = entry script.
 }
 
 impl Drop for TestResolver {
@@ -66,7 +62,7 @@ impl TestResolver {
         self
     }
 
-    /* Add an alias to the root manifest; additive, accumulates across calls. */
+    /* Add an alias to the root manifest. Additive, accumulates across calls. */
     pub fn with_alias(self, name: &str, target: &str) -> Self {
         {
             let mut s = self.state.borrow_mut();
@@ -76,7 +72,7 @@ impl TestResolver {
         self
     }
 
-    /* Register a manifest at `dir`; nearer manifests win for bare-name resolution. */
+    /* Register a manifest at `dir`, nearer manifests win for bare-name resolution. */
     pub fn with_manifest(self, dir: &str, imports: &[(&str, &str)], extends: Option<&str>) -> Self {
         let imp = imports.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
         let m = Manifest { imports: imp, extends: extends.map(|s| s.to_string()) };
@@ -102,7 +98,7 @@ impl Resolver for TestResolver {
         self.resolve_canonical(&canonical)
     }
 
-    /* Transitive sub-resolver: shares state, rescopes `dir`; Drop clears the in-flight marker. */
+    /* Transitive sub-resolver, shares state and rescopes `dir`. Drop clears the in-flight marker. */
     fn child(&self, spec: &str) -> Box<dyn Resolver> {
         let canon = spec.to_string();
         self.state.borrow_mut().in_flight.insert(canon.clone());
@@ -126,7 +122,7 @@ impl TestResolver {
         Err(format!("no packages.json above '{}' to resolve '{}'", self.dir, spec))
     }
 
-    /* Walk up from `start_dir` for the nearest manifest declaring `name`; `extends` chains with cycle detection. */
+    /* Walk up from `start_dir` for the nearest manifest declaring `name`. `extends` chains with cycle detection. */
     fn resolve_bare(&mut self, name: &str, start_dir: &str) -> Result<Resolved, String> {
         let mut visited: HashSet<String> = HashSet::new();
         let mut search_dir = start_dir.to_string();
@@ -180,9 +176,9 @@ impl TestResolver {
     }
 }
 
-// Fixture functions. Third arg is the kwargs slot (`None` for positional calls); these fixtures ignore it.
+// Fixture functions. Third arg is the kwargs slot (`None` for positional calls), ignored by these fixtures.
 
-/* Pure: a + b, exercises CallExtern dispatch, arg marshalling, and template memo. */
+/* Pure, a + b, exercises CallExtern dispatch, arg marshalling, and template memo. */
 fn add(_: &mut HeapPool, args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr> {
     if args.len() != 2 { return Err(VmErr::Type("add: expected 2 args")); }
     let a = if args[0].is_int() { args[0].as_int() } else { return Err(VmErr::Type("add: arg 0 not int")); };
@@ -190,14 +186,14 @@ fn add(_: &mut HeapPool, args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr> {
     Ok(Val::int(a + b))
 }
 
-/* Pure: x * x. Used to verify nested calls (square(add(1,2))). */
+/* Pure, x * x. Used to verify nested calls (square(add(1,2))). */
 fn square(_: &mut HeapPool, args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr> {
     if args.len() != 1 { return Err(VmErr::Type("square: expected 1 arg")); }
     let x = if args[0].is_int() { args[0].as_int() } else { return Err(VmErr::Type("square: arg not int")); };
     Ok(Val::int(x * x))
 }
 
-/* Pure-but-allocs: heap string of length n; exercises HeapPool::alloc from extern context. */
+/* Pure-but-allocs, heap string of length n, exercises HeapPool::alloc from extern context. */
 fn make_str(heap: &mut HeapPool, args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr> {
     if args.len() != 1 { return Err(VmErr::Type("make_str: expected 1 arg")); }
     let n = if args[0].is_int() { args[0].as_int() } else { return Err(VmErr::Type("make_str: arg not int")); };
@@ -205,19 +201,19 @@ fn make_str(heap: &mut HeapPool, args: &[Val], _kw: Option<Val>) -> Result<Val, 
     heap.alloc(HeapObj::Str(s))
 }
 
-/* Impure counter; verifies impurity taints the caller and skips memo. */
+/* Impure counter, verifies impurity taints the caller and skips memo. */
 fn counter(_: &mut HeapPool, _args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr> {
     use std::sync::atomic::{AtomicI64, Ordering};
     static N: AtomicI64 = AtomicI64::new(0);
     Ok(Val::int(N.fetch_add(1, Ordering::SeqCst)))
 }
 
-/* Pure constant 42; for tests that only care extern was called. */
+/* Pure constant 42, for tests that only care extern was called. */
 fn const_42(_: &mut HeapPool, _args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr> {
     Ok(Val::int(42))
 }
 
-/* Always errors; exercises extern-error propagation through dispatch. */
+/* Always errors, exercises extern-error propagation through dispatch. */
 fn boom(_: &mut HeapPool, _args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr> {
     Err(VmErr::Runtime("boom from extern"))
 }
@@ -230,7 +226,7 @@ fn double_f(_: &mut HeapPool, args: &[Val], _kw: Option<Val>) -> Result<Val, VmE
     Ok(Val::float(args[0].as_float() * 2.0))
 }
 
-/* Pure: bool -> bool. Asserts that bool tags survive the extern dispatch. */
+/* Pure, bool -> bool. Asserts that bool tags survive the extern dispatch. */
 fn negate(_: &mut HeapPool, args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr> {
     if args.len() != 1 || !args[0].is_bool() {
         return Err(VmErr::Type("negate: expected one bool arg"));
@@ -238,17 +234,17 @@ fn negate(_: &mut HeapPool, args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr
     Ok(Val::bool(!args[0].as_bool()))
 }
 
-/* Returns HostCallDeferred; exercises the PendingHostCall yield path through call_extern. */
+/* Returns HostCallDeferred, exercises the PendingHostCall yield path through call_extern. */
 fn host_defer(_: &mut HeapPool, _args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr> {
     Err(VmErr::HostCallDeferred)
 }
 
-/* Const fixture: zero-arg export materialised at init, bound as a module value attr. */
+/* Const fixture, zero-arg export materialised at init, bound as a module value attr. */
 fn const_pi(_: &mut HeapPool, _args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr> {
     Ok(Val::float(core::f64::consts::PI))
 }
 
-/* Pure: bool, int -> int. Mixes types to confirm per-arg decode is correct. */
+/* Pure, bool, int -> int. Mixes types to confirm per-arg decode is correct. */
 fn pick(_: &mut HeapPool, args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr> {
     if args.len() != 3 || !args[0].is_bool() || !args[1].is_int() || !args[2].is_int() {
         return Err(VmErr::Type("pick: expected (bool, int, int)"));
@@ -256,7 +252,7 @@ fn pick(_: &mut HeapPool, args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr> 
     Ok(if args[0].as_bool() { args[2] } else { args[1] })
 }
 
-/* Native class fixtures: `Box(v)` stores v on self, `get` reads it back; exercises the Extern-method self convention end to end. */
+/* Native class fixtures, `Box(v)` stores v on self, `get` reads it back, exercises the Extern-method self convention end to end. */
 fn class_box_init(heap: &mut HeapPool, args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr> {
     let [inst, v] = args else { return Err(VmErr::Type("Box: expected (self, value)")); };
     let HeapObj::Instance(_, attrs) = heap.get(*inst) else {
@@ -279,7 +275,7 @@ fn class_box_get(heap: &mut HeapPool, args: &[Val], _kw: Option<Val>) -> Result<
     out.ok_or(VmErr::Attribute("Box.get: 'v' not set".into()))
 }
 
-/* Fixture-name -> (fn ptr, purity); the runner turns each into a NativeBinding. */
+/* Fixture-name -> (fn ptr, purity), the runner turns each into a NativeBinding. */
 type NativeFn = fn(&mut HeapPool, &[Val], Option<Val>) -> Result<Val, VmErr>;
 
 pub fn test_native(name: &str) -> Option<NativeBinding> {

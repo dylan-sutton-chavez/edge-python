@@ -86,8 +86,7 @@ fn run_batch(path: &std::path::Path) -> Vec<String> {
     String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect()
 }
 
-// A server swarm stays alive, publish feeds its ingress, then output, /stats and posts are read.
-// The manifest is copied into a tempdir so its default wal lands there, never in the repo.
+// A server swarm stays alive, publish feeds its ingress, then output, /stats and posts are read. The manifest is copied into a tempdir so its default wal lands there, never in the repo.
 fn run_server(path: &std::path::Path, listen: &str, publish: &[String], control: Option<&str>, posts: &[Post]) -> (Vec<String>, String, Vec<String>) {
     let addr = listen.strip_prefix("tcp://").unwrap_or(listen);
     let scratch = std::env::temp_dir().join(format!("edge-swarm-{}", std::process::id()));

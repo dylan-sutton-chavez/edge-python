@@ -7,7 +7,7 @@ use super::super::types::*;
 
 impl<'a> VM<'a> {
 
-    // Resume coroutine: persist state on yield, restore caller on return. Suspended sync sub-frames run innermost-first, each pushing its result onto the next frame's stack at the Call site. The coro's `exception_frames` are restored before its body runs and saved back on yield, so `try`/`except` survives suspensions.
+    // Resume coroutine, persist state on yield, restore caller on return. Suspended sync sub-frames run innermost-first, each pushing its result onto the next frame's stack at the Call site. The coro's `exception_frames` are restored before its body runs and saved back on yield, so `try`/`except` survives suspensions.
     pub fn resume_coroutine(&mut self, callee: Val) -> Result<Val, VmErr> {
         // Scheduler-driven resumes have nothing native above.
         let resume_safe = core::mem::take(&mut self.pending_exec_safe);
@@ -18,7 +18,7 @@ impl<'a> VM<'a> {
                 return Err(cold_type("not a coroutine"));
             };
 
-        // Bound depth: sync frames within a coroutine, plus nested resumes from mutual awaits (native-stack recursion).
+        // Bound depth, sync frames within a coroutine, plus nested resumes from mutual awaits (native-stack recursion).
         if sync_frames.len() >= self.max_calls || self.depth >= self.max_calls {
             return Err(cold_depth());
         }
@@ -46,7 +46,7 @@ impl<'a> VM<'a> {
         let saved_exc_len = self.exception_stack.len();
         self.stack.extend_from_slice(&outer_stack);
         self.iter_stack.extend(outer_iters);
-        // Denormalize: stored depths are relative to the coro's saved stack/iter; lift them to absolute positions in the live VM stacks.
+        // Denormalize, stored depths are relative to the coro's saved stack/iter, lift them to absolute positions in the live VM stacks.
         let mut restored_exc = outer_exc;
         for f in &mut restored_exc {
             f.stack_depth += saved_stack_len;
@@ -133,10 +133,10 @@ impl<'a> VM<'a> {
 
         if self.yielded {
             let resume_ip = if outer_ran { self.resume_ip } else { outer_ip };
-            // A coroutine that left the stack shorter must not panic split_off / drain; clamp both.
+            // A coroutine that left the stack shorter must not panic split_off / drain, clamp both.
             let remaining = self.stack.split_off(saved_stack_len.min(self.stack.len()));
             let coro_iters: Vec<IterFrame> = self.iter_stack.drain(saved_iter_len.min(self.iter_stack.len())..).collect();
-            // Normalize: depths captured at SetupExcept time were absolute against the live stacks; store them relative to the coro's saved stack so the next resume can denormalize against a different base.
+            // Normalize, depths captured at SetupExcept time were absolute against the live stacks, store them relative to the coro's saved stack so the next resume can denormalize against a different base.
             let coro_exc: Vec<ExceptionFrame> = self.exception_stack.drain(saved_exc_len..)
                 .map(|mut f| {
                     f.stack_depth = f.stack_depth.saturating_sub(saved_stack_len);
@@ -144,7 +144,7 @@ impl<'a> VM<'a> {
                     f
                 })
                 .collect();
-            // An inline-awaited coro isn't a scheduler root, so its body's GC may have freed it; if so skip the save (a freed coro is unreachable and won't resume).
+            // An inline-awaited coro isn't a scheduler root, so its body's GC may have freed it, if so skip the save (a freed coro is unreachable and won't resume).
             if let Some(HeapObj::Coroutine(sip, ss, sst, _, si, sf, ef)) = self.heap.try_get_mut(callee) {
                 *sip = resume_ip;
                 *ss = outer_slots;
@@ -165,12 +165,12 @@ impl<'a> VM<'a> {
         }
     }
 
-    /* Live (non-terminal) coroutine count; the concurrency that bounds scheduler work. */
+    /* Live (non-terminal) coroutine count, the concurrency that bounds scheduler work. */
     fn scheduler_active(&self) -> usize {
         self.scheduler.iter().filter(|h| !matches!(h.state, CoroState::Done(_) | CoroState::Errored(_) | CoroState::Cancelled)).count()
     }
 
-    /* `await coro` and calling a coroutine `c()`: park the current coro on `target` (single-driver, like `run(target)`) and yield. The driving top loop resolves `target` and the wake-loop overwrites the placeholder with its value (or raises its error). Non-coroutine awaitables pass through unchanged at the call site. */
+    /* `await coro` and calling a coroutine `c()` parks the current coro on `target` (single-driver, like `run(target)`) and yields. The driving top loop resolves `target` and the wake-loop overwrites the placeholder with its value (or raises its error). Non-coroutine awaitables pass through unchanged at the call site. */
     pub(crate) fn await_coroutine(&mut self, target: Val) -> Result<(), VmErr> {
         if self.scheduler_active() >= self.max_calls {
             return Err(cold_depth());
@@ -178,15 +178,15 @@ impl<'a> VM<'a> {
         if !self.scheduler.iter().any(|h| h.coro == target) {
             self.scheduler.push(CoroutineHandle { coro: target, state: CoroState::Ready });
         }
-        self.push(Val::none()); // placeholder; wake-loop overwrites with target's result
+        self.push(Val::none()); // placeholder, wake-loop overwrites with target's result
         self.pending.waiting_for_children = Some((alloc::vec![target], WaitKind::Run(target)));
         self.yielded = true;
         Ok(())
     }
 
-    /* `run(*coros)`, single-driver model: pushes the targets into the global scheduler, parks the outer in `WaitingForChildren` with `WaitKind::Run(target)`, and yields. The top loop drains the children and wakes the outer when all are terminal. */
+    /* `run(*coros)`, single-driver model, pushes the targets into the global scheduler, parks the outer in `WaitingForChildren` with `WaitKind::Run(target)`, and yields. The top loop drains the children and wakes the outer when all are terminal. */
     pub fn call_run(&mut self, argc: u16) -> Result<(), VmErr> {
-        // Cap live concurrency like call depth: unbounded task spawning is recursion-shaped.
+        // Cap live concurrency like call depth, unbounded task spawning is recursion-shaped.
         if self.scheduler_active() >= self.max_calls {
             return Err(cold_depth());
         }
@@ -205,10 +205,10 @@ impl<'a> VM<'a> {
                 self.scheduler.push(CoroutineHandle { coro: *v, state: CoroState::Ready });
             }
         }
-        // Placeholder on stack top; wake-loop overwrites it with the target's result.
+        // Placeholder on stack top, wake-loop overwrites it with the target's result.
         self.push(Val::none());
         if coros.is_empty() {
-            // `run(non_coro)`, nothing to wait for; placeholder stays None.
+            // `run(non_coro)`, nothing to wait for, placeholder stays None.
             return Ok(());
         }
         self.pending.waiting_for_children = Some((coros, WaitKind::Run(target)));
@@ -216,11 +216,11 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    // Sweep `WaitingForChildren` outers: enforce timeouts, then wake any whose tracked tasks are all terminal, finalizing per `WaitKind`. Gated by `waiting_for_children_count` so the common (no-nested-run) tick is one comparison.
+    // Sweep `WaitingForChildren` outers, enforce timeouts, then wake any whose tracked tasks are all terminal, finalizing per `WaitKind`. Gated by `waiting_for_children_count` so the common (no-nested-run) tick is one comparison.
     fn wake_waiting_outers(&mut self) {
         if self.waiting_for_children_count == 0 { return; }
 
-        // Timeout enforcement: mark non-terminal tasks as CancelPending when their parent's deadline expired.
+        // Timeout enforcement, mark non-terminal tasks as CancelPending when their parent's deadline expired.
         let now = self.now_ns();
         let expired: Vec<Val> = self.scheduler.iter().filter_map(|h| {
             if let CoroState::WaitingForChildren { tasks, kind: WaitKind::Timeout { deadline_ns, .. } } = &h.state
@@ -255,7 +255,7 @@ impl<'a> VM<'a> {
         }
     }
 
-    // Finalize outer's state based on WaitKind and the (now-terminal) tasks. For Run / Gather / Timeout the placeholder is replaced; on error, raise it into the outer (popping a try-frame and jumping to the handler) or transition Errored if no handler is active.
+    // Finalize outer's state based on WaitKind and the (now-terminal) tasks. For Run / Gather / Timeout the placeholder is replaced, on error, raise it into the outer (popping a try-frame and jumping to the handler) or transition Errored if no handler is active.
     fn compute_wake_outcome(&mut self, outer: Val, tasks: &[Val], kind: &WaitKind) -> CoroState {
         match kind {
             WaitKind::Run(target) => {
@@ -311,7 +311,7 @@ impl<'a> VM<'a> {
             && let Some(top) = stack.last_mut() { *top = value; }
     }
 
-    // Pop a try-frame from the outer's saved exception_frames and stage a raise: truncate saved stack/iter to the frame, push the exception instance, set IP to the handler. If no frame is active, the outer transitions to Errored and propagation continues.
+    // Pop a try-frame from the outer's saved exception_frames and stage a raise, truncate saved stack/iter to the frame, push the exception instance, set IP to the handler. If no frame is active, the outer transitions to Errored and propagation continues.
     pub(crate) fn raise_into_outer(&mut self, outer: Val, e: VmErr) -> CoroState {
         let frame_opt = if let HeapObj::Coroutine(_, _, _, _, _, _, ef) = self.heap.get_mut(outer) {
             ef.pop()
@@ -341,7 +341,7 @@ impl<'a> VM<'a> {
         CoroState::Ready
     }
 
-    /* Single scheduler driver: picks a Ready coro and steps it; on no Ready, classifies the wait-state and yields to the host (PendingTimer / PendingFrame / PendingHostCall / PendingEvent) or returns Ok when nothing alive remains. */
+    /* Single scheduler driver, picks a Ready coro and steps it. On no Ready, classifies the wait-state and yields to the host (PendingTimer / PendingFrame / PendingHostCall / PendingEvent) or returns Ok when nothing alive remains. */
     pub(crate) fn top_loop(&mut self) -> Result<(), VmErr> {
         loop {
             // Charge the full scheduler scan so accumulating coroutines stay bounded.
@@ -374,13 +374,13 @@ impl<'a> VM<'a> {
             if !alive { return Ok(()); }
             if let Some(i) = next_ready {
                 self.scheduler_step(i)?;
-                // Coro stays Ready; re-entering resumes it.
+                // Coro stays Ready, re-entering resumes it.
                 if core::mem::take(&mut self.pending.preempt_request) {
                     return Err(VmErr::HostYield(SchedulerStatus::Preempted));
                 }
                 continue;
             }
-            // Yield priority: frame tick > sleep/timeout deadline > host call > event.
+            // Yield priority order, frame tick > sleep/timeout deadline > host call > event.
             if any_frame { return Err(VmErr::HostYield(SchedulerStatus::PendingFrame)); }
             match min_wake {
                 Some(w) => {
@@ -457,7 +457,7 @@ impl<'a> VM<'a> {
         let new_state = match result {
             Err(e) => CoroState::Errored(e),
             Ok(v) if yielded => {
-                // Suspension precedence: sleep > frame > receive > host-call > children > bare yield.
+                // Suspension precedence order, sleep > frame > receive > host-call > children > bare yield.
                 if let Some(until) = self.pending.sleep_until_ns.take() {
                     CoroState::Sleeping(until)
                 } else if core::mem::replace(&mut self.pending.host_frame_request, false) {
@@ -480,7 +480,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* Suspend until the host's next render frame; browsers hook `requestAnimationFrame`. */
+    /* Suspend until the host's next render frame, browsers hook `requestAnimationFrame`. */
     pub fn call_frame(&mut self) -> Result<(), VmErr> {
         self.pending.host_frame_request = true;
         self.push(Val::none());
@@ -498,15 +498,15 @@ impl<'a> VM<'a> {
         let secs = if secs < 0.0 { 0.0 } else { secs };
         let until = self.now_ns().saturating_add((secs * 1_000_000_000.0) as u64);
         self.pending.sleep_until_ns = Some(until);
-        // Push None as the yield value; the scheduler ignores it.
+        // Push None as the yield value, the scheduler ignores it.
         self.push(Val::none());
         self.yielded = true;
         Ok(())
     }
 
-    /* `gather(*coros)`, single-driver: pushes all targets, parks the outer in `WaitingForChildren` with `WaitKind::Gather`, and yields. Wake-loop builds the result list (or raises the first child error). */
+    /* `gather(*coros)`, single-driver, pushes all targets, parks the outer in `WaitingForChildren` with `WaitKind::Gather`, and yields. Wake-loop builds the result list (or raises the first child error). */
     pub fn call_gather(&mut self, argc: u16) -> Result<(), VmErr> {
-        // Cap live concurrency like call depth: unbounded task spawning is recursion-shaped.
+        // Cap live concurrency like call depth, unbounded task spawning is recursion-shaped.
         if self.scheduler_active() >= self.max_calls {
             return Err(cold_depth());
         }
@@ -519,7 +519,7 @@ impl<'a> VM<'a> {
                 self.scheduler.push(CoroutineHandle { coro: *v, state: CoroState::Ready });
             }
         }
-        self.push(Val::none()); // placeholder; replaced with the result list by the wake-loop.
+        self.push(Val::none()); // placeholder, replaced with the result list by the wake-loop.
         if coros.is_empty() {
             let empty = self.heap.alloc(HeapObj::List(Rc::new(RefCell::new(Vec::new()))))?;
             *self.stack.last_mut().unwrap() = empty;
@@ -530,7 +530,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* `with_timeout(seconds, coro)`, single-driver: pushes the target, parks the outer with `WaitKind::Timeout { deadline_ns, target }`, and yields. The top loop enforces the deadline by marking the target CancelPending when it expires; the wake-loop returns the target's value or `TimeoutError`. */
+    /* `with_timeout(seconds, coro)`, single-driver, pushes the target, parks the outer with `WaitKind::Timeout { deadline_ns, target }`, and yields. The top loop enforces the deadline by marking the target CancelPending when it expires. The wake-loop returns the target's value or `TimeoutError`. */
     pub fn call_with_timeout(&mut self) -> Result<(), VmErr> {
         let coro = self.pop()?;
         let secs_v = self.pop()?;
@@ -560,7 +560,7 @@ impl<'a> VM<'a> {
         self.push(Val::none()); Ok(())
     }
 
-    /* Pop oldest queued message; if empty, park in `WaitingEvent` until `run_push_event`. */
+    /* Pop oldest queued message, if empty, park in `WaitingEvent` until `run_push_event`. */
     pub fn call_receive(&mut self) -> Result<(), VmErr> {
         if !self.event_queue.is_empty() {
             let val = self.event_queue.remove(0);

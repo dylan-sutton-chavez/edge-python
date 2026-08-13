@@ -19,7 +19,7 @@ pub enum FastOp {
 /* Promote to `fast` after this many hits with a stable type key. */
 const QUICK_THRESH: u8 = 4;
 
-/* Pper-site monomorphic instance-dunder cache. Records the receiver's class heap idx and the pre-resolved method Val; once `hits >= QUICK_THRESH` the slot promotes and the hot dispatch skips `resolve_attr_silent` entirely. `arity` is the total operand count consumed from the stack (1 for unary, 2 for binary like `__add__`/`__getitem__`). */
+/* Per-site monomorphic instance-dunder cache. Records the receiver's class heap idx and the pre-resolved method Val, once `hits >= QUICK_THRESH` the slot promotes and the hot dispatch skips `resolve_attr_silent` entirely. `arity` is the total operand count consumed from the stack (1 for unary, 2 for binary like `__add__`/`__getitem__`). */
 #[derive(Clone, Copy)]
 pub struct InstanceCache {
     pub class: u32,
@@ -34,7 +34,7 @@ struct CacheSlot {
     type_key: u8,
     hits: u8,
     fast: Option<FastOp>,
-    // Instance-dunder cache; orthogonal to `fast`, dispatch checks it after scalar specialisation misses.
+    // Instance-dunder cache, orthogonal to `fast`, dispatch checks it after scalar specialisation misses.
     inst: Option<InstanceCache>,
 }
 
@@ -54,7 +54,7 @@ impl OpcodeCache {
         }
     }
 
-    /* Compile the fused instruction stream on first access; reuse afterwards. */
+    /* Compile the fused instruction stream on first access, reuse afterwards. */
     pub fn ensure_fused(&mut self, chunk: &SSAChunk) -> &[Instruction] {
         if self.fused.is_none() {
             self.fused = Some(fuse_method_calls(chunk));
@@ -67,7 +67,7 @@ impl OpcodeCache {
         self.fused.as_ref().expect("fused code not compiled")
     }
 
-    /* Build the const pool: scalars inline, Str/LongInt heap-allocated once and shared. */
+    /* Build the const pool, scalars inline, Str/LongInt heap-allocated once and shared. */
     pub fn ensure_const_vals(&mut self, chunk: &SSAChunk, heap: &mut HeapPool) -> Result<&[Val], VmErr> {
         if self.const_vals.is_none() {
             let mut out = Vec::with_capacity(chunk.constants.len());
@@ -75,7 +75,7 @@ impl OpcodeCache {
                 let v = match c {
                     Value::Int(i) => {
                         if *i >= Val::INT_MIN && *i <= Val::INT_MAX { Val::int(*i) }
-                        // Defensive path for FFI/wire-format chunks; parser now emits LongInt directly.
+                        // Defensive path for FFI/wire-format chunks, parser now emits LongInt directly.
                         else { heap.alloc(HeapObj::LongInt(*i as i128))? }
                     }
                     Value::LongInt(i) => {
@@ -167,10 +167,10 @@ impl OpcodeCache {
         if let Some(s) = self.slots.get_mut(ip) { s.inst = None; }
     }
 
-    /* GC root iterator for `InstanceCache` entries: yields the cached method Val and class Val so the collector keeps both alive while the cache holds them. */
+    /* GC root iterator for `InstanceCache` entries, yielding the cached method Val and class Val so the collector keeps both alive while the cache holds them. */
     pub fn inst_roots(&self) -> impl Iterator<Item = Val> + '_ {
         self.slots.iter().filter_map(|s| s.inst).flat_map(|c| {
-            // SAFETY: `method_bits` was recorded from a live `Val`; class Val is reconstructed from the stored heap idx.
+            // SAFETY `method_bits` was recorded from a live `Val`, class Val is reconstructed from the stored heap idx.
             let method = unsafe { Val::from_raw(c.method_bits) };
             let class = Val::heap(c.class);
             [method, class].into_iter()
@@ -215,12 +215,12 @@ fn hash_args(args: &[Val]) -> u64 {
     h
 }
 
-/* Memoize only when every arg is immutable; mutable containers hash by heap idx and go stale. */
+/* Memoize only when every arg is immutable, mutable containers hash by heap idx and go stale. */
 fn args_memoizable(args: &[Val], heap: &super::types::HeapPool) -> bool {
     use super::types::HeapObj;
     args.iter().all(|v| {
         if !v.is_heap() { return true; }
-        // Post-call args aren't rooted, so the body may have freed one; a freed slot (None) is not memoizable, nor are mutable containers.
+        // Post-call args aren't rooted, so the body may have freed one. A freed slot (None) is not memoizable, nor are mutable containers.
         match heap.try_get(*v) {
             Some(o) => !matches!(o, HeapObj::List(_) | HeapObj::Dict(_) | HeapObj::Set(_) | HeapObj::Instance(..)),
             None => false,
@@ -228,17 +228,17 @@ fn args_memoizable(args: &[Val], heap: &super::types::HeapPool) -> bool {
     })
 }
 
-/* Memoize only immediates (int/float/bool/None) and immutable heap objects; fresh mutable containers or tuples/sets wrapping them must stay per-call to avoid aliasing and falsifying `is`. */
+/* Memoize only immediates (int/float/bool/None) and immutable heap objects. Fresh mutable containers or tuples/sets wrapping them must stay per-call to avoid aliasing and falsifying `is`. */
 fn result_memoizable(result: Val, heap: &super::types::HeapPool) -> bool {
     use super::types::HeapObj;
     if !result.is_heap() { return true; }
     matches!(heap.try_get(result), Some(HeapObj::Str(_) | HeapObj::Bytes(_) | HeapObj::LongInt(_)))
 }
 
-/* Disable a fi's memo after this many consecutive lookup misses; the scan tax outweighs stale hope. */
+/* Disable a fi's memo after this many consecutive lookup misses, the scan tax outweighs stale hope. */
 const MISS_LIMIT: u16 = 256;
 
-// Indexed by dense `fi`; Vec gives O(1) lookup with no HashMap monomorphization.
+// Indexed by dense `fi`, Vec gives O(1) lookup with no HashMap monomorphization.
 pub struct Templates { slots: Vec<Vec<TplEntry>>, misses: Vec<u16> }
 
 impl Templates {
@@ -260,7 +260,7 @@ impl Templates {
             Some(_) => self.misses[fi] = 0,
             None => {
                 self.misses[fi] = self.misses[fi].saturating_add(1);
-                // Reclaim the dead table: entries would otherwise stay GC roots forever.
+                // Reclaim the dead table, entries would otherwise stay GC roots forever.
                 if self.misses[fi] >= MISS_LIMIT { self.slots[fi] = Vec::new(); }
             }
         }
@@ -290,13 +290,13 @@ impl Templates {
     }
 }
 
-/* Fuse LoadAttr + [single-push arg loads] + Call into CallMethod+CallMethodArgs. Arg loads shift left one slot so the pair sits adjacent at the Call; only pure single-push opcodes relocate, and never across a jump target. */
+/* Fuse LoadAttr + [single-push arg loads] + Call into CallMethod+CallMethodArgs. Arg loads shift left one slot so the pair sits adjacent at the Call. Only pure single-push opcodes relocate, and never across a jump target. */
 fn fuse_method_calls(chunk: &SSAChunk) -> Vec<Instruction> {
     let src = &chunk.instructions;
     let n = src.len();
     let mut out = src.clone();
 
-    // Instruction indices any jump/handler/unwind can enter; relocation across them is unsafe.
+    // Instruction indices any jump/handler/unwind can enter, relocation across them is unsafe.
     let mut targeted = vec![false; n + 1];
     for (k, ins) in src.iter().enumerate() {
         match ins.opcode {

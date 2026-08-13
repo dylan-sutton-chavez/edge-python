@@ -1,14 +1,10 @@
-/*
-Edge Python plugin ABI wire format. Shared by compiler (host) and wasm-pdk (guest). no_std, alloc only.
-*/
-
 #![no_std]
 
 extern crate alloc;
 
 use alloc::vec::Vec;
 
-/* Bump on any breaking change. Plugins export `__edge_abi_version`; hosts MUST refuse unrecognised versions. */
+/* Plugin ABI wire format shared by compiler (host) and wasm-pdk (guest), no_std and alloc only. Bump on any breaking change. Plugins export `__edge_abi_version`, hosts MUST refuse unrecognised versions. */
 pub const EDGE_ABI_VERSION: u32 = 1;
 
 /* NaN-boxing layout that packs Val into 64 bits. */
@@ -50,13 +46,13 @@ pub mod tag {
     pub const BOOL: u32 = 1;
     pub const INT: u32 = 2;
     pub const FLOAT: u32 = 3;
-    /* UTF-8 bytes: encoder builds a str, decoder returns its bytes. */
+    /* UTF-8 bytes, encoder builds a str, decoder returns its bytes. */
     pub const BYTES: u32 = 4;
-    // Opaque bytes: skips UTF-8 validation, maps to Python `bytes`.
+    // Opaque bytes, skips UTF-8 validation, maps to Python `bytes`.
     pub const RAW: u32 = 5;
-    // TLV payload: count:u32le then count nodes. Python list/tuple.
+    // TLV payload, count:u32le then count nodes. Python list/tuple.
     pub const LIST: u32 = 6;
-    // TLV payload: count:u32le then count key,value node pairs. Str keys only.
+    // TLV payload, count:u32le then count key,value node pairs. Str keys only.
     pub const DICT: u32 = 7;
 }
 
@@ -74,25 +70,25 @@ pub mod error_kind {
     pub const CUSTOM: u32 = 6;
 }
 
-/* Transit value tree. Composites nest as TLV nodes: tag:u32le len:u32le payload[len]. The top-level ABI call carries (tag, payload) as separate params, so only nested nodes spell the full frame. */
+/* Transit value tree. Composites nest as TLV nodes, tag:u32le len:u32le payload[len]. The top-level ABI call carries (tag, payload) as separate params, so only nested nodes spell the full frame. */
 
-/// Nesting cap for `decode_body`; malformed depth bombs return `None`.
+/// Nesting cap for `decode_body`, malformed depth bombs return `None`.
 pub const MAX_WIRE_DEPTH: u32 = 32;
 
-/// Typed transit value; sets, instances and other non-transit composites go through `edge_op`.
+/// Typed transit value, sets, instances and other non-transit composites go through `edge_op`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum WireValue {
     None,
     Bool(bool),
     Int(i128),
     Float(f64),
-    /// UTF-8 transit; the host materialises a `str`.
+    /// UTF-8 transit, the host materialises a `str`.
     Bytes(Vec<u8>),
-    /// Opaque bytes transit; the host materialises a `bytes`.
+    /// Opaque bytes transit, the host materialises a `bytes`.
     Raw(Vec<u8>),
     /// Python list/tuple <-> JS array.
     List(Vec<WireValue>),
-    /// Str keys only; non-str keys are not transit.
+    /// Str keys only, non-str keys are not transit.
     Dict(Vec<(WireValue, WireValue)>),
 }
 
@@ -132,7 +128,7 @@ impl WireValue {
         }
     }
 
-    /// Serialize a full nested node: tag, payload length, payload.
+    /// Serialize a full nested node (tag, payload length, payload).
     pub fn encode_node(&self, out: &mut Vec<u8>) {
         out.extend_from_slice(&self.tag().to_le_bytes());
         let len_at = out.len();
@@ -142,7 +138,7 @@ impl WireValue {
         out[len_at..len_at + 4].copy_from_slice(&len.to_le_bytes());
     }
 
-    /// Parse a payload for `tag`; `None` on malformed input (bad sizes, trailing bytes, depth bombs).
+    /// Parse a payload for `tag`, `None` on malformed input (bad sizes, trailing bytes, depth bombs).
     pub fn decode_body(tag: u32, bytes: &[u8]) -> Option<WireValue> {
         Self::parse_body(tag, bytes, 0)
     }
@@ -165,7 +161,7 @@ impl WireValue {
             tag::LIST | tag::DICT => {
                 let mut pos = 0usize;
                 let count = Self::read_u32(bytes, &mut pos)? as usize;
-                // Each node frame is >= 8 bytes; rejects count bombs before allocating.
+                // Each node frame is >= 8 bytes, rejects count bombs before allocating.
                 if count > (bytes.len() - pos) / 8 { return None; }
                 let val = if t == tag::LIST {
                     let mut items = Vec::with_capacity(count);

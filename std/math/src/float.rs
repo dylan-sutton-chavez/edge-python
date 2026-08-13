@@ -1,7 +1,3 @@
-/*
-Scalar floating-point surface. `math`, raising `ValueError` ("math domain error") out of domain.
-*/
-
 use alloc::string::String;
 use wasm_pdk::*;
 
@@ -174,12 +170,12 @@ fn isinf(x: f64) -> bool { x.is_infinite() }
 #[plugin_fn]
 fn isfinite(x: f64) -> bool { x.is_finite() }
 
-// `floor`/`ceil`/`trunc` return an int; reject non-finite or out-of-i128 values like Python int conversion.
+// `floor`/`ceil`/`trunc` return an int, rejecting non-finite or out-of-i128 values like Python int conversion.
 fn to_int(x: f64) -> Result<i128> {
     if !x.is_finite() {
         return Err(Error::Value(String::from("cannot convert float NaN or infinity to integer")));
     }
-    // Values at or beyond 2^127 saturate on cast; reject so the result is never silently clamped.
+    // Values at or beyond 2^127 saturate on cast, reject so the result is never silently clamped.
     if x.abs() >= 170141183460469231731687303715884105728.0 {
         return Err(Error::Value(String::from("int too large to convert")));
     }
@@ -223,7 +219,7 @@ fn fsum(it: Handle) -> Result<f64> {
     Ok(sum + c)
 }
 
-// `prod(iterable, *, start=1.0)`. Returns a float; integer inputs lose their int-ness.
+// `prod(iterable, *, start=1.0)`. Returns a float, integer inputs lose their int-ness.
 #[plugin_fn]
 fn prod(it: Handle, kw: Kwargs) -> Result<f64> {
     let mut acc = kw.get::<f64>("start")?.unwrap_or(1.0);

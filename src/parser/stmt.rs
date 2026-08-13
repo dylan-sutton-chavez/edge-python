@@ -7,7 +7,7 @@ use crate::lexer::{Token, TokenType};
 
 use alloc::{string::{String, ToString}, vec, vec::Vec};
 
-/* Assignment-target shapes for sequence unpacking; complex ones carry their captured load prefix plus its original offset for jump-shifted replay. */
+/* Assignment-target shapes for sequence unpacking, complex ones carry their captured load prefix plus its original offset for jump-shifted replay. */
 pub(super) enum UnpackTarget {
     Name(String),
     Attr(Vec<Instruction>, usize, u16),
@@ -15,7 +15,7 @@ pub(super) enum UnpackTarget {
     Nested(Vec<UnpackTarget>),
 }
 
-/* One element of a comma-led statement; plain names defer their load until proven expression. */
+/* One element of a comma-led statement, plain names defer their load until proven expression. */
 enum TupleElem {
     Named(String, bool),
     Range(usize, usize),
@@ -23,7 +23,7 @@ enum TupleElem {
 
 impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
-    /* Statement dispatch; returns true if a value is left on the stack for caller to PopTop. */
+    /* Statement dispatch, returns true if a value is left on the stack for caller to PopTop. */
     pub(super) fn stmt(&mut self) -> bool {
         // Record ip->source offset before any emit so `resolve()` can map ip to source.
         let ip = self.chunk.instructions.len() as u32;
@@ -168,7 +168,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                         self.chunk.emit(OpCode::Raise, 0);
                     }
                 } else {
-                    // Bare `raise`: operand 1 tells the VM to re-raise the active exception.
+                    // Bare `raise`, operand 1 tells the VM to re-raise the active exception.
                     self.chunk.emit(OpCode::Raise, 1);
                 }
                 false
@@ -179,7 +179,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     self.error("'break' outside loop");
                 } else {
                     self.emit_loop_unwind();
-                    // For-loop: PopIter before break so `iter_stack` stays clean.
+                    // For-loop, PopIter before break so `iter_stack` stays clean.
                     if let Some(true) = self.loop_kinds.last() {
                         self.chunk.emit(OpCode::PopIter, 0);
                     }
@@ -210,7 +210,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 }
                 self.eat(TokenType::Equal);
                 self.rhs_tuple();
-                // Leading star: equivalent to star at position 0.
+                // Leading star, equivalent to star at position 0.
                 self.emit_unpack_stores(&targets, Some(0));
                 false
             }
@@ -230,7 +230,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 let t = self.advance();
                 self.name_stmt(t)
             }
-            // Dangling Indent from a prior error: skip the entire block silently.
+            // Dangling Indent from a prior error, skip the entire block silently.
             Some(TokenType::Indent) => {
                 self.tokens.next();
                 let mut depth = 1u32;
@@ -244,13 +244,13 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 }
                 false
             }
-            // Stray Dedent from error recovery: skip silently.
+            // Stray Dedent from error recovery, skip silently.
             Some(TokenType::Dedent) => {
                 self.tokens.next();
                 false
             }
             _ => {
-                // `(a, b) = rhs` / `[a, b] = rhs`: a display followed by `=` is a sequence-unpack target.
+                // `(a, b) = rhs` / `[a, b] = rhs`, a display followed by `=` is a sequence-unpack target.
                 let start = self.chunk.instructions.len();
                 self.expr();
                 if matches!(self.peek(), Some(TokenType::Equal))
@@ -277,7 +277,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* Emits Global/Nonlocal opcodes for a comma-separated name list. Global registers each name so loads/stores route through LoadGlobal/StoreGlobal; Nonlocal records it in `chunk.nonlocals`. */
+    /* Emits Global/Nonlocal opcodes for a comma-separated name list. Global registers each name so loads/stores route through LoadGlobal/StoreGlobal, Nonlocal records it in `chunk.nonlocals`. */
     pub(super) fn emit_name_list(&mut self, op: OpCode) {
         self.advance();
         loop {
@@ -293,14 +293,14 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* Assignment RHS: one expression or a comma tuple, ends at the line boundary. */
+    /* Assignment RHS, one expression or a comma tuple, ends at the line boundary. */
     fn rhs_tuple(&mut self) {
         self.expr();
         let count = self.tuple_rest(1, |s| matches!(s.peek(), Some(TokenType::Newline | TokenType::Endmarker) | None));
         if count > 1 { self.chunk.emit(OpCode::BuildTuple, count); }
     }
 
-    /* Eats `, expr` until `stop`; returns the element count. */
+    /* Eats `, expr` until `stop`, returns the element count. */
     pub(super) fn tuple_rest(&mut self, mut count: u16, stop: impl Fn(&mut Self) -> bool) -> u16 {
         while self.eat_if(TokenType::Comma) {
             if stop(self) { break; }
@@ -310,7 +310,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         count
     }
 
-    // `expr:` at statement level: suggest the missing keyword.
+    // `expr:` at statement level, suggest the missing keyword.
     fn diag_stray_colon(&mut self) {
         if matches!(self.peek(), Some(TokenType::Colon)) {
             let t = self.advance();
@@ -324,7 +324,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     pub(super) fn compile_block(&mut self) { self.compile_block_inner(false); }
     pub(super) fn compile_block_body(&mut self) { self.compile_block_inner(true); }
 
-    /* Compiles Indent/Dedent block; is_body=true stops after ReturnValue to skip dead code. */
+    /* Compiles Indent/Dedent block, is_body=true stops after ReturnValue to skip dead code. */
     fn compile_block_inner(&mut self, is_body: bool) {
         let indented = self.eat_if(TokenType::Indent);
         loop {
@@ -346,7 +346,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* Annotation: discard tokens up to `=`; Edge Python is dynamically typed. Returns true when an assignment follows. */
+    /* Annotation discards tokens up to `=`, Edge Python is dynamically typed. Returns true when an assignment follows. */
     fn skip_annotation(&mut self) -> bool {
         while !matches!(
             self.peek(),
@@ -357,7 +357,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         matches!(self.peek(), Some(TokenType::Equal))
     }
 
-    /* Per-opcode stack effect for target segmentation; None = shape unknown, caller bails. */
+    /* Per-opcode stack effect for target segmentation, None = shape unknown, caller bails. */
     fn stack_delta(op: OpCode, operand: u16) -> Option<i32> {
         use OpCode::*;
         Some(match op {
@@ -371,7 +371,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         })
     }
 
-    /* Split an n-element display body into per-element ranges. Scans backward: each element is the minimal suffix with net stack effect +1, which is unambiguous even for nested displays. */
+    /* Split an n-element display body into per-element ranges. Scans backward, each element is the minimal suffix with net stack effect +1, which is unambiguous even for nested displays. */
     fn split_display(&self, lo: usize, hi: usize, n: usize) -> Option<Vec<(usize, usize)>> {
         let mut ranges = vec![(0usize, 0usize); n];
         let mut end = hi;
@@ -390,11 +390,11 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         (end == lo).then_some(ranges)
     }
 
-    /* Reinterpret emitted load instructions as one assignment target; None if not assignable. */
+    /* Reinterpret emitted load instructions as one assignment target, None if not assignable. */
     fn range_target(&self, lo: usize, hi: usize) -> Option<UnpackTarget> {
         if hi <= lo || hi > self.chunk.instructions.len() { return None; }
         let (last, prefix) = self.chunk.instructions[lo..hi].split_last()?;
-        // Jumps relocate via `push_shifted`; Phi cannot move, it is anchored by `phi_map`.
+        // Jumps relocate via `push_shifted`, Phi cannot move, it is anchored by `phi_map`.
         let relocatable = !prefix.iter().any(|i| matches!(i.opcode, OpCode::Phi));
         match last.opcode {
             OpCode::LoadName if prefix.is_empty() => {
@@ -432,7 +432,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.push_shifted(prefix.to_vec(), delta);
     }
 
-    /* One store per target; values arrive top-first, complex targets replay their captured loads. */
+    /* One store per target, values arrive top-first, complex targets replay their captured loads. */
     fn emit_target_stores(&mut self, targets: &[UnpackTarget]) {
         for t in targets {
             match t {
@@ -455,7 +455,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* Emit deferred loads for plain-name elements still pending; keeps tuple element order. */
+    /* Emit deferred loads for plain-name elements still pending, keeps tuple element order. */
     fn flush_named(&mut self, elems: &mut [TupleElem]) {
         for e in elems.iter_mut() {
             if let TupleElem::Named(n, emitted) = e
@@ -466,7 +466,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* Comma after one element: unpack assignment or tuple expression. `first` carries a plain leading name whose load is deferred; None means the element is already emitted at `start`. */
+    /* Comma after one element, unpack assignment or tuple expression. `first` carries a plain leading name whose load is deferred, None means the element is already emitted at `start`. */
     pub(super) fn unpack_or_tuple(&mut self, start: usize, first: Option<String>) -> bool {
         let mut elems: Vec<TupleElem> = Vec::new();
         match first {
@@ -474,7 +474,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             None => elems.push(TupleElem::Range(start, self.chunk.instructions.len())),
         }
         let mut star_pos: Option<usize> = None;
-        // Elements may be targets: `=` must not parse as embedded assignment.
+        // Elements may be targets, `=` must not parse as embedded assignment.
         self.in_target_list = true;
         while self.eat_if(TokenType::Comma) {
             if matches!(self.peek(), Some(TokenType::Newline | TokenType::Endmarker | TokenType::Equal) | None) { break; }
@@ -491,11 +491,11 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 let t = self.advance();
                 let nm = self.lexeme(&t).to_string();
                 if matches!(self.peek(), Some(TokenType::Comma | TokenType::Equal | TokenType::Newline | TokenType::Endmarker) | None) {
-                    // Plain name element: defer the load, no phantom SSA slot on assignment.
+                    // Plain name element, defer the load, no phantom SSA slot on assignment.
                     elems.push(TupleElem::Named(nm, false));
                     continue;
                 }
-                // Name-led complex element: flush deferred loads, then continue its expression.
+                // Name-led complex element, flush deferred loads, then continue its expression.
                 self.flush_named(&mut elems);
                 let lo = self.chunk.instructions.len();
                 self.emit_load_ssa(nm);
@@ -543,7 +543,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         false
     }
 
-    /* Name-led statement: assign, augmented-op, attr, index, call, or tuple unpack. */
+    /* Name-led statement, assign, augmented-op, attr, index, call, or tuple unpack. */
     pub(super) fn name_stmt(&mut self, t: Token) -> bool {
         let name = self.lexeme(&t).to_string();
         let start = self.chunk.instructions.len();
@@ -577,7 +577,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             Some(TokenType::Lsqb) => {
                 self.emit_load_ssa(name);
                 self.advance();
-                // Slice form: BuildSlice+StoreItem; runtime recognises HeapObj::Slice as splice index.
+                // Slice form, BuildSlice+StoreItem, runtime recognises HeapObj::Slice as splice index.
                 if self.parse_subscript() {
                     if matches!(self.peek(), Some(TokenType::Equal)) {
                         self.advance();
@@ -610,7 +610,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 }
             }
             Some(TokenType::Dot) => {
-                // Collect the whole `a.b.c` attribute chain; the last attr is the target.
+                // Collect the whole `a.b.c` attribute chain, the last attr is the target.
                 self.advance();
                 let mut attrs = vec![self.advance_text()];
                 while matches!(self.peek(), Some(TokenType::Dot)) {
@@ -636,7 +636,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 } else if let Some(op) = self.peek().and_then(|t| Self::augmented_op(&t)) {
                     self.advance();
                     let idx = self.chunk.push_name(&last);
-                    // Need the receiver twice: reload a plain name, else Dup the computed object.
+                    // Need the receiver twice, reload a plain name, else Dup the computed object.
                     if attrs.is_empty() { self.emit_load_ssa(name); } else { self.chunk.emit(OpCode::Dup, 0); }
                     self.chunk.emit(OpCode::LoadAttr, idx);
                     self.expr();
@@ -678,7 +678,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 self.unpack_or_tuple(start, Some(name))
             }
             Some(TokenType::Lpar) => {
-                // `name(...)` at statement level: allow postfix chains like `super().__init__(x)`.
+                // `name(...)` at statement level, allow postfix chains like `super().__init__(x)`.
                 let leaves = self.call(name);
                 if leaves {
                     self.expr_tails();
@@ -697,7 +697,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* `x[i] op= rhs`: Dup2 preserves container+index; GetItem, apply op, StoreItem. */
+    /* `x[i] op= rhs`, Dup2 preserves container+index, GetItem, apply op, StoreItem. */
     pub(super) fn emit_augmented_subscript(&mut self, op: OpCode) {
         self.advance();
         self.chunk.emit(OpCode::Dup2, 0);
@@ -725,22 +725,22 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* Parses one `del` target: name, subscript, attribute, or a parenthesized group. */
+    /* Parses one `del` target, name, subscript, attribute, or a parenthesized group. */
     fn parse_del_target(&mut self) {
         if matches!(self.peek(), Some(TokenType::Name)) {
             let name = self.advance_text();
             if self.eat_if(TokenType::Lsqb) {
-                // del `x[k]` or `x[a:b]`: BuildSlice so DelItem sees HeapObj::Slice.
+                // del `x[k]` or `x[a:b]`, BuildSlice so DelItem sees HeapObj::Slice.
                 self.emit_load_ssa(name);
                 self.parse_subscript();
-                // Chained subscripts (`d[0][0]`): all but the last index in place.
+                // Chained subscripts (`d[0][0]`), all but the last index in place.
                 while self.eat_if(TokenType::Lsqb) {
                     self.chunk.emit(OpCode::GetItem, 0);
                     self.parse_subscript();
                 }
                 self.chunk.emit(OpCode::DelItem, 0);
             } else if matches!(self.peek(), Some(TokenType::Dot)) {
-                // del `obj.attr` (chained): load object, LoadAttr intermediates, DelAttr last.
+                // del `obj.attr` (chained), load object, LoadAttr intermediates, DelAttr last.
                 self.emit_load_ssa(name);
                 self.eat(TokenType::Dot);
                 let mut attr = self.advance_text();
@@ -763,7 +763,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 Some(OpCode::GetItem) => self.chunk.instructions.last_mut().unwrap().opcode = OpCode::DelItem,
                 Some(OpCode::LoadAttr) => self.chunk.instructions.last_mut().unwrap().opcode = OpCode::DelAttr,
                 Some(OpCode::LoadName) => self.chunk.instructions.last_mut().unwrap().opcode = OpCode::Del,
-                // `del (a, b)` / `del [a, b]`: a target group unbinds each plain name.
+                // `del (a, b)` / `del [a, b]`, a target group unbinds each plain name.
                 Some(OpCode::BuildTuple | OpCode::BuildList) => self.del_group_targets(),
                 _ => {}
             }
@@ -793,7 +793,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             self.chunk.emit(OpCode::LoadNone, 0);
             self.chunk.emit(OpCode::Yield, 0);
         } else if self.eat_if(TokenType::From) {
-            // `yield from`: GetIter+ForIter+Yield loop; LoadYieldFrom pushes the subiterator's return value.
+            // `yield from`, GetIter+ForIter+Yield loop, LoadYieldFrom pushes the subiterator's return value.
             self.expr();
             self.chunk.emit(OpCode::GetIter, 0);
             let loop_start = self.chunk.instructions.len() as u16;
@@ -812,9 +812,9 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     pub(super) fn assign(&mut self, name: String) {
         self.advance();
         self.expr();
-        // `x = 1,` / `x = 1, 2`: a trailing comma builds a tuple right-hand side.
+        // `x = 1,` / `x = 1, 2`, a trailing comma builds a tuple right-hand side.
         if matches!(self.peek_same_line(), Some(TokenType::Comma)) {
-            // A line boundary ends the tuple; `peek_same_line` won't cross the Newline.
+            // A line boundary ends the tuple, `peek_same_line` won't cross the Newline.
             let count = self.tuple_rest(1, |s| s.peek_same_line().is_none());
             self.chunk.emit(OpCode::BuildTuple, count);
         }

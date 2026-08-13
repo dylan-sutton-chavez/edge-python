@@ -16,7 +16,7 @@ impl<'a> VM<'a> {
         let name = self.expect_str_arg("getattr() name must be a string")?;
         let obj = self.pop()?;
 
-        // Instance attribute: instance dict first, then the user class chain (mirrors obj.name).
+        // Instance attribute, instance dict first, then the user class chain (mirrors obj.name).
         let mut bind: Option<(Val, Val)> = None;
         if obj.is_heap() && let HeapObj::Instance(cls_val, attrs) = self.heap.get(obj) {
             let cls_val = *cls_val;
@@ -34,7 +34,7 @@ impl<'a> VM<'a> {
             self.push(b); return Ok(());
         }
 
-        // Class target: resolve a class attribute (incl. ones added via setattr / a decorator).
+        // Class target, resolve a class attribute (incl. ones added via setattr / a decorator).
         if obj.is_heap() && matches!(self.heap.get(obj), HeapObj::Class(..))
             && let Some((v, _)) = self.lookup_class_member(obj, &name) {
             self.push(v);
@@ -79,7 +79,7 @@ impl<'a> VM<'a> {
     pub fn call_hasattr(&mut self) -> Result<(), VmErr> {
         let name = self.expect_str_arg("hasattr() name must be a string")?;
         let obj = self.pop()?;
-        // Instance attribute: instance dict or the user class chain.
+        // Instance attribute, instance dict or the user class chain.
         if obj.is_heap() && let HeapObj::Instance(cls_val, attrs) = self.heap.get(obj) {
             let cls_val = *cls_val;
             let in_dict = attrs.borrow().entries.iter()
@@ -104,12 +104,12 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* `setattr(obj, name, value)`, mirrors `obj.name = value`. Instance-only: builtin types have no mutable attribute table. */
+    /* `setattr(obj, name, value)`, mirrors `obj.name = value`. Instance-only because builtin types have no mutable attribute table. */
     pub fn call_setattr(&mut self) -> Result<(), VmErr> {
         let value = self.pop()?;
         let name = self.expect_str_arg("setattr() name must be a string")?;
         let obj = self.pop()?;
-        // Class target: insert or replace in the mutable members store.
+        // Class target, insert or replace in the mutable members store.
         if obj.is_heap() && let HeapObj::Class(_, _, members) = self.heap.get(obj) {
             set_member(members, &name, value);
             self.push(Val::none());
@@ -140,14 +140,14 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* `del obj.attr` opcode: pop the object, remove the named attribute in place. */
+    /* `del obj.attr` opcode, pop the object, remove the named attribute in place. */
     pub fn exec_del_attr(&mut self, op: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         let obj = self.pop()?;
         let name = chunk.names.get(op as usize).ok_or(cold_runtime("DelAttr: bad name index"))?.clone();
         self.delete_attr_named(obj, &name)
     }
 
-    /* Shared attribute removal for `delattr()` and `del obj.attr`; AttributeError when absent. */
+    /* Shared attribute removal for `delattr()` and `del obj.attr`, AttributeError when absent. */
     fn delete_attr_named(&mut self, obj: Val, name: &str) -> Result<(), VmErr> {
         if obj.is_heap() && matches!(self.heap.get(obj), HeapObj::Class(..)) {
             if let HeapObj::Class(_, _, members) = self.heap.get(obj) {
@@ -195,14 +195,14 @@ impl<'a> VM<'a> {
         self.str_of(v, msg)
     }
 
-    /* `vars(obj)`, Instance: copy of `__dict__`; Module: dict from its attrs. No-arg form is unsupported, use `locals()`. */
+    /* `vars(obj)`, an Instance yields a copy of `__dict__`, a Module yields a dict from its attrs. No-arg form is unsupported, use `locals()`. */
     pub fn call_vars(&mut self) -> Result<(), VmErr> {
         use alloc::vec::Vec;
         let obj = self.pop()?;
         if !obj.is_heap() {
             return Err(cold_type("vars() requires an instance or module"));
         }
-        // Two passes: drop the heap borrow before `alloc()`. Modules materialise names as `Vec<String>` first.
+        // Two passes, drop the heap borrow before `alloc()`. Modules materialise names as `Vec<String>` first.
         enum Source { Instance(Vec<(Val, Val)>), Module(Vec<(String, Val)>) }
         let src = match self.heap.get(obj) {
             HeapObj::Instance(_, attrs) => Source::Instance(attrs.borrow().entries.clone()),
@@ -225,10 +225,10 @@ impl<'a> VM<'a> {
         self.alloc_and_push_dict(dm)
     }
 
-    /* `globals()`, module-level bindings as a dict. User top-level names only (entry-chunk slots + module state); builtins live in a separate namespace, matching Python. Returned dict is a copy. */
+    /* `globals()`, module-level bindings as a dict. User top-level names only (entry-chunk slots + module state), builtins live in a separate namespace, matching Python. Returned dict is a copy. */
     pub fn call_globals(&mut self, chunk: &crate::parser::SSAChunk, slots: &[Val]) -> Result<(), VmErr> {
         let mut out: crate::util::hash::FxHashMap<String, Val> = crate::util::hash::FxHashMap::default();
-        // Inside a function, entry slots sit at the bottom of `live_slots`; at top-level, use `slots` as-is.
+        // Inside a function, entry slots sit at the bottom of `live_slots`, at top-level, use `slots` as-is.
         let (entry_chunk, entry_slots): (&crate::parser::SSAChunk, &[Val]) =
             if core::ptr::eq(chunk as *const _, self.chunk as *const _) {
                 (chunk, slots)
@@ -272,7 +272,7 @@ impl<'a> VM<'a> {
             // Strip SSA version suffix.
             let (bare, ver) = crate::parser::SsaName::parse_or_bare(name);
             let ver = ver as i64;
-            // Skip unrebound builtins: same Val as the global means the user never assigned locally.
+            // Skip unrebound builtins, same Val as the global means the user never assigned locally.
             if let Some(&gv) = self.globals.get(bare)
                 && gv.0 == v.0 { continue; }
             let entry = latest.entry(bare.to_string()).or_insert((-1, Val::undef()));

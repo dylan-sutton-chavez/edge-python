@@ -8,7 +8,7 @@ pub(crate) const MAX_EXPR_DEPTH: usize = 200;
 pub(crate) const MAX_INSTRUCTIONS: usize = 65_535;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[repr(u8)] // <256 variants; guarantees a 1-byte tag for stable bytecode / transmute / jump-table dispatch
+#[repr(u8)] // <256 variants, guarantees a 1-byte tag for stable bytecode / transmute / jump-table dispatch
 pub enum OpCode {
     LoadConst, LoadName, StoreName, Call, PopTop, ReturnValue, BuildString, CallPrint, CallLen, 
     FormatValue, CallAbs, Minus, CallStr, CallInt, CallRange, Phi, CallChr, CallType, MakeFunction, 
@@ -18,38 +18,38 @@ pub enum OpCode {
     GetIter, ForIter, GetItem, Mod, Pow, FloorDiv, LoadTrue, LoadFalse, LoadNone, LoadAttr, StoreAttr, 
     BuildSlice, MakeClass, SetupExcept, PopExcept, Raise, BitAnd, BitOr, BitXor,
     BitNot, Shl, Shr, In, NotIn, Is, IsNot, UnpackSequence, BuildTuple, WithEnter, WithExit, Yield,
-    /* Finally/with block stack: setup pushes a cleanup frame, BeginFinally marks a normal entry, EndFinally resumes the exit. */
+    /* Finally/with block stack where setup pushes a cleanup frame, BeginFinally marks a normal entry, EndFinally resumes the exit. */
     SetupFinally, BeginFinally, EndFinally,
-    /* break/continue across N finally/with blocks before its jump; operand is N. */
+    /* break/continue across N finally/with blocks before its jump, operand is N. */
     UnwindFinally,
     Del, Assert, Global, Nonlocal, UnpackArgs, ListAppend, SetAdd, MapAdd, BuildSet, RaiseFrom,
     UnpackEx, LoadEllipsis, Await, MakeCoroutine, StoreItem, Dup2,
     JumpIfFalseOrPop, JumpIfTrueOrPop, Dup, CallMethod, CallMethodArgs, CallAll, CallAny, CallBin,
     CallOct, CallHex, CallDivmod, CallPow, CallRepr, CallReversed, CallCallable, CallId, CallHash,
     PopIter, DelItem, DelAttr, CallExtern,
-    /* Pushes HeapObj::Extern; operand indexes extern_table. Used by native `import X`. */
+    /* Pushes HeapObj::Extern, operand indexes extern_table. Used by native `import X`. */
     LoadExtern,
-    /* Builds HeapObj::Module from stack: name + operand (attr_name, attr_value) pairs. */
+    /* Builds HeapObj::Module from stack-held name + operand (attr_name, attr_value) pairs. */
     BuildModule,
     /* Constant-time lookup of chunk.imports[operand] from `vm.module_table`. */
     LoadModule,
-    /* Read/write a `global`-declared name from/to `self.globals`; operand indexes the bare name in `chunk.names`. */
+    /* Read/write a `global`-declared name from/to `self.globals`, operand indexes the bare name in `chunk.names`. */
     LoadGlobal, StoreGlobal,
-    /* Literal unpacking: pop a source value and merge it into the container left below it on the stack. `{**m}` / `{*s}` / `[*it]`. */
+    /* Literal unpacking, pop a source value and merge it into the container left below it on the stack. `{**m}` / `{*s}` / `[*it]`. */
     DictUpdate, SetUpdate, ListExtend,
-    /* Pop a value, push whether it matches a sequence pattern (list/tuple; str/bytes excluded). */
+    /* Pop a value, push whether it matches a sequence pattern (list/tuple, str/bytes excluded). */
     MatchSeq,
-    /* `name += rhs`: list+list extends in place (so aliases observe it, matching Python's __iadd__); every other type behaves as Add. */
+    /* `name += rhs` extends list+list in place (so aliases observe it, matching Python's __iadd__), every other type behaves as Add. */
     InPlaceAdd,
-    /* Unary plus: calls `__pos__`, coerces bool to int, else identity on numbers. */
+    /* Unary plus calls `__pos__`, coerces bool to int, else identity on numbers. */
     Pos,
-    /* Pushes the value `yield from` produces: the exhausted subiterator's return / StopIteration value. */
+    /* Pushes the value `yield from` produces, the exhausted subiterator's return / StopIteration value. */
     LoadYieldFrom,
-    // Augmented set bitwise `|=` `&=` `^=`: mutate the left set in place.
+    // Augmented set bitwise `|=` `&=` `^=`, mutating the left set in place.
     InPlaceBitOr, InPlaceBitAnd, InPlaceBitXor,
     // Push a fresh spread-delta frame.
     BeginArgs,
-    /* Consume the staged `__exit__` result; truthy suppresses a pending re-raise. */
+    /* Consume the staged `__exit__` result, truthy suppresses a pending re-raise. */
     WithJudge,
     // Swap the top two stack values.
     Swap,
@@ -100,27 +100,27 @@ pub enum Value {
     Str(String),
     Bytes(alloc::vec::Vec<u8>),
     Int(i64),
-    LongInt(i128), // Wide integer literal: value outside ±2^47 but inside ±2^127. Materialised as `HeapObj::LongInt` at constant-pool construction.
+    LongInt(i128), // Wide integer literal, value outside ±2^47 but inside ±2^127. Materialised as `HeapObj::LongInt` at constant-pool construction.
     Float(f64),
     Bool(bool),
     None,
 }
 
-// One bytecode instruction: opcode + 16-bit operand.
+// One bytecode instruction, opcode + 16-bit operand.
 #[derive(Debug, Clone, Copy)]
 pub struct Instruction {
     pub opcode: OpCode,
     pub operand: u16,
 }
 
-/* Parse-time import entry. VM dedupes by spec at `run()` start, runs Code modules once; LoadModule is then O(1). Native skips execution; Module Val built from bindings. */
+/* Parse-time import entry. VM dedupes by spec at `run()` start, runs Code modules once, LoadModule is then O(1). Native skips execution, Module Val built from bindings. */
 #[derive(Clone)]
 pub struct ImportEntry {
     pub spec: alloc::string::String,
     pub kind: ImportKind,
 }
 
-/* Synthesised class spec: name + method externs; init.rs builds a HeapObj::Class from this. */
+/* Synthesised class spec of name + method externs, init.rs builds a HeapObj::Class from this. */
 #[derive(Clone)]
 pub struct NativeClassEntry {
     pub name: String,
@@ -133,7 +133,7 @@ pub enum ImportKind {
     Native { funcs: Vec<crate::value::ExternFn>, classes: Vec<NativeClassEntry>, consts: Vec<crate::value::ExternFn> },
 }
 
-// SSA chunk: instructions, constant/name pools, Phi metadata, nested functions/classes.
+// SSA chunk holding instructions, constant/name pools, Phi metadata, nested functions/classes.
 #[derive(Default, Clone)]
 pub struct SSAChunk {
     pub instructions: Vec<Instruction>,
@@ -150,29 +150,29 @@ pub struct SSAChunk {
     pub phi_map: Vec<usize>,
     pub nonlocals: Vec<String>,
     pub(super) name_index: HashMap<String, u16>,
-    /* stmt ip->byte_offset map; binary-searched on error path; hot dispatch never touches it. */
+    /* stmt ip->byte_offset map, binary-searched on error path, hot dispatch never touches it. */
     pub stmt_pos: Vec<(u32, u32)>,
-    /* Call ip->byte_offset map; finer than stmt_pos; traceback caret lands under the call. */
+    /* Call ip->byte_offset map, finer than stmt_pos, traceback caret lands under the call. */
     pub call_byte_pos: Vec<(u32, u32)>,
-    /* Source text; shared via Arc across sub-chunks. Empty for manually constructed chunks. */
+    /* Source text, shared via Arc across sub-chunks. Empty for manually constructed chunks. */
     pub source: alloc::sync::Arc<alloc::string::String>,
-    /* Display path for tracebacks; empty string suppresses the file: prefix. */
+    /* Display path for tracebacks, empty string suppresses the `file:` prefix. */
     pub path: alloc::sync::Arc<alloc::string::String>,
-    /* Native bindings from `from <pkg> import`. CallExtern `operand=(idx<<8)|argc`; per-chunk. */
+    /* Native bindings from `from <pkg> import`. CallExtern `operand=(idx<<8)|argc`, per-chunk. */
     pub extern_table: Vec<ExternFn>,
     pub(crate) extern_index: HashMap<String, u16>,
-    /* Chunk's import list; LoadModule operands index here; each spec becomes one Module Val at init. */
+    /* Chunk's import list, LoadModule operands index here, each spec becomes one Module Val at init. */
     pub imports: Vec<ImportEntry>,
 }
 
 impl SSAChunk {
-    /* Binary-searches stmt_pos to map ip->byte offset; statement-level precision. */
+    /* Binary-searches stmt_pos to map ip->byte offset, statement-level precision. */
     pub fn resolve(&self, ip: u32) -> Option<u32> {
         let i = self.stmt_pos.partition_point(|&(s, _)| s <= ip).checked_sub(1)?;
         Some(self.stmt_pos[i].1)
     }
 
-    /* Finer than `resolve()`: returns call-site byte offset or None (caller falls back to resolve). */
+    /* Finer than `resolve()`, returns call-site byte offset or None (caller falls back to resolve). */
     pub fn resolve_call(&self, ip: u32) -> Option<u32> {
         let i = self.call_byte_pos.partition_point(|&(s, _)| s < ip);
         let (recorded_ip, byte) = *self.call_byte_pos.get(i)?;
@@ -180,7 +180,7 @@ impl SSAChunk {
     }
 
     pub(super) fn emit(&mut self, op: OpCode, operand: u16) {
-        // Overflow: set flag for post-parse diagnostic rather than panic.
+        // Overflow, set flag for post-parse diagnostic rather than panic.
         if self.instructions.len() >= MAX_INSTRUCTIONS {
             self.overflow = true;
             return;
@@ -224,7 +224,7 @@ impl SSAChunk {
     pub fn finalize_prev_slots(&mut self) {
         let n = self.names.len();
 
-        // `prev_slots[i]`: slot of name i at version-1, if any.
+        // `prev_slots[i]` is the slot of name i at version-1, if any.
         let mut ps: Vec<Option<u16>> = vec![None; n];
         for (i, name) in self.names.iter().enumerate() {
             if let Some(parsed) = SsaName::parse(name)
@@ -237,7 +237,7 @@ impl SSAChunk {
             }
         }
 
-        // Coalesce: walk each version chain to its root.
+        // Coalesce by walking each version chain to its root.
         let mut canonical: Vec<u16> = (0..n as u16).collect();
         for (i, item) in canonical.iter_mut().enumerate().take(n) {
             let mut root = i;
@@ -252,7 +252,7 @@ impl SSAChunk {
         for ins in &mut self.instructions {
             match ins.opcode {
                 OpCode::LoadName | OpCode::StoreName | OpCode::Del | OpCode::Phi => {
-                    // Malformed input can leave an out-of-range operand; keep it as-is then.
+                    // Malformed input can leave an out-of-range operand, keep it as-is then.
                     if let Some(&c) = canonical.get(ins.operand as usize) { ins.operand = c; }
                 }
                 _ => {}
@@ -287,13 +287,13 @@ impl SSAChunk {
     }
 }
 
-// SSA version snapshots for branch join; `then` is None until mid_block runs.
+// SSA version snapshots for branch join, `then` is None until mid_block runs.
 pub(crate) struct JoinNode {
     pub(super) backup: HashMap<String, u32>,
     pub(super) then: Option<HashMap<String, u32>>,
 }
 
-/* Synthetic SSA temps for multi-step desugarings. Leading `#` hides them from `globals()`/`locals()`; centralised so a typo becomes a compile error, not a misnamed slot. */
+/* Synthetic SSA temps for multi-step desugarings. Leading `#` hides them from `globals()`/`locals()`, centralised so a typo becomes a compile error, not a misnamed slot. */
 pub const SSA_TMP_CMP: &str = "#cmp";
 pub const SSA_TMP_MATCH: &str = "#match";
 pub const SSA_TMP_MATCH_ITEM: &str = "#match_item";
@@ -310,7 +310,7 @@ pub struct SsaName<'a> {
 }
 
 impl<'a> SsaName<'a> {
-    // Some when `name` matches `<bare>_<digits>`; None for synthetic temps and non-SSA names.
+    // Some when `name` matches `<bare>_<digits>`, None for synthetic temps and non-SSA names.
     pub fn parse(name: &'a str) -> Option<Self> {
         let pos = name.rfind('_')?;
         if pos + 1 >= name.len() { return None; }
@@ -328,19 +328,19 @@ impl<'a> SsaName<'a> {
     }
 }
 
-/* Strips `_<digits>` SSA suffix for user-facing diagnostics; returns input unchanged if absent. */
+/* Strips `_<digits>` SSA suffix for user-facing diagnostics, returns input unchanged if absent. */
 pub fn ssa_strip(name: &str) -> &str {
     SsaName::parse(name).map(|s| s.bare).unwrap_or(name)
 }
 
-/* Diagnostic with byte offsets; line/col computed at render time (UTF-8 safe). */
+/* Diagnostic with byte offsets, line/col computed at render time (UTF-8 safe). */
 pub struct Diagnostic {
     pub start: usize,
     pub end: usize,
     pub msg: String,
 }
 
-/* UAX#11 display width: 0=combining, 2=CJK/emoji, 1=other; keeps caret aligned in diagnostics. */
+/* UAX#11 display width, 0=combining, 2=CJK/emoji, 1=other, keeps caret aligned in diagnostics. */
 const fn char_width(c: char) -> usize {
     let cp = c as u32;
     if matches!(cp,
@@ -370,7 +370,7 @@ fn display_width(s: &str) -> usize {
 }
 
 impl Diagnostic {
-    /* Byte offset -> (line, col), 1-indexed; col counts display cells for wide-char alignment. */
+    /* Byte offset -> (line, col), 1-indexed, col counts display cells for wide-char alignment. */
     fn line_col(src: &str, byte: usize) -> (usize, usize) {
         let byte = byte.min(src.len());
         let line = src[..byte].matches('\n').count() + 1;
@@ -381,7 +381,7 @@ impl Diagnostic {
 }
 
 impl Diagnostic {
-    /* rustc-style render: error+arrow+source line+caret; path defaults to `<input>`. */
+    /* rustc-style render, error+arrow+source line+caret, path defaults to `<input>`. */
     pub fn render(&self, src: &str, path: Option<&str>) -> alloc::string::String {
         let path = path.unwrap_or("<input>");
         let s_off = self.start.min(src.len());
@@ -410,7 +410,7 @@ impl Diagnostic {
 }
 
 
-/* Scan only the prefix chars before the opening quote; the body itself may legally contain 'r'/'R'. */
+/* Scan only the prefix chars before the opening quote, the body itself may legally contain 'r'/'R'. */
 pub(super) fn has_raw_prefix(s: &str) -> bool {
     s.bytes()
         .take_while(|b| !matches!(b, b'"' | b'\''))
@@ -435,7 +435,7 @@ pub(super) fn parse_string(s: &str) -> String {
     if is_raw { inner.to_string() } else { unescape(inner) }
 }
 
-/* Parses b"..." to raw bytes: non-ASCII pass through; \xHH=single byte; \u/\U/\N rejected. */
+/* Parses b"..." to raw bytes, non-ASCII pass through, \xHH=single byte, \u/\U/\N rejected. */
 pub(super) fn parse_bytes_literal(s: &str) -> alloc::vec::Vec<u8> {
     let bytes = s.as_bytes();
     let is_raw = has_raw_prefix(s);
@@ -472,7 +472,7 @@ pub(super) fn parse_bytes_literal(s: &str) -> alloc::vec::Vec<u8> {
             b'"' => { out.push(b'"'); j += 2; }
             b'0' => { out.push(0); j += 2; }
             b'x' => {
-                // \xHH: exactly two hex digits.
+                // \xHH takes exactly two hex digits.
                 if j + 3 < body.len() {
                     let hi = (body[j + 2] as char).to_digit(16);
                     let lo = (body[j + 3] as char).to_digit(16);
@@ -482,7 +482,7 @@ pub(super) fn parse_bytes_literal(s: &str) -> alloc::vec::Vec<u8> {
                         continue;
                     }
                 }
-                // Malformed \x: emit verbatim.
+                // Malformed \x emits verbatim.
                 out.push(b'\\'); out.push(b'x'); j += 2;
             }
             other => { out.push(b'\\'); out.push(other); j += 2; }
@@ -500,7 +500,7 @@ fn unescape(s: &str) -> String {
     out
 }
 
-/* Decodes one backslash escape (cursor already past the `\`) into `out`; unknown escapes keep the backslash. */
+/* Decodes one backslash escape (cursor already past the `\`) into `out`, unknown escapes keep the backslash. */
 pub(super) fn push_escape(out: &mut String, chars: &mut core::iter::Peekable<core::str::Chars>) {
     let take_hex = |chars: &mut core::iter::Peekable<core::str::Chars>, n: usize| -> char {
         let hex: String = chars.by_ref().take(n).collect();
@@ -520,7 +520,7 @@ pub(super) fn push_escape(out: &mut String, chars: &mut core::iter::Peekable<cor
         Some('x') => out.push(take_hex(chars, 2)),
         Some('u') => out.push(take_hex(chars, 4)),
         Some('U') => out.push(take_hex(chars, 8)),
-        // Octal: up to 3 digits.
+        // Octal takes up to 3 digits.
         Some(c @ '0'..='7') => {
             let mut digits = String::from(c);
             while digits.len() < 3 && matches!(chars.peek(), Some('0'..='7')) {

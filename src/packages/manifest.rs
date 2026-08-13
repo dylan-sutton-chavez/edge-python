@@ -3,15 +3,15 @@ use alloc::vec::Vec;
 
 use crate::s;
 
-/* Parsed `packages.json`. `imports` maps bare names to specs; `extends` inherits another manifest's imports when a name isn't local. */
-// Vec not a map: parsed once, looked up linearly; avoids a hashbrown monomorphization.
+/* Parsed `packages.json`. `imports` maps bare names to specs, `extends` inherits another manifest's imports when a name isn't local. */
+// Vec not a map, parsed once, looked up linearly, avoids a hashbrown monomorphization.
 #[derive(Clone)]
 pub struct Manifest {
     pub imports: Vec<(String, String)>,
     pub extends: Option<String>,
 }
 
-/* Parse `{ "imports": {...}, "system": {...}, "extends": "..." }`. All optional; unknown keys skipped for forward compat; numbers, arrays, bools rejected. */
+/* Parse `{ "imports": {...}, "system": {...}, "extends": "..." }`. All optional, unknown keys skipped for forward compat, numbers, arrays, bools rejected. */
 pub fn parse_manifest(bytes: &[u8]) -> Result<Manifest, String> {
     let src = core::str::from_utf8(bytes).map_err(|_| s!("packages.json is not valid UTF-8"))?;
     let mut p = Reader { src: src.as_bytes(), pos: 0 };
@@ -33,7 +33,7 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<Manifest, String> {
             "system" => {
                 let mut pairs = Vec::new();
                 p.read_imports_into(&mut pairs)?;
-                // System names fold in as `mt:` specs; urls are runtime-side.
+// System names fold in as `mt:` specs, urls are runtime-side.
                 m.imports.extend(pairs.into_iter().map(|(name, _)| {
                     let spec = s!("mt:", str &name);
                     (name, spec)
@@ -70,7 +70,7 @@ pub fn dir_of(spec: &str) -> &str {
     }
 }
 
-/* Resolve `target` against `dir`. Absolute forms pass through; `../` pops parents; `./` strips only when base is non-empty. */
+/* Resolve `target` against `dir`. Absolute forms pass through, `../` pops parents, `./` strips only when base is non-empty. */
 pub fn join_relative(dir: &str, target: &str) -> String {
     if target.contains("://") || target.starts_with('/') || target.starts_with("mt:") {
         return target.to_string();
@@ -94,7 +94,7 @@ pub fn join_relative(dir: &str, target: &str) -> String {
 fn parent_dir(dir: &str) -> Option<String> {
     if dir.is_empty() { return None; }
     let trimmed = dir.trim_end_matches('/');
-    // URL guard: never strip the host. After "scheme://" there must still be a '/' to walk into.
+    // URL guard, never strip the host. After "scheme://" there must still be a '/' to walk into.
     if let Some(scheme_end) = trimmed.find("://") {
         let after = &trimmed[scheme_end + 3..];
         if !after.contains('/') { return None; }

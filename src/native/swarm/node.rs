@@ -97,8 +97,7 @@ impl Node {
         }
     }
 
-    /* Runs each queued message as its own fresh program, the chunk drops with the VM so nothing
-       leaks and no state crosses between snippets. An eval node never sends, so it cannot orchestrate. */
+    /* Runs each queued message as its own fresh program, the chunk drops with the VM so nothing leaks and no state crosses between snippets, an eval node never sends so it cannot orchestrate. */
     fn step_eval(&mut self) -> Step {
         let Mode::Eval { dir, limits, preempt } = &self.mode else { unreachable!() };
         let (dir, limits, preempt) = (dir.clone(), *limits, *preempt);
@@ -155,8 +154,7 @@ impl Node {
 // Marks an eval body that carries a base64 project bundle rather than a raw snippet.
 const BUNDLE_TAG: &str = "EDGEPKG:";
 
-/* Decodes and materializes a bundled project into a temp dir, returning its entry source and the dir.
-   The dir drops with the caller so the untrusted tree never outlives the run. */
+/* Decodes and materializes a bundled project into a temp dir, returning its entry source and the dir, the dir drops with the caller so the untrusted tree never outlives the run. */
 fn unbundle(body: &str) -> Option<(String, tempfile::TempDir)> {
     let b64 = body.strip_prefix(BUNDLE_TAG)?;
     let bytes = crate::util::ws::base64_decode(b64.trim())?;

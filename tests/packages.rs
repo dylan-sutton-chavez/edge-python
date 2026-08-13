@@ -1,8 +1,3 @@
-/*
-JSON-driven runner for `packages` (imports, resolver, CallExtern, code-module inlining).
-Case schema in `cases/packages.json`: src, output, error, input, modules, manifests, optional expect_externs/expect_functions/error_span_covers.
-*/
-
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
@@ -28,7 +23,7 @@ mod test {
         },
     }
 
-    /* Per-directory `packages.json` for walk-up cases; flat fixtures use `aliases` instead. */
+    /* Per-directory `packages.json` for walk-up cases, flat fixtures use `aliases` instead. */
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
     struct ManifestDef {
@@ -38,6 +33,7 @@ mod test {
         extends: Option<String>,
     }
 
+    /* JSON-driven case from `cases/packages.json`, optional expect_externs/expect_functions/error_span_covers. */
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Case {
@@ -50,10 +46,10 @@ mod test {
         input: Vec<String>,
         #[serde(default)]
         modules: HashMap<String, ModuleDef>,
-        /* Synthetic root `packages.json`; nested entries in `manifests` shadow this. */
+        /* Synthetic root `packages.json`, nested entries in `manifests` shadow this. */
         #[serde(default)]
         aliases: HashMap<String, String>,
-        /* Nested manifests by directory; exercises walk-up, `extends`, and circular-extends paths. */
+        /* Nested manifests by directory, exercises walk-up, `extends`, and circular-extends paths. */
         #[serde(default)]
         manifests: HashMap<String, ManifestDef>,
         #[serde(default)]
@@ -65,7 +61,7 @@ mod test {
         /* String values injected one-at-a-time after each PendingHostCall yield, simulating the JS bridge's `set_host_result`. */
         #[serde(default)]
         host_results: Vec<String>,
-        /* Per-call deliveries (by call_id) simulating out-of-order host resolution: `value` -> set_host_result_by_id, `error` -> set_host_error_by_id. */
+        /* Per-call deliveries (by call_id) simulating out-of-order host resolution, `value` -> set_host_result_by_id, `error` -> set_host_error_by_id. */
         #[serde(default)]
         host_deliveries: Vec<Delivery>,
     }
@@ -110,7 +106,7 @@ mod test {
         r
     }
 
-    /* NoopResolver path: imports must produce a clean diagnostic, not panic. Lives in Rust since the JSON runner always builds a TestResolver. */
+    /* NoopResolver path, imports must produce a clean diagnostic, not panic. Lives in Rust since the JSON runner always builds a TestResolver. */
     #[test]
     fn noop_resolver_default() {
         let src = "from json import dumps";
@@ -131,7 +127,7 @@ mod test {
             let parser = Parser::with_resolver(&case.src, tokens.into_iter(), resolver);
             let (chunk, parse_errs) = parser.parse();
 
-            // Parse-time errors: match `error` substring plus optional span anchor.
+            // Parse-time errors match the `error` substring plus optional span anchor.
             if !parse_errs.is_empty() {
                 let combined = parse_errs.iter().map(|d| d.msg.as_str()).collect::<Vec<_>>().join(" | ");
                 let expected = case.error.as_deref().unwrap_or_else(|| panic!("unexpected parse error on {:?}: {}", case.src, combined));
@@ -151,7 +147,7 @@ mod test {
 
             let mut vm = VM::new(&chunk);
             vm.input_buffer = case.input.clone();
-            // Drive loop: resume on PendingHostCall by injecting the next host_results entry as a string Val.
+            // Drive loop, resume on PendingHostCall by injecting the next host_results entry as a string Val.
             let mut hr_idx = 0usize;
             let result = loop {
                 match vm.run() {

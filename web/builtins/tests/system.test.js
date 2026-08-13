@@ -1,5 +1,3 @@
-/* Agnostic driver, feeds each capability corpus to the <edge-python> tag. Web-only corpora sit beside the module, shared ones live in tests/cases/builtins. Run deno test --allow-all tests/ */
-
 import { chromium } from "npm:playwright@latest";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { DEFAULT_IMPORTS } from "../../src/defaults.js";
@@ -9,7 +7,7 @@ const RUNTIME = new URL("../../", import.meta.url).pathname;
 const REPO = new URL("../../../", import.meta.url).pathname;
 const CORPUS = new URL("../../../tests/cases/builtins/", import.meta.url).pathname;
 const CDN_HOST = new URL(Object.values(DEFAULT_IMPORTS)[0]).host;
-const MANIFEST = "/_packages.json"; // synthesized; keeps the agnostic <cap>/ folder free of test artifacts
+const MANIFEST = "/_packages.json"; // synthesized, keeps the agnostic <cap>/ folder free of test artifacts
 
 // Corpus path per capability. Shared web-native corpora live under CORPUS, web-only ones sit beside the module.
 const corpusPath = (cap) => existsSync(`${CORPUS}${cap}.json`) ? `${CORPUS}${cap}.json` : `${ROOT}${cap}/${cap}.json`;
@@ -53,7 +51,7 @@ async function runCapability(cap) {
     const hasPy = existsSync(`${dir}/src/entry.py`);
 
     const cases = JSON.parse(readFileSync(corpusPath(cap), "utf-8"));
-    // The tag's packages.json: a capability may pin its own (e.g. python wrapper + system module pairs), else synthesized: python to entry.py as a code module; else the JS system module.
+// The tag's packages.json. A capability may pin its own (e.g. python wrapper + system module pairs), else synthesized with python to entry.py as a code module, else the JS system module.
     const manifest = existsSync(`${dir}/packages.json`)
         ? readFileSync(`${dir}/packages.json`, "utf-8")
         : JSON.stringify(
@@ -62,8 +60,7 @@ async function runCapability(cap) {
                 : { system: { [cap]: `/${cap}/src/index.js` } },
         );
 
-    // The fixture serves from loopback, Chromium's Local Network Access guard would block the test page
-    // reaching it, so disable that check for the test browser (never shipped, only the CI Chromium).
+    // The fixture serves from loopback, Chromium's Local Network Access guard would block the test page reaching it, so disable that check for the test browser (never shipped, only the CI Chromium).
     const browser = await chromium.launch({ args: ["--disable-features=LocalNetworkAccessChecks,LocalNetworkAccessChecksWebSockets"] });
     const page = await browser.newPage();
     const errors = [];
@@ -76,8 +73,7 @@ async function runCapability(cap) {
     const base = mock ? `http://127.0.0.1:${mock.port}` : "";
     const wsBase = base.replace("http://", "ws://");
 
-    /* Serve repo files from disk; synthesize the manifest. The fixture host is left unrouted so its real
-       responses, including sse keep-alive streams, reach the browser directly rather than buffered. */
+    /* Serve repo files from disk and synthesize the manifest. The fixture host is left unrouted so its real responses, including sse keep-alive streams, reach the browser directly rather than buffered. */
     await page.route((url) => url.host === "localhost" || url.host === CDN_HOST, (route) => {
         const url = new URL(route.request().url());
         // In-tree runtime first, CI must test the checkout not the deploy.
@@ -116,10 +112,10 @@ async function runCapability(cap) {
             const ready = new Promise((res) => el.addEventListener("ready", res, { once: true }));
             document.head.appendChild(el);
             await ready;
-            // Byte-stream stdout: one chunk per print() call (body + its `end`); collect verbatim.
+            // Byte-stream stdout, one chunk per print() call (body + its `end`). Collect verbatim.
             globalThis.chunks = [];
             el.worker.onOutput((chunk) => { globalThis.chunks.push(chunk); });
-            // DBs present once the runtime is up (its integrity cache); resetState must leave these alone.
+            // DBs present once the runtime is up (its integrity cache), resetState must leave these alone.
             globalThis.baseline = indexedDB.databases ? (await indexedDB.databases()).map((d) => d.name) : [];
             globalThis.el = el;
         }, MANIFEST);
@@ -140,7 +136,7 @@ async function runCapability(cap) {
                 }
                 globalThis.chunks = [];
                 const { out } = await globalThis.el.worker.run(s);
-                // One entry per print() call; drop its single trailing newline (the `end`).
+                // One entry per print() call, drop its single trailing newline (the `end`).
                 const output = globalThis.chunks.map((c) => c.replace(/\n$/, ""));
                 return { output, error: out || null };
             }, { s: src, html: c.html });
@@ -173,6 +169,7 @@ async function runCapability(cap) {
     if (failures.length) throw new Error("\n" + failures.join("\n"));
 }
 
+/* Agnostic driver, feeds each capability corpus to the <edge-python> tag. Web-only corpora sit beside the module, shared ones live in tests/cases/builtins. Run deno test --allow-all tests/ */
 for (const cap of capabilities) {
     Deno.test(`system package: ${cap}`, () => runCapability(cap));
 }

@@ -4,7 +4,7 @@ use super::super::ParamKind;
 
 use crate::alloc::string::ToString;
 
-// Builtin conversion-type name -> its constructor; None for exception/other types.
+// Builtin conversion-type name -> its constructor, None for exception/other types.
 fn constructor_native(name: &str) -> Option<super::super::types::NativeFnId> {
     use super::super::types::NativeFnId::*;
     Some(match name {
@@ -16,7 +16,7 @@ fn constructor_native(name: &str) -> Option<super::super::types::NativeFnId> {
     })
 }
 
-// Effects/mutation/scheduling/import/reflection/nondeterminism. Over-marking only forgoes memoisation; under-marking drops effects.
+// Effects/mutation/scheduling/import/reflection/nondeterminism. Over-marking only forgoes memoisation, under-marking drops effects.
 fn native_is_impure(id: super::super::types::NativeFnId) -> bool {
     use super::super::types::NativeFnId::*;
     matches!(id,
@@ -30,7 +30,7 @@ fn native_is_impure(id: super::super::types::NativeFnId) -> bool {
     )
 }
 
-/* Every fused call opcode -> its builtin name; extends `fused_native` with the packed-operand family. `sorted` stays out: its fused kwarg layout is not decodable for a redirect. */
+/* Every fused call opcode -> its builtin name, extends `fused_native` with the packed-operand family. `sorted` stays out because its fused kwarg layout is not decodable for a redirect. */
 fn fused_builtin_name(op: OpCode) -> Option<&'static str> {
     if let Some(id) = fused_native(op) { return Some(id.name()); }
     Some(match op {
@@ -41,7 +41,7 @@ fn fused_builtin_name(op: OpCode) -> Option<&'static str> {
     })
 }
 
-// Fused builtin opcode -> its id (plain-`pos+kw` operand ops); powers the shared arity guard.
+// Fused builtin opcode -> its id (plain-`pos+kw` operand ops), powers the shared arity guard.
 fn fused_native(op: OpCode) -> Option<super::super::types::NativeFnId> {
     use super::super::types::NativeFnId as F;
     Some(match op {
@@ -71,7 +71,7 @@ impl<'a> VM<'a> {
         {
             return self.call_rebound(bound, operand, chunk, slots);
         }
-        // Fused builtins skip dispatch_native's arity check; validate fixed-arity ones so a wrong count is a clean TypeError.
+        // Fused builtins skip dispatch_native's arity check, so validate fixed-arity ones to keep a wrong count a clean TypeError.
         if let Some(id) = fused_native(op)
             && let Some(n) = id.arity()
             && operand != n {
@@ -151,12 +151,12 @@ impl<'a> VM<'a> {
         let (params, body, _, _) = self.functions[global];
         let param_names: crate::util::hash::FxHashSet<String> = params.iter().map(|p| s!(str crate::parser::types::param_base_name(p), "_0")).collect();
         let mut captures: Vec<(usize, Val)> = Vec::new();
-        // Cells only make sense for variables of an enclosing FUNCTION scope. Module and class bodies are late-bound: their names resolve live at call time, never freeze.
+        // Cells only make sense for variables of an enclosing FUNCTION scope. Module and class bodies are late-bound, their names resolve live at call time, never freeze.
         let defined_in_fn = self.body_to_fi.contains_key(&chunk_ptr);
         let parent_locals = if defined_in_fn { Some(self.chunk_locals(chunk)) } else { None };
         // Capture once per canonical slot, skipping formal params. Linear scan over `chunk.names` beats a HashMap at typical body sizes (<30) and avoids a per-call monomorphisation.
         let mut seen_canonical: crate::util::hash::FxHashSet<usize> = crate::util::hash::FxHashSet::default();
-        // Root the in-progress cells: each is reachable only via this local Vec until the Func is allocated, so a GC during the loop's own allocs could otherwise sweep them.
+        // Root the in-progress cells, each is reachable only via this local Vec until the Func is allocated, so a GC during the loop's own allocs could otherwise sweep them.
         let roots_base = self.temp_roots.len();
         if let Some(locals) = parent_locals {
             for (bi, bname) in body.names.iter().enumerate() {
@@ -165,7 +165,7 @@ impl<'a> VM<'a> {
                     .and_then(|g| g.first().copied())
                     .unwrap_or(bi as u16) as usize;
                 if !seen_canonical.insert(canon) { continue; }
-                // Only variables bound by an enclosing FUNCTION scope become cells; module names stay late-bound. A not-yet-assigned local captures an undef-seeded cell the parent's store fills later.
+                // Only variables bound by an enclosing FUNCTION scope become cells, module names stay late-bound. A not-yet-assigned local captures an undef-seeded cell the parent's store fills later.
                 if !locals.contains(ssa_strip(bname)) && !self.lexical_ancestor_binds(chunk_ptr, ssa_strip(bname)) { continue; }
                 if let Some((si, _)) = chunk.names.iter().enumerate().find(|(_, n)| n.as_str() == bname.as_str()) {
                     let psi = chunk.alias_groups.get(si)
@@ -196,7 +196,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* True when a function scope strictly above `chunk` binds `bare`; pass-through frees capture, module names do not. */
+    /* True when a function scope strictly above `chunk` binds `bare`, pass-through frees capture, module names do not. */
     fn lexical_ancestor_binds(&mut self, chunk_ptr: *const SSAChunk, bare: &str) -> bool {
         let mut anc = self.body_to_fi.get(&chunk_ptr).and_then(|&fi| self.function_parents.get(fi).copied().flatten());
         while let Some(afi) = anc {
@@ -207,7 +207,7 @@ impl<'a> VM<'a> {
         false
     }
 
-    /* Bare names a chunk binds itself: StoreName/Phi targets plus formal params. Cached per chunk pointer. */
+    /* Bare names a chunk binds itself, StoreName/Phi targets plus formal params. Cached per chunk pointer. */
     fn chunk_locals(&mut self, chunk: &SSAChunk) -> alloc::rc::Rc<crate::util::hash::FxHashSet<String>> {
         let key = chunk as *const SSAChunk;
         if let Some(s) = self.chunk_local_binds.get(&key) { return s.clone(); }
@@ -229,7 +229,7 @@ impl<'a> VM<'a> {
         rc
     }
 
-    // Closure cell: a 1-element heap list used as a shared mutable box. Sibling closures over the same enclosing variable capture the same cell, so a `nonlocal` write through one is visible in the others.
+    // Closure cell, a 1-element heap list used as a shared mutable box. Sibling closures over the same enclosing variable capture the same cell, so a `nonlocal` write through one is visible in the others.
     fn make_cell(&mut self, v: Val) -> Result<Val, VmErr> {
         self.heap.alloc(HeapObj::List(Rc::new(RefCell::new(vec![v]))))
     }
@@ -252,7 +252,7 @@ impl<'a> VM<'a> {
         Ok(cell)
     }
 
-    /* Route a fused call site's stacked args to a rebound callable via the generic call path: slot the callee under the args, then `exec_call` decodes the same packed operand. */
+    /* Route a fused call site's stacked args to a rebound callable via the generic call path, slot the callee under the args, then `exec_call` decodes the same packed operand. */
     fn call_rebound(&mut self, callee: Val, operand: u16, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         let pos = ((operand & 0xFF) as i32 + self.pending.pos_delta).max(0) as usize;
         let kw = (((operand >> 8) & 0xFF) as i32 + self.pending.kw_delta).max(0) as usize;
@@ -261,7 +261,7 @@ impl<'a> VM<'a> {
         self.exec_call(operand, chunk, slots)
     }
 
-    /* `Call` orchestrator. Only user `Func` callees build a fresh `fn_slots` and run the body inline; every other callee kind short-circuits in `try_dispatch_non_func_callable`. */
+    /* `Call` orchestrator. Only user `Func` callees build a fresh `fn_slots` and run the body inline, every other callee kind short-circuits in `try_dispatch_non_func_callable`. */
     pub(crate) fn exec_call(&mut self, operand: u16, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         // Taken so nested native calls see false.
         let call_safe = core::mem::take(&mut self.pending_exec_safe);
@@ -301,7 +301,7 @@ impl<'a> VM<'a> {
 
         self.depth += 1;
         let (_params, body, _, _) = self.functions[fi];
-        // Reuse a pooled buffer: clear + bulk copy beats a fresh alloc per call.
+        // Reuse a pooled buffer, clear + bulk copy beats a fresh alloc per call.
         let mut fn_slots = self.slot_pool.pop().unwrap_or_default();
         fn_slots.clear();
         fn_slots.extend_from_slice(&self.slot_templates[fi]);
@@ -314,7 +314,7 @@ impl<'a> VM<'a> {
 
         self.bind_self_reference(fi, callee, &mut fn_slots);
 
-        // Generator/coroutine: return a suspended Coroutine instead of running. Both flags are O(1).
+        // Generator/coroutine, return a suspended Coroutine instead of running. Both flags are O(1).
         let is_async_fn = self.is_async.get(fi).copied().unwrap_or(false);
         if is_async_fn || body.is_generator {
             let coro = self.heap.alloc(HeapObj::Coroutine(0, fn_slots, Vec::new(), BodyRef::Fn(fi), Vec::new(), Vec::new(), Vec::new()))?;
@@ -338,7 +338,7 @@ impl<'a> VM<'a> {
         if callee_impure { self.mark_impure(); }
 
         if self.yielded {
-            // Sync helper suspended mid-execution (e.g. `sleep(0)` from inside a sync fn called by an async coro). Stage its frame on the VM-level buffer; `resume_coroutine` drains it onto the enclosing coro so the helper is re-entered from the right ip. Without this, the outer's resume_ip would skip past the unfinished helper and the next StoreName would underflow. A nested sync call inside this helper would already have pushed its own frame first, so the buffer ends up innermost-last.
+            // Sync helper suspended mid-execution (e.g. `sleep(0)` from inside a sync fn called by an async coro). Stage its frame on the VM-level buffer. `resume_coroutine` drains it onto the enclosing coro so the helper is re-entered from the right ip. Without this, the outer's resume_ip would skip past the unfinished helper and the next StoreName would underflow. A nested sync call inside this helper would already have pushed its own frame first, so the buffer ends up innermost-last.
             let helper_resume_ip = self.resume_ip;
             self.resume_ip = 0;
             let helper_stack_delta = if self.stack.len() > stack_base { self.stack.split_off(stack_base) } else { Vec::new() };
@@ -369,7 +369,7 @@ impl<'a> VM<'a> {
             }
             self.push(result);
         }
-        // Recycle the frame buffer; error/suspend paths above just drop theirs.
+        // Recycle the frame buffer, error/suspend paths above just drop theirs.
         if self.slot_pool.len() < 64 { self.slot_pool.push(fn_slots); }
         Ok(())
     }
@@ -386,7 +386,7 @@ impl<'a> VM<'a> {
         self.pending.kw_delta = 0;
 
         let total_items = num_pos + 2 * num_kw;
-        // Bulk-copy the stack tail: one memcpy instead of per-item pops plus a reverse.
+        // Bulk-copy the stack tail, one memcpy instead of per-item pops plus a reverse.
         let at = self.stack.len().checked_sub(total_items).ok_or(cold_runtime("stack underflow"))?;
         let kw_flat: Vec<Val> = self.stack[at + num_pos..].to_vec();
         let mut positional = self.stack.split_off(at);
@@ -401,7 +401,7 @@ impl<'a> VM<'a> {
         Ok(Some(heap.alloc(super::super::types::HeapObj::Dict(Rc::new(RefCell::new(dm))))?))
     }
 
-    /* list.sort(): parse key/reverse kwargs and sort in place. Intercepted from both call paths since it needs chunk/slots for __lt__. */
+    /* list.sort() parses key/reverse kwargs and sorts in place. Intercepted from both call paths since it needs chunk/slots for __lt__. */
     pub(crate) fn exec_sort(&mut self, recv: Val, positional: &[Val], kw_flat: &[Val], chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         if !positional.is_empty() {
             return Err(cold_type("list.sort() takes no positional arguments"));
@@ -418,7 +418,7 @@ impl<'a> VM<'a> {
         self.call_list_sort_keyed(recv, sort_key, sort_reverse, chunk, slots)
     }
 
-    /* Dispatch non-Func callees. Returns Ok(true) when handled here; Ok(false) means the caller falls through to the Func path. */
+    /* Dispatch non-Func callees. Returns Ok(true) when handled here, Ok(false) means the caller falls through to the Func path. */
     fn try_dispatch_non_func_callable(&mut self, callee: Val, positional: &[Val], kw_flat: &[Val], num_kw: usize, chunk: &SSAChunk, slots: &mut [Val]) -> Result<bool, VmErr> {
         if let HeapObj::BoundMethod(recv, id) = self.heap.get(callee) {
             let recv = *recv;
@@ -433,7 +433,7 @@ impl<'a> VM<'a> {
 
         if let HeapObj::NativeFn(id) = self.heap.get(callee) {
             let id = *id;
-            // First-class builtins (e.g. `apply(print, x)`) bypass the CallPrint/CallInput opcodes; mark here so a pure wrapper around them isn't memoised.
+            // First-class builtins (e.g. `apply(print, x)`) bypass the CallPrint/CallInput opcodes. Mark here so a pure wrapper around them isn't memoised.
             if native_is_impure(id) { self.mark_impure(); }
             self.dispatch_native(id, positional, kw_flat, chunk, slots)?;
             return Ok(true);
@@ -459,7 +459,7 @@ impl<'a> VM<'a> {
                 self.dispatch_native(id, positional, kw_flat, chunk, slots)?; // int/set/list/... construct
                 return Ok(true);
             }
-            // `object()`: unique featureless instance.
+            // `object()` builds a unique featureless instance.
             if name == "object" {
                 if !positional.is_empty() || !kw_flat.is_empty() {
                     return Err(cold_type("object() takes no arguments"));
@@ -468,7 +468,7 @@ impl<'a> VM<'a> {
                 self.push(inst);
                 return Ok(true);
             }
-            // Other Type objects are exception classes: build an ExcInstance for `raise X("msg")`.
+            // Other Type objects are exception classes, build an ExcInstance for `raise X("msg")`.
             if !kw_flat.is_empty() {
                 return Err(cold_type("exception class takes no keyword arguments"));
             }
@@ -477,7 +477,7 @@ impl<'a> VM<'a> {
             return Ok(true);
         }
 
-        // Calling a class: create an instance and run `__init__` if defined (walks bases).
+        // Calling a class, create an instance and run `__init__` if defined (walks bases).
         if let HeapObj::Class(..) = self.heap.get(callee) {
             // The recursive `exec_call` below only encodes positional count, kwargs would silently disappear before reaching `__init__`, so reject them here.
             if !kw_flat.is_empty() {
@@ -500,9 +500,9 @@ impl<'a> VM<'a> {
             return Ok(true);
         }
 
-        // Bound user method: prepend `self` to the arg list and re-dispatch.
+        // Bound user method, prepend `self` to the arg list and re-dispatch.
         if let HeapObj::BoundUserMethod(recv, func, class) = self.heap.get(callee) {
-            // Same as Class branch: depth check before mutating the stack.
+            // Same as the Class branch, depth check before mutating the stack.
             if self.depth >= self.max_calls { return Err(cold_depth()); }
             let (recv, func, class) = (*recv, *func, *class);
             self.pending.method_binding = Some((class, recv));
@@ -552,7 +552,7 @@ impl<'a> VM<'a> {
         }
 
         if let HeapObj::Coroutine(..) = self.heap.get(callee) {
-            // Plain `async def` (no `yield`): drive to completion via the scheduler (await semantics). Async *generators* fall through to step-wise resume like sync generators.
+            // Plain `async def` (no `yield`) drives to completion via the scheduler (await semantics). Async *generators* fall through to step-wise resume like sync generators.
             let drive_async = matches!(self.heap.get(callee),
                 HeapObj::Coroutine(_, _, _, super::super::types::BodyRef::Fn(fi), ..)
                     if self.is_async.get(*fi).copied().unwrap_or(false) && !self.functions[*fi].1.is_generator);
@@ -560,7 +560,7 @@ impl<'a> VM<'a> {
                 self.await_coroutine(callee)?;
                 return Ok(true);
             }
-            // Generator stepping (ForIter calls here per `next`): resume one step; the inner yield must NOT propagate to the caller.
+            // Generator stepping (ForIter calls here per `next`) resumes one step, the inner yield must NOT propagate to the caller.
             let result = self.resume_coroutine(callee)?;
             if self.yielded { self.yielded = false; }
             self.push(result);
@@ -609,7 +609,7 @@ impl<'a> VM<'a> {
                     if slot < fn_slots.len() { fn_slots[slot] = positional[pos_idx]; }
                     pos_idx += 1;
                 }
-                // KwOnly slots are NOT consumed positionally; they bind only via kwargs.
+                // KwOnly slots are NOT consumed positionally, they bind only via kwargs.
                 ParamKind::KwOnly => {}
             }
         }
@@ -619,12 +619,12 @@ impl<'a> VM<'a> {
             let params = &self.functions[fi].0;
             let body_map = &self.body_maps[fi];
             for pair in kw_flat.chunks_exact(2) {
-                // Malformed `**`/kwarg bytecode can leave a non-string in the name slot; guard the heap access.
+                // Malformed `**`/kwarg bytecode can leave a non-string in the name slot, so guard the heap access.
                 let key = match self.heap.try_get(pair[0]) {
                     Some(HeapObj::Str(s)) => s.clone(),
                     _ => return Err(cold_runtime("malformed kwarg on stack")),
                 };
-                // Star/double-star params are not keyword targets; a kwarg whose name matches `*a`/`**k` goes to **kwargs.
+                // Star/double-star params are not keyword targets. A kwarg whose name matches `*a`/`**k` goes to **kwargs.
                 if params.iter().any(|p| !p.starts_with('*') && crate::parser::types::param_base_name(p) == key.as_str()) {
                     let pname = s!(str &key, "_0");
                     if let Some(&s) = body_map.get(pname.as_str()) {
@@ -634,7 +634,7 @@ impl<'a> VM<'a> {
             }
         }
 
-        // Defaults: only fill slots still undef after binding.
+        // Defaults only fill slots still undef after binding.
         if !defaults.is_empty() {
             let ds = &self.default_slots[fi];
             for (di, &dv) in defaults.iter().enumerate() {
@@ -645,7 +645,7 @@ impl<'a> VM<'a> {
             }
         }
 
-        // Closure captures: same rule as defaults, only fill if undef. Each capture is a shared cell; read its current value into the slot.
+        // Closure captures follow the same rule as defaults, only fill if undef. Each capture is a shared cell, read its current value into the slot.
         for &(bi, cell) in captures {
             if bi < fn_slots.len() && fn_slots[bi].is_undef() {
                 fn_slots[bi] = self.cell_get(cell);
@@ -655,7 +655,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* Push caller slots into body slots. Same scope: late-binding, overwrite freely. Different scope: skip capture-filled slots (fixes stacked-decorator clobber). */
+    /* Push caller slots into body slots. Same scope means late-binding, overwrite freely. Different scope skips capture-filled slots (fixes stacked-decorator clobber). */
     fn apply_caller_slot_propagation(&mut self, fi: usize, captures: &[(usize, Val)], chunk: &SSAChunk, slots: &[Val], fn_slots: &mut [Val]) {
         let info = self.propagation_map(fi, chunk);
         let captured_set: crate::util::hash::FxHashSet<usize> = if info.same_scope {
@@ -663,7 +663,7 @@ impl<'a> VM<'a> {
         } else {
             captures.iter().map(|(s, _)| *s).collect()
         };
-        // Undef/captured filters stay per-call; the name matching is cached.
+        // Undef/captured filters stay per-call, the name matching is cached.
         for &(si, bs) in info.pairs.iter() {
             let bs = bs as usize;
             if let Some(&v) = slots.get(si as usize)
@@ -674,7 +674,7 @@ impl<'a> VM<'a> {
             }
         }
 
-        // Free names resolve lexically: exact-version hit in the caller frame (live parent local), then the module layers (late-bound), then the latest-version net where a lexical source is plausible. Entry-chunk slots are excluded from the net: `global`/`del` writes only reach `module_state`, so those slots go stale.
+        // Free names resolve lexically, exact-version hit in the caller frame (live parent local), then the module layers (late-bound), then the latest-version net where a lexical source is plausible. Entry-chunk slots are excluded from the net since `global`/`del` writes only reach `module_state`, so those slots go stale.
         let caller_is_module = !self.body_to_fi.contains_key(&(chunk as *const SSAChunk));
         let caller_is_entry = core::ptr::eq(chunk, self.chunk);
         let parent_is_fn = self.function_parents.get(fi).is_some_and(|p| p.is_some());
@@ -728,7 +728,7 @@ impl<'a> VM<'a> {
         let caller_module = caller_fi.and_then(|cf| self.fn_module.get(cf).and_then(|m| m.as_deref()));
         let callee_module = self.fn_module.get(fi).and_then(|m| m.as_deref());
         let same_scope = caller_fi == callee_parent_fi && caller_module == callee_module;
-        // Free loads with their caller-chunk (version, slot) candidates resolved once. Candidate slots canonicalise: operand rewriting stores values at the version chain's root.
+        // Free loads with their caller-chunk (version, slot) candidates resolved once. Candidate slots canonicalise because operand rewriting stores values at the version chain's root.
         let name_index = self.chunk_name_versions.get(&(chunk as *const _));
         let free: Vec<super::super::FreeLoadEntry> = self.body_free_loads[fi].iter()
             .map(|(bare, bs, ref_ver)| {
@@ -749,9 +749,9 @@ impl<'a> VM<'a> {
         map
     }
 
-    /* Slow layers for a bare free-load name after the caller-slot layer missed: callee module attrs -> entry module state -> globals. First hit wins. Centralised so the order is auditable. */
+    /* Slow layers for a bare free-load name after the caller-slot layer missed, callee module attrs -> entry module state -> globals. First hit wins. Centralised so the order is auditable. */
     pub(crate) fn resolve_free_name_fallback(&self, fi: usize, bare: &str) -> Option<Val> {
-        // Layer 2: callee's module attrs, keeps `a.helper` and `b.helper` isolated.
+        // Layer 2 checks the callee's module attrs, keeping `a.helper` and `b.helper` isolated.
         if let Some(Some(spec)) = self.fn_module.get(fi).cloned()
             && let Some(mod_val) = self.module_table.get(&spec).copied()
             && mod_val.is_heap()
@@ -760,14 +760,14 @@ impl<'a> VM<'a> {
         {
             return Some(*v);
         }
-        // Layer 3: entry-module bindings, live-mirrored on every store; beats `globals` so rebinding a def'd name is seen.
+        // Layer 3 checks entry-module bindings, live-mirrored on every store. Beats `globals` so rebinding a def'd name is seen.
         if self.fn_module.get(fi).is_none_or(|m| m.is_none())
             && let Some(&v) = self.module_state.get(bare)
             && !v.is_undef()
         {
             return Some(v);
         }
-        // Layer 4: globals, catches forward-ref mutual recursion in the entry chunk.
+        // Layer 4 checks globals, catching forward-ref mutual recursion in the entry chunk.
         if let Some(&v) = self.globals.get(bare) {
             return Some(v);
         }
@@ -784,9 +784,9 @@ impl<'a> VM<'a> {
         }
     }
 
-    /* Run the body with caller slots pinned in `live_slots` (GC roots) and a CallFrame on `call_stack` (traceback). Frame popped on success only; the dispatch catch clears it on swallowed exceptions. Returns `(callee_impure, exec_result)`. */
+    /* Run the body with caller slots pinned in `live_slots` (GC roots) and a CallFrame on `call_stack` (traceback). Frame popped on success only, the dispatch catch clears it on swallowed exceptions. Returns `(callee_impure, exec_result)`. */
     fn run_body_with_frame(&mut self, fi: usize, body: &SSAChunk, chunk: &SSAChunk, fn_slots: &mut [Val], slots: &[Val]) -> (bool, Result<Val, VmErr>) {
-        // GC roots come from `active_slots` (every live exec frame); `live_slots` only feeds `globals()`, which reads the entry chunk's slots at the bottom. Copy just that frame.
+        // GC roots come from `active_slots` (every live exec frame), `live_slots` only feeds `globals()`, which reads the entry chunk's slots at the bottom. Copy just that frame.
         let snap = self.live_slots.len();
         if snap == 0 && core::ptr::eq(chunk, self.chunk) {
             self.live_slots.extend_from_slice(slots);
@@ -794,7 +794,7 @@ impl<'a> VM<'a> {
 
         // Frame snapshots caller's source/path so render doesn't borrow live chunk pointers.
         let call_byte_pos = self.pending.call_byte_pos.take().unwrap_or(0);
-        // Method-call paths set `method_binding` immediately before invoking `exec_call`; plain function calls leave it `None`.
+        // Method-call paths set `method_binding` immediately before invoking `exec_call`, plain function calls leave it `None`.
         let (current_class, current_self) = match self.pending.method_binding.take() {
             Some((c, s)) => (Some(c), Some(s)),
             None => (None, None),
@@ -844,7 +844,7 @@ impl<'a> VM<'a> {
                             let mut b = rc.borrow_mut();
                             if b.is_empty() { b.push(val); } else { b[0] = val; }
                         },
-                        // Nonlocal target not captured at MakeFunction (rare): attach a fresh cell so the next call sees it.
+                        // Nonlocal target not captured at MakeFunction (rare), attach a fresh cell so the next call sees it.
                         None => if let Ok(c) = self.heap.alloc(HeapObj::List(Rc::new(RefCell::new(vec![val]))))
                             && let HeapObj::Func(_, _, caps, _) = self.heap.get_mut(callee) {
                                 caps.push((canon_body, c));
@@ -856,7 +856,7 @@ impl<'a> VM<'a> {
     }
 
 
-    /* CallExtern: operand packs `(extern_idx<<8)|(kw<<4)|pos`. Pop kw `name,val` pairs then `pos` positional vals, pack pairs into a heap dict via `pack_kw_dict` and hand it off as the explicit `Option<Val>` kwargs slot. Pure externs leave the impurity flag alone, bodies whose only side-effects are pure externs stay memoizable. */
+    /* CallExtern's operand packs `(extern_idx<<8)|(kw<<4)|pos`. Pop kw `name,val` pairs then `pos` positional vals, pack pairs into a heap dict via `pack_kw_dict` and hand it off as the explicit `Option<Val>` kwargs slot. Pure externs leave the impurity flag alone, bodies whose only side-effects are pure externs stay memoizable. */
     pub(crate) fn call_extern(&mut self, operand: u16, chunk: &SSAChunk) -> Result<(), VmErr> {
         let extern_idx = (operand >> 8) as usize;
         let kw = ((operand >> 4) & 0xF) as usize;
@@ -875,7 +875,7 @@ impl<'a> VM<'a> {
         }
     }
 
-    /* Park a native that deferred to the host: `None` placeholder (overwritten by `set_host_result_by_id`), correlation id, yield. */
+    /* Park a native that deferred to the host with a `None` placeholder (overwritten by `set_host_result_by_id`), correlation id, yield. */
     fn park_host_call(&mut self) {
         self.push(Val::none());
         self.pending.host_call_id = self.next_host_call_id;
@@ -887,7 +887,7 @@ impl<'a> VM<'a> {
     pub(crate) fn dispatch_native(&mut self, id: super::super::types::NativeFnId, positional: &[Val], kw: &[Val], chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         use super::super::types::NativeFnId::*;
 
-        // `sorted()` is the only builtin taking kwargs (`key=`, `reverse=`); extract them before the no-kw guard.
+        // `sorted()` is the only builtin taking kwargs (`key=`, `reverse=`), extract them before the no-kw guard.
         let mut sort_key: Option<Val> = None;
         let mut sort_reverse = false;
         let leftover_storage: Vec<Val>;
@@ -919,7 +919,7 @@ impl<'a> VM<'a> {
         match id {
             // Variadic
             Print => {
-                // CallPrint is statement-shaped (no trailing Pop); when reached via Call the parser emits Pop, so push None to keep the stack balanced.
+                // CallPrint is statement-shaped (no trailing Pop). When reached via Call the parser emits Pop, so push None to keep the stack balanced.
                 self.call_print(argc, chunk, slots)?;
                 self.push(Val::none());
                 Ok(())

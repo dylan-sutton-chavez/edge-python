@@ -1,12 +1,9 @@
-/*
-Receiver-type unwrap / arity-check primitives shared by the method dispatcher in mod.rs
-*/
-
 use alloc::{string::{String, ToString}, vec::Vec};
 
 use crate::vm::{VM, Val, VmErr, HeapObj, DictMap};
 use crate::vm::types::{ValSet, HeapPool, cold_type};
 
+/* Receiver-type unwrap and arity-check primitives shared by the method dispatcher in mod.rs. */
 #[inline]
 pub(super) fn recv_str(vm: &VM, recv: Val) -> Result<String, VmErr> {
     match vm.heap.try_get(recv) {
@@ -58,7 +55,7 @@ where F: FnOnce(&mut Vec<Val>) -> Result<R, VmErr>
     }
 }
 
-// Same shape as `list_mut` for dict receivers; clones the Rc so `&heap` stays free for content hashing.
+// Same shape as `list_mut` for dict receivers, clones the Rc so `&heap` stays free for content hashing.
 #[inline]
 pub(super) fn dict_mut<F, R>(vm: &mut VM, recv: Val, err: &'static str, f: F) -> Result<R, VmErr>
 where F: FnOnce(&mut DictMap, &HeapPool) -> Result<R, VmErr>
@@ -79,7 +76,7 @@ pub(super) fn set_clone(vm: &VM, recv: Val) -> Result<Vec<Val>, VmErr> {
     }
 }
 
-// Same shape as `list_mut` for set receivers; clones the Rc so `&heap` stays free for content hashing.
+// Same shape as `list_mut` for set receivers, clones the Rc so `&heap` stays free for content hashing.
 #[inline]
 pub(super) fn set_mut<F, R>(vm: &mut VM, recv: Val, err: &'static str, f: F) -> Result<R, VmErr>
 where F: FnOnce(&mut ValSet, &HeapPool) -> Result<R, VmErr>
@@ -91,7 +88,7 @@ where F: FnOnce(&mut ValSet, &HeapPool) -> Result<R, VmErr>
     f(&mut rc.borrow_mut(), &vm.heap)
 }
 
-/* List or tuple items as Vec. `try_get` is panic-free: an inline int arg would make `heap.get` index a bogus slot and abort. */
+/* List or tuple items as Vec. `try_get` is panic-free because an inline int arg would make `heap.get` index a bogus slot and abort. */
 #[inline]
 pub(super) fn extract_sequence(vm: &VM, v: Val, err: &'static str) -> Result<Vec<Val>, VmErr> {
     match vm.heap.try_get(v) {
@@ -118,7 +115,7 @@ pub(super) fn capitalize_first(s: &str) -> String {
 
 #[inline]
 pub(super) fn title_case(s: &str) -> String {
-    // each maximal run of cased chars is a word; first char titlecased, rest lowercased; non-cased chars (spaces, digits, punctuation) are boundaries.
+    // each maximal run of cased chars is a word, first char titlecased, rest lowercased, non-cased chars (spaces, digits, punctuation) are boundaries.
     let mut out = String::with_capacity(s.len());
     let mut prev_cased = false;
     for c in s.chars() {

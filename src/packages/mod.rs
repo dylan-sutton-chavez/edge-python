@@ -1,7 +1,3 @@
-/*
-Parse-time import: resolver returns Code (spliced .py) or Native (extern_table); VM sees Call/CallExtern.
-*/
-
 use alloc::{boxed::Box, string::{String, ToString}, sync::Arc, vec::Vec};
 
 use crate::s;
@@ -11,13 +7,13 @@ use crate::lexer::{lex, Token, TokenType};
 pub mod manifest;
 pub use manifest::{Manifest, parse_manifest, walk_up_dirs, dir_of, join_relative};
 
-/* Plain fn-pointer alias for hand-written Rust natives; the `Arc<dyn Fn ...>` form lives in `ExternFnPtr` below. Third arg is the kwargs slot, `None` for plain positional calls, `Some(dict_val)` when the caller used `name=value`; natives that don't accept kwargs ignore it. */
+/* Plain fn-pointer alias for hand-written Rust natives, the `Arc<dyn Fn ...>` form lives in `ExternFnPtr` below. Third arg is the kwargs slot, `None` for plain positional calls, `Some(dict_val)` when the caller used `name=value`, natives that don't accept kwargs ignore it. */
 pub type ExternFnPlain = fn(&mut HeapPool, &[Val], Option<Val>) -> Result<Val, VmErr>;
 
-/* Arc-wrapped callable for EdgePython natives; supports stateful loaders. */
+/* Arc-wrapped callable for EdgePython natives, supports stateful loaders. */
 pub type ExternFnPtr = Arc<dyn Fn(&mut HeapPool, &[Val], Option<Val>) -> Result<Val, VmErr> + Send + Sync>;
 
-/* Named native binding with purity flag; pure=true enables VM memoization, false for I/O or side-effects. */
+/* Named native binding with purity flag, pure=true enables VM memoization, false for I/O or side-effects. */
 #[derive(Clone)]
 pub struct NativeBinding {
     pub name: String,
@@ -32,21 +28,21 @@ impl NativeBinding {
     }
 }
 
-/* Native class definition; methods become Extern values inside a HeapObj::Class built at init time. */
+/* Native class definition, methods become Extern values inside a HeapObj::Class built at init time. */
 #[derive(Clone)]
 pub struct NativeClass {
     pub name: String,
     pub methods: Vec<NativeBinding>,
 }
 
-/* Resolver result: Code splices .py defs; Native registers extern bindings and classes. canonical dedupes diamond imports by resolved path. */
+/* Parse-time resolver result, Code splices .py defs, Native registers extern bindings and classes, the VM sees Call/CallExtern. canonical dedupes diamond imports by resolved path. */
 #[derive(Clone)]
 pub enum Resolved {
     Code { src: alloc::string::String, canonical: alloc::string::String },
     Native { bindings: Vec<NativeBinding>, classes: Vec<NativeClass>, consts: Vec<NativeBinding>, canonical: alloc::string::String },
 }
 
-/* Splits native bindings by export-name convention: `__class_` methods, `__const_` values, rest free functions. */
+/* Splits native bindings by export-name convention, `__class_` methods, `__const_` values, rest free functions. */
 pub fn partition_bindings(all: Vec<NativeBinding>) -> (Vec<NativeBinding>, Vec<NativeClass>, Vec<NativeBinding>) {
     let mut bindings = Vec::new();
     let mut class_map: Vec<(String, Vec<NativeBinding>)> = Vec::new();
@@ -85,22 +81,22 @@ fn parse_class_export(export: &str) -> Option<(&str, &str)> {
     Some((class_name, method))
 }
 
-/* Host-injected trait; resolve called once per import statement. &mut self allows internal caching. */
+/* Host-injected trait, resolve called once per import statement. &mut self allows internal caching. */
 pub trait Resolver {
     fn resolve(&mut self, spec: &str) -> Result<Resolved, String>;
 
-    /* Returns a child resolver rescoped to the imported file's directory for transitive imports; default is NoopResolver. */
+    /* Returns a child resolver rescoped to the imported file's directory for transitive imports, default is NoopResolver. */
     fn child(&self, _spec: &str) -> Box<dyn Resolver> {
         Box::new(NoopResolver)
     }
 
-    /* Returns raw bytes for integrity verification and manifest walk-up; Err signals absent file. expected_hash must match. */
+    /* Returns raw bytes for integrity verification and manifest walk-up, Err signals absent file. expected_hash must match. */
     fn fetch_bytes(&mut self, _spec: &str, _expected_hash: Option<[u8; 32]>) -> Result<alloc::vec::Vec<u8>, String> {
         Err(s!("module '", str _spec, "' integrity verification not supported by this resolver"))
     }
 }
 
-/* Splits spec into (url, Option<[u8;32]>); errors on malformed #sha256- fragment; decodes hex once. */
+/* Splits spec into (url, Option<[u8;32]>), errors on malformed #sha256- fragment, decodes hex once. */
 pub fn parse_integrity(spec: &str) -> Result<(&str, Option<[u8; 32]>), String> {
     let Some((url, frag)) = spec.split_once('#') else {
         return Ok((spec, None));
@@ -114,7 +110,7 @@ pub fn parse_integrity(spec: &str) -> Result<(&str, Option<[u8; 32]>), String> {
     Ok((url, Some(hash)))
 }
 
-/* Default resolver rejecting all specs with a diagnostic; used when no resolver is configured. */
+/* Default resolver rejecting all specs with a diagnostic, used when no resolver is configured. */
 pub struct NoopResolver;
 
 impl Resolver for NoopResolver {
@@ -132,7 +128,7 @@ impl Default for Box<dyn Resolver> {
     fn default() -> Self { Box::new(NoopResolver) }
 }
 
-/* Converts public NativeBinding into internal ExternFn; two structs separate host API from VM storage. */
+/* Converts public NativeBinding into internal ExternFn, two structs separate host API from VM storage. */
 pub(crate) fn binding_to_extern(b: &NativeBinding) -> crate::value::ExternFn {
     crate::value::ExternFn {
         name: b.name.clone(),
@@ -141,7 +137,7 @@ pub(crate) fn binding_to_extern(b: &NativeBinding) -> crate::value::ExternFn {
     }
 }
 
-/* A scanned import: Bare resolves against the manifest chain, Relative anchors at the importer dir, Root at the nearest packages.json dir. Paths carry the .py suffix, dots already mapped to '/'. */
+/* A scanned import, Bare resolves against the manifest chain, Relative anchors at the importer dir, Root at the nearest packages.json dir. Paths carry the .py suffix, dots already mapped to '/'. */
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImportSpec {
     Bare(String),
@@ -149,7 +145,7 @@ pub enum ImportSpec {
     Root(String),
 }
 
-/* Consumes `name(.name)*` at token `j`; returns ("a/b/c.py", segment count, index past). */
+/* Consumes `name(.name)*` at token `j`, returns ("a/b/c.py", segment count, index past). */
 fn dotted_path(src: &str, tokens: &[Token], j: usize) -> (String, usize, usize) {
     let mut path = src[tokens[j].start..tokens[j].end].to_string();
     let mut segs = 1;
@@ -166,7 +162,7 @@ fn dotted_path(src: &str, tokens: &[Token], j: usize) -> (String, usize, usize) 
     (path, segs, k)
 }
 
-/* Reads the module spec at token `j`: leading dots are importer-relative, dotted names root-relative, a plain name is Bare. Quoted strings are not specs. Returns (spec, index past it). */
+/* Reads the module spec at token `j`, leading dots are importer-relative, dotted names root-relative, a plain name is Bare. Quoted strings are not specs. Returns (spec, index past it). */
 fn read_spec(src: &str, tokens: &[Token], j: usize) -> Option<(ImportSpec, usize)> {
     let t = tokens.get(j)?;
     match t.kind {
@@ -207,7 +203,7 @@ pub fn scan_imports(src: &str) -> Vec<ImportSpec> {
                 }
             }
             TokenType::Import => {
-                // `import a, b as c`: comma-separated specs, each with an optional `as` alias.
+                // `import a, b as c`, comma-separated specs, each with an optional `as` alias.
                 let mut j = i + 1;
                 while let Some((spec, next)) = read_spec(src, &tokens, j) {
                     out.push(spec);

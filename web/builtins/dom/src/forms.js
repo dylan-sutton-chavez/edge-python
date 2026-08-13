@@ -1,7 +1,5 @@
-/* Form value/checked, submit/reset, FormData, Validity, file pickers. */
-
 export default ({ node, files }, { pushEvent, emitError }) => ({
-    /* `value`/`checked` are live state; `get_attribute("value")` reads the initial-value attribute instead. */
+    /* `value`/`checked` are live state, `get_attribute("value")` reads the initial-value attribute instead. */
     get_value: (h) => node(h).value ?? '',
     set_value: (h, v) => { node(h).value = v; },
     get_checked: (h) => !!node(h).checked,
@@ -48,7 +46,7 @@ export default ({ node, files }, { pushEvent, emitError }) => ({
     set_custom_validity: (h, msg) => { node(h).setCustomValidity(msg); },
     validation_message: (h) => node(h).validationMessage || '',
 
-    /* CSV of file handles. Python: [int(h) for h in get_files(inp).split(",") if h]. */
+    /* CSV of file handles. Python side does `[int(h) for h in get_files(inp).split(",") if h]`. */
     get_files: (h) => {
         const fl = node(h).files;
         if (!fl || fl.length === 0) return '';
@@ -66,7 +64,7 @@ export default ({ node, files }, { pushEvent, emitError }) => ({
         return JSON.stringify({ name: f.name, size: f.size, type: f.type, last_modified: f.lastModified });
     },
 
-    // Async; result via receive() as {msg, file_handle, ok, text}. File handle disposes on completion.
+    // Async, result via receive() as {msg, file_handle, ok, text}. File handle disposes on completion.
     file_read_text: (h, msg) => {
         const f = files[h];
         if (!f) return;
@@ -84,7 +82,7 @@ export default ({ node, files }, { pushEvent, emitError }) => ({
         r.readAsText(f);
     },
 
-    // Async; result via receive() as {msg, file_handle, ok, data_url}. File handle disposes on completion.
+    // Async, result via receive() as {msg, file_handle, ok, data_url}. File handle disposes on completion.
     file_read_data_url: (h, msg) => {
         const f = files[h];
         if (!f) return;

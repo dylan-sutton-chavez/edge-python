@@ -1,8 +1,3 @@
-/*
-Built-in methods for `int` / `float` receivers (and the `int.from_bytes` classmethod).
-Arity is checked by the dispatcher.
-*/
-
 use super::prelude::*;
 use crate::vm::types::as_i128;
 
@@ -17,12 +12,12 @@ pub fn bit_count(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
     vm.push(Val::int(n.unsigned_abs().count_ones() as i64)); Ok(())
 }
 
-// `int.to_bytes(length=1, byteorder='big')`; unsigned (signed=False), errors if it doesn't fit.
+// `int.to_bytes(length=1, byteorder='big')`, unsigned (signed=False), errors if it doesn't fit.
 pub fn to_bytes(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let n = as_i128(recv, &vm.heap).ok_or(cold_type("to_bytes() requires an int"))?;
     if n < 0 { return Err(cold_overflow_msg("can't convert negative int to unsigned")); }
     let length = match pos.first() { Some(v) if v.is_int() => v.as_int().max(0) as usize, None => 1, _ => return Err(cold_type("length must be an integer")) };
-    // Length is user-controlled; cap it against the heap budget so a huge count errors instead of aborting in the allocator.
+    // Length is user-controlled, cap it against the heap budget so a huge count errors instead of aborting in the allocator.
     if length > vm.heap.limit() { return Err(cold_heap()); }
     let big = byteorder_is_big(vm, pos.get(1))?;
     let mut v = n.unsigned_abs();
@@ -38,7 +33,7 @@ pub fn to_bytes(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     vm.push(val); Ok(())
 }
 
-// `int.from_bytes(bytes, byteorder='big')` classmethod; unsigned.
+// `int.from_bytes(bytes, byteorder='big')` classmethod, unsigned.
 pub fn from_bytes(vm: &mut VM, _recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let buf = recv_bytes(vm, pos[0])?;
     let big = byteorder_is_big(vm, pos.get(1))?;

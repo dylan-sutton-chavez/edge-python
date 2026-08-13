@@ -1,12 +1,11 @@
-/* Clock reads (sync) plus sleep, which yields so the worker parks the coro on the Promise, like fetch. */
-
 // Timezone is the standard (non-DST) offset, so sample both halves of the year and take the larger.
 const janOff = () => new Date(new Date().getFullYear(), 0, 1).getTimezoneOffset();
 const julOff = () => new Date(new Date().getFullYear(), 6, 1).getTimezoneOffset();
 
+/* Clock reads (sync) plus sleep, which yields so the worker parks the coro on the Promise, like fetch. */
 export default () => ({
     time: () => Date.now() / 1000,
-    time_ns: () => (BigInt(Date.now()) * 1_000_000n).toString(), // string: epoch ns overflows Number
+    time_ns: () => (BigInt(Date.now()) * 1_000_000n).toString(), // string, epoch ns overflows Number
     monotonic: () => performance.now() / 1000,
     monotonic_ns: () => Math.round(performance.now() * 1e6),
     perf_counter: () => performance.now() / 1000,

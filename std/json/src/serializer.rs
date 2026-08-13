@@ -1,10 +1,7 @@
-/*
-Walk a Handle, emit JSON text. Dispatch by `type_of`; sequences use `iter`+`len`+`get_item` (skip `iter_next`: wasm-pdk v0.1.0 StopIteration broken). Full Python `json.dumps` kwargs supported.
-*/
-
 use alloc::{borrow::ToOwned, format, string::String, vec::Vec};
 use wasm_pdk::{Error, FromValue, Handle, Result, Value, decode, encode};
 
+/// Full Python `json.dumps` kwargs supported.
 pub struct Options {
     pub indent: Option<i64>,
     pub sort_keys: bool,
@@ -33,11 +30,11 @@ pub struct SerCtx<'a> {
     pub opts: &'a Options,
 }
 
-/* Recursion-depth cap for circular detection: wasm plugin can't see Val identity (Python's `id(x) in seen`); trips before JS call stack overflow on self-reference. */
+/* Recursion-depth cap for circular detection, since the wasm plugin can't see Val identity (Python's `id(x) in seen`). Trips before JS call stack overflow on self-reference. */
 const MAX_DEPTH: usize = 200;
 
 pub fn serialize(value: &Handle, opts: Options) -> Result<String> {
-    // `cls` short-circuits the whole walk: instantiate and delegate to its `.encode(value)`.
+    // `cls` short-circuits the whole walk, so instantiate and delegate to its `.encode(value)`.
     if let Some(cls) = &opts.cls {
         let encoder = cls.call("__call__", &[])?;
         let result = encoder.call("encode", &[value.raw()])?;
@@ -52,6 +49,7 @@ pub fn serialize(value: &Handle, opts: Options) -> Result<String> {
     Ok(out)
 }
 
+// Dispatch by `type_of`, sequences use `iter`+`len`+`get_item` and skip `iter_next` since wasm-pdk v0.1.0 StopIteration is broken.
 fn serialize_into(value: &Handle, out: &mut String, ctx: &mut SerCtx, depth: usize) -> Result<()> {
     let ty_handle = value.type_of()?;
     let ty = String::from_handle(ty_handle.raw())?;

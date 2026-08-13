@@ -3,37 +3,37 @@ use super::*;
 use cache::OpcodeCache;
 use value_ops::cached_binop;
 
-/* IC: forward dunder name only; reflected ops are handled by the slow path's `NotImplemented` deopt. */
+/* IC keeps the forward dunder name only, reflected ops are handled by the slow path's `NotImplemented` deopt. */
 fn binary_dunder_name(op: OpCode) -> Option<&'static str> {
     super::dunder::binary_dunder_names(op).map(|(l, _)| l)
 }
 
-/* IC: same for comparison opcodes; reflected pairs collapse to the forward name. */
+/* IC, same for comparison opcodes, reflected pairs collapse to the forward name. */
 fn compare_dunder_name(op: OpCode) -> Option<&'static str> {
     super::dunder::compare_dunder_names(op).map(|(l, _, _)| l)
 }
 
 impl<'a> VM<'a> {
 
-    /* Add/Sub/Mul/Div with IC; Mod/Pow/FloorDiv on i128 with overflow trap; Minus is unary. */
+    /* Add/Sub/Mul/Div with IC, Mod/Pow/FloorDiv on i128 with overflow trap, Minus is unary. */
     pub(crate) fn handle_arith(&mut self, op: OpCode, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         if op == OpCode::Minus {
-            // -i128::MIN overflows; everything else fits.
+            // -i128::MIN overflows, everything else fits.
             return self.exec_unary(rip, cache, chunk, slots, "__neg__", |v| Val::float(-v.as_float()), i128::checked_neg, "unary - requires a number");
         }
         if op == OpCode::Pos {
-            // +float returns the value unchanged; bool drops its tag to int.
+            // +float returns the value unchanged, bool drops its tag to int.
             return self.exec_unary(rip, cache, chunk, slots, "__pos__", |v| v, Some, "unary + requires a number");
         }
 
         let (a, b) = self.pop2()?;
 
-        // `name += rhs`: a left list extends in place with any iterable (Python __iadd__); other types behave as Add.
+        // `name += rhs` extends a left list in place with any iterable (Python __iadd__). Other types behave as Add.
         let op = if op == OpCode::InPlaceAdd {
-            // Guard is_heap: `i += 1` operands are inline ints, and heap.get on a non-heap Val indexes garbage.
+            // Guard is_heap since `i += 1` operands are inline ints, and heap.get on a non-heap Val indexes garbage.
             let a_is_list = a.is_heap() && matches!(self.heap.get(a), HeapObj::List(_));
             if a_is_list {
-                // Snapshot rhs first so `xs += xs` doubles correctly; TypeError if rhs isn't iterable.
+                // Snapshot rhs first so `xs += xs` doubles correctly, TypeError if rhs isn't iterable.
                 let rhs = self.iter_to_vec_general(b)?;
                 if let HeapObj::List(la) = self.heap.get(a) { la.borrow_mut().extend_from_slice(&rhs); }
                 self.push(a);
@@ -42,7 +42,7 @@ impl<'a> VM<'a> {
             OpCode::Add
         } else { op };
 
-        // Root operands: the dunder runs user code that can GC, and we read a/b after it (record + fallback).
+        // Root operands since the dunder runs user code that can GC, and we read a/b after it (record + fallback).
         let roots = self.temp_roots.len();
         self.temp_roots.push(a);
         self.temp_roots.push(b);
@@ -59,7 +59,7 @@ impl<'a> VM<'a> {
             return Ok(());
         }
 
-        // Register-based FastOps (Add/Sub/Mul/Mod/FloorDiv) are cached; Div/Pow are not.
+        // Register-based FastOps (Add/Sub/Mul/Mod/FloorDiv) are cached, Div/Pow are not.
         if matches!(op, OpCode::Add | OpCode::Sub | OpCode::Mul | OpCode::Mod | OpCode::FloorDiv) {
             cached_binop!(self.heap, rip, &op, a, b, cache);
         }
@@ -78,7 +78,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* Unary `-`/`+`: instance dunder takes precedence over numeric coercion; `ffl` maps the float case, `fint` the i128 case. */
+    /* Unary `-`/`+`, instance dunder takes precedence over numeric coercion. `ffl` maps the float case, `fint` the i128 case. */
     #[allow(clippy::too_many_arguments)]
     fn exec_unary(&mut self, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk, slots: &mut [Val],
                   name: &'static str, ffl: fn(Val) -> Val, fint: fn(i128) -> Option<i128>, err: &'static str) -> Result<(), VmErr> {
@@ -109,19 +109,19 @@ impl<'a> VM<'a> {
             let af = self.to_f64_coerce(a).map_err(|_| cold_type("% requires numeric operands"))?;
             let bf = self.to_f64_coerce(b).map_err(|_| cold_type("% requires numeric operands"))?;
             if bf == 0.0 { return Err(VmErr::ZeroDiv); }
-            // Floor-division semantics: result takes the divisor's sign.
+            // Floor-division semantics, the result takes the divisor's sign.
             let r = af - ffloor(af / bf) * bf;
             return Ok(Val::float(r));
         }
         let (Some(ai), Some(bi)) = (self.as_i128(a), self.as_i128(b)) else { return Err(cold_type("% requires numeric operands")); };
         if bi == 0 { return Err(VmErr::ZeroDiv); }
-        // Floor-mod on i128: result takes the divisor's sign. `checked_rem` guards against i128::MIN % -1 (which would overflow).
+        // Floor-mod on i128, the result takes the divisor's sign. `checked_rem` guards against i128::MIN % -1 (which would overflow).
         let r = ai.checked_rem(bi).ok_or(cold_overflow())?;
         let r = if (r != 0) && ((r < 0) != (bi < 0)) { r + bi } else { r };
         self.int_to_val(Some(r))
     }
 
-    /* printf-style `str % args`: translates each `%[flags][width][.prec]conv` into the `{:spec}` mini-language and reuses `format_value`. A tuple spreads; else one value. */
+    /* printf-style `str % args` translates each `%[flags][width][.prec]conv` into the `{:spec}` mini-language and reuses `format_value`. A tuple spreads, else one value. */
     fn str_percent_format(&mut self, fmt_val: Val, arg: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Val, VmErr> {
         let fmt = match self.heap.get(fmt_val) { HeapObj::Str(s) => s.clone(), _ => return Err(cold_type("% requires a string")) };
         let args: alloc::vec::Vec<Val> = match self.heap.try_get(arg) {
@@ -146,7 +146,7 @@ impl<'a> VM<'a> {
                 }
                 i += 1;
             }
-            // width: digits, or `*` reads it (with sign) from the next argument.
+            // width is digits, or `*` reads it (with sign) from the next argument.
             let mut width = String::new();
             if i < chars.len() && chars[i] == '*' {
                 i += 1;
@@ -210,7 +210,7 @@ impl<'a> VM<'a> {
         self.heap.alloc(HeapObj::Str(out))
     }
 
-    /* Reads a `*` width/precision argument as an i64; non-integers raise TypeError like Python. */
+    /* Reads a `*` width/precision argument as an i64, non-integers raise TypeError like Python. */
     fn star_arg_int(&self, args: &[Val], ai: &mut usize) -> Result<i64, VmErr> {
         let v = *args.get(*ai).ok_or(cold_type("not enough arguments for format string"))?;
         *ai += 1;
@@ -234,12 +234,12 @@ impl<'a> VM<'a> {
             let af = self.to_f64_coerce(a).map_err(|_| cold_type("// requires numeric operands"))?;
             let bf = self.to_f64_coerce(b).map_err(|_| cold_type("// requires numeric operands"))?;
             if bf == 0.0 { return Err(VmErr::ZeroDiv); }
-            // ffloor() handles all magnitudes; `as i64` would overflow for large floats.
+            // ffloor() handles all magnitudes, `as i64` would overflow for large floats.
             return Ok(Val::float(ffloor(af / bf)));
         }
         let (Some(ai), Some(bi)) = (self.as_i128(a), self.as_i128(b)) else { return Err(cold_type("// requires numeric operands")); };
         if bi == 0 { return Err(VmErr::ZeroDiv); }
-        // Floor-div on i128: round toward negative infinity. checked_div guards i128::MIN / -1 overflow.
+        // Floor-div on i128, round toward negative infinity. checked_div guards i128::MIN / -1 overflow.
         let q = ai.checked_div(bi).ok_or(cold_overflow())?;
         let r = ai - q * bi;
         let q = if (r != 0) && ((r < 0) != (bi < 0)) { q - 1 } else { q };
@@ -250,7 +250,7 @@ impl<'a> VM<'a> {
         self.pow_vals(a, b, "** requires numeric operands")
     }
 
-    /* i128 bitwise + Shl/Shr (overflow trap); BitNot unary. Set/Set on |/&/^ means union/intersection/symmetric-diff; other types use the bitwise path. */
+    /* i128 bitwise + Shl/Shr (overflow trap), BitNot unary. Set/Set on |/&/^ means union/intersection/symmetric-diff, other types use the bitwise path. */
     pub(crate) fn handle_bitwise(&mut self, op: OpCode, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         // Augmented set bitwise reuses the plain path but mutates the left set in place.
         let inplace = matches!(op, OpCode::InPlaceBitOr | OpCode::InPlaceBitAnd | OpCode::InPlaceBitXor);
@@ -321,16 +321,16 @@ impl<'a> VM<'a> {
         let shift = b.as_int();
         if shift < 0 { return Err(cold_value("negative shift count")); }
         let ai = self.as_i128(a).ok_or(cold_type(">> requires an integer"))?;
-        // i128 >> is arithmetic (floor on negatives); `.min(127)` dodges shift-count UB.
+        // i128 >> is arithmetic (floor on negatives), and `.min(127)` dodges shift-count UB.
         self.int_to_val(Some(ai >> shift.min(127)))
     }
 
     pub(crate) fn handle_compare(&mut self, op: OpCode, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         let (a, b) = self.pop2()?;
-        // Record type-key for every compare op; `cache::specialize` picks the FastOp variant.
+        // Record type-key for every compare op, `cache::specialize` picks the FastOp variant.
         cached_binop!(self.heap, rip, &op, a, b, cache);
 
-        // Root operands: the dunder runs user code that can GC, and we read a/b after it (record + fallback).
+        // Root operands since the dunder runs user code that can GC, and we read a/b after it (record + fallback).
         let roots = self.temp_roots.len();
         self.temp_roots.push(a);
         self.temp_roots.push(b);
@@ -365,7 +365,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    // Only plain `not`; And/Or are short-circuited by the parser via Jump-If-Or-Pop.
+    // Only plain `not`, And/Or are short-circuited by the parser via Jump-If-Or-Pop.
     pub(crate) fn handle_logic(&mut self, op: OpCode, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         match op {
             OpCode::Not => {
@@ -378,7 +378,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* `is` / `is not` compare tag bits inline; `in` / `not in` delegate to contains(). */
+    /* `is` / `is not` compare tag bits inline, `in` / `not in` delegate to contains(). */
     pub(crate) fn handle_identity(&mut self, op: OpCode, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         let (a, b) = self.pop2()?;
         let result = match op {

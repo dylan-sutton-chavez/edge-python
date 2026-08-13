@@ -1,7 +1,5 @@
-/* Intersection / Resize / Mutation observers; each entry fires through `ctx.pushEvent`. */
-
 export default ({ node, intersectionObservers, resizeObservers, mutationObservers }, { pushEvent, emitError }) => ({
-    /* Options: {root_handle?, rootMargin?, threshold?}. Event detail: {msg, target_handle, intersecting, ratio, x, y, w, h}. */
+    /* Options are {root_handle?, rootMargin?, threshold?}. Event detail is {msg, target_handle, intersecting, ratio, x, y, w, h}. */
     observe_intersection: (h, msg, optionsJson) => {
         const target = node(h);
         const opts = optionsJson !== undefined ? JSON.parse(optionsJson || '{}') : {};
@@ -62,11 +60,11 @@ export default ({ node, intersectionObservers, resizeObservers, mutationObserver
         resizeObservers[h] = null;
     },
 
-    /* Options follow MutationObserverInit. `target_handle` is the watched root; mutations may fire on descendants (see `target_id`/`target_tag`). Added/removed report counts only; re-query for the actual new nodes. */
+    /* Options follow MutationObserverInit. `target_handle` is the watched root, mutations may fire on descendants (see `target_id`/`target_tag`). Added/removed report counts only, re-query for the actual new nodes. */
     observe_mutations: (h, msg, optionsJson) => {
         const target = node(h);
         const opts = optionsJson !== undefined ? JSON.parse(optionsJson || '{}') : {};
-        /* Spec requires at least one of childList/attributes/characterData; default to the most common. */
+        /* Spec requires at least one of childList/attributes/characterData, default to the most common. */
         if (!opts.childList && !opts.attributes && !opts.characterData) opts.childList = true;
         const observer = new MutationObserver((mutations) => {
             try {

@@ -1,7 +1,3 @@
-/*
-The runtime engine: drive Edge Python in a headless browser, one-shot via `run` or persistent via `Session`.
-*/
-
 use anyhow::{anyhow, bail, Context, Result};
 use headless_chrome::{Browser, LaunchOptions};
 use serde::Deserialize;
@@ -33,12 +29,12 @@ struct State {
     ok: bool,
     #[serde(default)]
     err: String,
-    // Set when the script raised `SystemExit`; carries its exit code.
+    // Set when the script raised `SystemExit`, carries its exit code.
     #[serde(default)]
     code: Option<i32>,
 }
 
-/// Result of one eval: streamed lines went out via the `on_line` callback; only the error and exit code survive.
+/// Result of one eval, streamed lines went out via the `on_line` callback and only the error and exit code survive.
 impl super::Backend for Session {
     fn eval(&mut self, src: &str, base: Option<&str>, on_line: &mut dyn FnMut(&str)) -> Result<Outcome> {
         Session::eval(self, src, base, |line| on_line(line))
@@ -49,7 +45,7 @@ impl super::Backend for Session {
     }
 }
 
-/// A live session: the worker keeps the interpreter alive, so each eval runs its input exactly once.
+/// A live session, the worker keeps the interpreter alive, so each eval runs its input exactly once.
 pub struct Session {
     _browser: Browser,
     tab: Arc<headless_chrome::Tab>,
@@ -62,7 +58,7 @@ impl Session {
         let port = serve(packages)?;
         let url = format!("http://127.0.0.1:{port}/");
 
-        // One spinner covers the whole bring-up: Chromium spawn + page load + worker boot.
+        // One spinner covers the whole bring-up, Chromium spawn + page load + worker boot.
         let _sp = crate::ui::spinner("starting chromium");
         let browser = launch().context("launching headless Chromium")?;
         let tab = browser.new_tab().map_err(|e| anyhow!("opening a tab: {e}"))?;
@@ -72,8 +68,7 @@ impl Session {
         Ok(Self { _browser: browser, tab })
     }
 
-    /// Run one input; state persists in the worker's interpreter between evals.
-    /// `base` repositions relative imports; None means the project root.
+    /// Run one input, state persists in the worker's interpreter between evals. `base` repositions relative imports, None means the project root.
     pub fn eval<F: FnMut(&str)>(&mut self, src: &str, base: Option<&str>, mut on_line: F) -> Result<Outcome> {
         let literal = serde_json::to_string(src)?;
         let base = serde_json::to_string(&base)?;
@@ -82,15 +77,14 @@ impl Session {
         drain(&self.tab, &mut |line| on_line(line))
     }
 
-    /// Wipe the runtime's interpreter and modules; next eval starts in a fresh namespace.
+    /// Wipe the runtime's interpreter and modules, next eval starts in a fresh namespace.
     pub fn reset(&mut self) -> Result<()> {
         self.tab.evaluate("__edgeReset()", false).map_err(|e| anyhow!("resetting runtime: {e}"))?;
         Ok(())
     }
 }
 
-/// Write a raw stdout chunk (byte-stream: it already carries its own `end`) and flush so streaming output appears at once.
-/// One-shot: open a session, eval `src`, stream stdout, tear down. Returns the process exit code (0 clean, 1 on error, or the script's `SystemExit` code).
+/// One-shot run, open a session, eval `src`, stream stdout, tear down. Returns the process exit code (0 clean, 1 on error, or the script's `SystemExit` code).
 pub fn run(src: &str, manifest: &Manifest, base: Option<&str>) -> Result<i32> {
     let mut session = Session::open(manifest)?;
     let outcome = session.eval(src, base, super::emit_chunk)?;
@@ -261,7 +255,7 @@ pub fn base_dir(file: &Path) -> Option<String> {
     Some(format!("{parent}/"))
 }
 
-/* Test hooks: EDGE_FAKE_CONTRACT lands after element.js, so the fake wins; EDGE_RUNTIME_DIR swaps the CDN runtime and compiler for locally served copies. */
+/* Test hooks, EDGE_FAKE_CONTRACT lands after element.js so the fake wins, EDGE_RUNTIME_DIR swaps the CDN runtime and compiler for locally served copies. */
 fn harness_page() -> String {
     let mut page = HARNESS.replacen("%CONTRACT%", compiler::devkit::RUNTIME_CONTRACT, 1);
     if let Ok(v) = std::env::var("EDGE_FAKE_CONTRACT") {
@@ -282,7 +276,7 @@ fn harness_page() -> String {
     page
 }
 
-/* Test hook: with EDGE_RUNTIME_DIR set, the harness swaps the CDN for these local routes. */
+/* Test hook, with EDGE_RUNTIME_DIR set the harness swaps the CDN for these local routes. */
 fn local_stack_file(path: &str) -> Option<(Vec<u8>, &'static str)> {
     let dir = std::env::var("EDGE_RUNTIME_DIR").ok()?;
     if path == "/compiler.wasm" {

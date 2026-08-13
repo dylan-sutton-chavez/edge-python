@@ -27,7 +27,7 @@ impl<'a> VM<'a> {
         let idx = self.pop()?;
         let obj = self.pop()?;
 
-        // instance `__getitem__` runs before built-in indexing; slices pass through as a single Slice arg.
+        // instance `__getitem__` runs before built-in indexing, and slices pass through as a single Slice arg.
         if let Some(r) = self.try_call_dunder(obj, "__getitem__", &[idx], chunk, slots)? {
             // Record monomorphic hit so the next iteration skips `resolve_attr_silent`.
             self.record_dunder_hit(ip, cache, obj, "__getitem__", 2);
@@ -65,7 +65,7 @@ impl<'a> VM<'a> {
         }
     }
 
-    /* No-dunder indexing path. Used by callers without a bytecode frame (FFI re-entry); also the post-dunder fallback inside `get_item`. */
+    /* No-dunder indexing path. Used by callers without a bytecode frame (FFI re-entry) and as the post-dunder fallback inside `get_item`. */
     pub fn get_item_builtin(&mut self, obj: Val, idx: Val) -> Result<bool, VmErr> {
         if idx.is_heap()
             && let HeapObj::Slice(start, stop, step) = self.heap.get(idx).clone() {
@@ -139,7 +139,7 @@ impl<'a> VM<'a> {
             else { def }
         };
 
-        // Negative step bounds at [-1, len-1]; an underflowing index floors at -1, not 0.
+        // Negative step bounds at [-1, len-1], an underflowing index floors at -1, not 0.
         let clamp_neg = |v: Val, def: i64| -> i64 {
             if v.is_none() { def }
             else if v.is_int() { let i = v.as_int(); (if i < 0 { len + i } else { i }).clamp(-1, len - 1) }
@@ -208,7 +208,7 @@ impl<'a> VM<'a> {
                 HeapObj::Dict(_) => return Err(cold_type("unhashable type: 'dict'")),
                 HeapObj::Set(_) => return Err(cold_type("unhashable type: 'set'")),
                 HeapObj::Instance(cls, _) => {
-                    // Same eq-hash invariant as `call_hash`; defining one without the other voids hashability.
+                    // Same eq-hash invariant as `call_hash` since defining one without the other voids hashability.
                     let cls = *cls;
                     if self.lookup_class_member(cls, "__eq__").is_some()
                         && self.lookup_class_member(cls, "__hash__").is_none() {
@@ -234,10 +234,10 @@ impl<'a> VM<'a> {
         self.store_item_builtin(cont, idx_val, value)
     }
 
-    /* No-dunder item-assignment path. Used by callers without a bytecode frame (FFI re-entry); also the post-dunder fallback inside `store_item`. */
+    /* No-dunder item-assignment path. Used by callers without a bytecode frame (FFI re-entry) and as the post-dunder fallback inside `store_item`. */
     pub fn store_item_builtin(&mut self, cont: Val, idx_val: Val, value: Val) -> Result<(), VmErr> {
         if !cont.is_heap() { return Err(cold_type("object does not support item assignment")); }
-        // Slice assignment: `xs[a:b] = iterable` (step must be 1 for resize). Resolves the target range, materialises RHS, and splices in place.
+        // Slice assignment `xs[a:b] = iterable` (step must be 1 for resize). Resolves the target range, materialises RHS, and splices in place.
         if idx_val.is_heap()
             && let HeapObj::Slice(start, stop, step) = self.heap.get(idx_val).clone()
         {
@@ -273,7 +273,7 @@ impl<'a> VM<'a> {
             return Ok(());
         }
         let idx_val = self.coerce_index(cont, idx_val, chunk, slots)?;
-        // Slice deletion: `del xs[a:b]`, same step=1 restriction as `store_slice`. Reuses `store_slice` with an empty replacement vec.
+        // Slice deletion `del xs[a:b]` has the same step=1 restriction as `store_slice`. Reuses `store_slice` with an empty replacement vec.
         if idx_val.is_heap()
             && let HeapObj::Slice(start, stop, step) = self.heap.get(idx_val).clone()
         {
@@ -298,7 +298,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* Splice for `xs[a:b] = items` and `del xs[a:b]`. step=1 resizes; step≠1 demands exact-length RHS. Lists only, tuples/strings are immutable. */
+    /* Splice for `xs[a:b] = items` and `del xs[a:b]`. step=1 resizes, step≠1 demands exact-length RHS. Lists only since tuples/strings are immutable. */
     fn store_slice(&mut self, cont: Val,start: Val, stop: Val, step: Val, new_items: Vec<Val>) -> Result<(), VmErr> {
         let st = if step.is_none() { 1 }
             else if step.is_int() { step.as_int() }
@@ -324,8 +324,7 @@ impl<'a> VM<'a> {
             return Ok(());
         }
 
-        // Extended slice (step!=1): collect indices; RHS length must match exactly.
-        // Negative-step start caps at len-1; clamp's min(len) alone would yield an out-of-range len.
+        // Extended slice (step!=1) collects indices, RHS length must match exactly. Negative-step start caps at len-1 since clamp's min(len) alone would yield an out-of-range len.
         let (s, e) = if st > 0 { (clamp(start, 0), clamp(stop, len)) } else { (clamp(start, len - 1).min(len - 1), clamp(stop, -1)) };
         let mut indices: Vec<usize> = Vec::new();
         let mut cur = s;
@@ -346,7 +345,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    // `slice(stop)` | `slice(start, stop)` | `slice(start, stop, step)`, builtin; usable as a sequence index.
+    // `slice(stop)` | `slice(start, stop)` | `slice(start, stop, step)`, builtin, usable as a sequence index.
     pub fn call_slice(&mut self, argc: u16) -> Result<(), VmErr> {
         let args = self.pop_n(argc as usize)?;
         let (start, stop, step) = match args.as_slice() {

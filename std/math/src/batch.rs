@@ -1,7 +1,3 @@
-/*
-Vectorized fast path. Operates on `bytes` of little-endian f64, crossing the host boundary once per call instead of once per element.
-*/
-
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -14,7 +10,7 @@ fn check_len(data: &[u8]) -> Result<()> {
     Ok(())
 }
 
-// Apply `f` element-wise; chunked decode avoids the alignment UB of casting `&[u8]` to `&[f64]`.
+// Apply `f` element-wise over `bytes` of little-endian f64, crossing the host boundary once per call instead of once per element. Chunked decode avoids the alignment UB of casting `&[u8]` to `&[f64]`.
 fn map(data: &[u8], f: impl Fn(f64) -> f64) -> Result<Vec<u8>> {
     check_len(data)?;
     let mut out = vec![0u8; data.len()];
@@ -25,7 +21,7 @@ fn map(data: &[u8], f: impl Fn(f64) -> f64) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/* Element-wise transforms: `bytes` -> `bytes`, same length. */
+/* Element-wise transforms, `bytes` -> `bytes`, same length. */
 
 macro_rules! map_all { ($($f:ident => $l:ident),* $(,)?) => { $(
     #[plugin_fn]
@@ -41,7 +37,7 @@ map_all!(
     cos_all => cos,
 );
 
-/* Reductions: `bytes` -> scalar, the largest boundary win (N values in, one out). */
+/* Reductions, `bytes` -> scalar, the largest boundary win (N values in, one out). */
 
 // Neumaier compensated sum over the packed buffer.
 #[plugin_fn]
@@ -68,7 +64,7 @@ fn prod_all(data: Bytes) -> Result<f64> {
     Ok(acc)
 }
 
-/* Binary kernels: two same-length `bytes` operand buffers. */
+/* Binary kernels over two same-length `bytes` operand buffers. */
 
 fn check_pair(a: &[u8], b: &[u8]) -> Result<()> {
     check_len(a)?;
@@ -102,7 +98,7 @@ bin_all!(
     mul_all => *,
 );
 
-// Scalar broadcast: every element times `k`.
+// Scalar broadcast, every element times `k`.
 #[plugin_fn]
 fn scale_all(data: Bytes, k: f64) -> Result<Bytes> {
     Ok(Bytes(map(&data, |x| x * k)?))
@@ -123,7 +119,7 @@ fn dot_all(a: Bytes, b: Bytes) -> Result<f64> {
     Ok(sum + c)
 }
 
-/* Row-major (rows x cols) matrix times vector; returns `rows` packed values. */
+/* Row-major (rows x cols) matrix times vector, returns `rows` packed values. */
 #[plugin_fn]
 fn matvec(m: Bytes, x: Bytes, cols: i64) -> Result<Bytes> {
     check_len(&m)?;

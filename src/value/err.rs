@@ -2,7 +2,7 @@ use alloc::string::String;
 
 use super::{CallFrame, SchedulerStatus};
 
-/* Runtime errors; static variants alloc-free, dynamic carry user text. `HostYield` is a control-flow signal (not catchable by Python try/except), riding the `Result` chain so `?` propagation reuses without parallel signaling. */
+/* Runtime errors, static variants alloc-free, dynamic carry user text. `HostYield` is a control-flow signal (not catchable by Python try/except), riding the `Result` chain so `?` propagation reuses without parallel signaling. */
 #[derive(Debug, Clone)]
 pub enum VmErr {
     CallDepth, Heap, Budget, ZeroDiv, Overflow,
@@ -14,12 +14,12 @@ pub enum VmErr {
     Attribute(String),
     Raised(String),
     HostYield(SchedulerStatus),
-    /// Native `CallExtern` deferred to host; caught locally by `call_extern`, never propagates.
+    /// Native `CallExtern` deferred to host, caught locally by `call_extern`, never propagates.
     HostCallDeferred,
 }
 
 impl VmErr {
-    /* Class-name lookup used by the exception unwind path and the `with` cleanup opcode; native errors, `Raised` keeps the user-supplied name. */
+    /* Class-name lookup used by the exception unwind path and the `with` cleanup opcode. Native variants map below, `Raised` keeps the user-supplied name. */
     pub fn class_name(&self) -> alloc::string::String {
         match self {
             Self::ZeroDiv => "ZeroDivisionError".into(),
@@ -31,11 +31,11 @@ impl VmErr {
             Self::CallDepth => "RecursionError".into(),
             Self::Heap => "MemoryError".into(),
             Self::Budget | Self::Runtime(_) => "RuntimeError".into(),
-            // `Raised` carries "Class" or "Class: message"; the bare class name drives except-matching.
+            // `Raised` carries "Class" or "Class: message", the bare class name drives except-matching.
             Self::Raised(s) => s.split(':').next().unwrap_or(s).trim().into(),
-            // Unreachable in correct hosts; embedder catches HostYield before traceback rendering.
+            // Unreachable in correct hosts, embedder catches HostYield before traceback rendering.
             Self::HostYield(_) => "_HostYield".into(),
-            // Caught locally in call_extern; unreachable here.
+            // Caught locally in call_extern, unreachable here.
             Self::HostCallDeferred => "_HostCallDeferred".into(),
         }
     }
@@ -63,7 +63,7 @@ impl VmErr {
         use crate::s;
         match self {
             Self::Name(n) => s!("NameError: name '", str n, "' is not defined"),
-            // Already formatted as "Class" or "Class: message"; render verbatim (no double prefix).
+            // Already formatted as "Class" or "Class: message", render verbatim (no double prefix).
             Self::Raised(m) => m.clone(),
             Self::Type(m) => s!("TypeError: ", str m),
             Self::TypeMsg(m) => s!("TypeError: ", str m),
@@ -76,14 +76,14 @@ impl VmErr {
         }
     }
 
-    /* Message-only form (no "Class:" prefix); feeds `e.args`. */
+    /* Message-only form (no "Class:" prefix), feeds `e.args`. */
     pub fn message(&self) -> alloc::string::String {
         use alloc::string::String;
         match self {
             Self::Name(n) => crate::s!("name '", str n, "' is not defined"),
             Self::Type(m) | Self::Value(m) | Self::Runtime(m) => String::from(*m),
             Self::TypeMsg(m) | Self::Attribute(m) => m.clone(),
-            // `Raised` carries "Class" or "Class: message"; the message is the part after the class (empty for a bare class), so re-wrapping into an ExcInstance doesn't double the class prefix.
+            // `Raised` carries "Class" or "Class: message". The message is the part after the class (empty for a bare class), so re-wrapping into an ExcInstance doesn't double the class prefix.
             Self::Raised(m) => m.split_once(": ").map_or(String::new(), |(_, msg)| String::from(msg)),
             Self::ZeroDiv => String::from("division by zero"),
             Self::Overflow => String::from("integer too large for 128-bit int range"),
@@ -95,13 +95,13 @@ impl VmErr {
         }
     }
 
-    /* `render()` anchored at a byte offset for rustc-style caret preview; falls back when absent. */
+    /* `render()` anchored at a byte offset for rustc-style caret preview, falls back when absent. */
     pub fn render_at(&self, src: &str, byte_pos: Option<usize>, path: Option<&str>) -> alloc::string::String {
         let Some(pos) = byte_pos else { return self.render(); };
         crate::parser::Diagnostic { start: pos, end: pos, msg: self.render() }.render(src, path)
     }
 
-    /* Multi-frame traceback: `error:` at the site, then `note: called from ...` outward. */
+    /* Multi-frame traceback, `error:` at the site, then `note: called from ...` outward. */
     pub fn render_traceback(&self, error_src: &str, error_byte_pos: Option<usize>, error_path: Option<&str>, frames: &[CallFrame], function_names: &[alloc::string::String]) -> alloc::string::String {
         let mut out = self.render_at(error_src, error_byte_pos, error_path);
         for f in frames.iter().rev() {

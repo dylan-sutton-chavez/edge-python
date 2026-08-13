@@ -10,7 +10,7 @@ const MAX_FSTRING_DEPTH: usize = 200;
 pub(super) struct Scanner<'a> {
     pub src: &'a [u8],
     pub pos: usize,
-    /* LIFO queue for states that emit multiple tokens per source position (newline/dedent, f-string).2 */
+    /* LIFO queue for states that emit multiple tokens per source position (newline/dedent, f-string). */
     pub pending: Vec<(TokenType,usize,usize,usize)>,
     pub indent_stack: Vec<usize>,
     pub nesting: u32,
@@ -48,7 +48,7 @@ impl<'a> Scanner<'a> {
     pub fn skip_whitespace(&mut self) {
         loop {
             self.scan_while(|b| BYTE_CLASS[b as usize] & SPACE != 0);
-            // Backslash-newline line continuation: consume the escape and the newline.
+            // Backslash-newline line continuation, consume the escape and the newline.
             if self.pos + 1 < self.src.len() && self.src[self.pos] == b'\\'
                 && matches!(self.src[self.pos + 1], b'\n' | b'\r') {
                 self.pos += 1;
@@ -65,7 +65,7 @@ impl<'a> Scanner<'a> {
         self.scan_while(|b| BYTE_CLASS[b as usize] & DIGIT != 0 || b == b'_');
     }
 
-    /* Underscores must sit between digits: no leading, trailing, or consecutive. Empty body only valid after a decimal dot. */
+    /* Underscores must sit between digits, no leading, trailing, or consecutive. Empty body only valid after a decimal dot. */
     fn check_digits(&mut self, start: usize, end: usize, allow_empty: bool) {
         if start == end {
             if !allow_empty {
@@ -95,7 +95,7 @@ impl<'a> Scanner<'a> {
         self.src.get(self.pos + offset).copied()
     }
 
-    // Numbers: decimal, hex, octal, binary, float.
+    // Numbers, decimal, hex, octal, binary, float.
 
     #[inline]
     fn scan_exponent(&mut self) -> bool {
@@ -106,7 +106,7 @@ impl<'a> Scanner<'a> {
             }
             let body_start = self.pos;
             self.scan_digits();
-            /* Format specs reuse `e/E` (e.g. `.2e`); leave empty-exponent detection to the float parser instead of erroring at lex time. */
+            /* Format specs reuse `e/E` (e.g. `.2e`), leave empty-exponent detection to the float parser instead of erroring at lex time. */
             self.check_digits(body_start, self.pos, true);
             true
         } else {
@@ -131,7 +131,7 @@ impl<'a> Scanner<'a> {
             self.pos += 1;
             let frac_start = self.pos;
             self.scan_digits();
-            // Trailing dot like `5.` is valid; only validate non-empty fractions.
+            // Trailing dot like `5.` is valid, only validate non-empty fractions.
             self.check_digits(frac_start, self.pos, true);
         }
         is_float |= self.scan_exponent();
@@ -146,7 +146,7 @@ impl<'a> Scanner<'a> {
         TokenType::Float
     }
 
-    // Strings: single, double, triple-quoted (escape-aware).
+    // Strings, single, double, triple-quoted (escape-aware).
 
     fn scan_string(&mut self, quote: u8, start: usize) {
         if self.at(0) == Some(quote) && self.at(1) == Some(quote) {
@@ -187,7 +187,7 @@ impl<'a> Scanner<'a> {
         self.report(start, start + 3, "unterminated triple-quoted string literal");
     }
 
-    // F-strings: emits Start/Middle/End and suspends at `{`.
+    // F-strings emit Start/Middle/End and suspend at `{`.
 
     fn start_fstring(&mut self, start: usize, prefix_end: usize) {
         let quote = self.src[prefix_end];
@@ -255,7 +255,7 @@ impl<'a> Scanner<'a> {
         self.pos = pos;
     }
 
-    // Newlines: emit Newline/Indent/Dedent, or NL inside brackets.
+    // Newlines emit Newline/Indent/Dedent, or NL inside brackets.
 
     fn handle_newline(&mut self, start: usize) {
         let current_line = self.line;
@@ -341,7 +341,7 @@ impl<'a> Scanner<'a> {
         self.pos = end;
     }
 
-    /* Main dispatch: drains pending queue, then routes each byte via BYTE_CLASS / SINGLE_TOK lookups. */
+    /* Main dispatch, drains pending queue, then routes each byte via BYTE_CLASS / SINGLE_TOK lookups. */
     pub fn next_token(&mut self) -> Option<(TokenType, usize, usize, usize)> {
         if let Some(tok) = self.pending.pop() {
             return Some(tok);
@@ -398,7 +398,7 @@ impl<'a> Scanner<'a> {
                 return Some((TokenType::String, line_at_start, start, self.pos));
             }
 
-            /* Bytes literal (b/B, optional r/R for raw): scans like a string, the parser decodes bytes-specific escapes later. */
+            /* Bytes literal (b/B, optional r/R for raw) scans like a string, the parser decodes bytes-specific escapes later. */
             if is_bytes_prefix(slice)
                 && let Some(&q) = self.src.get(self.pos)
                 && (q == b'"' || q == b'\'')
@@ -446,7 +446,7 @@ impl<'a> Scanner<'a> {
             return self.pending.pop();
         }
 
-        // Multi-char operators: 3 characters
+        // Multi-char operators, 3 characters
         if self.pos + 2 < self.src.len() {
             let kind = match &self.src[self.pos..self.pos + 3] {
                 b"**=" => Some(TokenType::DoubleStarEqual),
@@ -461,7 +461,7 @@ impl<'a> Scanner<'a> {
             }
         }
 
-        // Multi-char operators: 2 characters
+        // Multi-char operators, 2 characters
         if self.pos + 1 < self.src.len() {
             let kind = match &self.src[self.pos..self.pos + 2] {
                 b"!=" => Some(TokenType::NotEqual), b"%=" => Some(TokenType::PercentEqual),
@@ -482,10 +482,10 @@ impl<'a> Scanner<'a> {
             }
         }
 
-        // Single character: table dispatch
+        // Single character, table dispatch
         self.pos += 1;
         let idx = if b < 128 { SINGLE_TOK[b as usize] } else { 0 };
-        /* Index 0 means no operator slot: report and skip instead of emitting a stray Endmarker that truncates the stream. */
+        /* Index 0 means no operator slot, report and skip instead of emitting a stray Endmarker that truncates the stream. */
         if idx == 0 {
             self.report(start, self.pos, "unexpected character");
             return self.next_token();

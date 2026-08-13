@@ -14,7 +14,7 @@ pub use err::*;
 pub use math::*;
 pub use scheduler::*;
 
-/* Per-execution caps: recursion depth, op budget, heap quota. */
+/* Per-execution caps for recursion depth, op budget, heap quota. */
 #[derive(Clone, Copy)]
 pub struct Limits { pub calls: usize, pub ops: usize, pub heap: usize }
 
@@ -23,7 +23,7 @@ impl Limits {
     pub fn sandbox() -> Self { Self { calls: 256, ops: 100_000_000, heap: 100_000 } }
 }
 
-/* Host-provided callable, resolved at compile time and dispatched by `CallExtern`. `Arc<dyn Fn>` lets loaders capture stateful handles; `pure` enables memoization. Third arg is the kwargs slot, `None` for plain positional calls, `Some(dict_val)` when the caller used `name=value` syntax. */
+/* Host-provided callable, resolved at compile time and dispatched by `CallExtern`. `Arc<dyn Fn>` lets loaders capture stateful handles, `pure` enables memoization. Third arg is the kwargs slot, `None` for plain positional calls, `Some(dict_val)` when the caller used `name=value` syntax. */
 pub type ExternCallable =
     alloc::sync::Arc<dyn Fn(&mut HeapPool, &[Val], Option<Val>) -> Result<Val, VmErr> + Send + Sync>;
 
@@ -40,7 +40,7 @@ impl core::fmt::Debug for ExternFn {
     }
 }
 
-/* NaN-boxed 8-byte value (47-bit int, float, bool, None, undef, heap idx); layout in `abi::nan_box`. */
+/* NaN-boxed 8-byte value (47-bit int, float, bool, None, undef, heap idx), layout in `abi::nan_box`. */
 use crate::abi::nan_box::{
     QNAN, SIGN, TAG_UNDEF, TAG_NONE, TAG_TRUE, TAG_FALSE, TAG_INT, TAG_HEAP,
     INT_PAYLOAD_MASK,
@@ -52,7 +52,7 @@ pub struct Val(pub(crate) u64);
 impl PartialEq for Val {
     #[inline] fn eq(&self, o: &Self) -> bool {
         if self.0 == o.0 { return true; }
-        // Mirror Hash: numeric immediates unify by value so True==1==1.0 share a dict/set key.
+        // Mirror Hash, numeric immediates unify by value so True==1==1.0 share a dict/set key.
         let num = |v: &Val| -> Option<f64> {
             if v.is_int() { Some(v.as_int() as f64) }
             else if v.is_bool() { Some(v.as_bool() as i64 as f64) }
@@ -105,7 +105,7 @@ impl Val {
     #[inline(always)] pub fn none() -> Self { Self(TAG_NONE) }
     #[inline(always)] pub fn bool(b: bool) -> Self { Self(if b { TAG_TRUE } else { TAG_FALSE }) }
     #[inline(always)] pub fn heap(idx: u32) -> Self { Self(TAG_HEAP | ((idx as u64) << 4)) }
-    /* Unbound-local sentinel; lets slots stay Vec<Val> and LoadName check via one u64 compare. */
+    /* Unbound-local sentinel, lets slots stay Vec<Val> and LoadName check via one u64 compare. */
     #[inline(always)] pub fn undef() -> Self { Self(TAG_UNDEF) }
 
     #[inline(always)] pub fn is_float(&self) -> bool { (self.0 & QNAN) != QNAN }
@@ -143,43 +143,42 @@ pub enum HeapObj {
     List(Rc<RefCell<Vec<Val>>>),
     Dict(Rc<RefCell<DictMap>>),
     Set(Rc<RefCell<ValSet>>),
-    /* Immutable, hashable counterpart of Set; built via `frozenset(iter)`. */
+    /* Immutable, hashable counterpart of Set, built via `frozenset(iter)`. */
     FrozenSet(Rc<ValSet>),
     Tuple(Vec<Val>),
-    // (fi, defaults, captures, attrs); attrs share the Class member shape.
+    // (fi, defaults, captures, attrs), attrs share the Class member shape.
     Func(usize, Vec<Val>, Vec<(usize, Val)>, Rc<RefCell<Vec<(String, Val)>>>),
     Range(i64, i64, i64),
     Slice(Val, Val, Val),
     // True `...` singleton, distinct from any string.
     Ellipsis,
     Type(String),
-    // `NotImplemented` singleton; dunder return sentinel that triggers the reflected operator fallback.
+    // `NotImplemented` singleton, dunder return sentinel that triggers the reflected operator fallback.
     NotImplemented,
-    /* Wide-int slow path (i128); `int_to_val` canonicalises so 47-bit values stay inline. */
+    /* Wide-int slow path (i128), `int_to_val` canonicalises so 47-bit values stay inline. */
     LongInt(i128),
-    /* Exception instance: type name + ctor args (exposed via `.args`). */
+    /* Exception instance, type name + ctor args (exposed via `.args`). */
     ExcInstance(String, Vec<Val>),
     BoundMethod(Val, BuiltinMethodId),
     NativeFn(NativeFnId),
-    // `bases` lists direct parents in declared order; `resolve_attr` DFS-walks them on miss.
-    // Members are mutable so a decorator or `cls.attr = ...` can add or replace class attributes.
+    // `bases` lists direct parents in declared order, `resolve_attr` DFS-walks them on miss. Members are mutable so a decorator or `cls.attr = ...` can add or replace class attributes.
     Class(String, Vec<Val>, Rc<RefCell<Vec<(String, Val)>>>),
     Instance(Val, Rc<RefCell<DictMap>>),
-    // `(recv, func, class)`; `class` is where `func` was found so the called frame knows what `super()` should skip past.
+    // `(recv, func, class)`, `class` is where `func` was found so the called frame knows what `super()` should skip past.
     BoundUserMethod(Val, Val, Val),
-    // `super()` proxy: attribute access walks the bases of `cls` (skipping `cls` itself); methods bind to `recv`.
+    // `super()` proxy, attribute access walks the bases of `cls` (skipping `cls` itself), methods bind to `recv`.
     Super(Val, Val),
-    // `(getter, setter)`; `setter == none()` for getter-only properties, written via `@property` / `@x.setter`.
+    // `(getter, setter)`, `setter == none()` for getter-only properties, written via `@property` / `@x.setter`.
     Property(Val, Val),
-    // Intermediate produced by `prop.setter`: callable that takes a function and returns a new `Property` with the setter attached.
+    // Intermediate produced by `prop.setter`, a callable that takes a function and returns a new `Property` with the setter attached.
     PropertySetter(Val),
-    // `staticmethod(func)`: wraps a function so attribute lookup returns it unbound.
+    // `staticmethod(func)` wraps a function so attribute lookup returns it unbound.
     StaticMethod(Val),
-    // `classmethod(func)`: attribute lookup binds the class.
+    // `classmethod(func)`, attribute lookup binds the class.
     ClassMethod(Val),
-    // Trailing `Vec<SyncFrame>` stacks suspended sync sub-calls (innermost-last); resume walks inside-out, each return lands on next frame's Call site. `BodyRef` discriminates user-fn coros from the implicit module-body coro. Final `Vec<ExceptionFrame>` carries try/except across yields.
+    // Trailing `Vec<SyncFrame>` stacks suspended sync sub-calls (innermost-last). Resume walks inside-out, each return lands on next frame's Call site. `BodyRef` discriminates user-fn coros from the implicit module-body coro. Final `Vec<ExceptionFrame>` carries try/except across yields.
     Coroutine(usize, Vec<Val>, Vec<Val>, BodyRef, Vec<IterFrame>, Vec<SyncFrame>, Vec<ExceptionFrame>),
-    /* Produced by `import m`; attr access via LoadAttr, calls fuse through CallMethod. */
+    /* Produced by `import m`, attr access via LoadAttr, calls fuse through CallMethod. */
     Module(String, Vec<(String, Val)>),
     /* A native binding lifted to a first-class callable. */
     Extern(ExternFn),
@@ -187,7 +186,7 @@ pub enum HeapObj {
 
 pub use crate::vm::methods::BuiltinMethodId;
 
-// Single source of truth per builtin: variant => name, arity (`var` = variadic, validated in handler).
+// Single source of truth per builtin, variant => name, arity (`var` = variadic, validated in handler).
 macro_rules! builtins {
     ( $( $variant:ident => $name:literal, $arity:tt );* $(;)? ) => {
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,13 +194,13 @@ macro_rules! builtins {
         pub enum NativeFnId { $( $variant ),* }
 
         impl NativeFnId {
-            // All variants in declaration order; drives global registration.
+            // All variants in declaration order, drives global registration.
             pub const ALL: &'static [NativeFnId] = &[ $( NativeFnId::$variant ),* ];
             // Python-visible name.
             pub fn name(self) -> &'static str { match self { $( NativeFnId::$variant => $name ),* } }
-            // Inverse of `name`; used by snapshot restore.
+            // Inverse of `name`, used by snapshot restore.
             pub fn from_name(n: &str) -> Option<Self> { match n { $( $name => Some(NativeFnId::$variant), )* _ => None } }
-            // Fixed positional arity; None means the handler validates the count.
+            // Fixed positional arity, None means the handler validates the count.
             pub fn arity(self) -> Option<u16> { match self { $( NativeFnId::$variant => builtins!(@a $arity) ),* } }
         }
     };
@@ -234,7 +233,7 @@ builtins! {
     ClassMethod => "classmethod", 1;
 }
 
-/* Content-hashed set: equal-by-content values dedup in O(1) regardless of heap identity. */
+/* Content-hashed set, equal-by-content values dedup in O(1) regardless of heap identity. */
 #[derive(Clone, Debug, Default)]
 pub struct ValSet {
     t: hashbrown::HashTable<Val>,
@@ -268,7 +267,7 @@ impl ValSet {
     }
 }
 
-/* Insertion-ordered dict: Vec for ordering, content-hashed HashTable<usize> index for O(1) get. */
+/* Insertion-ordered dict, Vec for ordering, content-hashed HashTable<usize> index for O(1) get. */
 #[derive(Clone, Debug)]
 pub struct DictMap {
     pub entries: Vec<(Val, Val)>,
@@ -276,12 +275,12 @@ pub struct DictMap {
 }
 
 impl DictMap {
-    /* Entries only; `rebuild_index` once the heap lives. */
+    /* Entries only, `rebuild_index` once the heap lives. */
     pub(crate) fn from_entries(entries: Vec<(Val, Val)>) -> Self {
         Self { entries, index: hashbrown::HashTable::new() }
     }
 
-    /* Rehash after restore; hashing reads the heap. */
+    /* Rehash after restore, hashing reads the heap. */
     pub(crate) fn rebuild_index(&mut self, heap: &HeapPool) {
         self.index.clear();
         let e = &self.entries;
@@ -342,7 +341,7 @@ impl DictMap {
         dm
     }
 
-    /* Vec shift after remove invalidates stored positions; rebuild the whole index. */
+    /* Vec shift after remove invalidates stored positions, rebuild the whole index. */
     fn reindex(&mut self, heap: &HeapPool) {
         self.index.clear();
         for i in 0..self.entries.len() {
@@ -357,7 +356,7 @@ impl Default for DictMap {
     fn default() -> Self { Self::new() }
 }
 
-/* Insert-or-replace in a named-member list; shared by Class members and Func attrs. */
+/* Insert-or-replace in a named-member list, shared by Class members and Func attrs. */
 pub(crate) fn set_member(members: &Rc<RefCell<Vec<(String, Val)>>>, name: &str, value: Val) {
     let mut m = members.borrow_mut();
     match m.iter_mut().find(|(n, _)| n == name) {
@@ -380,7 +379,7 @@ impl DictMap {
     }
 }
 
-/* Visits every reachable `Val` once; single source of truth for GC traversal. */
+/* Visits every reachable `Val` once, single source of truth for GC traversal. */
 pub(crate) fn for_each_val(obj: &HeapObj, mut f: impl FnMut(Val)) {
     match obj {
         HeapObj::Tuple(items) => for &v in items { f(v); },
@@ -448,7 +447,7 @@ pub struct HeapPool {
     ellipsis_idx: Option<u32>,
     // Same singleton invariant as `ellipsis_idx`, but for `NotImplemented`.
     notimpl_idx: Option<u32>,
-    /* Reused across mark() calls; cleared not freed, so GC never re-allocates under pressure. */
+    /* Reused across mark() calls, cleared not freed, so GC never re-allocates under pressure. */
     mark_worklist: Vec<u32>,
 }
 
@@ -516,7 +515,7 @@ impl HeapPool {
 
     pub fn mark(&mut self, v: Val) {
         if !v.is_heap() { return; }
-        /* Split borrow: closure needs &mut mark_worklist while we read slots. */
+        /* Split borrow, closure needs &mut mark_worklist while we read slots. */
         let HeapPool { slots, mark_worklist, .. } = self;
         mark_worklist.push(v.as_heap());
         while let Some(idx) = mark_worklist.pop() {
@@ -557,19 +556,19 @@ impl HeapPool {
         self.gc_threshold = (self.live * 2).max(512);
         self.alloc_count = 0;
 
-        // Cap free list at 512K slots; sort to prefer low indices and reduce fragmentation.
+        // Cap free list at 512K slots, sort to prefer low indices and reduce fragmentation.
         if self.free_list.len() > 524_288 {
             self.free_list.sort_unstable();
             self.free_list.truncate(524_288);
         }
     }
 
-    /* One entry per slot; None when free. */
+    /* One entry per slot, None when free. */
     pub(crate) fn snapshot_objs(&self) -> impl Iterator<Item = Option<&HeapObj>> {
         self.slots.iter().map(|s| s.obj.as_ref())
     }
 
-    /* Replace the pool; rebuild free and intern tables. */
+    /* Replace the pool, rebuild free and intern tables. */
     pub(crate) fn restore_objs(&mut self, objs: Vec<Option<HeapObj>>) {
         self.slots = objs.into_iter().map(|obj| HeapSlot { obj, marked: false }).collect();
         self.free_list.clear();
@@ -628,7 +627,7 @@ impl HeapPool {
             .expect("garbage collector invariant violated: live Val references a freed heap slot (mut)")
     }
 
-    /* Panic-free access for type checks: None when `v` is not a live heap object. */
+    /* Panic-free access for type checks, None when `v` is not a live heap object. */
     #[inline] pub fn try_get(&self, v: Val) -> Option<&HeapObj> {
         if !v.is_heap() { return None; }
         self.slots.get(v.as_heap() as usize).and_then(|s| s.obj.as_ref())
@@ -639,7 +638,7 @@ impl HeapPool {
     }
 
 
-    /* Stable per-type tag for inline-cache binop specialisation; 0 for unknown/freed. */
+    /* Stable per-type tag for inline-cache binop specialisation, 0 for unknown/freed. */
     #[inline(always)]
     pub fn val_tag(&self, v: Val) -> u8 {
         if v.is_int() { 1 } else if v.is_float() { 2 } else if v.is_bool() { 3 }
@@ -678,7 +677,7 @@ impl HeapPool {
         } else { 0 }
     }
 
-    /* Identity probe for the `NotImplemented` singleton; consumed by the dunder dispatch protocol. */
+    /* Identity probe for the `NotImplemented` singleton, consumed by the dunder dispatch protocol. */
     #[inline(always)]
     pub fn is_not_implemented(&self, v: Val) -> bool {
         v.is_heap()
@@ -694,7 +693,7 @@ impl HeapPool {
     }
 }
 
-/* Widens int/bool/LongInt to i128 for the slow path; None on non-integer operands. */
+/* Widens int/bool/LongInt to i128 for the slow path, None on non-integer operands. */
 #[inline]
 pub fn as_i128(v: Val, heap: &HeapPool) -> Option<i128> {
     if v.is_int() { Some(v.as_int() as i128) }

@@ -1,14 +1,8 @@
-/*
-Sealed module contract: op codes / tags / error kinds / HandleTable / ErrorStash / codec.
-Constants mirror `wasm-abi` byte-for-byte; extend system modules via new Op values, never new imports.
-Spec: docs/content/reference/abi.md.
-*/
-
 use alloc::{string::String, vec::Vec};
 
 pub use wasm_abi::{nan_box, WireValue, EDGE_ABI_VERSION, MAX_WIRE_DEPTH, TAG_INVALID};
 
-/* Sealed enum + `from_u32` reverse map from one variant list, so the two can't drift. Values mirror `wasm_abi::*`. */
+/* Sealed op codes / tags / error kinds with a `from_u32` reverse map from one variant list, so the two can't drift. Values mirror `wasm_abi::*` byte-for-byte per docs/content/reference/abi.md, extend host modules via new Op values, never new imports. */
 macro_rules! abi_enum {
     ($name:ident { $($variant:ident = $value:path),+ $(,)? }) => {
         #[allow(non_camel_case_types)]
@@ -47,11 +41,11 @@ abi_enum!(Tag {
     Bool = wasm_abi::tag::BOOL,
     Int = wasm_abi::tag::INT,
     Float = wasm_abi::tag::FLOAT,
-    // UTF-8 bytes: encoder builds a str, decoder returns its bytes.
+    // UTF-8 bytes, encoder builds a str, decoder returns its bytes.
     Bytes = wasm_abi::tag::BYTES,
-    // Opaque bytes: no UTF-8 validation, maps to Python `bytes`.
+    // Opaque bytes, no UTF-8 validation, maps to Python `bytes`.
     Raw = wasm_abi::tag::RAW,
-    // TLV composites; payloads defined in `wasm_abi::WireValue`.
+    // TLV composites, payloads defined in `wasm_abi::WireValue`.
     List = wasm_abi::tag::LIST,
     Dict = wasm_abi::tag::DICT,
 });
@@ -69,14 +63,14 @@ abi_enum!(ErrorKind {
 
 /* Handle table */
 
-// Handle slot; rc=0 = free. Exposed handle = index+1 (0 reserved as invalid).
+// Handle slot, rc=0 = free. Exposed handle = index+1 (0 reserved as invalid).
 struct HandleSlot {
-    // Raw Val bits, opaque to the ABI; encode/decode go through classify_*.
+    // Raw Val bits, opaque to the ABI, encode/decode go through classify_*.
     val: u64,
     rc: u32,
 }
 
-// Refcounted handle -> Val-bits map; cleared between script runs.
+// Refcounted handle -> Val-bits map, cleared between script runs.
 pub struct HandleTable {
     slots: Vec<HandleSlot>,
     free_list: Vec<u32>,
@@ -116,7 +110,7 @@ impl HandleTable {
             .map(|s| s.val)
     }
 
-    // Decrements rc; frees slot at 0. Safe against double-release.
+    // Decrements rc, frees slot at 0. Safe against double-release.
     pub fn release(&mut self, h: u32) {
         if h == 0 { return; }
         let idx = (h - 1) as usize;
@@ -131,7 +125,7 @@ impl HandleTable {
 
 /* Error stash */
 
-// Single-slot error stash; populated by dispatch failures / edge_throw, drained by edge_take_error.
+// Single-slot error stash, populated by dispatch failures / edge_throw, drained by edge_take_error.
 #[derive(Default)]
 pub struct ErrorStash(Option<(u32, String)>);
 
@@ -144,7 +138,7 @@ impl ErrorStash {
         self.0 = Some((kind, msg));
     }
 
-    // Convenience: stash a typed error.
+    // Stash a typed error.
     pub fn set_typed(&mut self, kind: ErrorKind, msg: String) {
         self.0 = Some((kind as u32, msg));
     }
@@ -152,7 +146,7 @@ impl ErrorStash {
     // Take the error if present.
     pub fn take(&mut self) -> Option<(u32, String)> { self.0.take() }
 
-    // Peeks without consuming; lets edge_take_error retry on buffer-too-small.
+    // Peeks without consuming, lets edge_take_error retry on buffer-too-small.
     pub fn peek(&self) -> Option<(u32, &str)> {
         self.0.as_ref().map(|(k, m)| (*k, m.as_str()))
     }
@@ -160,7 +154,7 @@ impl ErrorStash {
 
 /* Primitive codec helpers */
 
-// edge_encode outcome: Direct (Val bits), AllocStr / AllocBytes / AllocLongInt (host alloc), Composite (host builds recursively), or Invalid.
+// edge_encode outcome, Direct (Val bits), AllocStr / AllocBytes / AllocLongInt (host alloc), Composite (host builds recursively), or Invalid.
 pub enum EncodeRequest<'a> {
     Direct(u64),
     AllocStr(&'a str),
@@ -170,11 +164,11 @@ pub enum EncodeRequest<'a> {
     Invalid,
 }
 
-// Inline range for Val::int (47-bit signed); values outside go to HeapObj::LongInt.
+// Inline range for Val::int (47-bit signed), values outside go to HeapObj::LongInt.
 const INLINE_INT_MIN: i128 = -0x0000_8000_0000_0000i64 as i128;
 const INLINE_INT_MAX: i128 =  0x0000_7FFF_FFFF_FFFFi64 as i128;
 
-// Val bits for an inline int; `None` when the value needs a LongInt.
+// Val bits for an inline int, `None` when the value needs a LongInt.
 pub fn inline_int_bits(i: i128) -> Option<u64> {
     use nan_box::*;
     (INLINE_INT_MIN..=INLINE_INT_MAX).contains(&i).then_some(TAG_INT | ((i as i64) as u64 & INT_PAYLOAD_MASK))
@@ -196,7 +190,7 @@ pub fn classify_encode(tag: u32, bytes: &[u8]) -> EncodeRequest<'_> {
             let mut buf = [0u8; 16];
             buf.copy_from_slice(bytes);
             let i = i128::from_le_bytes(buf);
-            // Fits in 47-bit inline range -> emit as Val::int directly; else heap-alloc LongInt.
+            // Fits in 47-bit inline range -> emit as Val::int directly, else heap-alloc LongInt.
             match inline_int_bits(i) {
                 Some(bits) => EncodeRequest::Direct(bits),
                 None => EncodeRequest::AllocLongInt(i),
@@ -222,7 +216,7 @@ pub fn classify_encode(tag: u32, bytes: &[u8]) -> EncodeRequest<'_> {
     }
 }
 
-// edge_decode outcome: Primitive (ready bytes), Heap (host materializes), or Invalid.
+// edge_decode outcome, Primitive (ready bytes), Heap (host materializes), or Invalid.
 pub enum DecodeBits {
     Primitive { tag: u32, bytes: PrimitiveBytes },
     Heap,
@@ -236,18 +230,18 @@ pub enum PrimitiveBytes {
     Sixteen([u8; 16]),
 }
 
-// Classifies Val bits; Heap routes the host to HeapPool.
+// Classifies Val bits, Heap routes the host to HeapPool.
 pub fn classify_decode(val_bits: u64) -> DecodeBits {
     use nan_box::*;
 
-    // Float: any non-QNAN-tagged pattern.
+    // Any non-QNAN-tagged pattern is a float.
     if (val_bits & QNAN) != QNAN {
         return DecodeBits::Primitive {
             tag: Tag::Float as u32,
             bytes: PrimitiveBytes::Eight(f64::from_bits(val_bits).to_le_bytes()),
         };
     }
-    // Int: QNAN|SIGN with payload. Sign-extend the 47-bit payload to i128 (wire width).
+    // Int, QNAN|SIGN with payload. Sign-extend the 47-bit payload to i128 (wire width).
     if (val_bits & (QNAN | SIGN)) == TAG_INT {
         let raw = (val_bits & INT_PAYLOAD_MASK) as i64;
         let sign_extended_i64 = (raw << 16) >> 16;

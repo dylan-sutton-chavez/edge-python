@@ -1,10 +1,6 @@
-/*
-Built-in methods for `bytes` receivers. Arity is checked by the dispatcher.
-*/
-
 use super::prelude::*;
 
-// `bytes.decode([encoding[, errors]])`. 'strict' raises on invalid UTF-8; 'ignore'/'replace' recover.
+// `bytes.decode([encoding[, errors]])`. 'strict' raises on invalid UTF-8, 'ignore'/'replace' recover.
 pub fn decode(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let buf = recv_bytes(vm, recv)?;
     if let Some(arg) = pos.first() {
@@ -62,7 +58,7 @@ pub fn hex(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
     vm.push(v); Ok(())
 }
 
-// bytes-only; strings go through `string::startswith`.
+// bytes-only, strings go through `string::startswith`.
 pub fn startswith(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let buf = recv_bytes(vm, recv)?;
     let prefix = recv_bytes(vm, pos[0])?;
@@ -77,7 +73,7 @@ pub fn endswith(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     Ok(())
 }
 
-/* Shared search for find/index; `raise` turns a miss into ValueError. Empty needle matches at 0 (Python); windows(0) would panic. */
+/* Shared search for find/index, `raise` turns a miss into ValueError. Empty needle matches at 0 (Python), windows(0) would panic. */
 fn find_impl(vm: &mut VM, recv: Val, pos: &[Val], raise: bool) -> Result<(), VmErr> {
     let buf = recv_bytes(vm, recv)?;
     let sub = recv_bytes(vm, pos[0])?;
@@ -154,7 +150,7 @@ pub fn split(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     vm.alloc_and_push_list(parts)
 }
 
-// `bytes.fromhex(s)` classmethod: parse pairs of hex digits, skipping ASCII whitespace.
+// `bytes.fromhex(s)` classmethod, parse pairs of hex digits, skipping ASCII whitespace.
 pub fn fromhex(vm: &mut VM, _recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let s = val_to_str(vm, pos[0])?;
     let mut out: Vec<u8> = Vec::new();
@@ -181,7 +177,7 @@ pub fn upper(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
     let v = vm.heap.alloc(HeapObj::Bytes(buf))?; vm.push(v); Ok(())
 }
 
-// bytes strip: ASCII whitespace, or any byte in the optional argument.
+// bytes strip, ASCII whitespace, or any byte in the optional argument.
 fn bstrip(vm: &mut VM, recv: Val, pos: &[Val], left: bool, right: bool) -> Result<(), VmErr> {
     let buf = recv_bytes(vm, recv)?;
     let chars = match pos.first() { Some(&a) => Some(recv_bytes(vm, a)?), None => None };

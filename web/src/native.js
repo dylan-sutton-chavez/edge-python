@@ -1,7 +1,4 @@
-/*
-Native module loading + dispatch. `nativeTable` indexed by `baseId` from `register_native_module`; entries are wasmpdk fns or JS handlers, dispatched by `host_call_native`.
-*/
-
+/* `nativeTable` is indexed by `baseId` from `register_native_module`, entries are wasmpdk fns or JS handlers, dispatched by `host_call_native`. */
 export const nativeTable = [];
 
 export function resetNativeTable() {
@@ -85,10 +82,10 @@ export function makeGuestEnv(compilerExports) {
     };
 }
 
-/* Built-in Path A fallback: instantiate guest, walk exports, annotate each fn with its guest's `__edge_alloc` + `__edge_memory`. */
+/* Built-in Path A fallback, instantiate guest, walk exports, annotate each fn with its guest's `__edge_alloc` + `__edge_memory`. */
 async function builtinWasmPdkLoader(module, ctx) {
     const envFactory = makeGuestEnv(ctx.compilerExports);
-    // Forward reference: the getter captures `instance` lazily. It's only read when env functions fire during VM execution, by which point `instance` is bound.
+    // Forward reference, the getter captures `instance` lazily. It's only read when env functions fire during VM execution, by which point `instance` is bound.
     const env = envFactory({ get memory() { return instance.exports.memory; } });
     // WebAssembly.instantiate(Module, ...) returns the Instance directly, not {module, instance}.
     const instance = await WebAssembly.instantiate(module, { env });
@@ -108,7 +105,7 @@ async function builtinWasmPdkLoader(module, ctx) {
         if (k.startsWith('__') && !k.startsWith('__class_') && !k.startsWith('__const_') && !k.startsWith('__fn_')) continue;
         names.push(k);
         v.__edge_alloc = instance.exports.__edge_alloc;
-        // Optional on older plugins; callers use `?.`.
+        // Optional on older plugins, callers use `?.`.
         v.__edge_free = instance.exports.__edge_free;
         v.__edge_memory = instance.exports.memory;
         v.__edge_kind = 'wasmpdk';
@@ -117,7 +114,7 @@ async function builtinWasmPdkLoader(module, ctx) {
     return { kind: 'wasmpdk', names, fns };
 }
 
-/* Try custom loaders first; built-in Path A is the implicit fallback. */
+/* Try custom loaders first, built-in Path A is the implicit fallback. */
 export async function loadNativeModule(_spec, bytes, ctx) {
     const module = await WebAssembly.compile(bytes);
 

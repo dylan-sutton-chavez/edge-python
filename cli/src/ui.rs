@@ -1,7 +1,3 @@
-/*
-Minimalist terminal output. Plain text only, no colors.
-*/
-
 use std::io::{IsTerminal, Write};
 use std::path::Path;
 use std::sync::Arc;
@@ -36,7 +32,7 @@ pub fn scaffolded(dir: &str, items: &[&str], next: &str) {
     note(next);
 }
 
-/// The `edge serve` banner; `lan` adds a network URL.
+/// The `edge serve` banner, `lan` adds a network URL.
 pub fn serve_banner(port: u16, dir: &Path, lan: Option<&str>) {
     println!("  http://localhost:{port}");
     if let Some(ip) = lan {
@@ -91,7 +87,7 @@ pub fn test_summary(passed: usize, total: usize, secs: f64) {
     println!("  {passed}/{total} files passed · {secs:.1}s");
 }
 
-// Braille frames used by the spinner; match the rest of the UI's unicode style.
+// Braille frames used by the spinner, matching the rest of the UI's unicode style.
 const SPIN_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 /// Animated stderr spinner for long operations. Falls back to a static line when redirected.
@@ -103,7 +99,7 @@ pub struct Spinner {
 /// Start a spinner with `label`. Drop it (or call `done`) to stop.
 pub fn spinner(label: &str) -> Spinner {
     let stop = Arc::new(AtomicBool::new(false));
-    // No animation when stderr is redirected; just announce the step.
+    // No animation when stderr is redirected, just announce the step.
     if !std::io::stderr().is_terminal() {
         eprintln!("  {label}...");
         return Spinner { stop, handle: None };
@@ -119,7 +115,7 @@ pub fn spinner(label: &str) -> Spinner {
             thread::sleep(Duration::from_millis(120));
             i += 1;
         }
-        // ANSI: carriage return + erase-to-end-of-line so the next print starts clean.
+        // ANSI carriage return plus erase-to-end-of-line so the next print starts clean.
         eprint!("\r\x1b[2K");
         let _ = std::io::stderr().flush();
     });
@@ -129,7 +125,7 @@ pub fn spinner(label: &str) -> Spinner {
 impl Spinner {
     /// Stop the spinner and print a `(successful) {msg}` line.
     pub fn done(self, msg: &str) {
-        // Drop stops the thread and clears the line; the result line goes right after.
+        // Drop stops the thread and clears the line, the result line goes right after.
         drop(self);
         eprintln!("  (successful) {msg}");
     }

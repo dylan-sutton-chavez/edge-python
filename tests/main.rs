@@ -1,4 +1,3 @@
-// Integration test entry point.
 mod common;
 mod abi;
 mod lexer;

@@ -1,12 +1,8 @@
-/*
-WASM bridge: wires parser/VM to host via the handle ABI.
-Wire contract lives in `crate::abi`; extend there, never here.
-*/
-
 use crate::vm::VM;
 use crate::packages::Manifest;
 use alloc::{boxed::Box, string::String, vec::Vec};
 
+// Wires parser/VM to the host via the handle ABI, the wire contract lives in `crate::abi`, extend there, never here.
 mod exports;
 mod resolver;
 
@@ -14,13 +10,13 @@ mod resolver;
 unsafe extern "C" {
     pub(super) fn host_print(ptr: *const u8, len: usize);
 
-    /* CallExtern dispatch for register_native_module. Host owns argv; guest writes return into out. `call_id` correlates a deferred result back to its coro via `set_host_result_by_id`. */
+    /* CallExtern dispatch for register_native_module. Host owns argv, guest writes return into out. `call_id` correlates a deferred result back to its coro via `set_host_result_by_id`. */
     pub(super) fn host_call_native(id: u32, call_id: u32, argv_ptr: *const u32, argc: u32, out: *mut u32) -> i32;
 
     /* Host-cached bytes for `spec`. Non-null `hash_ptr` is a 32-byte expected sha-256. */
     pub(super) fn host_fetch_bytes(spec_ptr: *const u8, spec_len: u32, hash_ptr: *const u8, out_len: *mut u32) -> *mut u8;
 
-    /* Wall-clock in nanoseconds. WASM hosts wire to `Date.now() * 1_000_000`; native hosts to `Instant::now().as_nanos()`. Without this hook the VM falls back to `virtual_clock_ns` which advances deterministically for tests. */
+    /* Wall-clock in nanoseconds. WASM hosts wire to `Date.now() * 1_000_000`, native hosts to `Instant::now().as_nanos()`. Without this hook the VM falls back to `virtual_clock_ns` which advances deterministically for tests. */
     pub(super) fn host_now_ns() -> u64;
 }
 
@@ -33,7 +29,7 @@ pub(super) fn now_ns_host() -> u64 {
     unsafe { host_now_ns() }
 }
 
-/* dlmalloc: binned O(1) alloc/free, so cost stays flat as live Rust blocks grow. The old free-list allocator degraded linearly per op on large live heaps. */
+/* dlmalloc, binned O(1) alloc/free, so cost stays flat as live Rust blocks grow. The old free-list allocator degraded linearly per op on large live heaps. */
 #[global_allocator]
 static A: dlmalloc::GlobalDlmalloc = dlmalloc::GlobalDlmalloc;
 
@@ -56,7 +52,7 @@ pub(super) enum ModuleEntry {
 pub(super) struct PausedRun {
     /* Option so `step_vm` can `take()` for re-entry and stash back without a dummy VM. */
     pub vm: Option<VM<'static>>,
-    /* Earliest wake-up deadline (ns) from the last yield; zero for `PendingFrame` / `PendingEvent`. */
+    /* Earliest wake-up deadline (ns) from the last yield, zero for `PendingFrame` / `PendingEvent`. */
     pub last_yield_deadline_ns: u64,
 }
 
@@ -72,12 +68,12 @@ pub(super) struct WasmRuntime {
     pub entry_dir: String,
     /* Last `save_state` blob, read via `snapshot_ptr`. */
     pub snapshot: Vec<u8>,
-    /* Owned across `run_start` / `run_resume`; mutually exclusive with the bridge's `current_vm`. */
+    /* Owned across `run_start` / `run_resume`, mutually exclusive with the bridge's `current_vm`. */
     pub paused_run: Option<Box<PausedRun>>,
-    /* REPL: the interpreter kept alive between `repl_eval` inputs. */
+    /* REPL, the interpreter kept alive between `repl_eval` inputs. */
     pub repl_vm: Option<Box<VM<'static>>>,
     pub repl_mode: bool,
-    /* Back-edges between preempt yields; 0 disables. */
+    /* Back-edges between preempt yields, 0 disables. */
     pub preempt_every: usize,
 }
 
@@ -102,7 +98,7 @@ impl WasmRuntime {
 
 static mut RUNTIME: WasmRuntime = WasmRuntime::new();
 
-// SAFETY: single-threaded WASM; re-entrant callers route through `with_vm` to drop the borrow first.
+// SAFETY single-threaded WASM, re-entrant callers route through `with_vm` to drop the borrow first.
 pub(super) fn with_runtime<R>(f: impl FnOnce(&mut WasmRuntime) -> R) -> R {
     unsafe { f(&mut *core::ptr::addr_of_mut!(RUNTIME)) }
 }

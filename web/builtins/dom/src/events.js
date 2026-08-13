@@ -1,5 +1,3 @@
-/* DOM events fan into Python's `receive()` via `ctx.pushEvent(jsonDetail)`. */
-
 export default ({ node, bindings, files }, { pushEvent, emitError }) => ({
     bind_event: (h, type, msg, optionsJson) => {
         const target = node(h);
@@ -9,7 +7,7 @@ export default ({ node, bindings, files }, { pushEvent, emitError }) => ({
                 if (opts.prevent_default) e.preventDefault();
                 if (opts.stop_propagation) e.stopPropagation();
 
-                /* Drag/drop: dropped files become file handles; text/plain payload comes through `drop_text`. */
+                /* Drag/drop, dropped files become file handles. The text/plain payload comes through `drop_text`. */
                 let drop_files, drop_text;
                 if (e.dataTransfer) {
                     if (e.dataTransfer.files && e.dataTransfer.files.length) {
@@ -25,7 +23,7 @@ export default ({ node, bindings, files }, { pushEvent, emitError }) => ({
                     }
                 }
 
-                /* Clipboard text on copy/paste/cut; pasted file/image items become file handles. */
+                /* Clipboard text on copy/paste/cut, pasted file/image items become file handles. */
                 let clipboard_text, clipboard_files;
                 if (e.clipboardData) {
                     const t = e.clipboardData.getData('text/plain');
@@ -44,7 +42,7 @@ export default ({ node, bindings, files }, { pushEvent, emitError }) => ({
                     }
                 }
 
-                /* Single touch covered by clientX/Y; emit `touches` only for multi-finger. */
+                /* Single touch covered by clientX/Y, emit `touches` only for multi-finger. */
                 let touches;
                 if (e.touches && e.touches.length > 1) {
                     touches = new Array(e.touches.length);
@@ -89,7 +87,7 @@ export default ({ node, bindings, files }, { pushEvent, emitError }) => ({
         return bindings.length - 1;
     },
 
-    /* Idempotent: double-unbind is a no-op. */
+    /* Idempotent, double-unbind is a no-op. */
     unbind_event: (h) => {
         const b = bindings[h];
         if (!b) return;
@@ -101,6 +99,6 @@ export default ({ node, bindings, files }, { pushEvent, emitError }) => ({
         node(h).dispatchEvent(new CustomEvent(type, { detail: detail || '', bubbles: true, cancelable: true }));
     },
 
-    /* Synthetic native click; triggers default behaviors (file picker, link nav). CustomEvent("click") wouldn't. */
+    /* Synthetic native click, triggers default behaviors (file picker, link nav). CustomEvent("click") wouldn't. */
     click: (h) => { node(h).click(); },
 });

@@ -23,8 +23,7 @@ mod test {
         interactive_events: Vec<String>,
     }
 
-    /* Sets iterate in hash order, so canonicalize a set/frozenset line by sorting
-       its elements. Assumes scalar elements with no nested ", ". Non-sets pass through. */
+    /* Sets iterate in hash order, so canonicalize a set/frozenset line by sorting its elements. Assumes scalar elements with no nested ", ". Non-sets pass through. */
     fn normalize_set(line: &str) -> String {
         let (prefix, inner, suffix) = if let Some(i) =
             line.strip_prefix("frozenset({").and_then(|r| r.strip_suffix("})")) {
@@ -60,7 +59,7 @@ mod test {
         }
     }
 
-    /* Runs every vm.json case under `Limits::sandbox()` rather than `none()`: the budget / heap / call-depth guards are off under `none` (`sandbox_off` short-circuits them), so only the bounded profile exercises the charge_step / charge_steps / back-edge-budget paths and lets cases assert that runaway allocation, recursion, and materialisation surface as `MemoryError` / `RecursionError` instead of hanging. Every case must therefore stay within the sandbox budget. */
+    /* Runs every vm.json case under `Limits::sandbox()` rather than `none()`, the budget / heap / call-depth guards are off under `none` (`sandbox_off` short-circuits them), so only the bounded profile exercises the charge_step / charge_steps / back-edge-budget paths and lets cases assert that runaway allocation, recursion, and materialisation surface as `MemoryError` / `RecursionError` instead of hanging. Every case must therefore stay within the sandbox budget. */
     #[test]
     fn test_cases() {
         let cases: Vec<Case> = serde_json::from_str(include_str!("cases/vm.json")).expect("invalid JSON");
@@ -104,14 +103,14 @@ mod test {
         }
     }
 
-    /* Reruns every vm.json case in strict_input mode (host-supplied buffer; reading past = RuntimeError) under `Limits::sandbox()` (see `test_cases` for why the bounded profile). Lex/parse errors are also asserted here. */
+    /* Reruns every vm.json case in strict_input mode (host-supplied buffer, reading past = RuntimeError) under `Limits::sandbox()` (see `test_cases` for why the bounded profile). Lex/parse errors are also asserted here. */
     #[test]
     fn strict_cases() {
         let cases: Vec<Case> = serde_json::from_str(include_str!("cases/vm.json")).expect("invalid JSON");
 
         for case in cases {
             let (tokens, lex_errs) = lex(&case.src);
-            // Lex errors are surfaced as diagnostics; match against the expected error and move on.
+            // Lex errors are surfaced as diagnostics, match against the expected error and move on.
             if !lex_errs.is_empty() {
                 if let Some(expected) = &case.error {
                     assert!(
@@ -141,7 +140,7 @@ mod test {
                     None => panic!("parse error on {:?}: {:?}", case.src, errs.iter().map(|e| &e.msg).collect::<Vec<_>>()),
                 }
             }
-            // Match production: fold before running.
+            // Match production and fold before running.
             compiler::vm::optimizer::constant_fold(&mut chunk);
 
             let mut vm = VM::with_limits(&chunk, Limits::sandbox());

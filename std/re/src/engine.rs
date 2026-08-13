@@ -1,6 +1,3 @@
-/* Engine facade, compiles patterns and runs the high level operations. */
-
-
 use alloc::{format, string::String, vec::Vec};
 use crate::ast::{Node, Program};
 use crate::matcher::{fixed_len, Caps, Matcher};

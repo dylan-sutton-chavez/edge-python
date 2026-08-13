@@ -1,8 +1,3 @@
-/*
-A flat length-prefixed archive of a project tree, the shape edge build and the swarm ingress share.
-No zip so no zip-slip or zip-bomb, every path is validated relative on read.
-*/
-
 use std::path::{Component, Path, PathBuf};
 
 // Leading bytes marking an edge package, checked before anything is trusted.
@@ -18,7 +13,7 @@ pub struct Entry {
     pub bytes: Vec<u8>,
 }
 
-// A resolved project ready to serialize, entry is the relative path of main.py.
+// A resolved project serialized as a flat length-prefixed archive, the shape edge build and the swarm ingress share, entry is the relative path of main.py. No zip so no zip-slip or zip-bomb, every path is validated relative on read.
 pub struct Bundle {
     pub entry: String,
     pub files: Vec<Entry>,

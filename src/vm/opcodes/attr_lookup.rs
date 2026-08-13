@@ -1,7 +1,3 @@
-/*
-Attribute resolution for `LoadAttr` / `CallMethod`. Built-in method bodies live in `vm/methods/`; this file owns `AttrLookup`, the resolver, and the `__getattr__` fallback.
-*/
-
 use super::*;
 use crate::alloc::string::ToString;
 use crate::s;
@@ -9,21 +5,21 @@ use crate::s;
 pub use crate::vm::methods::BuiltinMethodId;
 use crate::vm::methods::lookup_method;
 
-// `resolve_attr` result, every shape LoadAttr / CallMethod dispatches on.
+// `resolve_attr` result, every shape LoadAttr / CallMethod dispatches on. Built-in method bodies live in `vm/methods/`.
 pub(crate) enum AttrLookup {
     ModuleAttr(Val),
     ClassMember(Val),
     InstanceField(Val),
-    // `class` is where `func` was found; the called frame needs it so `super()` knows where to resume.
+    // `class` is where `func` was found, and the called frame needs it so `super()` knows where to resume.
     InstanceMethod { recv: Val, func: Val, class: Val },
     BuiltinMethod(BuiltinMethodId),
-    // `e.args` on ExcInstance, caller picks: LoadAttr materialises the tuple, CallMethod errors.
+    // `e.args` on ExcInstance, caller picks between LoadAttr materialising the tuple and CallMethod erroring.
     ExcArgs(Vec<Val>),
     // Property descriptor on an instance, `LoadAttr` invokes `getter(recv)`.
     PropertyGet { recv: Val, getter: Val },
     // `prop.setter` access, `LoadAttr` materialises a `PropertySetter` value bound to the source property.
     PropertySetterRef(Val),
-    // `__name__` on a function, type, or class; `LoadAttr` materialises the str.
+    // `__name__` on a function, type, or class, and `LoadAttr` materialises the str.
     Name(String),
 }
 
@@ -44,7 +40,7 @@ impl<'a> VM<'a> {
         loop {
             seqs.retain(|s| !s.is_empty());
             if seqs.is_empty() { break; }
-            // A valid head appears in no sequence's tail; take the first such across sequences (C3 order).
+            // A valid head appears in no sequence's tail, so take the first such across sequences (C3 order).
             let mut head = None;
             for s in &seqs {
                 let h = s[0];
@@ -60,7 +56,7 @@ impl<'a> VM<'a> {
         Ok(out)
     }
 
-    /* Bind a resolved MRO member `mv` to `recv`: Property -> getter, staticmethod -> unbound, function -> descriptor-bound; plain data returned as-is. Guards is_heap before heap.get so a non-heap data member is never read as a pointer. */
+    /* Bind a resolved MRO member `mv` to `recv`, mapping Property to getter, staticmethod to unbound, function to descriptor-bound. Plain data is returned as-is. Guards is_heap before heap.get so a non-heap data member is never read as a pointer. */
     fn bind_member(&self, mv: Val, recv: Val, defining: Val) -> AttrLookup {
         if mv.is_heap() {
             match self.heap.get(mv) {
@@ -80,7 +76,7 @@ impl<'a> VM<'a> {
         AttrLookup::ClassMember(mv)
     }
 
-    // Member lookup along the C3 MRO; first hit wins. Falls back to a direct-then-DFS walk for uncached classes (native classes have no bases, so DFS = own members). Returns `(value, defining_class)` so callers building `BoundUserMethod` / `InstanceMethod` record where the method came from for `super()`.
+    // Member lookup along the C3 MRO, first hit wins. Falls back to a direct-then-DFS walk for uncached classes (native classes have no bases, so DFS = own members). Returns `(value, defining_class)` so callers building `BoundUserMethod` / `InstanceMethod` record where the method came from for `super()`.
     pub(crate) fn lookup_class_member(&self, cls: Val, name: &str) -> Option<(Val, Val)> {
         if !cls.is_heap() { return None; }
         let HeapObj::Class(_, bases, members) = self.heap.get(cls) else { return None; };
@@ -100,7 +96,7 @@ impl<'a> VM<'a> {
         None
     }
 
-    /* `super()` lookup: walk `derived`'s C3 MRO strictly past `after`, so a diamond resolves to the next class in the instance's linearization (not just `after`'s own bases). Falls back to a DFS over `after`'s bases when `derived` has no cached MRO. */
+    /* `super()` lookup walks `derived`'s C3 MRO strictly past `after`, so a diamond resolves to the next class in the instance's linearization (not just `after`'s own bases). Falls back to a DFS over `after`'s bases when `derived` has no cached MRO. */
     pub(crate) fn lookup_class_member_after(&self, derived: Val, after: Val, name: &str) -> Option<(Val, Val)> {
         if let Some(mro) = self.mro_cache.get(&derived.0) {
             let mut past = false;
@@ -114,7 +110,7 @@ impl<'a> VM<'a> {
             }
             return None;
         }
-        // Fallback: search strictly above `after` via its own bases.
+        // Fallback searches strictly above `after` via its own bases.
         if !after.is_heap() { return None; }
         let HeapObj::Class(_, bases, _) = self.heap.get(after) else { return None; };
         for &b in bases {
@@ -127,7 +123,7 @@ impl<'a> VM<'a> {
     pub(crate) fn resolve_attr(&self, obj: Val, name: &str) -> Result<AttrLookup, VmErr> {
         let bare = crate::parser::ssa_strip(name);
 
-        // Module attr: linear scan; the table is sized for around 30 entries.
+        // Module attr lookup is a linear scan, the table is sized for around 30 entries.
         if obj.is_heap()
             && let HeapObj::Module(mod_name, attrs) = self.heap.get(obj) {
                 if let Some((_, v)) = attrs.iter().find(|(n, _)| n == bare) {
@@ -136,7 +132,7 @@ impl<'a> VM<'a> {
                 return Err(VmErr::Attribute(s!("module '", str mod_name, "' has no attribute '", str bare, "'")));
             }
 
-        // ExcInstance attr: only `e.args` is defined.
+        // ExcInstance attr, only `e.args` is defined.
         if obj.is_heap()
             && let HeapObj::ExcInstance(_, args) = self.heap.get(obj) {
                 if bare == "args" { return Ok(AttrLookup::ExcArgs(args.clone())); }
@@ -144,7 +140,7 @@ impl<'a> VM<'a> {
                 return Err(VmErr::Attribute(s!("'", str ty, "' object has no attribute '", str bare, "'")));
             }
 
-        // Bound methods expose their receiver; user methods also their function. Builtin bound methods have no `__func__`, like Python.
+        // Bound methods expose their receiver, and user methods also their function. Builtin bound methods have no `__func__`, like Python.
         if obj.is_heap() {
             match self.heap.get(obj) {
                 HeapObj::BoundUserMethod(recv, func, _) => match bare {
@@ -159,7 +155,7 @@ impl<'a> VM<'a> {
             }
         }
 
-        // Function attributes; a stored attr wins over the derived `__name__`.
+        // Function attributes, a stored attr wins over the derived `__name__`.
         if obj.is_heap()
             && let HeapObj::Func(_, _, _, attrs) = self.heap.get(obj)
             && let Some(v) = attrs.borrow().iter().find(|(n, _)| n == bare).map(|(_, v)| *v)
@@ -178,7 +174,7 @@ impl<'a> VM<'a> {
             if let Some(n) = resolved { return Ok(AttrLookup::Name(n)); }
         }
 
-        // Class attr: `MyClass.method` returns the unbound function (no `self` prepended).
+        // Class attr, `MyClass.method` returns the unbound function (no `self` prepended).
         if obj.is_heap()
             && let HeapObj::Class(cls_name, _, _) = self.heap.get(obj) {
                 if let Some((v, defining)) = self.lookup_class_member(obj, bare) {
@@ -196,7 +192,7 @@ impl<'a> VM<'a> {
                 return Err(VmErr::Attribute(s!("type object '", str &cls_name, "' has no attribute '", str bare, "'")));
             }
 
-        // Instance attribute lookup: check `__dict__` first, then the class chain (direct + bases).
+        // Instance attribute lookup, check `__dict__` first, then the class chain (direct + bases).
         if obj.is_heap()
             && let HeapObj::Instance(cls_val, attrs) = self.heap.get(obj) {
                 let cls_val = *cls_val;
@@ -211,11 +207,11 @@ impl<'a> VM<'a> {
                 return Err(VmErr::Attribute(s!("'", str ty, "' object has no attribute '", str name, "'")));
             }
 
-        // `super().<name>`: search strictly above the proxy's stored class; methods bind to the proxy's `recv`.
+        // `super().<name>` searches strictly above the proxy's stored class, and methods bind to the proxy's `recv`.
         if obj.is_heap()
             && let HeapObj::Super(cls_val, recv) = self.heap.get(obj) {
                 let (cls_val, recv) = (*cls_val, *recv);
-                // C3 super: walk the *instance type*'s MRO past the defining class, not just the defining class's bases.
+                // C3 super walks the *instance type*'s MRO past the defining class, not just the defining class's bases.
                 let derived = match self.heap.get(recv) {
                     HeapObj::Instance(c, _) => *c,
                     _ => cls_val,
@@ -233,7 +229,7 @@ impl<'a> VM<'a> {
                 return Ok(AttrLookup::PropertySetterRef(obj));
             }
 
-        // Builtin classmethods accessed on the type object (e.g. dict.fromkeys, bytes.fromhex, int.from_bytes): resolve under the type's own name rather than "type".
+        // Builtin classmethods accessed on the type object (e.g. dict.fromkeys, bytes.fromhex, int.from_bytes) resolve under the type's own name rather than "type".
         if obj.is_heap()
             && let HeapObj::Type(n) = self.heap.get(obj)
             && matches!(bare, "fromkeys" | "fromhex" | "from_bytes") {
@@ -257,7 +253,7 @@ impl<'a> VM<'a> {
     }
 
     pub(crate) fn handle_load_attr(&mut self, name_idx: u16, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
-        // Borrow, don't clone: `chunk` outlives every `&mut self` call below.
+        // Borrow, don't clone, `chunk` outlives every `&mut self` call below.
         let name = chunk.names.get(name_idx as usize).ok_or(VmErr::Runtime("LoadAttr: bad name index"))?;
         let obj = self.pop()?;
         let lookup = match self.resolve_attr(obj, name) {
@@ -294,7 +290,7 @@ impl<'a> VM<'a> {
                 Ok(())
             }
             AttrLookup::PropertyGet { recv, getter } => {
-                // Inline getter call: matches `BoundUserMethod` dispatch (push func, push self, call).
+                // Inline getter call, matches `BoundUserMethod` dispatch (push func, push self, call).
                 if self.depth >= self.max_calls { return Err(cold_depth()); }
                 self.push(getter);
                 self.push(recv);

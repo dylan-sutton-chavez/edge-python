@@ -1,4 +1,4 @@
-/* f64 -> string: shortest round-trip digits, fixed for exponents in (-4, 16], else scientific with sign and ≥2 exp digits; always includes `.0` or exponent so floats never read as ints. */
+/* f64 -> string, shortest round-trip digits, fixed for exponents in (-4, 16], else scientific with sign and ≥2 exp digits, always includes `.0` or exponent so floats never read as ints. */
 pub fn format_f64(f: f64) -> alloc::string::String {
     use alloc::string::String;
     use core::fmt::Write;
@@ -9,13 +9,13 @@ pub fn format_f64(f: f64) -> alloc::string::String {
         return if f.is_sign_negative() { String::from("-0.0") } else { String::from("0.0") };
     }
 
-    // Rust's `{:e}` yields the same unique shortest mantissa dtoa does: "d[.ddd]eN".
+    // Rust's `{:e}` yields the same unique shortest mantissa dtoa does, "d[.ddd]eN".
     let neg = f < 0.0;
     let mut sci = String::with_capacity(32);
     let _ = write!(&mut sci, "{:e}", f.abs());
     let (mant, exp_str) = sci.split_once('e').unwrap_or((sci.as_str(), "0"));
     let exp: i32 = exp_str.parse().unwrap_or(0);
-    // Significant digits with the point removed; `decpt` = count of digits left of the point.
+    // Significant digits with the point removed, `decpt` = count of digits left of the point.
     let mut digits = String::with_capacity(mant.len());
     for c in mant.chars() { if c != '.' { digits.push(c); } }
     let decpt = exp + 1;

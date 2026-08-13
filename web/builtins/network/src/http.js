@@ -1,5 +1,3 @@
-/* HTTP async handlers; worker parks the coro on the returned Promise so Python sees `fetch()` as a yielding builtin composing with `gather` / `with_timeout`. */
-
 export default ({ requests }) => ({
     /* `fetch(url, options_json?)` -> JSON `{id, ok, status, headers, body}`. `id` cancels via `abort_request(id)`. `options_json` forwarded as `RequestInit`. */
     fetch: async (url, optionsJson) => {

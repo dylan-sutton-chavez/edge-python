@@ -1,7 +1,3 @@
-/*
-Interactive REPL: a persistent engine session driven by rustyline; one line, one eval.
-*/
-
 use anyhow::Result;
 use rustyline::error::ReadlineError;
 use rustyline::history::DefaultHistory;
@@ -16,6 +12,7 @@ const PROMPT: &str = ">>> ";
 
 type Repl = Editor<(), DefaultHistory>;
 
+/// A persistent engine session driven by rustyline, one line per eval.
 pub fn run(manifest_path: &Path, packages: Option<&Path>, web: bool) -> Result<()> {
     let mut session: Box<dyn Backend> = if web {
         Box::new(Session::open(&Manifest::load(manifest_path)?)?)
@@ -39,7 +36,7 @@ pub fn run(manifest_path: &Path, packages: Option<&Path>, web: bool) -> Result<(
         match trimmed {
             ".exit" => break,
             ".reset" => {
-                // Wipe the interpreter in place; the engine keeps running.
+                // Wipe the interpreter in place, the engine keeps running.
                 session.reset()?;
                 rl.clear_screen()?;
                 continue;

@@ -1,7 +1,3 @@
-/*
-`edge build`: pack a project into a self-contained native binary, a swarm .package, or a browser dist/.
-*/
-
 use anyhow::{anyhow, Context, Result};
 use compiler::native::pack::{Bundle, Entry};
 use std::collections::{BTreeMap, BTreeSet};
@@ -76,8 +72,7 @@ fn make_executable(_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/* Trailer of a standalone binary, `Some(payload)` when this exe carries a bundle.
-   Reads only the tail so a plain `edge` invocation never loads the whole binary. */
+/* Trailer of a standalone binary, `Some(payload)` when this exe carries a bundle. Reads only the tail so a plain `edge` invocation never loads the whole binary. */
 pub fn embedded_payload() -> Option<Vec<u8>> {
     trailer_payload(&std::env::current_exe().ok()?)
 }
@@ -138,6 +133,7 @@ const RUNTIME_FILES: &[&str] = &[
 
 const INDEX_HTML: &str = include_str!("../templates/dist.html");
 
+/// Pack the project as a browser dist/, vendoring the runtime, compiler and packages.
 pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
     let t0 = Instant::now();
     let manifest = Manifest::load(manifest_path)?;
@@ -156,7 +152,7 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
     }
 
     let sp = crate::ui::spinner("fetching compiler.wasm");
-    // Test hook: local compiler instead of CDN.
+    // Test hook, a local compiler instead of the CDN.
     let compiler_result = match std::env::var("EDGE_COMPILER_WASM") {
         Ok(p) => fs::read(&p).with_context(|| format!("reading {p}")),
         Err(_) => fetch(COMPILER_WASM).context("fetching compiler.wasm"),
@@ -198,7 +194,7 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
 
 /// Fetch the runtime JS modules into `dist/web/` mirroring their CDN layout.
 fn vendor_runtime(out_dir: &Path) -> Result<()> {
-    // Test hook: local runtime instead of CDN.
+    // Test hook, a local runtime instead of the CDN.
     let local = std::env::var("EDGE_RUNTIME_DIR").ok();
     for rel in RUNTIME_FILES {
         let bytes = match &local {
@@ -220,7 +216,7 @@ fn vendor_runtime(out_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Walk the project for `.py` files; skip hidden dirs and the output directory itself.
+/// Walk the project for `.py` files, skipping hidden dirs and the output directory itself.
 fn collect_scripts(project: &Path, out_dir: &Path) -> Vec<PathBuf> {
     let mut scripts = Vec::new();
     walk(project, out_dir, &mut scripts);
@@ -244,7 +240,7 @@ fn walk(dir: &Path, out_dir: &Path, found: &mut Vec<PathBuf>) {
     }
 }
 
-/// Cheap import scanner: regex-free, picks up `import X` and `from X import …` at the top level of a line.
+/// Cheap import scanner, regex-free, picks up `import X` and `from X import …` at the top level of a line.
 fn crawl_imports(scripts: &[PathBuf]) -> BTreeSet<String> {
     let mut imports = BTreeSet::new();
     for path in scripts {
@@ -279,11 +275,11 @@ fn vendor_packages(
     let mut system_local = BTreeMap::new();
 
     for name in imports {
-        // Unknown names are project-local .py modules; let the runtime resolve them at run time.
+        // Unknown names are project-local .py modules, let the runtime resolve them at run time.
         let Some((kind, url)) = crate::manifest::resolve(name, manifest) else { continue };
         let bytes = fetch(&url).with_context(|| format!("fetching {url}"))?;
         let local = match kind {
-            // std packages are .wasm, except pure-Python ones (test) served as .py; preserve the real extension.
+            // std packages are .wasm, except pure-Python ones (test) served as .py, preserve the real extension.
             Kind::Std => format!("vendor/{name}.{}", if url.ends_with(".py") { "py" } else { "wasm" }),
             Kind::System => format!("vendor/{name}/index.js"),
         };
@@ -320,7 +316,7 @@ fn copy_scripts(scripts: &[PathBuf], project: &Path, out_dir: &Path) -> Result<u
     Ok(count)
 }
 
-/// Overlay vendored entries on top of the user's manifest; vendored paths win.
+/// Overlay vendored entries on top of the user's manifest, vendored paths win.
 fn rewrite_manifest(
     manifest: &Manifest,
     vendored_imports: &BTreeMap<String, String>,
@@ -334,7 +330,7 @@ fn rewrite_manifest(
     out
 }
 
-/// Pick `main.py`/`app.py`/`index.py` if present; otherwise the first script found.
+/// Pick `main.py`/`app.py`/`index.py` if present, otherwise the first script found.
 fn find_entry(scripts: &[PathBuf], project: &Path) -> String {
     for c in ["main.py", "app.py", "index.py"] {
         if scripts.iter().any(|s| s.file_name().and_then(|n| n.to_str()) == Some(c)) {

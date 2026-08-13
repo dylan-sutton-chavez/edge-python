@@ -1,5 +1,3 @@
-/* Agnostic driver: feeds each <pkg>/<pkg>.json corpus to the <edge-python> tag. Run: deno test --allow-all harness/ */
-
 import { chromium } from "npm:playwright@latest";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { DEFAULT_IMPORTS } from "../../web/src/defaults.js";
@@ -8,7 +6,7 @@ const ROOT = new URL("../", import.meta.url).pathname;
 const RUNTIME = new URL("../../web/", import.meta.url).pathname;
 const REPO = new URL("../../", import.meta.url).pathname;
 const CDN_HOST = new URL(Object.values(DEFAULT_IMPORTS)[0]).host;
-const MANIFEST = "/_packages.json"; // synthesized; keeps the agnostic <pkg>/ folder free of test artifacts
+const MANIFEST = "/_packages.json"; // synthesized, keeps the agnostic <pkg>/ folder free of test artifacts
 
 /* Repo-root dirs with a `<name>/<name>.json` corpus are stdpkgs. `STDPKG=<name>` narrows discovery to one package, used by the matrix-fanned CI to isolate per-shard work. */
 const only = Deno.env.get("STDPKG");
@@ -27,6 +25,7 @@ const TYPES = {
     ".py": "text/plain",
 };
 
+// Agnostic driver, feeds each <pkg>/<pkg>.json corpus to the <edge-python> tag. Run with deno test --allow-all harness/
 async function runPackage(pkg) {
     const dir = `${ROOT}${pkg}`;
     // Import the package's `.py` entry when it has one, else the built wasm.
@@ -36,7 +35,7 @@ async function runPackage(pkg) {
     if (hasPy) {
         entry = `/${pkg}/src/entry.py`;
     } else {
-        // Artifact name can differ from the dir (e.g. `struct` is a Rust keyword); any single .wasm in release/ counts.
+        // Artifact name can differ from the dir (e.g. `struct` is a Rust keyword), any single .wasm in release/ counts.
         const releaseDir = `${dir}/target/wasm32-unknown-unknown/release`;
         const wasmName = existsSync(`${releaseDir}/${pkg}.wasm`)
             ? `${pkg}.wasm`
@@ -48,7 +47,7 @@ async function runPackage(pkg) {
     }
 
     const cases = JSON.parse(readFileSync(`${dir}/${pkg}.json`, "utf-8"));
-    // The tag's packages.json: a package may pin its own (e.g. cross-package corpora), else synthesized keyed by name.
+    // The tag's packages.json is pinned by a package with its own (e.g. cross-package corpora), else synthesized keyed by name.
     const manifest = existsSync(`${dir}/packages.json`)
         ? readFileSync(`${dir}/packages.json`, "utf-8")
         : JSON.stringify({ imports: { [pkg]: entry } });
@@ -59,14 +58,14 @@ async function runPackage(pkg) {
     page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
     page.on("pageerror", (e) => errors.push(e.message));
 
-    /* Serve repo files from disk; synthesize the manifest. External CDNs (cdn.edgepython.com) pass through. */
+    /* Serve repo files from disk and synthesize the manifest. External CDNs (cdn.edgepython.com) pass through. */
     await page.route("**/*", (route) => {
         const url = new URL(route.request().url());
         // Prefer in-tree wasm so new exports are testable.
         if (url.host === CDN_HOST && url.pathname === "/compiler.wasm") {
             const local = `${REPO}target/wasm32-unknown-unknown/release/compiler.wasm`;
             try { return route.fulfill({ contentType: "application/wasm", body: readFileSync(local) }); }
-            catch { return route.continue(); } // no local build: use the deployed wasm
+            catch { return route.continue(); } // no local build, use the deployed wasm
         }
         // In-tree runtime first, CI must test the checkout not the deploy.
         if (url.host === CDN_HOST && url.pathname.startsWith("/web/")) {
@@ -98,7 +97,7 @@ async function runPackage(pkg) {
             const ready = new Promise((res) => el.addEventListener("ready", res, { once: true }));
             document.head.appendChild(el);
             await ready;
-            // Byte-stream stdout: one chunk per print() call (body + its `end`); collect verbatim.
+            // Byte-stream stdout, one chunk per print() call (body + its `end`), collected verbatim.
             globalThis.chunks = [];
             el.worker.onOutput((chunk) => { globalThis.chunks.push(chunk); });
             globalThis.el = el;
@@ -109,7 +108,7 @@ async function runPackage(pkg) {
             const result = await page.evaluate(async (s) => {
                 globalThis.chunks = [];
                 const { out } = await globalThis.el.worker.run(s);
-                // One entry per print() call; drop its single trailing newline (the `end`).
+                // One entry per print() call. Drop its single trailing newline (the `end`).
                 const output = globalThis.chunks.map((c) => c.replace(/\n$/, ""));
                 return { output, error: out || null };
             }, src);

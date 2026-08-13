@@ -1,7 +1,3 @@
-/*
-Dunder dispatch: probe instance method, invoke with `self` prepended; `NotImplemented` triggers reflected/fallback dispatch.
-*/
-
 use super::*;
 use crate::alloc::string::ToString;
 
@@ -24,7 +20,7 @@ pub(crate) fn binary_dunder_names(op: OpCode) -> Option<(&'static str, &'static 
     })
 }
 
-/* Same for comparisons: (forward, reflected, negate). `__eq__` reflects to itself; `__ne__` is negated `__eq__`; `<` reflects to `>` and vice-versa. */
+/* Same for comparisons, (forward, reflected, negate). `__eq__` reflects to itself. `__ne__` is negated `__eq__`. `<` reflects to `>` and vice-versa. */
 pub(crate) fn compare_dunder_names(op: OpCode) -> Option<(&'static str, &'static str, bool)> {
     Some(match op {
         OpCode::Eq => ("__eq__", "__eq__", false),
@@ -38,19 +34,19 @@ pub(crate) fn compare_dunder_names(op: OpCode) -> Option<(&'static str, &'static
 }
 
 impl<'a> VM<'a> {
-    /* `recv.<name>(*args)`: `Some(v)` on return, `None` on miss / `NotImplemented`, `Err` only on a raised dunder. */
+    /* `recv.<name>(*args)` probes the instance method and invokes it with `self` prepended. `Some(v)` on return, `None` on miss / `NotImplemented` (triggers reflected/fallback dispatch), `Err` only on a raised dunder. */
     pub(crate) fn try_call_dunder(&mut self, recv: Val, name: &str, args: &[Val], chunk: &SSAChunk, slots: &mut [Val]) -> Result<Option<Val>, VmErr> {
-        // Built-in types route through their native handlers; dunder dispatch only fires on user instances.
+        // Built-in types route through their native handlers, and dunder dispatch only fires on user instances.
         if !recv.is_heap() { return Ok(None); }
         let HeapObj::Instance(cls_val, _) = self.heap.get(recv) else { return Ok(None); };
         let cls_val = *cls_val;
 
         // Special methods resolve on the type's MRO, bypassing the instance __dict__, like Python.
         let Some((func, class)) = self.lookup_class_member(cls_val, name) else { return Ok(None); };
-        // Only plain functions bind as methods; data attributes never dispatch implicitly.
+        // Only plain functions bind as methods, so data attributes never dispatch implicitly.
         if !(func.is_heap() && matches!(self.heap.get(func), HeapObj::Func(..))) { return Ok(None); }
 
-        // Mirror `__init__` dispatch: depth guard before pushing so a recursive blow-up leaves no half-built frame.
+        // Mirror `__init__` dispatch, depth guard before pushing so a recursive blow-up leaves no half-built frame.
         if self.depth >= self.max_calls { return Err(cold_depth()); }
 
         self.pending.method_binding = Some((class, recv));
@@ -65,13 +61,13 @@ impl<'a> VM<'a> {
         Ok(Some(result))
     }
 
-    /* Class of an Instance, or `None` for built-in operands; powers the subclass-first ordering rule. */
+    /* Class of an Instance, or `None` for built-in operands. Powers the subclass-first ordering rule. */
     fn instance_class(&self, v: Val) -> Option<Val> {
         if !v.is_heap() { return None; }
         match self.heap.get(v) { HeapObj::Instance(c, _) => Some(*c), _ => None }
     }
 
-    /* Ordered forward/reflected dunder dispatch: reflected (`b.rname(a)`) runs first when `type(b)` strictly subclasses `type(a)`, so overrides win. Returns the first non-None result. */
+    /* Ordered forward/reflected dunder dispatch, reflected (`b.rname(a)`) runs first when `type(b)` strictly subclasses `type(a)` so overrides win. Returns the first non-None result. */
     fn dispatch_reflected(&mut self, a: Val, b: Val, lname: &str, rname: &str, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Option<Val>, VmErr> {
         let b_overrides = match (self.instance_class(a), self.instance_class(b)) {
             (Some(ac), Some(bc)) => ac.0 != bc.0 && self.heap.is_subclass(bc, ac),
@@ -88,14 +84,14 @@ impl<'a> VM<'a> {
         Ok(None)
     }
 
-    /* Binary arithmetic dunder dispatch with Python's subclass-first ordering: if `type(b)` is a strict subclass of `type(a)`, the reflected op runs first so overrides win. */
+    /* Binary arithmetic dunder dispatch with Python's subclass-first ordering, if `type(b)` is a strict subclass of `type(a)` the reflected op runs first so overrides win. */
     pub(crate) fn try_binary_dunder(&mut self, op: OpCode, a: Val, b: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Option<Val>, VmErr> {
         if self.instance_class(a).is_none() && self.instance_class(b).is_none() { return Ok(None); }
         let Some((lname, rname)) = binary_dunder_names(op) else { return Ok(None); };
         self.dispatch_reflected(a, b, lname, rname, chunk, slots)
     }
 
-    /* Comparison dunder dispatch. `__eq__` reflects to itself; `__ne__` falls back to `not __eq__`; `<` reflects to `>` and vice-versa. */
+    /* Comparison dunder dispatch. `__eq__` reflects to itself. `__ne__` falls back to `not __eq__`. `<` reflects to `>` and vice-versa. */
     pub(crate) fn try_compare_dunder(&mut self, op: OpCode, a: Val, b: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Option<Val>, VmErr> {
         if self.instance_class(a).is_none() && self.instance_class(b).is_none() { return Ok(None); }
         let Some((lname, rname, negate)) = compare_dunder_names(op) else { return Ok(None); };
@@ -108,11 +104,11 @@ impl<'a> VM<'a> {
             }
             return Ok(None);
         };
-        // `!=` negates `__eq__`; other comparisons return the raw dunder result.
+        // `!=` negates `__eq__`, other comparisons return the raw dunder result.
         Ok(Some(if negate { Val::bool(!self.truthy(r)) } else { r }))
     }
 
-    /* Python `bool()` semantics: try `__bool__`, then `__len__` (0 = False), else default True for instances. Pass-through for built-in types. */
+    /* Python `bool()` semantics, try `__bool__`, then `__len__` (0 = False), else default True for instances. Pass-through for built-in types. */
     pub(crate) fn truthy_op(&mut self, v: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<bool, VmErr> {
         if !v.is_heap() || !matches!(self.heap.get(v), HeapObj::Instance(..)) {
             return Ok(self.truthy(v));
@@ -129,7 +125,7 @@ impl<'a> VM<'a> {
         Ok(true)
     }
 
-    /* `in` operator: prefer the container's `__contains__`; for built-in sequences with an instance item, iterate using `__eq__` so user equality is honoured. */
+    /* `in` operator prefers the container's `__contains__`. For built-in sequences with an instance item, iterate using `__eq__` so user equality is honoured. */
     pub(crate) fn contains_op(&mut self, container: Val, item: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<bool, VmErr> {
         if let Some(r) = self.try_call_dunder(container, "__contains__", &[item], chunk, slots)? {
             return Ok(self.truthy(r));
@@ -137,7 +133,7 @@ impl<'a> VM<'a> {
 
         let item_is_instance = item.is_heap() && matches!(self.heap.get(item), HeapObj::Instance(..));
 
-        // Built-in sequence container + instance item: walk and compare with `__eq__` so user equality wins over pointer eq.
+        // Built-in sequence container + instance item, walk and compare with `__eq__` so user equality wins over pointer eq.
         if item_is_instance && container.is_heap() {
             let items: Option<Vec<Val>> = match self.heap.get(container) {
                 HeapObj::List(v) => Some(v.borrow().clone()),
@@ -154,7 +150,7 @@ impl<'a> VM<'a> {
             }
         }
 
-        // User instance container with `__iter__`: walk via the iterator protocol, comparing items with `__eq__`.
+        // User instance container with `__iter__` walks via the iterator protocol, comparing items with `__eq__`.
         if container.is_heap() && matches!(self.heap.get(container), HeapObj::Instance(..))
             && let Some(iter) = self.try_call_dunder(container, "__iter__", &[], chunk, slots)? {
             loop {
@@ -173,13 +169,13 @@ impl<'a> VM<'a> {
         self.contains(container, item)
     }
 
-    /* `==` with dunder dispatch and pointer-eq fallback; used wherever `contains_op` walks a sequence. */
+    /* `==` with dunder dispatch and pointer-eq fallback, used wherever `contains_op` walks a sequence. */
     pub(crate) fn eq_op(&mut self, a: Val, b: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<bool, VmErr> {
         if let Some(r) = self.try_compare_dunder(OpCode::Eq, a, b, chunk, slots)? { return Ok(self.truthy(r)); }
         Ok(eq_vals_with_heap(a, b, &self.heap))
     }
 
-    /* Drive a user-defined iterator to a Vec; treats a missing or non-Instance receiver as "no protocol" by returning `None`. Used by `list(custom)`, `tuple(custom)`, etc. */
+    /* Drive a user-defined iterator to a Vec. Treats a missing or non-Instance receiver as "no protocol" by returning `None`. Used by `list(custom)`, `tuple(custom)`, etc. */
     pub(crate) fn iter_to_vec_op(&mut self, obj: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Option<Vec<Val>>, VmErr> {
         if !obj.is_heap() || !matches!(self.heap.get(obj), HeapObj::Instance(..)) { return Ok(None); }
         let Some(iter) = self.try_call_dunder(obj, "__iter__", &[], chunk, slots)? else { return Ok(None); };
@@ -195,7 +191,7 @@ impl<'a> VM<'a> {
         }
     }
 
-    /* `str(v)` semantics: instance `__str__` wins, then `__repr__`, else the built-in display. */
+    /* `str(v)` semantics, instance `__str__` wins, then `__repr__`, else the built-in display. */
     pub(crate) fn display_op(&mut self, v: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<String, VmErr> {
         if v.is_heap() && matches!(self.heap.get(v), HeapObj::Instance(..)) {
             if let Some(r) = self.try_call_dunder(v, "__str__", &[], chunk, slots)? {
@@ -211,12 +207,12 @@ impl<'a> VM<'a> {
         } else {
             self.display(v)
         };
-        // Render is O(size); charge it so reprinting growing data can't outrun the budget.
+        // Render is O(size). Charge it so reprinting growing data can't outrun the budget.
         self.charge_steps(s.len())?;
         Ok(s)
     }
 
-    /* `repr(v)` semantics: instance `__repr__` wins; otherwise the built-in repr (which adds quotes for strings, etc.). */
+    /* `repr(v)` semantics, instance `__repr__` wins, otherwise the built-in repr (which adds quotes for strings, etc.). */
     pub(crate) fn repr_op(&mut self, v: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<String, VmErr> {
         if v.is_heap() && matches!(self.heap.get(v), HeapObj::Instance(..))
             && let Some(r) = self.try_call_dunder(v, "__repr__", &[], chunk, slots)? {
@@ -238,7 +234,7 @@ impl<'a> VM<'a> {
         )
     }
 
-    /* Container-aware repr: dispatches `__repr__` on nested instances; elements always use repr, with `seen` tracking heap ids for cycle detection. */
+    /* Container-aware repr dispatches `__repr__` on nested instances. Elements always use repr, with `seen` tracking heap ids for cycle detection. */
     pub(crate) fn repr_deep(&mut self, v: Val, chunk: &SSAChunk, slots: &mut [Val], seen: &mut Vec<u32>) -> Result<String, VmErr> {
         const DEEP_MAX: usize = 100;
         if !v.is_heap() { return Ok(self.repr(v)); }
@@ -337,7 +333,7 @@ impl<'a> VM<'a> {
         Err(VmErr::TypeMsg(crate::s!("'", str name, "' did not return a string")))
     }
 
-    /* `format(v, spec)` dispatch: instance `__format__(spec)` wins; otherwise the built-in spec engine runs. Empty spec on an instance still goes through `__format__` so user formatting can opt in. */
+    /* `format(v, spec)` dispatch, instance `__format__(spec)` wins, otherwise the built-in spec engine runs. Empty spec on an instance still goes through `__format__` so user formatting can opt in. */
     pub(crate) fn format_op(&mut self, v: Val, spec: &str, chunk: &SSAChunk, slots: &mut [Val]) -> Result<String, VmErr> {
         if v.is_heap() && matches!(self.heap.get(v), HeapObj::Instance(..)) {
             let spec_val = self.heap.alloc(HeapObj::Str(spec.to_string()))?;
@@ -348,7 +344,7 @@ impl<'a> VM<'a> {
         crate::vm::format_spec::format_value(v, spec, &self.heap).map_err(crate::vm::format_spec::fmt_err)
     }
 
-    /* Coerce a `__len__` / `__length_hint__` return value to bool semantics; rejects negatives. */
+    /* Coerce a `__len__` / `__length_hint__` return value to bool semantics and reject negatives. */
     fn len_to_bool(&self, v: Val) -> Result<bool, VmErr> {
         let n = if v.is_int() { v.as_int() as i128 }
         else if let Some(i) = crate::vm::types::as_i128(v, &self.heap) { i }

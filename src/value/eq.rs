@@ -6,7 +6,7 @@ pub(crate) fn eq_seq(a: &[Val], b: &[Val], eq: impl Fn(Val,Val)->bool) -> bool {
 pub(crate) fn eq_dict(a: &DictMap, b: &DictMap, heap: &HeapPool, eq: impl Fn(Val,Val)->bool) -> bool {
     a.len() == b.len() && a.iter().all(|(k,v)| b.get(&k, heap).is_some_and(|&v2| eq(v,v2)))
 }
-/* Content set-equality: same size and every element of `a` content-matches one in `b`. */
+/* Content set-equality, same size and every element of `a` content-matches one in `b`. */
 pub(crate) fn eq_set(a: &ValSet, b: &ValSet, eq: impl Fn(Val,Val)->bool) -> bool {
     a.len() == b.len() && a.iter().all(|&x| b.iter().any(|&y| eq(x, y)))
 }
@@ -18,14 +18,14 @@ pub fn eq_vals_with_heap(a: Val, b: Val, heap: &HeapPool) -> bool {
     eq_vals_depth(a, b, heap, 0)
 }
 
-/* Content hash, consistent with eq_vals_with_heap: values that compare equal hash equal (numeric unified). */
+/* Content hash, consistent with eq_vals_with_heap. Values that compare equal hash equal (numeric unified). */
 pub fn hash_val_with_heap(v: Val, heap: &HeapPool) -> u64 {
     hash_depth(v, heap, 0)
 }
 fn hash_depth(v: Val, heap: &HeapPool, depth: usize) -> u64 {
     use core::hash::Hasher;
     let mut h = crate::util::hash::FxHasher::default();
-    // Numeric unification: int / bool / integral-float / in-range LongInt all hash as the same i64.
+    // Numeric unification, int / bool / integral-float / in-range LongInt all hash as the same i64.
     if v.is_int() { h.write_i64(v.as_int()); return h.finish(); }
     if v.is_bool() { h.write_i64(v.as_bool() as i64); return h.finish(); }
     if v.is_float() {
@@ -35,7 +35,7 @@ fn hash_depth(v: Val, heap: &HeapPool, depth: usize) -> u64 {
     }
     if !v.is_heap() || depth > EQ_DEPTH_MAX { h.write_u64(v.0); return h.finish(); }
     match heap.get(v) {
-        // i128 in i64 range hashes like the equal int/float; wider values hash their two halves.
+        // i128 in i64 range hashes like the equal int/float, wider values hash their two halves.
         HeapObj::LongInt(i) => match i64::try_from(*i) {
             Ok(n) => h.write_i64(n),
             Err(_) => { h.write_u64(*i as u64); h.write_u64((*i >> 64) as u64); }
@@ -50,7 +50,7 @@ fn hash_depth(v: Val, heap: &HeapPool, depth: usize) -> u64 {
     h.finish()
 }
 
-/* f64 view of any numeric Val (int/bool/float/LongInt); None for non-numerics. */
+/* f64 view of any numeric Val (int/bool/float/LongInt), None for non-numerics. */
 pub(crate) fn num_as_f64(v: Val, heap: &HeapPool) -> Option<f64> {
     if v.is_float() { Some(v.as_float()) }
     else if v.is_int() { Some(v.as_int() as f64) }
@@ -60,7 +60,7 @@ pub(crate) fn num_as_f64(v: Val, heap: &HeapPool) -> Option<f64> {
 }
 
 fn eq_vals_depth(a: Val, b: Val, heap: &HeapPool, depth: usize) -> bool {
-    // Past the cap fall back to identity; cyclic structures terminate.
+    // Past the cap fall back to identity, cyclic structures terminate.
     if depth > EQ_DEPTH_MAX { return a.0 == b.0; }
 
     // Unify all int-flavoured pairs through i128 (LongInt, inline int, bool).
@@ -68,7 +68,7 @@ fn eq_vals_depth(a: Val, b: Val, heap: &HeapPool, depth: usize) -> bool {
         return ai == bi;
     }
 
-    // One side is a float here (all-integer handled above): compare numerically so float unifies with int/bool/LongInt, e.g. `1.0 == True`, `1e16 == 10**16`.
+    // One side is a float here (all-integer handled above), compare numerically so float unifies with int/bool/LongInt, e.g. `1.0 == True`, `1e16 == 10**16`.
     if let (Some(af), Some(bf)) = (num_as_f64(a, heap), num_as_f64(b, heap)) {
         return af == bf;
     }
@@ -77,7 +77,7 @@ fn eq_vals_depth(a: Val, b: Val, heap: &HeapPool, depth: usize) -> bool {
         return a.0 == b.0;
     }
 
-    // A heap object equals itself; short-circuits self-referential containers before the element walk.
+    // A heap object equals itself, short-circuits self-referential containers before the element walk.
     if a.0 == b.0 { return true; }
 
     let d = depth + 1;
@@ -91,9 +91,9 @@ fn eq_vals_depth(a: Val, b: Val, heap: &HeapPool, depth: usize) -> bool {
         (HeapObj::Set(x), HeapObj::FrozenSet(y)) => eq_set(&x.borrow(), y, |a,b| eq_vals_depth(a, b, heap, d)),
         (HeapObj::FrozenSet(x), HeapObj::Set(y)) => eq_set(x, &y.borrow(), |a,b| eq_vals_depth(a, b, heap, d)),
         (HeapObj::Dict(x), HeapObj::Dict(y)) => eq_dict(&x.borrow(), &y.borrow(), heap, |a,b| eq_vals_depth(a, b, heap, d)),
-        (HeapObj::Type(x), HeapObj::Type(y)) => x == y, // by name; interning also makes `is` hold
+        (HeapObj::Type(x), HeapObj::Type(y)) => x == y, // by name, interning also makes `is` hold
         (HeapObj::Range(s1,e1,t1), HeapObj::Range(s2,e2,t2)) => {
-            // Python: equal length, then matching start/step only when non-empty.
+            // Python semantics, equal length, then matching start/step only when non-empty.
             let (l1, l2) = (range_len(*s1,*e1,*t1), range_len(*s2,*e2,*t2));
             l1 == l2 && (l1 == 0 || (s1 == s2 && (l1 == 1 || t1 == t2)))
         }
@@ -102,7 +102,7 @@ fn eq_vals_depth(a: Val, b: Val, heap: &HeapPool, depth: usize) -> bool {
     }
 }
 
-/* Count of values range(start, stop, step) yields; step is never zero. */
+/* Count of values range(start, stop, step) yields, step is never zero. */
 fn range_len(s: i64, e: i64, t: i64) -> i128 {
     let (lo, hi, step) = if t > 0 { (s as i128, e as i128, t as i128) } else { (e as i128, s as i128, -(t as i128)) };
     if hi > lo { (hi - lo + step - 1) / step } else { 0 }

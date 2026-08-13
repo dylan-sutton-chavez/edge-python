@@ -1,12 +1,10 @@
-/* Pure calendar helpers. struct_time crosses as a JSON 9-tuple string, like storage's returns. */
-
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const DAYS_ABBR = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const MONTHS_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 const pad = (n, w = 2) => String(n).padStart(w, "0");
-// Python tm_wday is Mon=0..Sun=6; JS getDay is Sun=0. Convert both ways.
+// Python tm_wday is Mon=0..Sun=6, JS getDay is Sun=0. Convert both ways.
 const cpyWday = (d) => (d + 6) % 7;
 const jsDay = (cpy) => (cpy + 1) % 7;
 
@@ -65,6 +63,7 @@ const strptime = (s, fmt) => {
     return toTuple(new Date(Date.UTC(Y, mo - 1, d, H, Mi, S)), true);
 };
 
+/* Pure calendar helpers. struct_time crosses as a JSON 9-tuple string, like storage's returns. */
 export default () => ({
     gmtime: (secs) => toTuple(new Date((secs ?? Date.now() / 1000) * 1000), true),
     localtime: (secs) => toTuple(new Date((secs ?? Date.now() / 1000) * 1000), false),

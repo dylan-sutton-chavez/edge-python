@@ -19,7 +19,7 @@ pub mod devkit;
 #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 pub mod native;
 
-/* Internal compiler helpers (not Edge Python stdlib); separate from pipeline code. */
+/* Internal compiler helpers (not Edge Python stdlib), separate from pipeline code. */
 pub mod util {
     pub mod hash;
     pub mod fstr;
@@ -29,12 +29,12 @@ pub mod util {
     pub mod ws;
 }
 
-/* NaN-boxed values and the mark-and-sweep heap; the layer both the frontend and the VM build on. */
+/* NaN-boxed values and the mark-and-sweep heap, the layer both the frontend and the VM build on. */
 pub mod value;
 
 pub mod lexer;
 pub mod parser;
-/* Post-SSA passes, run between parse and boot; touches no VM state. */
+/* Post-SSA passes, run between parse and boot, touches no VM state. */
 pub mod optimizer;
 pub mod vm;
 pub mod packages;

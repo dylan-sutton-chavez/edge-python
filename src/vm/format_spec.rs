@@ -1,25 +1,20 @@
-/*
-f-string format spec, PEP 3101 subset: `[[fill]align][sign][#][0][width][,][.precision][type]`.
-Types: d/b/o/x/X (ints), f/F/e/E/g/G (floats), % (percent), s (str), c (codepoint).
-Returns Err(msg); caller raises ValueError.
-*/
-
 use alloc::string::{String, ToString};
 use crate::vm::types::{Val, HeapObj, HeapPool, VmErr, cold_value, fabs, ffloor, flog10, fsignum, ftrunc, num_as_f64};
 
-// `%c`/`{:c}` out-of-range raises OverflowError; other format errors are ValueError.
+// `%c`/`{:c}` out-of-range raises OverflowError, other format errors are ValueError.
 pub const C_RANGE_ERR: &str = "%c arg not in range(0x110000)";
 
 pub fn fmt_err(m: &'static str) -> VmErr {
     if m == C_RANGE_ERR { VmErr::Raised(crate::s!("OverflowError: ", str m)) } else { cold_value(m) }
 }
 
+/* f-string format spec, PEP 3101 subset, `[[fill]align][sign][#][0][width][,][.precision][type]`. Types are d/b/o/x/X (ints), f/F/e/E/g/G (floats), % (percent), s (str), c (codepoint). Returns Err(msg), the caller raises ValueError. */
 pub fn format_value(v: Val, spec: &str, heap: &HeapPool) -> Result<String, &'static str> {
     if spec.is_empty() {
         return Ok(display_inline(v, heap));
     }
     let parsed = parse_spec(spec)?;
-    // Cap against the heap budget; precision also below core::fmt's u16 abort threshold (panics at >= 65535).
+    // Cap against the heap budget, precision also below core::fmt's u16 abort threshold (panics at >= 65535).
     const PRECISION_MAX: usize = 65_000;
     if parsed.width > heap.limit() { return Err("format width exceeds limit"); }
     if parsed.precision.is_some_and(|p| p > heap.limit().min(PRECISION_MAX)) { return Err("format precision exceeds limit"); }
@@ -77,7 +72,7 @@ fn parse_spec(spec: &str) -> Result<Spec, &'static str> {
         s.width = spec[w_start..i].parse().map_err(|_| "invalid width in format spec")?;
     }
 
-    // ',' or '_' digit-group separator; '_' groups hex/oct/bin by four.
+    // ',' or '_' digit-group separator, '_' groups hex/oct/bin by four.
     if i < bytes.len() && matches!(bytes[i], b',' | b'_') {
         s.sep = bytes[i];
         i += 1;
@@ -104,12 +99,12 @@ fn parse_spec(spec: &str) -> Result<Spec, &'static str> {
 fn apply(v: Val, s: &Spec, heap: &HeapPool) -> Result<String, &'static str> {
     let is_long = v.is_heap() && matches!(heap.get(v), HeapObj::LongInt(_));
     let is_int_like = v.is_int() || v.is_bool() || is_long;
-    // Dispatch by type char: int types -> int formatter, float types coerce ints up, `s` only strings.
+    // Dispatch by type char, int types -> int formatter, float types coerce ints up, `s` only strings.
     match s.ty {
         0 | b's' => {
             if is_int_like || v.is_float() || v.is_none() {
                 if s.ty == b's' { return Err("'s' format spec requires a string"); }
-                // Precision on int -> float-fixed; thousands stays in int path to keep LongInt precision.
+                // Precision on int -> float-fixed, thousands stays in int path to keep LongInt precision.
                 if s.precision.is_some() && !is_int_like {
                     return format_float(v, s, b'f', heap);
                 }
@@ -140,7 +135,7 @@ fn apply(v: Val, s: &Spec, heap: &HeapPool) -> Result<String, &'static str> {
             };
             Ok(pad_string(s, &truncated))
         }
-        // `n` is locale-aware decimal; paradigm has no locale, so alias to `d`.
+        // `n` is locale-aware decimal, paradigm has no locale, so alias to `d`.
         b'd' | b'b' | b'o' | b'x' | b'X' | b'n' => {
             if s.precision.is_some() { return Err("precision not allowed in integer format spec"); }
             let mut s2 = s.clone();
@@ -169,7 +164,7 @@ fn format_char(v: Val, s: &Spec) -> Result<String, &'static str> {
     let i = v.as_int();
     if !(0..=0x10FFFF).contains(&i) { return Err(C_RANGE_ERR); }
     let ch = char::from_u32(i as u32).ok_or("'c' format spec arg not a valid char")?;
-    // 'c' is numeric for alignment: it defaults to right-align like ints.
+    // 'c' is numeric for alignment, it defaults to right-align like ints.
     Ok(pad_aligned(s, &ch.to_string(), 0))
 }
 
@@ -203,14 +198,14 @@ fn format_float(v: Val, s: &Spec, ty: u8, heap: &HeapPool) -> Result<String, &'s
     let mag = f.abs();
     let body = match ty {
         b'f' | b'F' => fixed(mag, prec),
-        // e/g delegate to Rust's f64 formatter; round-half-to-even applies only to `f`.
+        // e/g delegate to Rust's f64 formatter, round-half-to-even applies only to `f`.
         b'e' => format_with_e(mag, prec, false),
         b'E' => format_with_e(mag, prec, true),
-        // `g/G`: pick `e` for very small/large, `f` otherwise.
+        // `g/G` picks `e` for very small/large, `f` otherwise.
         b'g' | b'G' => {
             let upper = ty == b'G';
             let exp = if mag == 0.0 { 0 } else { ffloor(flog10(mag)) as i32 };
-            // rule: -4 <= exp < precision uses fixed; else scientific.
+            // The rule is -4 <= exp < precision uses fixed, else scientific.
             let p = prec.max(1);
             if exp < -4 || exp >= p as i32 {
                 format_with_e(mag, p.saturating_sub(1), upper)
@@ -227,7 +222,7 @@ fn format_float(v: Val, s: &Spec, ty: u8, heap: &HeapPool) -> Result<String, &'s
 }
 
 fn format_with_e(mag: f64, prec: usize, upper: bool) -> String {
-    // Rust emits "3.14e0"; expects "e+00", inject the sign and pad exponent to >=2 digits.
+    // Rust emits "3.14e0" but we expect "e+00", inject the sign and pad exponent to >=2 digits.
     let raw = alloc::format!("{:.*e}", prec, mag);
     let (mant, exp_str) = raw.split_once('e').unwrap_or((raw.as_str(), "0"));
     let (esign, edigs) = if let Some(rest) = exp_str.strip_prefix('-') { ('-', rest) }
@@ -257,7 +252,7 @@ fn int_to_decimal_parts(v: Val, heap: &HeapPool) -> Result<(bool, String), &'sta
     if v.is_heap() && let HeapObj::LongInt(i) = heap.get(v) {
         let neg = *i < 0;
         let mut b = itoa::Buffer::new();
-        // unsigned_abs handles i128::MIN: returns 2^127 in u128.
+        // unsigned_abs handles i128::MIN by returning 2^127 in u128.
         let mag = b.format(i.unsigned_abs()).to_string();
         return Ok((neg, mag));
     }
@@ -265,8 +260,7 @@ fn int_to_decimal_parts(v: Val, heap: &HeapPool) -> Result<(bool, String), &'sta
 }
 
 fn decimal_to_radix(mag: &str, radix: u32) -> String {
-    // Non-neg decimal string -> `radix`. Parses into u128 to cover LongInt
-    // magnitudes (up to 2^127). Bool/inline-int values still fit trivially.
+    // Non-neg decimal string -> `radix`. Parses into u128 to cover LongInt magnitudes (up to 2^127). Bool/inline-int values still fit trivially.
     if mag == "0" { return String::from("0"); }
     let mut n: u128 = mag.parse().unwrap_or(0);
     let mut out = String::new();
@@ -278,7 +272,7 @@ fn decimal_to_radix(mag: &str, radix: u32) -> String {
     out.chars().rev().collect()
 }
 
-// '_' groups binary/octal/hex every four digits; decimal and ',' every three.
+// '_' groups binary/octal/hex every four digits, decimal and ',' every three.
 fn group_size(ty: u8, sep: u8) -> usize {
     if sep == b'_' && matches!(ty, b'b' | b'o' | b'x' | b'X') { 4 } else { 3 }
 }
@@ -331,7 +325,7 @@ fn pad_string(s: &Spec, body: &str) -> String {
     let len = body.chars().count();
     if len >= s.width { return body.to_string(); }
     let pad = s.width - len;
-    // Strings can't use '=' alignment; a zero-fill default becomes left-align.
+    // Strings can't use '=' alignment, a zero-fill default becomes left-align.
     let align = match s.align.unwrap_or(b'<') { b'=' => b'<', a => a };
     pad_with(body, pad, align, s.fill, 0)
 }
@@ -363,7 +357,7 @@ fn pad_with(body: &str, pad: usize, align: u8, fill: char, sign_prefix_len: usiz
             for _ in 0..r { out.push(fill); }
         }
         b'=' => {
-            /* Sign-aware: insert padding between the sign/prefix and the digits. */
+            /* Sign-aware padding goes between the sign/prefix and the digits. */
             let mut chars = body.chars();
             for _ in 0..sign_prefix_len {
                 if let Some(c) = chars.next() { out.push(c); }
@@ -377,7 +371,7 @@ fn pad_with(body: &str, pad: usize, align: u8, fill: char, sign_prefix_len: usiz
 }
 
 fn fixed(mag: f64, prec: usize) -> String {
-    // Round-half-to-even to `prec` decimals; renders manually to avoid `alloc::format!`'s %f.
+    // Round-half-to-even to `prec` decimals, renders manually to avoid `alloc::format!`'s %f.
     let scale = pow10(prec);
     let scaled = mag * scale;
     let rounded = if fabs(scaled - ftrunc(scaled)) == 0.5 {

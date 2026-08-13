@@ -1,12 +1,8 @@
-/*
-Post-SSA passes: constant folding (binop / Not / Minus on LoadConst) and Phi-noop elimination.
-LoadName preserved for IC/super-ops/templates. Dead instructions removed, jump operands remapped.
-*/
-
 use crate::parser::{OpCode, SSAChunk, Instruction, Value};
 use crate::value::Val;
 use alloc::{vec, vec::Vec};
 
+/* Post-SSA passes, constant folding (binop / Not / Minus on LoadConst) and Phi-noop elimination. LoadName preserved for IC/super-ops/templates, dead instructions removed, jump operands remapped. */
 pub fn constant_fold(chunk: &mut SSAChunk) {
     let n = chunk.instructions.len();
     if n == 0 {
@@ -36,7 +32,7 @@ pub fn constant_fold(chunk: &mut SSAChunk) {
         }
     }
 
-    // Pass 2: Phi-noop elimination; capture source pairs before marking dead.
+    // Pass 2, Phi-noop elimination, capture source pairs before marking dead.
     let mut surviving_pairs: Vec<(u16, u16)> = Vec::new();
     if !chunk.phi_map.is_empty() && !chunk.phi_sources.is_empty() {
         for (ip, ins) in chunk.instructions.iter().enumerate() {
@@ -54,7 +50,7 @@ pub fn constant_fold(chunk: &mut SSAChunk) {
 
     if dead.iter().any(|&d| d) {
         compact_with_jump_remap(chunk, &dead);
-        // Rebuild phi_map; surviving Phis keep their relative order, so pair them sequentially.
+        // Rebuild phi_map, surviving Phis keep their relative order, so pair them sequentially.
         if !surviving_pairs.is_empty() {
             chunk.phi_sources = surviving_pairs;
             chunk.phi_map = vec![0; chunk.instructions.len()];
@@ -66,7 +62,7 @@ pub fn constant_fold(chunk: &mut SSAChunk) {
                 }
             }
         } else if !chunk.phi_map.is_empty() {
-            // All Phis were eliminated; clear both metadata vectors.
+            // All Phis were eliminated, clear both metadata vectors.
             chunk.phi_sources.clear();
             chunk.phi_map.clear();
         }
@@ -94,7 +90,7 @@ fn is_jump_op(op: OpCode) -> bool {
     )
 }
 
-/* Build remap[i] = new index after compaction; dead entries forward to next live, n->new_len. */
+/* Build remap[i] = new index after compaction, dead entries forward to next live, n->new_len. */
 fn compact_with_jump_remap(chunk: &mut SSAChunk, dead: &[bool]) {
     let n = chunk.instructions.len();
     let alive_count: usize = dead.iter().filter(|&&d| !d).count();
@@ -186,7 +182,7 @@ fn const_to_val(constants: &[Value], idx: u16) -> Option<Val> {
     }
 }
 
-/* Nearest live instruction before `from`; skips entries already marked dead by inner folds. */
+/* Nearest live instruction before `from`, skips entries already marked dead by inner folds. */
 fn prev_live(dead: &[bool], from: usize) -> Option<usize> {
     let mut i = from;
     while i > 0 {
@@ -217,7 +213,7 @@ fn try_fold_binop(chunk: &mut SSAChunk, dead: &mut [bool], ip: usize) {
     dead[ip] = true;
 }
 
-/* Fold a unary op over the preceding LoadConst; `fold` supplies the per-op table. */
+/* Fold a unary op over the preceding LoadConst, `fold` supplies the per-op table. */
 fn try_fold_unary(chunk: &mut SSAChunk, dead: &mut [bool], ip: usize, fold: impl Fn(Val) -> Option<Val>) {
     let Some(prev1_ip) = prev_live(dead, ip) else { return };
     let p1 = chunk.instructions[prev1_ip];
@@ -269,7 +265,7 @@ fn fold_binop(op: OpCode, a: Val, b: Val) -> Option<Val> {
             OpCode::Add => ai.checked_add(bi)?,
             OpCode::Sub => ai.checked_sub(bi)?,
             OpCode::Mul => ai.checked_mul(bi)?,
-            // floored mod/div (sign follows divisor), not Euclidean; matches the runtime path.
+            // floored mod/div (sign follows divisor), not Euclidean, matches the runtime path.
             OpCode::Mod => if bi == 0 { return None; } else { let r = ai % bi; if r != 0 && (r < 0) != (bi < 0) { r + bi } else { r } },
             OpCode::FloorDiv => if bi == 0 { return None; } else { let q = ai / bi; let r = ai - q * bi; if r != 0 && (r < 0) != (bi < 0) { q - 1 } else { q } },
             OpCode::BitAnd => ai & bi,

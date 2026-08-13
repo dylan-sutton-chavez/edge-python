@@ -18,7 +18,7 @@ impl<'a> VM<'a> {
     /* Byte offset of the last propagating error, or None on success / before `run()`. */
     pub fn error_pos(&self) -> Option<usize> { self.error_byte_pos.map(|p| p as usize) }
 
-    /* Intended process exit code when the last uncaught error is `SystemExit` with an integer (or absent/None) argument. `None` means "not a plain SystemExit", so the host renders a normal traceback; a non-int argument also yields `None` so its message surfaces as an error. */
+    /* Intended process exit code when the last uncaught error is `SystemExit` with an integer (or absent/None) argument. `None` means "not a plain SystemExit", so the host renders a normal traceback. A non-int argument also yields `None` so its message surfaces as an error. */
     pub fn system_exit_code(&self) -> Option<i64> {
         let exc = self.pending.exc_val?;
         let HeapObj::ExcInstance(name, args) = self.heap.get(exc) else { return None; };
@@ -34,7 +34,7 @@ impl<'a> VM<'a> {
     pub fn call_stack_frames(&self) -> &[CallFrame] { &self.call_stack }
     pub fn function_names_ref(&self) -> &[String] { &self.function_names }
 
-    /// Host-provided wall clock (ns); without one, `sleep` advances a deterministic virtual clock.
+    /// Host-provided wall clock (ns), without one, `sleep` advances a deterministic virtual clock.
     pub fn set_time_hook(&mut self, hook: fn() -> u64) { self.time_hook = Some(hook); }
     pub(crate) fn now_ns(&self) -> u64 {
         match self.time_hook { Some(h) => h(), None => self.virtual_clock_ns }
@@ -65,12 +65,12 @@ impl<'a> VM<'a> {
             HeapObj::Range(s, e, st) => {
                 let (s, e, st) = (*s, *e, *st);
                 if st == 0 { return Err(VmErr::Value("range() arg 3 must not be zero")); }
-                // Spreading a huge range would build a giant arg vec; cap against the heap budget.
+                // Spreading a huge range would build a giant arg vec, cap against the heap budget.
                 let count = (e as i128 - s as i128).unsigned_abs() / (st as i128).unsigned_abs();
                 if count > self.heap.limit() as u128 { return Err(VmErr::Heap); }
                 let mut out = Vec::new();
                 let mut i = s;
-                // range_int promotes past the 47-bit inline range; checked_add ends at the i64 edge.
+                // range_int promotes past the 47-bit inline range, checked_add ends at the i64 edge.
                 if st > 0 { while i < e { out.push(range_int(&mut self.heap, i)?); match i.checked_add(st) { Some(n) => i = n, None => break } } }
                 else { while i > e { out.push(range_int(&mut self.heap, i)?); match i.checked_add(st) { Some(n) => i = n, None => break } } }
                 out
@@ -111,7 +111,7 @@ impl<'a> VM<'a> {
 
     #[inline]
     pub(crate) fn checked_jump(&mut self, target: usize, limit: usize) -> Result<usize, VmErr> {
-        // Sandbox-off skips the budget decrement; the bounds check still runs.
+        // Sandbox-off skips the budget decrement, the bounds check still runs.
         if !self.sandbox_off {
             if self.budget == 0 { return Err(cold_budget()); }
             self.budget -= 1;
@@ -121,7 +121,7 @@ impl<'a> VM<'a> {
     }
 
     pub(crate) fn str_to_char_vals(&mut self, s: &str) -> Result<Vec<Val>, VmErr> {
-        // Per-char heap allocs scale with input; charge the budget so loops over this stay bounded.
+        // Per-char heap allocs scale with input, charge the budget so loops over this stay bounded.
         self.charge_steps(s.len())?;
         s.chars().map(|c| self.heap.alloc(HeapObj::Str(c.to_string()))).collect()
     }
@@ -194,9 +194,9 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* Pick the first defined Phi source; if both are undef fall back to None. */
+    /* Pick the first defined Phi source, if both are undef fall back to None. */
     pub(crate) fn exec_phi(op: u16, rip: usize, phi_map: &[usize], slots: &mut [Val], phi_sources: &[(u16, u16)]) {
-        // Parse recovery can leave a Phi indexing past `slots` (sized to names.len()); index defensively.
+        // Parse recovery can leave a Phi indexing past `slots` (sized to names.len()), index defensively.
         let Some(&(ia, ib)) = phi_map.get(rip).and_then(|&pi| phi_sources.get(pi)) else { return };
         let a = slots.get(ia as usize).copied().unwrap_or_else(Val::undef);
         let val = if !a.is_undef() { a }

@@ -1,7 +1,3 @@
-/*
-`edge test` discover *_test.py files and drive each through one engine session. Verdicts come only from SystemExit codes, never from parsed output.
-*/
-
 use anyhow::{bail, Context, Result};
 use compiler::devkit::{discover_tests, TEST_DRIVER};
 use std::path::Path;
@@ -11,6 +7,7 @@ use crate::engine::native::NativeSession;
 use crate::manifest::Manifest;
 use crate::ui;
 
+/// Discover *_test.py files and drive each through one engine session. Verdicts come only from SystemExit codes, never from parsed output.
 pub fn run(manifest_path: &Path, packages: Option<&Path>, web: bool, path: Option<&Path>) -> Result<()> {
     let target = path.unwrap_or(Path::new("."));
     let files = if target.is_file() {
@@ -44,7 +41,7 @@ pub fn run(manifest_path: &Path, packages: Option<&Path>, web: bool, path: Optio
             .and_then(|src| run_file(session.as_mut(), &src, file));
         let (ok, reason) = match result {
             Ok(v) => v,
-            // A wedged session poisons later files; reopen.
+            // A wedged session poisons later files, reopen.
             Err(e) => {
                 ui::error(&e);
                 drop(session);

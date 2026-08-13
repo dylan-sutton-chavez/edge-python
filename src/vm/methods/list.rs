@@ -1,10 +1,6 @@
-/*
-Built-in methods for `list` receivers. Arity is checked by the dispatcher; `mutating` is marked by the dispatcher when `MethodDesc::mutating` is true.
-*/
-
 use super::prelude::*;
 
-/* `list.__next__()`: consume the front item; StopIteration when empty (iter() yields a list). */
+/* `list.__next__()` consumes the front item, StopIteration when empty (iter() yields a list). */
 pub fn next_method(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
     let HeapObj::List(rc) = vm.heap.get(recv) else { return Err(cold_type("__next__: receiver is not a list")); };
     let rc = rc.clone();
@@ -19,7 +15,7 @@ pub fn next_method(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
 pub fn index(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let items = list_clone(vm, recv)?;
     let len = items.len() as i64;
-    // Optional start/end clamp like Python; negatives count from the end. Bools count as ints.
+    // Optional start/end clamp like Python, negatives count from the end. Bools count as ints.
     let as_i = |v: Val| -> i64 { if v.is_bool() { v.as_bool() as i64 } else { v.as_int() } };
     let norm = |v: Val| (if as_i(v) < 0 { len + as_i(v) } else { as_i(v) }).clamp(0, len) as usize;
     let start = pos.get(1).filter(|v| v.is_int() || v.is_bool()).map_or(0, |&v| norm(v));

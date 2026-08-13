@@ -1,8 +1,3 @@
-/*
-Lazy prefetch over the dependency graph. The compiler classifies each import (bare, importer-relative, root-relative);
-bare names resolve against the manifest chain (defaults < user packages.json), and only the imports a module actually uses get fetched. Manifests are resolution tables, not download lists.
-*/
-
 import { fetchWithLockfile } from './fetch.js';
 import { loadNativeModule, nativeTable } from './native.js';
 import { dirOf, joinRel, parentDir, SOURCE_LIMIT } from './specs.js';
@@ -10,7 +5,7 @@ import { dirOf, joinRel, parentDir, SOURCE_LIMIT } from './specs.js';
 const TD = new TextDecoder();
 const TE = new TextEncoder();
 
-/* Hint when a module spec likely can't load: insecure scheme or schemeless URL. Null when it looks fine. */
+/* Hint when a module spec likely can't load, insecure scheme or schemeless URL. Null when it looks fine. */
 function schemeHint(spec) {
     if (spec.startsWith('http://')) {
         return `'${spec}' uses http://; browsers block http subresources from an https page `
@@ -42,15 +37,16 @@ function scanImports(src, exports) {
     }));
 }
 
+/* Lazy prefetch over the dependency graph. The compiler classifies each import (bare, importer-relative, root-relative), bare names resolve against the manifest chain (defaults < user packages.json), and only the imports a module actually uses get fetched. Manifests are resolution tables, not download lists. */
 export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
     const { fetchedSources, knownMissing, importsMap, mainThreadSpecs, entryDir } = ctx;
     const visited = new Set();
     const queue = [];
-    // Module specs that never registered; thrown together at the end so the user sees a clear cause.
+    // Module specs that never registered, thrown together at the end so the user sees a clear cause.
     const failures = [];
-    // Bare-name -> target spec. Seeded from importsMap (defaults + user); physical packages.json merge in as discovered.
+    // Bare-name -> target spec. Seeded from importsMap (defaults + user), physical packages.json merge in as discovered.
     const table = { ...(importsMap || {}) };
-    // Bare names scanned before a manifest declared them; retried after each manifest merge.
+    // Bare names scanned before a manifest declared them, retried after each manifest merge.
     const pendingBare = new Map(); // name -> importer dirs, for relative targets
     // Root-relative imports waiting on their importer's manifest chain to finish probing.
     const pendingRoot = []; // { spec, dir }
@@ -70,7 +66,7 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
         }
     };
 
-    /* Nearest dir at or above `dir` with a fetched manifest; undefined while probes are pending, null once fully probed bare. */
+    /* Nearest dir at or above `dir` with a fetched manifest, undefined while probes are pending, null once fully probed bare. */
     const rootFor = (dir) => {
         for (let d = dir; d != null; d = parentDir(d)) {
             const m = d + 'packages.json';
@@ -82,7 +78,7 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
     const enqueueRoot = (spec, dir) => {
         const root = rootFor(dir);
         if (root === undefined) { pendingRoot.push({ spec, dir }); return; }
-        if (root !== null) queue.push(joinRel(root, spec)); // null: no manifest anywhere, the compiler reports it
+        if (root !== null) queue.push(joinRel(root, spec)); // null means no manifest anywhere, the compiler reports it
     };
     const retryRoot = () => {
         for (let i = pendingRoot.length - 1; i >= 0; i--) {
@@ -93,7 +89,7 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
         }
     };
 
-    /* A scanned import contributes at most one fetch target: paths queue directly, bare resolves via the table. */
+    /* A scanned import contributes at most one fetch target, paths queue directly, bare resolves via the table. */
     const enqueueImport = (imp, dir) => {
         if (imp.kind === 'r') { queue.push(joinRel(dir, imp.spec)); return; }
         if (imp.kind === 'R') { enqueueRoot(imp.spec, dir); return; }
@@ -123,10 +119,10 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
         if (visited.has(spec)) continue;
         visited.add(spec);
 
-        // Eager system (programmatic object) already registered before prefetch; nothing to fetch.
+        // Eager system (programmatic object) already registered before prefetch, nothing to fetch.
         if (mainThreadSpecs && mainThreadSpecs.has(spec)) continue;
 
-        // Lazy system: ask the page to load the ESM, then register its exports as `mt:<name>` stubs.
+        // Lazy system, ask the page to load the ESM, then register its exports as `mt:<name>` stubs.
         if (spec.startsWith('mt:')) {
             const name = spec.slice(3);
             let exportNames;
@@ -143,7 +139,7 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
         } else {
             bytes = await fetchWithLockfile(spec, lockfile, ctx);
             if (!bytes) {
-                // packages.json probes are opportunistic 404s; only a real module import is worth flagging.
+                // packages.json probes are opportunistic 404s, only a real module import is worth flagging.
                 if (!spec.endsWith('packages.json')) failures.push(schemeHint(spec) ?? `could not fetch module '${spec}'`);
                 retryRoot(); // a settled probe may unblock a root-relative import
                 continue;
@@ -161,7 +157,7 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
             for (const [name, target] of Object.entries(parsed.imports || {})) {
                 if (!(name in table)) table[name] = joinRel(dir, target);
             }
-            // `system` entries declare mt: stubs; the page imports the ESM.
+            // `system` entries declare mt: stubs, the page imports the ESM.
             for (const [name, target] of Object.entries(parsed.system || {})) {
                 if (!(name in table)) table[name] = 'mt:' + name;
                 if (!systemEsmUrls.has(name)) systemEsmUrls.set(name, joinRel(dir, target));
@@ -180,7 +176,7 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
             try {
                 ({ names, fns } = await loadNativeModule(spec, bytes, ctx));
             } catch (e) {
-                // Bytes fetched but the module won't load (bad ABI / corrupt wasm); a scheme issue would have failed at fetch.
+                // Bytes fetched but the module won't load (bad ABI / corrupt wasm), a scheme issue would have failed at fetch.
                 failures.push(`'${spec}' failed to load as a wasm module: ${e?.message ?? e}`);
                 continue;
             }
@@ -198,7 +194,7 @@ export async function bfsPrefetch(rootSrc, exports, lockfile, ctx) {
             continue;
         }
 
-        // .py module: register, then scan ITS imports (bare + path) so transitive deps stay lazy too.
+        // .py module, register, then scan ITS imports (bare + path) so transitive deps stay lazy too.
         const specBytes = TE.encode(spec);
         exports.register_code_module(writeBytes(specBytes), specBytes.length, writeBytes(bytes), bytes.length);
 

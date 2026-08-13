@@ -107,7 +107,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    // Operand packs kw<<8 | pos; keep counts distinct.
+    // Operand packs kw<<8 | pos, keep counts distinct.
     pub fn call_dict(&mut self, op: u16) -> Result<(), VmErr> {
         let pos = (op & 0xFF) as usize;
         let kw = (op >> 8) as usize;
@@ -126,7 +126,7 @@ impl<'a> VM<'a> {
         self.alloc_and_push_dict(dm)
     }
 
-    // dict(mapping) copies; dict(iterable) builds from pairs.
+    // dict(mapping) copies, dict(iterable) builds from pairs.
     fn dict_from_source(&mut self, src: Val) -> Result<DictMap, VmErr> {
         if let Some(HeapObj::Dict(rc)) = self.heap.try_get(src) {
             let pairs: Vec<(Val, Val)> = rc.borrow().iter().collect();
@@ -170,7 +170,7 @@ impl<'a> VM<'a> {
         self.push(v); Ok(())
     }
 
-    /* `bytes()`, empty, `n` zero bytes, iter of ints (0..=255), or `(str, encoding)`. Encodings limited to utf-8/utf8/ascii; unknown ones error so mismatches aren't silent. */
+    /* `bytes()`, empty, `n` zero bytes, iter of ints (0..=255), or `(str, encoding)`. Encodings limited to utf-8/utf8/ascii, unknown ones error so mismatches aren't silent. */
     pub fn call_bytes(&mut self, argc: u16) -> Result<(), VmErr> {
         let args = self.pop_n(argc as usize)?;
         let buf: Vec<u8> = match args.len() {
@@ -180,7 +180,7 @@ impl<'a> VM<'a> {
                 if a.is_int() {
                     let n = a.as_int();
                     if n < 0 { return Err(cold_value("negative count")); }
-                    // Length is user-controlled; cap it against the heap budget so a huge count errors instead of aborting in the allocator.
+                    // Length is user-controlled, cap it against the heap budget so a huge count errors instead of aborting in the allocator.
                     if n as usize > self.heap.limit() { return Err(cold_heap()); }
                     alloc::vec![0u8; n as usize]
                 } else if a.is_heap() {

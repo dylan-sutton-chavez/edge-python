@@ -1,7 +1,3 @@
-/*
-`edge serve`: static dev server with live reload. Sync, on tiny_http; reloads the page on any file change.
-*/
-
 use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -9,10 +5,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tiny_http::{Header, Response, Server};
 
+/// Static dev server with live reload, sync on tiny_http and reloading the page on any file change.
 pub fn run(dir: PathBuf, host: &str, port: u16, open: bool) -> Result<()> {
     let server = Server::http((host, port)).map_err(|e| anyhow!("could not bind {host}:{port}: {e}"))?;
 
-    // Bumped by the watcher; the injected client polls it and reloads on change.
+    // Bumped by the watcher, the injected client polls it and reloads on change.
     let version = Arc::new(AtomicU64::new(0));
     spawn_watcher(dir.clone(), version.clone());
 
@@ -106,7 +103,7 @@ fn inject_livereload(html: &str) -> String {
     }
 }
 
-/// Outbound interface IP via a connected UDP probe; no packets are sent.
+/// Outbound interface IP via a connected UDP probe, no packets are sent.
 fn lan_ip() -> Option<String> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("8.8.8.8:80").ok()?;
@@ -128,7 +125,7 @@ fn spawn_watcher(dir: PathBuf, version: Arc<AtomicU64>) {
     });
 }
 
-/// Cheap directory fingerprint: a rolling sum of file mtimes and sizes.
+/// Cheap directory fingerprint, a rolling sum of file mtimes and sizes.
 fn fingerprint(dir: &Path) -> u64 {
     fn walk(dir: &Path, acc: &mut u64) {
         let Ok(entries) = std::fs::read_dir(dir) else { return };

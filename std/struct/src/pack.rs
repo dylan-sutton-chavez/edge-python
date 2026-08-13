@@ -1,7 +1,3 @@
-/*
-Format-string packing into fixed-width `bytes`: byte-order prefix, repeat counts, one width code per value. No alignment padding; `unpack` returns a list.
-*/
-
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -12,7 +8,7 @@ struct Item {
     count: usize,
 }
 
-// Byte width of a format code; None for an unknown code (the single source of the legal-code set).
+// Byte width of a format code, None for an unknown code (the single source of the legal-code set).
 fn width(code: u8) -> Option<usize> {
     Some(match code {
         b'x' | b'b' | b'B' | b'?' => 1,
@@ -23,7 +19,7 @@ fn width(code: u8) -> Option<usize> {
     })
 }
 
-// (big_endian, items); rejects unknown codes and dangling counts.
+// (big_endian, items), rejects unknown codes and dangling counts.
 fn parse_fmt(fmt: &str) -> Result<(bool, Vec<Item>)> {
     let bytes = fmt.as_bytes();
     let mut i = 0;
@@ -78,7 +74,7 @@ fn put_int(out: &mut Vec<u8>, big: bool, code: u8, i: i128) -> Result<()> {
     }
     let w = width(code).unwrap();
     let full = if big { i.to_be_bytes() } else { i.to_le_bytes() };
-    // i128 buffer: value bytes sit at the tail for BE, at the head for LE.
+    // i128 buffer, value bytes sit at the tail for BE, at the head for LE.
     let slice = if big { &full[16 - w..] } else { &full[..w] };
     out.extend_from_slice(slice);
     Ok(())
@@ -125,6 +121,7 @@ fn take(big: bool, code: u8, chunk: &[u8]) -> Value {
     }
 }
 
+/* Format-string packing into fixed-width `bytes`, byte-order prefix, repeat counts, one width code per value. No alignment padding, `unpack` returns a list. */
 #[plugin_fn]
 fn pack(fmt: String, values: Args) -> Result<Bytes> {
     let (big, items) = parse_fmt(&fmt)?;

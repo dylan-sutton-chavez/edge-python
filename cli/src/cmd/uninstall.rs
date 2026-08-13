@@ -1,14 +1,11 @@
-/*
-`edge uninstall`: prompts here, then drops the bundled uninstall.sh to a temp file and runs it via bash.
-*/
-
 use anyhow::{anyhow, bail, Result};
 use std::io::Write;
 use std::process::Command;
 
-// Bundled at compile time so the binary is self-contained; no network needed to clean up.
+// Bundled at compile time so the binary is self-contained, no network needed to clean up.
 const UNINSTALL_SH: &str = include_str!("../../setup/uninstall.sh");
 
+/// Prompt here, then drop the bundled uninstall.sh to a temp file and run it via bash.
 pub fn run() -> Result<()> {
     println!("This removes the edge binary and the PATH entry from your shell rc files.");
     println!("System browsers (apt/brew Chromium, Chrome) are never touched.");

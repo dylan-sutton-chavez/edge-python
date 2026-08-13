@@ -1,5 +1,3 @@
-/* Regex AST and flags, matched directly by the backtracking engine. */
-
 use alloc::{boxed::Box, string::String, vec::Vec};
 
 /* Inline flag state threaded into the matcher. */

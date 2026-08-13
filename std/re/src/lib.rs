@@ -1,7 +1,3 @@
-/*
-Edge Python `re` package. Exposes `match`/`search`/`fullmatch`/`findall`/`sub`/`groups`/`span` over the `wasm-pdk` ABI. A small backtracking engine, Unicode aware via std char predicates so it ships no Unicode tables.
-*/
-
 #![no_std]
 #![cfg_attr(target_arch = "wasm32", no_main)]
 
@@ -14,8 +10,7 @@ pub mod engine;
 pub mod matcher;
 pub mod parser;
 
-/* Exports build for wasm and native alike so the CLI can dlopen this package. */
-// Class exports follow the `__class_<Name>_<method>` ABI convention, not snake case.
+/* Exports build for wasm and native alike so the CLI can dlopen this package. Class exports follow the `__class_<Name>_<method>` ABI convention, not snake case. */
 #[allow(non_snake_case)]
 mod wasm_api {
     use alloc::string::String;
@@ -35,7 +30,7 @@ mod wasm_api {
         r.map_err(to_error)
     }
 
-    /* Compiled-pattern cache; every call path compiles a given pattern once. Capped so unbounded pattern churn stays bounded. */
+    /* Compiled-pattern cache, every call path compiles a given pattern once. Capped so unbounded pattern churn stays bounded. */
     static PATTERNS: PluginCell<Vec<(String, engine::Regex)>> = PluginCell::new();
 
     fn with_compiled<T>(pattern: &str, f: impl FnOnce(&engine::Regex) -> Result<T>) -> Result<T> {
@@ -52,7 +47,7 @@ mod wasm_api {
         f(&cache[idx].1)
     }
 
-    /* Shared op bodies; module functions and Pattern methods delegate here. */
+    /* Shared op bodies, module functions and Pattern methods delegate here. */
     fn do_find(pattern: &str, string: &str, mode: Mode) -> Result<Option<String>> {
         with_compiled(pattern, |re| Ok(rx(engine::find_rx(re, string, mode))?.map(|f| f.text)))
     }
@@ -90,37 +85,37 @@ mod wasm_api {
         with_compiled(pattern, |re| rx(engine::sub_rx(re, repl, string)))
     }
 
-    /* search: leftmost match anywhere, returns group 0 or None. */
+    /* search finds the leftmost match anywhere, returns group 0 or None. */
     #[plugin_fn]
     fn search(pattern: String, string: String) -> Result<Option<String>> {
         do_find(&pattern, &string, Mode::Search)
     }
 
-    /* fullmatch: the pattern must consume the whole string. */
+    /* fullmatch requires the pattern to consume the whole string. */
     #[plugin_fn]
     fn fullmatch(pattern: String, string: String) -> Result<Option<String>> {
         do_find(&pattern, &string, Mode::Full)
     }
 
-    /* findall: list of matches, group shaped like Python for zero or one group. One boundary crossing per call via the LIST transit. */
+    /* findall returns a list of matches, group shaped like Python for zero or one group. One boundary crossing per call via the LIST transit. */
     #[plugin_fn]
     fn findall(pattern: String, string: String) -> Result<Vec<Value>> {
         do_findall(&pattern, &string)
     }
 
-    /* groups: capture groups of the first match, or None. */
+    /* groups returns the capture groups of the first match, or None. */
     #[plugin_fn]
     fn groups(pattern: String, string: String) -> Result<Option<Vec<Value>>> {
         do_groups(&pattern, &string)
     }
 
-    /* span: codepoint start and end of the first match as a two element list. */
+    /* span returns the codepoint start and end of the first match as a two element list. */
     #[plugin_fn]
     fn span(pattern: String, string: String) -> Result<Option<Vec<Value>>> {
         do_span(&pattern, &string)
     }
 
-    /* sub: replace every match, expanding backreferences in the template. */
+    /* sub replaces every match, expanding backreferences in the template. */
     #[plugin_fn]
     fn sub(pattern: String, repl: String, string: String) -> Result<String> {
         do_sub(&pattern, &repl, &string)
@@ -130,7 +125,7 @@ mod wasm_api {
         if ngroups == 1 { f.groups[0].clone().unwrap_or_default() } else { f.text.clone() }
     }
 
-    /* `re.compile(p)`: a native class named `compile`, so instantiation is the constructor call. Instances carry the source pattern; the compiled program lives in the cache. */
+    /* `re.compile(p)` is a native class named `compile`, so instantiation is the constructor call. Instances carry the source pattern, the compiled program lives in the cache. */
     #[plugin_fn]
     fn __class_compile___init__(self_h: Handle, pattern: String) -> Result<()> {
         // Bad patterns raise here, at compile time, like Python.
@@ -179,7 +174,7 @@ mod wasm_api {
         do_sub(&self_pattern(&self_h)?, &repl, &string)
     }
 
-    /* match: anchored at the start. Hand written export since `match` is a keyword. */
+    /* match is anchored at the start. Hand written export since `match` is a keyword. */
     #[unsafe(no_mangle)]
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub extern "C" fn r#match(argv: *const u32, argc: u32, out: *mut u32) -> i32 {

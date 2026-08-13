@@ -41,7 +41,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* Name `type(x)` reports: a user instance's own class, an exception's concrete class, else the builtin type name. */
+    /* The name `type(x)` reports, a user instance's own class, an exception's concrete class, else the builtin type name. */
     fn type_repr_name(&self, o: Val) -> alloc::string::String {
         if o.is_heap() {
             match self.heap.get(o) {

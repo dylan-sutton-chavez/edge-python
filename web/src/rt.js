@@ -1,7 +1,3 @@
-/*
-Handle-codec helpers wrapping `host_edge_decode` / `host_edge_encode`; passed to capability loaders so handlers skip NaN-boxing.
-*/
-
 const TD = new TextDecoder();
 const TE = new TextEncoder();
 
@@ -20,13 +16,13 @@ const I128_MAX = (1n << 127n) - 1n;
 const I128_MIN = -(1n << 127n);
 const SAFE_MAX = BigInt(Number.MAX_SAFE_INTEGER);
 
-// i128 LE read; BigInt past 2^53.
+// i128 LE read, BigInt past 2^53.
 function readI128(v, off) {
     const big = (v.getBigInt64(off + 8, true) << 64n) | v.getBigUint64(off, true);
     return big >= -SAFE_MAX && big <= SAFE_MAX ? Number(big) : big;
 }
 
-// i128 LE write; throws beyond i128.
+// i128 LE write, throws beyond i128.
 function writeI128(v, off, n) {
     const big = BigInt(n);
     if (big > I128_MAX || big < I128_MIN) throw new RangeError(`int out of i128 range: ${n}`);
@@ -34,6 +30,7 @@ function writeI128(v, off, n) {
     v.setBigInt64(off + 8, big >> 64n, true);
 }
 
+/* Handle-codec helpers wrapping `host_edge_decode` / `host_edge_encode`, passed to capability loaders so handlers skip NaN-boxing. */
 export function makeRt(getExports) {
     return {
         decodeStr: (h) => decodeStr(getExports(), h),
@@ -45,14 +42,14 @@ export function makeRt(getExports) {
         encodeBool: (b) => encodeBool(getExports(), b),
         encodeFloat: (f) => encodeFloat(getExports(), f),
         encodeNone: () => getExports().host_edge_encode(TAG_NONE, 0, 0),
-        /* Tag-agnostic: decode any handle to a plain JS value; used by deferred host-call shuttling. */
+        /* Tag-agnostic, decode any handle to a plain JS value. Used by deferred host-call shuttling. */
         decodeAny: (h) => decodeAny(getExports(), h),
-        /* Tag-agnostic: encode a plain JS value back into a handle. Integer numbers become INT; non-integer become FLOAT. */
+        /* Tag-agnostic, encode a plain JS value back into a handle. Integer numbers become INT, non-integer become FLOAT. */
         encodeAny: (v) => encodeAny(getExports(), v),
     };
 }
 
-// Shared alloc/decode/retry cycle; returns tag+bytes.
+// Shared alloc/decode/retry cycle, returns tag+bytes.
 function rawDecode(exps, handle) {
     const tagPtr = exps.wasm_alloc(4);
     let cap = 256;
@@ -117,7 +114,7 @@ function decodeAny(exps, handle) {
     return decodeBody(tag, bytes);
 }
 
-/* Wire payload to JS value; LIST/DICT payloads hold nested TLV nodes (tag:u32le len:u32le payload). */
+/* Wire payload to JS value. LIST/DICT payloads hold nested TLV nodes (tag:u32le len:u32le payload). */
 function decodeBody(tag, bytes) {
     const view = () => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     switch (tag) {
@@ -126,7 +123,7 @@ function decodeBody(tag, bytes) {
         case TAG_INT: return readI128(view(), 0);
         case TAG_FLOAT: return view().getFloat64(0, true);
         case TAG_BYTES: return TD.decode(bytes);
-        // Copy: nested payloads are views into the parent buffer.
+        // Copy, nested payloads are views into the parent buffer.
         case TAG_RAW: return bytes.slice();
         case TAG_LIST: case TAG_DICT: {
             const v = view();
@@ -153,7 +150,7 @@ function decodeBody(tag, bytes) {
     }
 }
 
-/* JS value -> handle; chooses tag from typeof. Bigint also accepted for int. */
+/* JS value -> handle, chooses tag from typeof. Bigint also accepted for int. */
 function encodeAny(exps, value) {
     if (value === null || value === undefined) return exps.host_edge_encode(TAG_NONE, 0, 0);
     if (typeof value === 'boolean') return encodeBool(exps, value);
@@ -171,7 +168,7 @@ function encodeAny(exps, value) {
     return h;
 }
 
-/* JS value to {tag, body}; used for nested nodes and composite roots. */
+/* JS value to {tag, body}, used for nested nodes and composite roots. */
 function encodeNode(value) {
     if (value === null || value === undefined) return { tag: TAG_NONE, body: new Uint8Array(0) };
     if (typeof value === 'boolean') return { tag: TAG_BOOL, body: Uint8Array.of(value ? 1 : 0) };

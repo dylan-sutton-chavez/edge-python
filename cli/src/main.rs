@@ -1,10 +1,7 @@
-/*
-edge: the Edge Python developer CLI. Run, serve, test, and scaffold Edge Python apps.
-*/
-
 mod cmd;
 mod engine;
 mod manifest;
+/// Minimalist terminal output, plain text only, no colors.
 mod ui;
 
 use anyhow::{bail, Context, Result};
@@ -76,7 +73,7 @@ enum Cmd {
     Repl,
     /// Dev server with live reload.
     Serve {
-        /// Bind address; use 0.0.0.0 to expose on your LAN.
+        /// Bind address, use 0.0.0.0 to expose on your LAN.
         #[arg(long, default_value = "127.0.0.1")]
         host: String,
         /// Port to listen on.
@@ -109,7 +106,7 @@ enum Cmd {
         /// Package names to remove.
         pkgs: Vec<String>,
     },
-    /// Pack the app: a standalone binary by default, --bundle for a swarm, --web for the browser.
+    /// Pack the app, a standalone binary by default, --bundle for a swarm, --web for the browser.
     Build {
         /// Output path, defaults to app.edge, app.package, or dist/ per mode.
         #[arg(long)]
@@ -236,12 +233,12 @@ fn run_embedded(payload: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Read a script from `file` (or stdin when absent) and run it; a script that raises exits non-zero.
+/// Read a script from `file` (or stdin when absent) and run it, a script that raises exits non-zero.
 fn run_script(manifest_path: &Path, file: Option<&Path>) -> Result<()> {
     let src = match file {
         Some(p) => std::fs::read_to_string(p).with_context(|| format!("reading {}", p.display()))?,
         None => {
-            // A bare `edge run` from a terminal would block on stdin forever; force an explicit pipe or path.
+            // A bare `edge run` from a terminal would block on stdin forever, force an explicit pipe or path.
             if std::io::stdin().is_terminal() {
                 bail!("no script given; pass a file path or pipe Python to stdin");
             }

@@ -5,8 +5,8 @@ use crate::parser::{OpCode, SSAChunk, ssa_strip, ImportKind};
 use super::VM;
 use super::types::*;
 
-/* Collect top-level StoreName bindings as module attrs; `seen` keeps the latest per bare name. */
-// `_`-prefixed names stay: the free-name fallback resolves module functions here.
+/* Collect top-level StoreName bindings as module attrs, `seen` keeps the latest per bare name. */
+// `_`-prefixed names stay, the free-name fallback resolves module functions here.
 pub(crate) fn collect_module_attrs(chunk: &SSAChunk, slots: &[Val]) -> Vec<(String, Val)> {
     let mut attrs: Vec<(String, Val)> = Vec::new();
     let mut seen: crate::util::hash::FxHashSet<String> = crate::util::hash::FxHashSet::default();
@@ -25,7 +25,7 @@ pub(crate) fn collect_module_attrs(chunk: &SSAChunk, slots: &[Val]) -> Vec<(Stri
 
 impl<'a> VM<'a> {
 
-    /* Flatten nested defs into one table (DFS); also build parent/body-pointer maps so `exec_call` can tell lexical-parent calls (late-bind) from foreign closures (captures stick). */
+    /* Flatten nested defs into one table (DFS), also build parent/body-pointer maps so `exec_call` can tell lexical-parent calls (late-bind) from foreign closures (captures stick). */
     pub(crate) fn build_function_table(&mut self, chunk: &'a SSAChunk, parent_fi: Option<usize>, module_spec: Option<&str>) {
         let mut indices = Vec::with_capacity(chunk.functions.len());
         for desc in chunk.functions.iter() {
@@ -56,7 +56,7 @@ impl<'a> VM<'a> {
         for class_body in chunk.classes.iter() {
             self.build_function_table(class_body, parent_fi, module_spec);
         }
-        // Recurse into code-module imports; each fn carries its spec so namespaces stay separate.
+        // Recurse into code-module imports, each fn carries its spec so namespaces stay separate.
         for entry in chunk.imports.iter() {
             if let ImportKind::Code(sub) = &entry.kind {
                 self.build_function_table(sub, None, Some(&entry.spec));
@@ -64,7 +64,7 @@ impl<'a> VM<'a> {
         }
     }
 
-    /* Inject `val` into the first `WaitingEvent` waiter's saved stack (innermost sync sub-frame wins) and mark it Ready; queues `val` otherwise. Shared by `push_event` and `run_push_event`. */
+    /* Inject `val` into the first `WaitingEvent` waiter's saved stack (innermost sync sub-frame wins) and mark it Ready, queues `val` otherwise. Shared by `push_event` and `run_push_event`. */
     pub fn inject_event(&mut self, val: Val) {
         let waiter = self.scheduler.iter().enumerate()
             .find(|(_, h)| matches!(h.state, CoroState::WaitingEvent))
@@ -80,7 +80,7 @@ impl<'a> VM<'a> {
         }
     }
 
-    /* Inject `val` into the first `WaitingHostCall` waiter and mark it Ready; false if none. Uncorrelated path for hosts/tests that don't track call ids. */
+    /* Inject `val` into the first `WaitingHostCall` waiter and mark it Ready, false if none. Uncorrelated path for hosts/tests that don't track call ids. */
     pub fn inject_host_result(&mut self, val: Val) -> bool {
         match self.scheduler.iter().position(|h| matches!(h.state, CoroState::WaitingHostCall(_))) {
             Some(idx) => { self.deliver_host_result(idx, val); true }
@@ -88,7 +88,7 @@ impl<'a> VM<'a> {
         }
     }
 
-    /* Inject `val` into the `WaitingHostCall(id)` waiter and mark it Ready; false if no coro is parked on `id`. Lets the host resolve concurrent calls out of order. */
+    /* Inject `val` into the `WaitingHostCall(id)` waiter and mark it Ready, false if no coro is parked on `id`. Lets the host resolve concurrent calls out of order. */
     pub fn inject_host_result_by_id(&mut self, id: u64, val: Val) -> bool {
         match self.scheduler.iter().position(|h| matches!(h.state, CoroState::WaitingHostCall(w) if w == id)) {
             Some(idx) => { self.deliver_host_result(idx, val); true }
@@ -96,7 +96,7 @@ impl<'a> VM<'a> {
         }
     }
 
-    /* Shared tail: write `val` over the parked coro's saved-stack top and mark it Ready. */
+    /* Shared tail, write `val` over the parked coro's saved-stack top and mark it Ready. */
     fn deliver_host_result(&mut self, idx: usize, val: Val) {
         let coro = self.scheduler[idx].coro;
         if let HeapObj::Coroutine(_, _, saved_stack, _, _, sub_frames, _) = self.heap.get_mut(coro) {
@@ -106,7 +106,7 @@ impl<'a> VM<'a> {
         self.scheduler[idx].state = CoroState::Ready;
     }
 
-    /* String form of `inject_host_result`: allocates `message` on the heap and injects it. Used by Rust hosts that return text bodies (and test fixtures simulating that path). */
+    /* String form of `inject_host_result`, allocates `message` on the heap and injects it. Used by Rust hosts that return text bodies (and test fixtures simulating that path). */
     pub fn push_host_result(&mut self, message: &str) -> Result<bool, VmErr> {
         let val = self.heap.alloc(HeapObj::Str(message.into()))?;
         Ok(self.inject_host_result(val))
@@ -118,7 +118,7 @@ impl<'a> VM<'a> {
         Ok(self.inject_host_result_by_id(id, val))
     }
 
-    /* Raise `e` inside the `WaitingHostCall(id)` coro at its saved try-frame, or mark it Errored if none; false if no coro is parked on `id`. A failed host call wakes only its coro, leaving siblings untouched. */
+    /* Raise `e` inside the `WaitingHostCall(id)` coro at its saved try-frame, or mark it Errored if none, false if no coro is parked on `id`. A failed host call wakes only its coro, leaving siblings untouched. */
     pub fn inject_host_error_by_id(&mut self, id: u64, e: VmErr) -> bool {
         let Some(idx) = self.scheduler.iter().position(|h| matches!(h.state, CoroState::WaitingHostCall(w) if w == id)) else { return false; };
         let coro = self.scheduler[idx].coro;
@@ -126,18 +126,18 @@ impl<'a> VM<'a> {
         true
     }
 
-    /* Test/host helper: raise a generic error (`VmErr::Raised(message)`) into host call `id`. */
+    /* Test/host helper raising a generic error (`VmErr::Raised(message)`) into host call `id`. */
     pub fn push_host_error_by_id(&mut self, id: u64, message: &str) -> bool {
         self.inject_host_error_by_id(id, VmErr::Raised(message.into()))
     }
 
-    /* Yield `Preempted` every `n` back-edges; 0 disables. */
+    /* Yield `Preempted` every `n` back-edges, 0 disables. */
     pub fn set_preempt_interval(&mut self, n: usize) {
         self.preempt_every = n;
         self.preempt_left = n;
     }
 
-    /* Push a string event onto the event queue; consumed by the next `receive()` call. Mirrors what `run_push_event` does for WASM hosts. */
+    /* Push a string event onto the event queue, consumed by the next `receive()` call. Mirrors what `run_push_event` does for WASM hosts. */
     pub fn push_event(&mut self, message: &str) -> Result<(), VmErr> {
         let val = self.heap.alloc(HeapObj::Str(message.into()))?;
         self.inject_event(val);
@@ -146,13 +146,13 @@ impl<'a> VM<'a> {
 
     pub fn run(&mut self) -> Result<Val, VmErr> {
         self.error_byte_pos = None;
-        // Resume path: scheduler non-empty means a prior `run()` yielded; wake `WaitingFrame` (rAF fired) and drain.
+        // Resume path, scheduler non-empty means a prior `run()` yielded, wake `WaitingFrame` (rAF fired) and drain.
         let fresh_entry = self.scheduler.is_empty();
         if fresh_entry {
-            // Fresh entry. Initialise imports before user code; DFS gives topological order naturally.
+            // Fresh entry. Initialise imports before user code, DFS gives topological order naturally.
             let mut in_progress: crate::util::hash::FxHashSet<String> = crate::util::hash::FxHashSet::default();
             self.init_modules(self.chunk, &mut in_progress)?;
-            // Wrap the module body as an implicit coroutine; lets top-level statements suspend on deferred host calls (DOM, sleep, receive) through the same scheduler path as `async def`.
+            // Wrap the module body as an implicit coroutine, lets top-level statements suspend on deferred host calls (DOM, sleep, receive) through the same scheduler path as `async def`.
             let slots = self.fill_builtins(&self.chunk.names);
             let coro = self.heap.alloc(HeapObj::Coroutine(
                 0, slots, Vec::new(),
@@ -192,7 +192,7 @@ impl<'a> VM<'a> {
         Ok(Val::none())
     }
 
-    /* Init each unique import once; code modules run their top-level, native ones just bind. `in_progress` catches cycles cleanly. */
+    /* Init each unique import once, code modules run their top-level, native ones just bind. `in_progress` catches cycles cleanly. */
     fn init_modules(&mut self, chunk: &SSAChunk, in_progress: &mut crate::util::hash::FxHashSet<String>) -> Result<(), VmErr> {
         for entry in &chunk.imports {
             if self.module_table.contains_key(&entry.spec) { continue; }
@@ -212,7 +212,7 @@ impl<'a> VM<'a> {
                         let val = func(&mut self.heap, &[], None)?;
                         attrs.push((c.name.clone(), val));
                     }
-                    // Synthesise a HeapObj::Class per native class; each method becomes an Extern Val on the class.
+                    // Synthesise a HeapObj::Class per native class, each method becomes an Extern Val on the class.
                     for c in classes {
                         let mut methods: Vec<(String, Val)> = Vec::with_capacity(c.methods.len());
                         for m in &c.methods {

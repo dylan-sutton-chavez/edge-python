@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use super::super::VM;
 use super::super::types::*;
 
-/* Convert a float to i128 for int()/round(): NaN and infinity raise, and the value is rejected before the saturating cast overflows. `transform` truncates or rounds. */
+/* Convert a float to i128 for int()/round(), NaN and infinity raise, and the value is rejected before the saturating cast overflows. `transform` truncates or rounds. */
 fn finite_f64_to_i128(f: f64, transform: impl Fn(f64) -> f64) -> Result<i128, VmErr> {
     if f.is_nan() { return Err(cold_value("cannot convert float NaN to integer")); }
     if f.is_infinite() { return Err(VmErr::Raised(String::from("OverflowError: cannot convert float infinity to integer"))); }
@@ -20,9 +20,9 @@ fn i128_to_radix(n: i128, radix: u32, prefix: &str) -> String {
         s.push_str(prefix); s.push('0'); return s;
     }
     let neg = n < 0;
-    // unsigned_abs handles i128::MIN safely: returns 2^127 in u128.
+    // unsigned_abs handles i128::MIN safely, returning 2^127 in u128.
     let mut abs = n.unsigned_abs();
-    // Max length: i128 in base 2 is 128 digits + sign + prefix. 144 fits all.
+    // Max length is i128 in base 2, 128 digits + sign + prefix. 144 fits all.
     let mut buf = [0u8; 144];
     let mut i = buf.len();
     while abs > 0 {
@@ -38,14 +38,14 @@ fn i128_to_radix(n: i128, radix: u32, prefix: &str) -> String {
     s
 }
 
-/* One Neumaier (improved Kahan) compensated-summation step: returns (sum, comp). */
+/* One Neumaier (improved Kahan) compensated-summation step returning (sum, comp). */
 fn neumaier(sum: f64, comp: f64, x: f64) -> (f64, f64) {
     let t = sum + x;
     let c = if libm::fabs(sum) >= libm::fabs(x) { (sum - t) + x } else { (x - t) + sum };
     (t, comp + c)
 }
 
-/* `int(s, base)` parsing: optional sign, optional 0x/0o/0b prefix (matching the base, or inferred when base==0), `_` digit separators, radix 0 or 2..=36. */
+/* `int(s, base)` parsing, optional sign, optional 0x/0o/0b prefix (matching the base, or inferred when base==0), `_` digit separators, radix 0 or 2..=36. */
 // Rounds an integer to -k decimal digits using banker's rounding, matching Python.
 fn round_int_banker(n: i128, k: u32) -> i128 {
     let factor = 10i128.checked_pow(k.min(38)).unwrap_or(i128::MAX);
@@ -79,7 +79,7 @@ fn parse_int_radix(s: &str, base: i64) -> Result<i128, VmErr> {
             Some(p) => { radix = p; body = &rest[2..]; had_prefix = true; }
             None => {
                 radix = 10;
-                // base 0 rejects superfluous leading zeros ("010"); "0"/"00" stay valid.
+                // base 0 rejects superfluous leading zeros ("010"), "0"/"00" stay valid.
                 if rest.len() > 1 && rest.starts_with('0') && !rest.bytes().all(|b| b == b'0') {
                     return Err(cold_value("int(): invalid literal with base 0"));
                 }
@@ -126,7 +126,7 @@ impl<'a> VM<'a> {
     }
 
     pub fn call_int(&mut self, argc: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
-        // Two-arg form `int(string, base)`: parse the string in the given radix.
+        // Two-arg form `int(string, base)` parses the string in the given radix.
         if argc == 2 {
             let base_v = self.pop()?;
             let o = self.pop()?;
@@ -183,7 +183,7 @@ impl<'a> VM<'a> {
             else if o.is_heap() && let HeapObj::LongInt(i) = self.heap.get(o) { *i as f64 }
             else if o.is_heap() && let HeapObj::Str(s) = self.heap.get(o) {
                 let t = s.trim();
-                // Accept `_` digit separators; strip then parse.
+                // Accept `_` digit separators, strip then parse.
                 let cleaned = if t.contains('_') {
                     if t.starts_with('_') || t.ends_with('_') || t.contains("__") { return Err(cold_value("float(): invalid literal")); }
                     t.chars().filter(|&c| c != '_').collect::<alloc::string::String>()
@@ -241,7 +241,7 @@ impl<'a> VM<'a> {
                 if !x.is_finite() {
                     Val::float(x)
                 } else if nd >= 0 {
-                    // Correctly-rounded decimal (round-half-even on the true value); avoids the double-rounding `x*10^n` would introduce (e.g. round(2.675, 2) -> 2.67).
+                    // Correctly-rounded decimal (round-half-even on the true value), avoids the double-rounding `x*10^n` would introduce (e.g. round(2.675, 2) -> 2.67).
                     let s = alloc::format!("{:.*}", (nd as usize).min(323), x);
                     Val::float(s.parse().unwrap_or(x))
                 } else {
@@ -250,11 +250,11 @@ impl<'a> VM<'a> {
                 }
             }
             (Some(o), None) if o.is_float() => {
-                // 1-arg round returns an int; promote via int_to_val so large results don't wrap.
+                // 1-arg round returns an int, promote via int_to_val so large results don't wrap.
                 let i = finite_f64_to_i128(o.as_float(), fround)?;
                 self.int_to_val(Some(i))?
             }
-            // Ints/bools round to themselves; negative ndigits round to tens/hundreds.
+            // Ints/bools round to themselves, negative ndigits round to tens/hundreds.
             (Some(o), n) if o.is_bool() || o.is_int() || (o.is_heap() && matches!(self.heap.get(o), HeapObj::LongInt(_))) => {
                 let i = if o.is_bool() { o.as_bool() as i128 } else { self.as_i128(o).ok_or(cold_type("round() requires a number"))? };
                 let nd = match n { Some(n) if n.is_int() => n.as_int(), _ => 0 };
@@ -281,13 +281,13 @@ impl<'a> VM<'a> {
                 _ => return Err(cold_type("min()/max() got an unexpected keyword argument")),
             }
         }
-        // One arg iterable; many args are values.
+        // One arg iterable, many args are values.
         let items = if positional.len() == 1 { self.iter_to_vec_general(positional[0])? } else { positional };
         let label = if is_min { "min() arg is an empty sequence" } else { "max() arg is an empty sequence" };
         if items.is_empty() {
             return match default { Some(d) => { self.push(d); Ok(()) }, None => Err(cold_value(label)) };
         }
-        // Without a key, compare elements directly; with one, compare key(x) but return the winning element.
+        // Without a key, compare elements directly, with one, compare key(x) but return the winning element.
         let keys: Vec<Val> = match key {
             None => items.clone(),
             Some(k) => {
@@ -316,7 +316,7 @@ impl<'a> VM<'a> {
             match fstate {
                 Some((s, c)) => match self.to_f64_coerce(item) {
                     Ok(x) => fstate = Some(neumaier(s, c, x)),
-                    // Non-numeric after floats: let add_vals raise the proper TypeError.
+                    // Non-numeric after floats, let add_vals raise the proper TypeError.
                     Err(_) => { acc = self.add_vals(Val::float(s + c), item)?; fstate = None; }
                 },
                 None if (item.is_float() || acc.is_float())
@@ -372,7 +372,7 @@ impl<'a> VM<'a> {
     pub fn call_divmod(&mut self) -> Result<(), VmErr> {
         let b = self.pop()?;
         let a = self.pop()?;
-        // Float operands: divmod(a, b) == (floor(a/b), a - floor(a/b)*b).
+        // Float operands use divmod(a, b) == (floor(a/b), a - floor(a/b)*b).
         if a.is_float() || b.is_float() {
             let af = self.to_f64_coerce(a).map_err(|_| cold_type("divmod() requires numeric operands"))?;
             let bf = self.to_f64_coerce(b).map_err(|_| cold_type("divmod() requires numeric operands"))?;
@@ -404,7 +404,7 @@ impl<'a> VM<'a> {
                 Ok(())
             }
             3 => {
-                // Modular exponentiation: (a ** b) % c on i128.
+                // Modular exponentiation (a ** b) % c on i128.
                 let (Some(base), Some(modulus)) = (self.as_i128(args[0]), self.as_i128(args[2]))
                 else { return Err(cold_type("pow() with 3 args requires integers")); };
                 let exp = self.as_i128(args[1]).ok_or(cold_type("pow() with 3 args requires integer exponent"))?;
@@ -412,7 +412,7 @@ impl<'a> VM<'a> {
                 if modulus == 0 { return Err(VmErr::ZeroDiv); }
 
                 let m = modulus.unsigned_abs();
-                // Cap |m| < 2^63 so m*m fits in i128; larger moduli would overflow silently.
+                // Cap |m| < 2^63 so m*m fits in i128, larger moduli would overflow silently.
                 if m > (1u128 << 63) { return Err(cold_value("pow() modulus too large; must be < 2^63 (no arbitrary precision)")); }
                 let m = m as i128;
                 // Seed with 1 % m so pow(x, 0, 1) yields 0, not 1.
@@ -437,12 +437,12 @@ impl<'a> VM<'a> {
     }
 
 
-    /* Two-arg power for `pow()` and `**`. int**non-neg int stays i128 (overflow trap); floats or negative exponents promote to f64. */
+    /* Two-arg power for `pow()` and `**`. int**non-neg int stays i128 (overflow trap), floats or negative exponents promote to f64. */
     pub(crate) fn pow_vals(&mut self, a: Val, b: Val, err_msg: &'static str) -> Result<Val, VmErr> {
         if let (Some(ai), true) = (self.as_i128(a), b.is_int()) {
             let exp = b.as_int();
             if exp >= 0 {
-                // i128 exp-by-squaring; overflow at any step -> OverflowError. Bases +/- 1/0 never overflow regardless of exp size.
+                // i128 exp-by-squaring, overflow at any step -> OverflowError. Bases +/- 1/0 never overflow regardless of exp size.
                 let mut result: i128 = 1;
                 let mut base = ai;
                 let mut e = exp;

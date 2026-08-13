@@ -1,7 +1,3 @@
-/*
-Edge Python `json` package. Exports `loads(text) -> value` and `dumps(value) -> text` over the `wasm-pdk` ABI.
-*/
-
 #![no_std]
 #![cfg_attr(target_arch = "wasm32", no_main)]
 
@@ -42,7 +38,7 @@ fn dumps(value: Handle, kw: Kwargs) -> Result<String> {
         item_sep: ",".to_string(),
         key_sep: ":".to_string(),
     };
-    // `separators` arrives as a 2-tuple `(item, key)`; index manually since `Kwargs::get` can't decode tuples.
+    // `separators` arrives as a 2-tuple `(item, key)`, indexed manually since `Kwargs::get` can't decode tuples.
     if let Some(seps) = kw.get_handle("separators")? {
         let zero = encode(Value::Int(0))?;
         let one = encode(Value::Int(1))?;
@@ -51,7 +47,7 @@ fn dumps(value: Handle, kw: Kwargs) -> Result<String> {
         opts.item_sep = decode_str(&item, "separators[0]")?;
         opts.key_sep = decode_str(&key, "separators[1]")?;
     } else if opts.indent.is_some() {
-        // Python: when `indent` is given and `separators` is not, default key separator becomes `": "`.
+        // Per Python, when `indent` is given and `separators` is not, the default key separator becomes `": "`.
         opts.key_sep = ": ".to_string();
     }
     serializer::serialize(&value, opts)

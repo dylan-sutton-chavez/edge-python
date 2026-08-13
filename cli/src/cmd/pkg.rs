@@ -1,7 +1,3 @@
-/*
-`edge add` and `edge remove`: resolve package specs, then rewrite packages.json.
-*/
-
 use anyhow::{anyhow, bail, Result};
 use std::path::Path;
 
@@ -73,7 +69,7 @@ fn parse_spec(spec: &str) -> (&str, Option<String>) {
     (spec, None)
 }
 
-/// A `.wasm` url is a worker-side std package; anything else is a system package.
+/// A `.wasm` url is a worker-side std package, anything else is a system package.
 fn kind_from_url(url: &str) -> Kind {
     if url.ends_with(".wasm") {
         Kind::Std

@@ -1,5 +1,3 @@
-/* Selection, traversal, mutation, content, attrs, classes, dataset. */
-
 export default ({ alloc, node, allocList, cleanSubtree }) => ({
     query: (sel) => alloc(document.querySelector(sel)),
     query_all: (sel) => allocList(document.querySelectorAll(sel)),
@@ -17,7 +15,7 @@ export default ({ alloc, node, allocList, cleanSubtree }) => ({
     tag_name: (h) => (node(h).tagName || '').toLowerCase(),
 
     create_element: (tag) => alloc(document.createElement(tag)),
-    /* SVG/MathML need a namespace; `createElement("svg")` returns an HTMLUnknownElement that won't render. */
+    /* SVG/MathML need a namespace, `createElement("svg")` returns an HTMLUnknownElement that won't render. */
     create_element_ns: (ns, tag) => alloc(document.createElementNS(ns, tag)),
 
     append_child: (parent, child) => { node(parent).appendChild(node(child)); },
@@ -32,7 +30,7 @@ export default ({ alloc, node, allocList, cleanSubtree }) => ({
         el.remove();
         cleanSubtree(el);
     },
-    // Variadic: first arg is parent, rest are child handles. Pass only parent to clear. Sweeps detached children.
+    // Variadic, first arg is parent, rest are child handles. Pass only parent to clear. Sweeps detached children.
     replace_children: (parent, ...kids) => {
         const p = node(parent);
         const old = Array.from(p.children);

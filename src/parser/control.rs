@@ -9,7 +9,7 @@ use alloc::{vec, vec::Vec, string::{String, ToString}};
 
 impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
-    /* if/elif/else compiler; emits JumpIfFalse/Jump and patches branch join targets */
+    /* if/elif/else compiler, emits JumpIfFalse/Jump and patches branch join targets */
 
     pub(super) fn if_stmt(&mut self) {
         self.advance();
@@ -49,7 +49,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* match/case: literals, captures, wildcards, OR, guards, sequences; emits subject-load + pattern + guard + Jump-end. */
+    /* match/case, literals, captures, wildcards, OR, guards, sequences, emits subject-load + pattern + guard + Jump-end. */
     pub(super) fn match_stmt(&mut self) {
         self.advance();
         self.expr();
@@ -69,7 +69,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             let mut fail_jumps: Vec<usize> = Vec::new();
             self.parse_pattern(subj, &mut fail_jumps);
 
-            // Guard fail joins pattern fails; both land at the next case.
+            // Guard fail joins pattern fails, both land at the next case.
             if self.eat_if(TokenType::If) {
                 self.expr();
                 fail_jumps.push(self.emit_jump(OpCode::JumpIfFalse));
@@ -88,18 +88,18 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         for pos in end_jumps { self.patch(pos); }
     }
 
-    /* Emits bytecode for one pattern; appends case-fail jumps to `fail_jumps`; reloads subject from subj. */
+    /* Emits bytecode for one pattern, appends case-fail jumps to `fail_jumps`, reloads subject from subj. */
     pub(super) fn parse_pattern(&mut self, subj: u16, fail_jumps: &mut Vec<usize>) {
-        // OR pattern: each alt gets a success-jump landing past all alts.
+        // OR pattern, each alt gets a success-jump landing past all alts.
         let mut alts: Vec<Vec<usize>> = Vec::new();
         let mut succ_jumps: Vec<usize> = Vec::new();
 
         loop {
             let mut this_alt_fails: Vec<usize> = Vec::new();
             self.parse_simple_pattern(subj, &mut this_alt_fails);
-            // On match: jump past remaining alts.
+            // On match, jump past remaining alts.
             succ_jumps.push(self.emit_jump(OpCode::Jump));
-            // On mismatch: redirect fails to next alt; only last alt propagates to case-fail.
+            // On mismatch, redirect fails to next alt, only last alt propagates to case-fail.
             alts.push(this_alt_fails);
             if !matches!(self.peek(), Some(TokenType::Vbar)) {
                 break;
@@ -122,21 +122,21 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         for j in succ_jumps { self.patch(j); }
     }
 
-    /* Dispatches single pattern alternative by token: wildcard, capture (StoreName), or literal equality. */
+    /* Dispatches single pattern alternative by token, wildcard, capture (StoreName), or literal equality. */
     fn parse_simple_pattern(&mut self, subj: u16, fail_jumps: &mut Vec<usize>) {
         match self.peek() {
-            // Wildcard: always succeeds, no binding.
+            // Wildcard always succeeds, no binding.
             Some(TokenType::Underscore) => { self.advance(); }
             // Sequence pattern.
             Some(TokenType::Lsqb) => { self.parse_sequence_pattern(subj, fail_jumps); }
-            // Capture: bind subject to name, always succeeds.
+            // Capture binds subject to name, always succeeds.
             Some(TokenType::Name) => {
                 let t = self.advance();
                 let name = self.lexeme(&t).to_string();
                 self.chunk.emit(OpCode::LoadName, subj);
                 self.emit_store_new(&name);
             }
-            // Literal/expr: equality-test against subject; precedence > bitwise-or keeps `1|2|3` as OR pattern.
+            // Literal/expr, equality-test against subject, precedence > bitwise-or keeps `1|2|3` as OR pattern.
             _ => {
                 self.chunk.emit(OpCode::LoadName, subj);
                 self.expr_bp(11);
@@ -146,11 +146,11 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* Sequence pattern: length-checks subject, indexes items into fresh slots; star captures middle slice. */
+    /* Sequence pattern length-checks subject, indexes items into fresh slots, star captures middle slice. */
     fn parse_sequence_pattern(&mut self, subj: u16, fail_jumps: &mut Vec<usize>) {
         self.advance(); // consume `[`
 
-        // Pass 1: buffer tokens to count items and locate the star.
+        // Pass 1 buffers tokens to count items and locate the star.
         let mut buffered: Vec<crate::lexer::Token> = Vec::new();
         let mut depth: i32 = 0;
         let mut commas = 0;
@@ -186,12 +186,12 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             self.error_at(buffered[0].start, buffered.last().unwrap().end, "multiple stars in sequence pattern");
         }
 
-        // Type guard: a non-sequence subject fails the pattern instead of erroring on len().
+        // Type guard, a non-sequence subject fails the pattern instead of erroring on len().
         self.chunk.emit(OpCode::LoadName, subj);
         self.chunk.emit(OpCode::MatchSeq, 0);
         fail_jumps.push(self.emit_jump(OpCode::JumpIfFalse));
 
-        // Length check: exact without star, >= (count-1) with star.
+        // Length check, exact without star, >= (count-1) with star.
         let len_min = if star_count > 0 { item_count - 1 } else { item_count };
         self.chunk.emit(OpCode::LoadName, subj);
         self.chunk.emit(OpCode::CallLen, 1);
@@ -201,7 +201,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.chunk.emit(cmp, 0);
         fail_jumps.push(self.emit_jump(OpCode::JumpIfFalse));
 
-        // Pass 2: walk buffered tokens, emitting per-item bytecode.
+        // Pass 2 walks buffered tokens, emitting per-item bytecode.
         let saved: Vec<crate::lexer::Token> = buffered;
         let mut idx = 0usize;
         let total = saved.len();
@@ -210,14 +210,14 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         let item_ver = self.increment_version(super::SSA_TMP_MATCH_ITEM);
         let item_subj = self.chunk.push_name(&s!(str super::SSA_TMP_MATCH_ITEM, int item_ver));
 
-        // Walk items; split on top-level commas.
+        // Walk items, split on top-level commas.
         let mut item_idx: i64 = 0;
         let mut star_idx_seen: Option<i64> = None;
         while idx < total {
             // Check for star prefix.
             let is_star = matches!(saved.get(idx), Some(t) if t.kind == TokenType::Star);
             if is_star { idx += 1; }
-            // Find item end: next depth-0 comma or EOF.
+            // Find item end at next depth-0 comma or EOF.
             let item_start = idx;
             let mut d: i32 = 0;
             while idx < total {
@@ -231,10 +231,10 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             // Consume trailing comma.
             if idx < total && saved[idx].kind == TokenType::Comma { idx += 1; }
 
-            // Index: positive before star, star gets slice, negative after.
+            // Index, positive before star, star gets slice, negative after.
             if is_star {
                 star_idx_seen = Some(item_idx);
-                // Slice: subj[item_idx : len-suffix]
+                // Slice subj[item_idx : len-suffix]
                 let suffix = (item_count as i64) - item_idx - 1;
                 self.chunk.emit(OpCode::LoadName, subj);
                 let cs = self.chunk.push_const(super::types::Value::Int(item_idx));
@@ -263,10 +263,10 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 self.chunk.emit(OpCode::StoreName, item_subj);
             }
 
-            // Dispatch: wildcard, capture, or literal. No nested sequences; use if/match instead.
+            // Dispatch wildcard, capture, or literal. No nested sequences, use if/match instead.
             let toks = &saved[item_start..item_end];
             if toks.is_empty() || (toks.len() == 1 && toks[0].kind == TokenType::Underscore) {
-                // Wildcard: discard stored `item_subj`.
+                // Wildcard discards stored `item_subj`.
             } else if toks.len() == 1 && toks[0].kind == TokenType::Name {
                 let name = self.source[toks[0].start..toks[0].end].to_string();
                 if name != "_" {
@@ -274,7 +274,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     self.emit_store_new(&name);
                 }
             } else {
-                // Literal: replay tokens; supports Int/Float/Str/Bool/None/negation; else error.
+                // Literal replays tokens, supports Int/Float/Str/Bool/None/negation, else error.
                 let mut pos = 0;
                 let mut neg = false;
                 if pos < toks.len() && toks[pos].kind == TokenType::Minus { neg = true; pos += 1; }
@@ -284,7 +284,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     let val = match t.kind {
                         TokenType::Int => {
                             let cleaned = raw.replace('_', "");
-                            // i64 first; fall back to i128 when literal is wider.
+                            // i64 first, fall back to i128 when literal is wider.
                             cleaned.parse::<i64>().ok().map(super::types::Value::Int)
                                 .or_else(|| cleaned.parse::<i128>().ok().map(super::types::Value::LongInt))
                         }
@@ -299,7 +299,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                         if neg {
                             v = match v {
                                 super::types::Value::Int(i) => super::types::Value::Int(-i),
-                                // i128::MIN.neg() overflows; trap as parse error to keep sub-pattern semantics aligned with literal materialisation.
+                                // i128::MIN.neg() overflows, trap as parse error to keep sub-pattern semantics aligned with literal materialisation.
                                 super::types::Value::LongInt(i) => match i.checked_neg() {
                                     Some(n) => super::types::Value::LongInt(n),
                                     None => super::types::Value::LongInt(i),
@@ -322,7 +322,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* while: cond + body + back-edge; optional else when cond falsifies. */
+    /* while, cond + body + back-edge, optional else when cond falsifies. */
 
     pub(super) fn while_stmt(&mut self) {
         self.advance();
@@ -380,7 +380,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
         self.eat(TokenType::In);
         self.expr();
-        // Unparenthesized tuple iterable: `for x in 1, 2:` iterates the tuple.
+        // Unparenthesized tuple iterable, `for x in 1, 2:` iterates the tuple.
         let n = self.tuple_rest(1, |s| matches!(s.peek(), Some(TokenType::Colon) | None));
         if n > 1 { self.chunk.emit(OpCode::BuildTuple, n); }
         self.chunk.emit(OpCode::GetIter, is_async as u16);
@@ -430,7 +430,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.advance();
         self.eat(TokenType::Colon);
 
-        // Outer cleanup frame: the finally runs on every exit (normal, return, break, raise).
+        // Outer cleanup frame, the finally runs on every exit (normal, return, break, raise).
         let fin_setup = self.emit_jump(OpCode::SetupFinally);
         self.cleanup_count += 1;
         let setup = self.emit_jump(OpCode::SetupExcept);
@@ -484,7 +484,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 self.chunk.emit(OpCode::Del, idx);
             }
 
-            // Handled arms jump past the `else` block; a bare last arm just falls through.
+            // Handled arms jump past the `else` block, a bare last arm just falls through.
             let more = matches!(
                 self.peek(),
                 Some(TokenType::Except | TokenType::Else | TokenType::Finally)
@@ -498,11 +498,11 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             self.patch(j);
             self.chunk.emit(OpCode::Raise, 0);
         } else if !had_except {
-            // Pure try/finally: the handler just re-raises so the outer finally still runs.
+            // Pure try/finally, the handler just re-raises so the outer finally still runs.
             self.chunk.emit(OpCode::Raise, 0);
         }
 
-        // Success path falls into `else`; handled-exception arms skip it.
+        // Success path falls into `else`, handled-exception arms skip it.
         self.patch(success_jump);
         if self.eat_if(TokenType::Else) {
             self.eat(TokenType::Colon);
@@ -512,7 +512,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             self.patch(j);
         }
 
-        // Normal path pops the frame and marks the entry; unwind exits jump straight to the body.
+        // Normal path pops the frame and marks the entry, unwind exits jump straight to the body.
         self.cleanup_count -= 1;
         self.chunk.emit(OpCode::PopExcept, 0);
         self.chunk.emit(OpCode::BeginFinally, 0);
@@ -527,7 +527,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.commit_block();
     }
 
-    /* with / async with: each CM is a SetupFinally cleanup frame whose handler stages `WithExit`. Dunders run as staged plain Calls so host deferrals can park. */
+    /* with / async with, each CM is a SetupFinally cleanup frame whose handler stages `WithExit`. Dunders run as staged plain Calls so host deferrals can park. */
 
     pub(super) fn with_stmt_inner(&mut self, is_async: bool) {
         self.advance();
@@ -551,7 +551,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.eat(TokenType::Colon);
         self.compile_block();
 
-        // Cleanups innermost-first: normal path pops the frame and marks the entry, then runs `__exit__`.
+        // Cleanups innermost-first, normal path pops the frame and marks the entry, then runs `__exit__`.
         for s in setups.into_iter().rev() {
             self.cleanup_count -= 1;
             self.chunk.emit(OpCode::PopExcept, 0);

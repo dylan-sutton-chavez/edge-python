@@ -285,7 +285,7 @@ fn dotted_imports_anchor_at_the_manifest_root() {
     assert_eq!(code, 0, "stderr was: {err}");
 }
 
-/* Quoted specs are not imports at all; they fail like any missing module. */
+/* Quoted specs are not imports at all, they fail like any missing module. */
 #[test]
 fn quoted_imports_are_not_found() {
     let dir = scratch("quoted");

@@ -1,23 +1,21 @@
-/* 
-Edge Python PDK; Rust runtime for authoring `.wasm` plugins.
-
-```ignore
-use wasm_pdk::*;
-
-#[plugin_fn]
-fn slugify(s: String) -> String {
-    s.to_lowercase().replace(' ', "-")
-}
-``` 
-*/
-
 #![cfg_attr(not(test), no_std)]
 
 extern crate alloc;
 
-pub use wasm_pdk_macros::{plugin_fn, plugin_const, plugin_class, plugin_methods, plugin_ctor};
+/// Wraps a free fn as a plugin ABI export. A minimal plugin is one such fn.
+///
+/// ```ignore
+/// use wasm_pdk::*;
+///
+/// #[plugin_fn]
+/// fn slugify(s: String) -> String {
+///     s.to_lowercase().replace(' ', "-")
+/// }
+/// ```
+pub use wasm_pdk_macros::plugin_fn;
+pub use wasm_pdk_macros::{plugin_const, plugin_class, plugin_methods, plugin_ctor};
 
-/// Curated import surface; hides `__internals` / `__edge_alloc` from glob users.
+/// Curated import surface that hides `__internals` / `__edge_alloc` from glob users.
 pub mod prelude {
     pub use crate::{plugin_fn, plugin_const, plugin_class, plugin_methods, plugin_ctor, Handle, Value, Bytes, Args, Error, Result, FromValue, IntoValue, Kwargs, PluginCell};
 }
@@ -49,7 +47,7 @@ macro_rules! module {
 #[doc(hidden)]
 pub use linked_list_allocator as __lla;
 
-/// Like `module!` but with a free-list allocator on a static `.bss` pool (default 4 MiB): never calls `memory.grow`, so host-side pre-captured `DataView(memory.buffer)`s stay attached, and `dealloc` reclaims chunks across repeated calls. Single-threaded wasm32 makes the `UnsafeCell`s safe.
+/// Like `module!` but with a free-list allocator on a static `.bss` pool (default 4 MiB). Never calls `memory.grow`, so host-side pre-captured `DataView(memory.buffer)`s stay attached, and `dealloc` reclaims chunks across repeated calls. Single-threaded wasm32 makes the `UnsafeCell`s safe.
 #[macro_export]
 macro_rules! module_fixed_pool {
     () => { $crate::module_fixed_pool!(4 * 1024 * 1024); };
@@ -220,14 +218,14 @@ pub mod __internals {
         unsafe { super::edge_throw(kind, msg.as_ptr(), msg.len() as u32); }
     }
 
-    /// Host-side argv stager; paired with `__edge_free`.
+    /// Host-side argv stager, paired with `__edge_free`.
     #[unsafe(no_mangle)]
     pub extern "C" fn __edge_alloc(size: u32) -> *mut u8 {
         let v = alloc::vec![0u8; size as usize];
         alloc::boxed::Box::into_raw(v.into_boxed_slice()) as *mut u8
     }
 
-    /// Frees an `__edge_alloc` buffer; sizes must match.
+    /// Frees an `__edge_alloc` buffer. Sizes must match.
     #[unsafe(no_mangle)]
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub extern "C" fn __edge_free(ptr: *mut u8, size: u32) {
@@ -286,7 +284,7 @@ impl Error {
 
 pub type Result<T> = core::result::Result<T, Error>;
 
-/// Drain the host's stashed error after a 1-returning `edge_op`; never returns `None`.
+/// Drain the host's stashed error after a 1-returning `edge_op`. Never returns `None`.
 pub fn last_error() -> Error {
     let mut kind: u32 = 2;
     let mut buf = alloc::vec![0u8; 256];
@@ -300,20 +298,20 @@ pub fn last_error() -> Error {
             return Error::from_kind(kind, msg);
         }
         if r == -1 { return Error::Runtime(String::from("native error: no message")); }
-        // Negative = -needed; resize and retry.
+        // Negative = -needed, so resize and retry.
         buf.resize((-r) as usize, 0);
     }
 }
 
 /* Handle (RAII) */
 
-/// Opaque host-managed reference; `owned` distinguishes guest-released from argv-borrowed.
+/// Opaque host-managed reference. The `owned` flag distinguishes guest-released from argv-borrowed.
 pub struct Handle { raw: u32, owned: bool }
 
 impl Handle {
     /// Wrap an argv handle without releasing on drop (host owns it for the call).
     pub fn borrow(raw: u32) -> Self { Self { raw, owned: false } }
-    /// Take ownership of a raw handle; `Drop` will release the refcount.
+    /// Take ownership of a raw handle. `Drop` will release the refcount.
     pub fn from_raw(raw: u32) -> Self { Self { raw, owned: true } }
     /// Surrender the handle without running `Drop` (used when writing to `*out`).
     pub fn into_raw(self) -> u32 {
@@ -339,11 +337,11 @@ impl IntoValue for Handle {
 
 /* Kwargs */
 
-/// Trailing kwargs slot. `None` when no kwargs were passed (host sends handle 0); `Some(dict)` otherwise.
+/// Trailing kwargs slot. `None` when no kwargs were passed (host sends handle 0), `Some(dict)` otherwise.
 pub struct Kwargs(Option<Handle>);
 
 impl Kwargs {
-    /// Decode `name` from kwargs as primitive `T`. Returns `Ok(None)` if absent or kwargs slot empty; `Ok(Some(_))` on hit; `Err` on decode failure. Use `get_handle` for non-primitive values (callables, tuples, lists).
+    /// Decode `name` from kwargs as primitive `T`. Returns `Ok(None)` if absent or kwargs slot empty, `Ok(Some(_))` on hit, `Err` on decode failure. Use `get_handle` for non-primitive values (callables, tuples, lists).
     pub fn get<T: FromValue>(&self, name: &str) -> Result<Option<T>> {
         match self.get_handle(name)? {
             None => Ok(None),
@@ -363,7 +361,7 @@ impl Kwargs {
 }
 
 impl FromValue for Kwargs {
-    /// Macro-generated decode for the trailing kwargs slot: handle 0 = no kwargs, else borrow the dict.
+    /// Macro-generated decode for the trailing kwargs slot, handle 0 = no kwargs, else borrow the dict.
     fn from_handle(h: u32) -> Result<Self> {
         if h == 0 { Ok(Kwargs(None)) } else { Ok(Kwargs(Some(Handle::borrow(h)))) }
     }
@@ -371,7 +369,7 @@ impl FromValue for Kwargs {
 
 /* Bootstrap codec */
 
-/// Decode a handle into a typed `Value`; errors on non-transit composites (use `Handle::call`).
+/// Decode a handle into a typed `Value`. Errors on non-transit composites (use `Handle::call`).
 pub fn decode(h: u32) -> Result<Value> {
     let mut tag: u32 = 0;
     let mut buf = alloc::vec![0u8; 256];
@@ -401,7 +399,7 @@ pub fn encode(v: Value) -> Result<Handle> {
     else { Ok(Handle::from_raw(raw)) }
 }
 
-/// Typed transit value, shared with the host as `wasm_abi::WireValue`; sets and instances go through `Handle::call`.
+/// Typed transit value, shared with the host as `wasm_abi::WireValue`. Sets and instances go through `Handle::call`.
 pub use wasm_abi::WireValue as Value;
 
 /* FromValue / IntoValue */
@@ -499,7 +497,7 @@ impl IntoValue for alloc::borrow::Cow<'_, str> {
     }
 }
 
-/// Python `bytes`; transits raw, never decoded as UTF-8. Deref reads it as a slice.
+/// Python `bytes`, transits raw and is never decoded as UTF-8. Deref reads it as a slice.
 pub struct Bytes(pub Vec<u8>);
 
 impl core::ops::Deref for Bytes {
@@ -526,7 +524,7 @@ impl IntoValue for Value {
     fn into_handle(self) -> Result<Handle> { encode(self) }
 }
 
-/* List transit: the whole sequence crosses in one edge_decode/edge_encode instead of per-item ops. */
+/* List transit, the whole sequence crosses in one edge_decode/edge_encode instead of per-item ops. */
 
 impl FromValue for Vec<Value> {
     fn from_handle(h: u32) -> Result<Self> {
@@ -570,7 +568,7 @@ impl Args {
 
 impl<T: FromValue> FromValue for Option<T> {
     fn from_handle(h: u32) -> Result<Self> {
-        // Peek the tag with a zero-length buffer; consume only on non-None.
+        // Peek the tag with a zero-length buffer, consuming only on non-None.
         let mut tag: u32 = 0;
         let r = unsafe { edge_decode(h, &mut tag as *mut u32, core::ptr::null_mut(), 0) };
         if r >= 0 && tag == 0 { return Ok(None); }
@@ -589,7 +587,7 @@ impl<T: IntoValue> IntoValue for Option<T> {
 /* Universal dispatch via Handle */
 
 impl Handle {
-    // Shared edge_op wrapper; empty name/argv pass null.
+    // Shared edge_op wrapper. Empty name/argv pass null.
     fn raw_op(opcode: u32, recv: u32, name: &str, argv: &[u32]) -> Result<u32> {
         let name_ptr = if name.is_empty() { core::ptr::null() } else { name.as_ptr() };
         let argv_ptr = if argv.is_empty() { core::ptr::null() } else { argv.as_ptr() };
@@ -601,7 +599,7 @@ impl Handle {
         Ok(out)
     }
 
-    /// Invoke `recv.<name>(args)`; argv handles stay owned by the caller.
+    /// Invoke `recv.<name>(args)`. Argv handles stay owned by the caller.
     pub fn call(&self, name: &str, args: &[u32]) -> Result<Handle> {
         Self::raw_op(op::CALL, self.raw, name, args).map(Handle::from_raw)
     }
@@ -611,12 +609,12 @@ impl Handle {
         Self::raw_op(op::GET_ATTR, self.raw, name, &[]).map(Handle::from_raw)
     }
 
-    /// `recv[key]`; key passed as handle (encode an int for list indexing, str for dict lookup).
+    /// `recv[key]`. The key is passed as a handle (encode an int for list indexing, str for dict lookup).
     pub fn get_item(&self, key: &Handle) -> Result<Handle> {
         Self::raw_op(op::GET_ITEM, self.raw, "", &[key.raw]).map(Handle::from_raw)
     }
 
-    /// `recv[key] = value`; key/value passed as handles. Returns None which is released immediately.
+    /// `recv[key] = value`. Key and value are passed as handles. Returns None which is released immediately.
     pub fn set_item(&self, key: &Handle, value: &Handle) -> Result<()> {
         let out = Self::raw_op(op::SET_ITEM, self.raw, "", &[key.raw, value.raw])?;
         let _ = Handle::from_raw(out);
@@ -631,7 +629,7 @@ impl Handle {
         i64::from_handle(h.raw())
     }
 
-    /// `recv.<name> = value`; SET_ATTR returns None which we release immediately.
+    /// `recv.<name> = value`. SET_ATTR returns None which we release immediately.
     pub fn set_attr(&self, name: &str, value: &Handle) -> Result<()> {
         let out = Self::raw_op(op::SET_ATTR, self.raw, name, &[value.raw])?;
         let _ = Handle::from_raw(out);
@@ -653,27 +651,27 @@ impl Handle {
         Self::raw_op(op::NEW_TUPLE, 0, "", items).map(Handle::from_raw)
     }
 
-    /// Construct a set from item handles; unhashable items raise `TypeError`.
+    /// Construct a set from item handles. Unhashable items raise `TypeError`.
     pub fn new_set(items: &[u32]) -> Result<Handle> {
         Self::raw_op(op::NEW_SET, 0, "", items).map(Handle::from_raw)
     }
 
-    /// Construct a frozenset from item handles; unhashable items raise `TypeError`.
+    /// Construct a frozenset from item handles. Unhashable items raise `TypeError`.
     pub fn new_frozenset(items: &[u32]) -> Result<Handle> {
         Self::raw_op(op::NEW_FROZENSET, 0, "", items).map(Handle::from_raw)
     }
 
-    /// `type(recv).__name__`; returns a fresh str handle naming the runtime type.
+    /// `type(recv).__name__`. Returns a fresh str handle naming the runtime type.
     pub fn type_of(&self) -> Result<Handle> {
         Self::raw_op(op::TYPE_OF, self.raw, "", &[]).map(Handle::from_raw)
     }
 
-    /// `iter(recv)`; materialises the receiver as a List iterator handle.
+    /// `iter(recv)`. Materialises the receiver as a List iterator handle.
     pub fn iter(&self) -> Result<Handle> {
         Self::raw_op(op::ITER, self.raw, "", &[]).map(Handle::from_raw)
     }
 
-    /// `next(recv)`; returns `Ok(None)` at end-of-iteration, propagates other errors.
+    /// `next(recv)`. Returns `Ok(None)` at end-of-iteration, propagates other errors.
     pub fn iter_next(&self) -> Result<Option<Handle>> {
         match Self::raw_op(op::ITER_NEXT, self.raw, "", &[]) {
             Ok(out) => Ok(Some(Handle::from_raw(out))),
@@ -686,7 +684,7 @@ impl Handle {
 
 /* Plugin-class state helpers */
 
-/// Single-threaded interior-mutable cell for static plugin state; Sync because WASM has no threads.
+/// Single-threaded interior-mutable cell for static plugin state. Sync because WASM has no threads.
 pub struct PluginCell<T>(core::cell::UnsafeCell<Option<T>>);
 
 unsafe impl<T> Sync for PluginCell<T> {}
@@ -695,7 +693,7 @@ impl<T> PluginCell<T> {
     /// Const constructor for static initialization.
     pub const fn new() -> Self { Self(core::cell::UnsafeCell::new(None)) }
 
-    /// Unsafe getter; caller must ensure no overlapping &mut borrows across reentrant edge_op calls.
+    /// Unsafe getter. The caller must ensure no overlapping &mut borrows across reentrant edge_op calls.
     #[allow(clippy::mut_from_ref)]
     pub fn get_or_init<F: FnOnce() -> T>(&self, init: F) -> &mut T {
         unsafe {

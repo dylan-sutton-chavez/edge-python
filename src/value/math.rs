@@ -1,5 +1,3 @@
-// Pure-Rust f64 math (no libm, works under no_std / WASM).
-
 #[inline]
 pub fn fpowi(mut base: f64, exp: i32) -> f64 {
     if exp == 0 { return 1.0; }
@@ -18,7 +16,7 @@ pub fn fround(x: f64) -> f64 {
     let diff = x - fl;
     if diff < 0.5 { fl }
     else if diff > 0.5 { fl + 1.0 }
-    // Exactly .5: pick the even neighbour. `fl` is integral here, so test evenness without a cast.
+    // Exactly .5, pick the even neighbour. `fl` is integral here, so test evenness without a cast.
     else if libm::floor(fl / 2.0) * 2.0 == fl { fl }
     else { fl + 1.0 }
 }
@@ -26,7 +24,7 @@ pub fn fround(x: f64) -> f64 {
 #[inline]
 pub fn fpowf(base: f64, exp: f64) -> f64 {
     let ei = exp as i32;
-    // Exact integer exponents stay on the squaring path; everything else uses libm `pow`.
+    // Exact integer exponents stay on the squaring path, everything else uses libm `pow`.
     if (ei as f64) == exp && exp.abs() < 1024.0 { return fpowi(base, ei); }
     libm::pow(base, exp)
 }

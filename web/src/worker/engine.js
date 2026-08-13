@@ -1,8 +1,3 @@
-/*
-Engine orchestrator. Internal to the Worker; consumers use `createWorker` in `src/index.js`.
-Lifecycle: `load` once -> many `run` cycles -> `dispose`. Each run instantiates compiler fresh, no state leak.
-*/
-
 import { MemoryCache } from '../cache/memory.js';
 import { bfsPrefetch } from '../prefetch.js';
 import { makeCompilerEnv } from '../env.js';
@@ -13,7 +8,7 @@ import { SOURCE_LIMIT } from '../specs.js';
 const TE = new TextEncoder();
 const TD = new TextDecoder();
 
-/* Packed status from `run_start` / `run_resume`; mirrors `src/wasm/exports.rs`. */
+/* Packed status from `run_start` / `run_resume`, mirrors `src/wasm/exports.rs`. */
 const STATUS_KIND_SHIFT = 29;
 const STATUS_PAYLOAD_MASK = (1 << STATUS_KIND_SHIFT) - 1;
 const STATUS_DONE = 0;
@@ -22,8 +17,8 @@ const STATUS_PENDING_FRAME = 2;
 const STATUS_PENDING_EVENT = 3;
 const STATUS_ERROR = 4;
 const STATUS_PENDING_HOST_CALL = 5;
-const STATUS_EXIT = 6; // uncaught SystemExit: clean termination, low 8 bits = exit code
-const STATUS_PREEMPTED = 7; // preempt tick; resumes with no host action
+const STATUS_EXIT = 6; // uncaught SystemExit, clean termination, low 8 bits = exit code
+const STATUS_PREEMPTED = 7; // preempt tick, resumes with no host action
 const ERR_RUNTIME = 2; // abi/src/lib.rs error_kind::RUNTIME, for failed deferred host calls
 
 // Worker-lifetime state
@@ -37,9 +32,9 @@ let importsMap = null;
 let eventWaiter = null;
 // Events `pushEvent`'d before the VM was ready (no `compilerExports`, or no paused run yet). Drained at the next `PENDING_EVENT` yield.
 const pendingEvents = [];
-/* Deferred host calls captured by env.host_call_native, keyed by the VM-assigned call_id; drained concurrently in the PENDING_HOST_CALL branch. */
+/* Deferred host calls captured by env.host_call_native, keyed by the VM-assigned call_id. Drained concurrently in the PENDING_HOST_CALL branch. */
 const pendingHostCalls = new Map();
-// Back-edges between preempt yields; 0 disables.
+// Back-edges between preempt yields, 0 disables.
 let preemptEvery = 0;
 let pauseRequested = false;
 // True from run entry so mid-boot pause waits.
@@ -50,7 +45,7 @@ let pauseAck = null;
 let resumeGate = null;
 /* (name, args) => Promise<value>. Set by worker.js (postMessage round-trip) or by a main-thread embedder. */
 let hostCallDelegate = null;
-/* System modules resolvable by bare name but loaded on demand; (name) => Promise<exportNames>. */
+/* System modules resolvable by bare name but loaded on demand. (name) => Promise<exportNames>. */
 let loadSystemDelegate = null;
 let lazySystemNames = [];
 // Source/missing caches persist across runs so the BFS skips refetching modules and re-probing 404'd `packages.json` paths on every Run press. Wiped by `clearCache()`.
@@ -59,6 +54,7 @@ const knownMissing = new Set();
 /* Synthetic native modules (handlers live on main thread). Re-applied at every `run` since `resetNativeTable` clears them. */
 let mainThreadManifests = [];
 
+/* Engine orchestrator, internal to the Worker. Consumers use `createWorker` in `src/index.js`. Lifecycle is `load` once -> many `run` cycles -> `dispose`, and each run instantiates the compiler fresh with no state leak. */
 export async function load({ wasmUrl, integrity = true, loaders: loaderUrls = [], imports = null, version = null, availableSystems = [] }, manifests = []) {
     const t0 = performance.now();
     importsMap = imports;
@@ -81,7 +77,7 @@ export async function load({ wasmUrl, integrity = true, loaders: loaderUrls = []
 
     mainThreadManifests = manifests;
 
-    // Plain fetch, no SRI; the browser decodes any Content-Encoding (br/gzip) before compileStreaming.
+    // Plain fetch, no SRI. The browser decodes any Content-Encoding (br/gzip) before compileStreaming.
     const response = await fetch(wasmUrl);
     if (!response.ok) throw new Error(`fetch failed for '${wasmUrl}' (${response.status})`);
     const wrapped = new Response(response.body, { headers: { 'Content-Type': 'application/wasm' } });
@@ -95,7 +91,7 @@ export async function run(opts) {
     try {
         const payload = TE.encode(opts.src);
         if (payload.length > SOURCE_LIMIT) throw new Error(`source exceeds ${SOURCE_LIMIT} bytes`);
-        // REPL inputs keep the interpreter alive in the wasm instance; implies incremental so the instance itself persists too.
+        // REPL inputs keep the interpreter alive in the wasm instance, implying incremental so the instance itself persists too.
         if (opts.repl) {
             return await execute({ ...opts, payload, incremental: true, start: (e, n) => e.repl_eval(n) });
         }
@@ -104,7 +100,7 @@ export async function run(opts) {
     finally { running = false; }
 }
 
-/* Shared run/restore core: instance, host imports, prefetch, then drive `start`. */
+/* Shared run/restore core, instance, host imports, prefetch, then drive `start`. */
 async function execute({ src, payload, start, entryDir = '', baseUrl = null, onLine, incremental = false }) {
     if (!wasmModule) throw new Error('engine.load() must be called first');
     entryDir = entryDir.replace(/^(\.\/)+/, ''); // specs never carry ./
@@ -112,7 +108,7 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
     let lockfile = new Map();
     if (integrityActive) {
         try { lockfile = await cache.loadLockfile(); }
-        catch { /* lockfile load failure is non-fatal; treat as empty */ }
+        catch { /* lockfile load failure is non-fatal, treat as empty */ }
     }
 
     /* rt built first (lazy getter) so makeCompilerEnv can decode handles during deferred host calls. */
@@ -128,7 +124,7 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
 
     const registerSystem = makeRegisterSystem(exports);
 
-    /* Both kinds graft `<name> -> mt:<name>` so the bare name resolves; eager ones (programmatic objects) register now, lazy ones (urls) load on first import during prefetch. In incremental mode the native table is preserved, so skip re-registration. */
+    /* Both kinds graft `<name> -> mt:<name>` so the bare name resolves. Eager ones (programmatic objects) register now, lazy ones (urls) load on first import during prefetch. In incremental mode the native table is preserved, so skip re-registration. */
     const { mainThreadSpecs, augmentedImports } = systemImportMap(registerSystem, incremental);
 
     const writePayload = () => new Uint8Array(exports.memory.buffer).set(payload, exports.src_ptr());
@@ -146,7 +142,7 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
         compilerExports: exports,
         rt,
         loaders,
-        // Lazy system: fetch export names from the page, then register the mt: stubs here.
+        // Lazy system, fetch export names from the page, then register the mt: stubs here.
         loadSystem: (name, url) => {
             if (!loadSystemDelegate) throw new Error(`system '${name}' imported but no main-thread loader is wired`);
             return loadSystemDelegate(name, url);
@@ -170,13 +166,13 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
 
     if (integrityActive) {
         try { await cache.saveLockfile(lockfile); }
-        catch { /* persistence failure is non-fatal; lockfile lives in-memory until next save */ }
+        catch { /* persistence failure is non-fatal, lockfile lives in-memory until next save */ }
     }
 
     return result;
 }
 
-/* Register a main-thread module at `mt:<name>`: push a stub per export (the real call defers to the page) and tell the compiler its export names. */
+/* Register a main-thread module at `mt:<name>`, push a stub per export (the real call defers to the page) and tell the compiler its export names. */
 const makeRegisterSystem = (exports) => (name, exportNames) => {
     const baseId = nativeTable.length;
     for (const fnName of exportNames) {
@@ -216,7 +212,7 @@ function systemImportMap(registerSystem, skipRegistration) {
     return { mainThreadSpecs, augmentedImports };
 }
 
-/* Fresh instance; resets module registry and native table. */
+/* Fresh instance, resets module registry and native table. */
 async function makeInstance(onLine, lockfile, rt) {
     const env = makeCompilerEnv({
         getExports: () => compilerExports,
@@ -246,7 +242,7 @@ async function drive(exports, rt, status, t0) {
     while (true) {
         const kind = (status >>> STATUS_KIND_SHIFT) & 7;
         if (kind === STATUS_DONE || kind === STATUS_ERROR || kind === STATUS_EXIT) break;
-        // Any yield is a park; settle pause() here.
+        // Any yield is a park, settle pause() here.
         if (pauseRequested) settlePause(true);
         if (kind === STATUS_PREEMPTED) {
             // Macrotask, so queued postMessage events land.
@@ -294,10 +290,10 @@ async function drive(exports, rt, status, t0) {
 
         status = exports.run_resume();
     }
-    // Run over; a parkless pause must not hang.
+    // Run over, a parkless pause must not hang.
     pauseRequested = false;
     settlePause(false);
-    // SystemExit: low 8 bits are the exit code, not a buffer length; finish without a traceback.
+    // SystemExit, low 8 bits are the exit code, not a buffer length. Finish without a traceback.
     if (((status >>> STATUS_KIND_SHIFT) & 7) === STATUS_EXIT) {
         return { out: '', ms: performance.now() - t0, exitCode: status & 0xFF };
     }
@@ -319,7 +315,7 @@ function snapshotSource(blob) {
     return TD.decode(blob.subarray(24, 24 + len));
 }
 
-/* Older wasm lacks the export; only preemption needs it. */
+/* Older wasm lacks the export, only preemption needs it. */
 function applyPreemptInterval(exports) {
     if (!exports.set_preempt_interval) {
         if (preemptEvery > 0) throw new Error('preemption needs a newer compiler.wasm');
@@ -328,20 +324,20 @@ function applyPreemptInterval(exports) {
     exports.set_preempt_interval(preemptEvery);
 }
 
-/* Preempt every `n` back-edges; 0 disables. */
+/* Preempt every `n` back-edges, 0 disables. */
 export function setPreemptInterval(n) {
     preemptEvery = Math.max(0, n | 0);
     if (compilerExports) applyPreemptInterval(compilerExports);
 }
 
-/* Park the run; resolves true once parked. */
+/* Park the run, resolves true once parked. */
 export function pause() {
     if (!running) return Promise.resolve(false);
     pauseRequested = true;
     return new Promise((r) => { pauseAck = r; });
 }
 
-/* Release a preempt-held run; no-op otherwise. */
+/* Release a preempt-held run, no-op otherwise. */
 export function resume() {
     pauseRequested = false;
     const gate = resumeGate;
@@ -349,7 +345,7 @@ export function resume() {
     if (gate) gate();
 }
 
-/* Serialize the parked run; throws when none. */
+/* Serialize the parked run, throws when none. */
 export function saveState() {
     if (!compilerExports) throw new Error('nothing to save: no run has started');
     const len = Number(compilerExports.save_state());
@@ -357,7 +353,7 @@ export function saveState() {
     return new Uint8Array(compilerExports.memory.buffer, compilerExports.snapshot_ptr(), len).slice();
 }
 
-/* Boot from the blob's embedded source, continue from the saved state; resolves like run(). */
+/* Boot from the blob's embedded source, continue from the saved state. Resolves like run(). */
 export async function restoreState({ blob, onLine }) {
     running = true;
     try {
@@ -394,7 +390,7 @@ function injectEvent(message) {
     return status === 0;
 }
 
-/* Push a string into the VM's event queue; wakes `receive()`. Buffers if the VM isn't paused on PENDING_EVENT yet, the driver loop drains the buffer at the next yield, so callers never need to know about the VM's readiness window. */
+/* Push a string into the VM's event queue, wakes `receive()`. Buffers if the VM isn't paused on PENDING_EVENT yet, the driver loop drains the buffer at the next yield, so callers never need to know about the VM's readiness window. */
 export function pushEvent(message) {
     const msg = String(message);
     if (!injectEvent(msg)) {
@@ -409,12 +405,12 @@ export function pushEvent(message) {
     return true;
 }
 
-/* Register the host-call delegate. worker.js wires a postMessage round-trip; no other consumer is supported. */
+/* Register the host-call delegate. worker.js wires a postMessage round-trip, no other consumer is supported. */
 export function setHostCallDelegate(fn) {
     hostCallDelegate = fn;
 }
 
-/* Register the lazy system loader: (name) => Promise<exportNames>. worker.js wires the postMessage round-trip. */
+/* Register the lazy system loader, (name) => Promise<exportNames>. worker.js wires the postMessage round-trip. */
 export function setLoadSystemDelegate(fn) {
     loadSystemDelegate = fn;
 }

@@ -16,7 +16,7 @@ pub struct Token {
     pub end: usize,
 }
 
-/* Lex-time diagnostic. Static message since errors are a fixed set; parser boundary upgrades it to a richer Diagnostic. */
+/* Lex-time diagnostic. Static message since errors are a fixed set, parser boundary upgrades it to a richer Diagnostic. */
 #[derive(Debug)]
 pub struct LexError {
     pub start: usize,

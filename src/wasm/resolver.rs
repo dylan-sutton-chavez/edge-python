@@ -10,7 +10,7 @@ use crate::bridge::{error_from_kind, get_val, put_val, release_handles, take_err
 use crate::vm::types::{Val, VmErr};
 use alloc::sync::Arc;
 
-// Cap on packages.json `extends` chain, bounds attacker-crafted loops; 32 dwarfs real workspace depth.
+// Cap on packages.json `extends` chain, bounds attacker-crafted loops, 32 dwarfs real workspace depth.
 const MAX_PACKAGES_HOPS: u32 = 32;
 
 pub(super) struct WasmHostResolver { pub(super) dir: String }
@@ -42,7 +42,7 @@ impl Resolver for WasmHostResolver {
         if ptr.is_null() {
             return Err(s!("no bytes cached by host for '", str spec, "'"));
         }
-        // Host allocates via `wasm_alloc` (abi.md): copy into a guest Vec, then `wasm_free`. `Vec::from_raw_parts` would UB by freeing Box-laid memory through Vec's layout.
+        // Host allocates via `wasm_alloc` (abi.md), copy into a guest Vec, then `wasm_free`. `Vec::from_raw_parts` would UB by freeing Box-laid memory through Vec's layout.
         let len = len as usize;
         let bytes: Vec<u8> = unsafe { core::slice::from_raw_parts(ptr, len) }.to_vec();
         unsafe { wasm_free(ptr, len as u32) };
@@ -159,12 +159,12 @@ impl WasmHostResolver {
 /* Builds a NativeBinding that marshals handles around `host_call_native`. Lives here so the bridge stays host-import-free. */
 fn make_native_binding(name: String, id: u32) -> NativeBinding {
     let closure = move |_: &mut crate::vm::types::HeapPool, args: &[Val], kwargs: Option<Val>| -> Result<Val, VmErr> {
-        /* 1. Register positional args as handles the guest will see; append the kwargs handle (0 means no kwargs). */
+        /* 1. Register positional args as handles the guest will see, append the kwargs handle (0 means no kwargs). */
         let mut argv: Vec<u32> = args.iter().map(|v| put_val(*v)).collect();
         argv.push(kwargs.map_or(0, put_val));
         let mut out_handle: u32 = 0;
 
-        // call_id is what call_extern will park with on defer; lets the host route the result back.
+        // call_id is what call_extern will park with on defer, lets the host route the result back.
         let call_id = with_vm(|vm| vm.next_host_call_id as u32).unwrap_or(0);
         let status = unsafe {
             super::host_call_native(
@@ -174,8 +174,8 @@ fn make_native_binding(name: String, id: u32) -> NativeBinding {
             )
         };
 
-        /* 3. Read result BEFORE releasing argv: a returned input would point into slots we're about to free. */
-        // Status 2 = DEFERRED: handler has captured what it needs; release argv and park the VM.
+        /* 3. Read result BEFORE releasing argv, a returned input would point into slots we're about to free. */
+        // Status 2 = DEFERRED, handler has captured what it needs, release argv and park the VM.
         if status == 2 {
             release_handles(&argv);
             return Err(VmErr::HostCallDeferred);

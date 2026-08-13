@@ -9,7 +9,7 @@ mod test {
 
     fn bits(s: &str) -> u64 { u64::from_str_radix(s, 16).unwrap() }
 
-    /* Corpus wire-value forms: null | bool | {"i": decimal} | {"f": num|"inf"|"-inf"} | {"s": text} | {"raw": hex} | [..] | {"d": [[k, v], ..]}. */
+    /* Corpus wire-value forms, null | bool | {"i": decimal} | {"f": num|"inf"|"-inf"} | {"s": text} | {"raw": hex} | [..] | {"d": [[k, v], ..]}. */
     fn wire_value(v: &serde_json::Value) -> WireValue {
         match v {
             serde_json::Value::Null => WireValue::None,
@@ -80,7 +80,7 @@ mod test {
     fn test_cases() {
         let cases: Vec<serde_json::Value> = serde_json::from_str(include_str!("cases/abi.json")).expect("invalid JSON");
 
-        // Table and stash live across cases; corpus order is the op sequence.
+        // Table and stash live across cases, corpus order is the op sequence.
         let mut table = HandleTable::new();
         let mut stash = ErrorStash::new();
         let error_pair = |v: &serde_json::Value| -> Option<(u32, String)> {

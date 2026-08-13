@@ -1,7 +1,6 @@
-/* Shared handle tables + helpers. One `makeState()` per `createWorker` so multiple workers don't share `nodes[]`. */
-
 const HANDLE_NONE = -1;
 
+/* Shared handle tables + helpers. One `makeState()` per `createWorker` so multiple workers don't share `nodes[]`. */
 export const makeState = () => {
     const nodes = [];
     // Reverse lookup Element->handles for O(1) subtree sweep. WeakMap so detached refs can GC.
@@ -37,7 +36,7 @@ export const makeState = () => {
         return out.join(',');
     };
 
-    // Targets: handles in `nodes[]`, listeners in `bindings[]`, running `animations[]` rooted in `el` (inclusive). Slots nulled, not spliced.
+    // Targets, handles in `nodes[]`, listeners in `bindings[]`, running `animations[]` rooted in `el` (inclusive). Slots nulled, not spliced.
     const cleanSubtree = (el) => {
         const all = new Set([el, ...el.querySelectorAll('*')]);
         for (const e of all) {

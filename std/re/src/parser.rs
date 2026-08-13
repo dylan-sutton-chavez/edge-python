@@ -1,5 +1,3 @@
-/* Recursive descent parser, pattern text to AST. */
-
 use alloc::{boxed::Box, string::String, vec::Vec};
 use super::ast::*;
 

@@ -6,13 +6,13 @@ use crate::parser::types::OpCode;
 use alloc::{string::{String, ToString}, vec::Vec, rc::Rc};
 use core::cell::RefCell;
 
-/* Cap on nested-container rendering depth; stops self-referential prints from overflowing the stack. */
+/* Cap on nested-container rendering depth, stops self-referential prints from overflowing the stack. */
 const RENDER_DEPTH_MAX: usize = 100;
 
-/* Cap on total rendered output; bounds breadth the way RENDER_DEPTH_MAX bounds depth. */
+/* Cap on total rendered output, bounds breadth the way RENDER_DEPTH_MAX bounds depth. */
 const MAX_REPR_LEN: usize = 1_000_000;
 
-/* Same cap for `<` descent; self-referential sequences raise RecursionError. */
+/* Same cap for `<` descent, self-referential sequences raise RecursionError. */
 const CMP_DEPTH_MAX: usize = 100;
 
 /* Render `bytes` as `b'...'` (printable ASCII verbatim, rest escaped). */
@@ -39,7 +39,7 @@ fn format_bytes(buf: &[u8]) -> String {
     out
 }
 
-/* `repr` of a str: quote selection (' unless the text has ' but not ") and backslash escapes for control chars; printable text (incl. non-ASCII) is verbatim. */
+/* `repr` of a str, quote selection (' unless the text has ' but not ") and backslash escapes for control chars, printable text (incl. non-ASCII) is verbatim. */
 fn repr_str(s: &str) -> String {
     use core::fmt::Write;
     let quote = if s.contains('\'') && !s.contains('"') { '"' } else { '\'' };
@@ -65,7 +65,7 @@ fn repr_str(s: &str) -> String {
     out
 }
 
-/* Coerce a numeric pair to f64; returns None if neither operand is a float. */
+/* Coerce a numeric pair to f64, returns None if neither operand is a float. */
 fn coerce_floats(a: Val, b: Val, heap: &HeapPool) -> Option<(f64, f64)> {
     if !a.is_float() && !b.is_float() { return None; }
     Some((num_as_f64(a, heap)?, num_as_f64(b, heap)?))
@@ -115,7 +115,7 @@ impl<'a> VM<'a> {
         self.int_to_val(Some(r))
     }
 
-    /* Clone the element set out of a `set` or `frozenset`; None for any other type. */
+    /* Clone the element set out of a `set` or `frozenset`, None for any other type. */
     pub(crate) fn clone_set_items(&self, v: Val) -> Option<ValSet> {
         if !v.is_heap() { return None; }
         match self.heap.get(v) {
@@ -130,7 +130,7 @@ impl<'a> VM<'a> {
         v.is_heap() && matches!(self.heap.get(v), HeapObj::Set(_) | HeapObj::FrozenSet(_))
     }
 
-    /* Alloc a set-algebra result; frozen picks frozenset (left-operand type rule). */
+    /* Alloc a set-algebra result, frozen picks frozenset (left-operand type rule). */
     pub(crate) fn alloc_set_result(&mut self, items: Vec<Val>, frozen: bool) -> Result<Val, VmErr> {
         let mut s = ValSet::with_capacity(items.len());
         for v in items { s.insert(v, &self.heap); }
@@ -138,8 +138,8 @@ impl<'a> VM<'a> {
         else { self.heap.alloc(HeapObj::Set(Rc::new(RefCell::new(s)))) }
     }
 
-    /* Set bitwise ops (|, &, ^) over set/frozenset; result frozen iff `a` is frozen. */
-    // Union/intersection/symmetric-diff items; content membership lets alloc dedup distinct-handle equals.
+    /* Set bitwise ops (|, &, ^) over set/frozenset, result frozen iff `a` is frozen. */
+    // Union/intersection/symmetric-diff items, content membership lets alloc dedup distinct-handle equals.
     fn set_binop_items(&self, a: Val, b: Val, op: OpCode) -> Result<Vec<Val>, VmErr> {
         let (sa, sb) = match (self.clone_set_items(a), self.clone_set_items(b)) {
             (Some(x), Some(y)) => (x, y),
@@ -161,7 +161,7 @@ impl<'a> VM<'a> {
         self.push(v); Ok(())
     }
 
-    // Augmented set bitwise: rewrite the left set in place (identity preserved); frozenset rebinds.
+    // Augmented set bitwise rewrites the left set in place (identity preserved), frozenset rebinds.
     pub(crate) fn set_iop_and_push(&mut self, a: Val, b: Val, op: OpCode) -> Result<(), VmErr> {
         if !matches!(self.heap.get(a), HeapObj::Set(_)) {
             return self.set_binop_and_push(a, b, op);
@@ -232,7 +232,7 @@ impl<'a> VM<'a> {
     fn append_reprs<'b>(&self, out: &mut String, it: impl Iterator<Item = &'b Val>, seen: &mut Vec<u32>) {
         let mut first = true;
         for v in it {
-            // Bound breadth: a wide structure re-referencing one big child would render without limit.
+            // Bound breadth, a wide structure re-referencing one big child would render without limit.
             if out.len() > MAX_REPR_LEN { out.push_str(", ..."); break; }
             if !first { out.push_str(", "); }
             out.push_str(&self.repr_d(*v, seen));
@@ -242,7 +242,7 @@ impl<'a> VM<'a> {
 
     pub fn display(&self, v: Val) -> String { self.display_d(v, &mut Vec::new()) }
 
-    /* Cycle-aware display: `seen` tracks containers on the current path, so self-referential structures emit "..." instead of recursing forever (and its length bounds raw nesting depth). */
+    /* Cycle-aware display, `seen` tracks containers on the current path, so self-referential structures emit "..." instead of recursing forever (and its length bounds raw nesting depth). */
     fn display_d(&self, v: Val, seen: &mut Vec<u32>) -> String {
         if seen.len() > RENDER_DEPTH_MAX { return "...".into(); }
         if v.is_int() { let mut b = itoa::Buffer::new(); return b.format(v.as_int()).into(); }
@@ -266,7 +266,7 @@ impl<'a> VM<'a> {
             HeapObj::Dict(d) => { let id = v.as_heap(); if seen.contains(&id) { return "{...}".into(); } seen.push(id); let mut o = s!(cap: 32; "{"); for (i,(k,val)) in d.borrow().iter().enumerate() { if i>0 { if o.len() > MAX_REPR_LEN { o.push_str(", ..."); break; } o.push_str(", "); } o.push_str(&self.repr_d(k, seen)); o.push_str(": "); o.push_str(&self.repr_d(val, seen)); } o.push('}'); seen.pop(); o },
             HeapObj::BoundMethod(_, id) => s!("<built-in method ", str id.name(), ">"),
             HeapObj::NativeFn(id) => s!("<built-in function ", str id.name(), ">"),
-            // User classes live in `__main__`; Python qualifies the repr with the module.
+            // User classes live in `__main__`, Python qualifies the repr with the module.
             HeapObj::Class(name, _, _) => crate::s!("<class '__main__.", str name, "'>"),
             HeapObj::Instance(cls, _) => {
                 if cls.is_heap() && let HeapObj::Class(name, _, _) = self.heap.get(*cls) { return crate::s!("<", str name, " instance>"); }
@@ -282,7 +282,7 @@ impl<'a> VM<'a> {
             HeapObj::Module(name, _) => s!("<module '", str name, "'>"),
             HeapObj::Extern(f) => s!("<extern function ", str &f.name, ">"),
             HeapObj::ExcInstance(name, args) => {
-                // `str(E("x"))` -> "x"; KeyError is special, stringifying as the key's repr.
+                // `str(E("x"))` -> "x", KeyError is special, stringifying as the key's repr.
                 if args.len() == 1 {
                     if name == "KeyError" { self.repr_d(args[0], seen) } else { self.display_d(args[0], seen) }
                 } else if args.is_empty() {
@@ -331,20 +331,20 @@ impl<'a> VM<'a> {
         self.lt_vals_d(a, b, 0)
     }
 
-    /* Depth-tracked `<`; past the cap surface RecursionError instead of overflowing the stack. */
+    /* Depth-tracked `<`, past the cap surface RecursionError instead of overflowing the stack. */
     fn lt_vals_d(&self, a: Val, b: Val, depth: usize) -> Result<bool, VmErr> {
         if depth > CMP_DEPTH_MAX { return Err(cold_depth()); }
         let a = if a.is_bool() { Val::int(a.as_bool() as i64) } else { a };
         let b = if b.is_bool() { Val::int(b.as_bool() as i64) } else { b };
         if a.is_int() && b.is_int() { return Ok(a.as_int() < b.as_int()); }
         if let Some((af, bf)) = coerce_floats(a, b, &self.heap) { return Ok(af < bf); }
-        // Wide-int compare in i128; falls through when either side isn't int-like.
+        // Wide-int compare in i128, falls through when either side isn't int-like.
         if let (Some(ai), Some(bi)) = (as_i128(a, &self.heap), as_i128(b, &self.heap)) { return Ok(ai < bi); }
         if a.is_heap() && b.is_heap() {
             match (self.heap.get(a), self.heap.get(b)) {
                 (HeapObj::Str(x), HeapObj::Str(y)) => return Ok(x < y),
                 (HeapObj::Bytes(x), HeapObj::Bytes(y)) => return Ok(x < y),
-                // Sequences compare lexicographically; clone to drop the heap borrow before recursing.
+                // Sequences compare lexicographically, clone to drop the heap borrow before recursing.
                 (HeapObj::List(x), HeapObj::List(y)) => {
                     let (x, y) = (x.borrow().clone(), y.borrow().clone());
                     return self.seq_lt_d(&x, &y, depth + 1);
@@ -359,7 +359,7 @@ impl<'a> VM<'a> {
         Err(VmErr::TypeMsg(s!("'<' not supported between instances of '", str self.type_name(a), "' and '", str self.type_name(b), "'")))
     }
 
-    /* Lexicographic `<` for sequences: first differing element decides; otherwise the shorter is less. Recurses through `lt_vals`, so nested sequences and mixed element types are handled (and rejected) consistently. */
+    /* Lexicographic `<` for sequences, first differing element decides, otherwise the shorter is less. Recurses through `lt_vals`, so nested sequences and mixed element types are handled (and rejected) consistently. */
     fn seq_lt_d(&self, xs: &[Val], ys: &[Val], depth: usize) -> Result<bool, VmErr> {
         if depth > CMP_DEPTH_MAX { return Err(cold_depth()); }
         for (&x, &y) in xs.iter().zip(ys.iter()) {
@@ -384,7 +384,7 @@ impl<'a> VM<'a> {
                 }
                 HeapObj::Range(s, e, st) => {
                     let (s, e, st) = (*s as i128, *e as i128, *st as i128);
-                    // O(1) range membership: bounds + step; integral floats match too.
+                    // O(1) range membership via bounds + step, integral floats match too.
                     let x = match as_i128(item, &self.heap) {
                         Some(i) => Some(i),
                         None if item.is_float() => {
@@ -409,14 +409,14 @@ impl<'a> VM<'a> {
         Err(VmErr::TypeMsg(s!("argument of type '", str self.type_name(container), "' is not iterable")))
     }
     pub fn add_vals(&mut self, a: Val, b: Val) -> Result<Val, VmErr> {
-        // Inline-int fast path; overflow falls through to the i128 slow path.
+        // Inline-int fast path, overflow falls through to the i128 slow path.
         if a.is_int() && b.is_int()
             && let Some(r) = a.as_int().checked_add(b.as_int())
             && (Val::INT_MIN..=Val::INT_MAX).contains(&r) {
             return Ok(Val::int(r));
         }
         if let Some((af, bf)) = coerce_floats(a, b, &self.heap) { return Ok(Val::float(af + bf)); }
-        // Wide-int slow path; int_to_val picks the narrowest storage class.
+        // Wide-int slow path, int_to_val picks the narrowest storage class.
         if let (Some(ai), Some(bi)) = (as_i128(a, &self.heap), as_i128(b, &self.heap)) {
             return self.int_to_val(ai.checked_add(bi));
         }
@@ -461,7 +461,7 @@ impl<'a> VM<'a> {
         if let (Some(ai), Some(bi)) = (as_i128(a, &self.heap), as_i128(b, &self.heap)) {
             return self.int_to_val(ai.checked_sub(bi));
         }
-        // Set / frozenset difference: fresh set of `a` elements not in `b`.
+        // Set / frozenset difference makes a fresh set of `a` elements not in `b`.
         if let (Some(sa), Some(sb)) = (self.clone_set_items(a), self.clone_set_items(b)) {
             let items: Vec<Val> = sa.iter().filter(|&&v| !sb.contains(v, &self.heap)).copied().collect();
             let frozen = matches!(self.heap.get(a), HeapObj::FrozenSet(_));
@@ -481,7 +481,7 @@ impl<'a> VM<'a> {
         if let (Some(ai), Some(bi)) = (as_i128(a, &self.heap), as_i128(b, &self.heap)) {
             return self.int_to_val(ai.checked_mul(bi));
         }
-        // Sequence repetition: str/list/tuple * int (count clamped to i64).
+        // Sequence repetition, str/list/tuple * int (count clamped to i64).
         let (seq_val, count) = if a.is_heap() && b.is_int() && !matches!(self.heap.get(a), HeapObj::LongInt(_)) {
             (a, b.as_int())
         } else if a.is_int() && b.is_heap() && !matches!(self.heap.get(b), HeapObj::LongInt(_)) {
@@ -522,7 +522,7 @@ impl<'a> VM<'a> {
 
     /* Repeat a sequence `n` times with the same budget/overflow/heap-limit guards as `seq * n`. */
     fn repeat_seq(&self, src: &[Val], n: usize) -> Result<Vec<Val>, VmErr> {
-        // Empty source: result is empty for any n, so skip the n-iteration loop.
+        // Empty source means result is empty for any n, so skip the n-iteration loop.
         if src.is_empty() { return Ok(Vec::new()); }
         let cap = src.len().checked_mul(n).ok_or(cold_overflow())?;
         if cap > self.heap.limit() { return Err(cold_heap()); }
@@ -548,7 +548,7 @@ impl<'a> VM<'a> {
         num_as_f64(v, &self.heap).ok_or(cold_type("numeric operand required"))
     }
 
-    /* Wrap an i128 into the narrowest Val: None->Overflow, 47-bit->inline, else LongInt. */
+    /* Wrap an i128 into the narrowest Val, None->Overflow, 47-bit->inline, else LongInt. */
     #[inline]
     pub(crate) fn int_to_val(&mut self, r: Option<i128>) -> Result<Val, VmErr> {
         let i = r.ok_or(cold_overflow())?;

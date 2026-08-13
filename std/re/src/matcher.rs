@@ -1,5 +1,3 @@
-/* Backtracking matcher over codepoints, so offsets are Unicode aware. */
-
 use alloc::vec::Vec;
 use core::cell::Cell;
 use super::ast::*;
@@ -15,6 +13,7 @@ struct Rep<'a> {
     greedy: bool,
 }
 
+/* Backtracking matcher over codepoints, so offsets are Unicode aware. */
 pub struct Matcher<'a> {
     input: &'a [char],
     flags: Flags,

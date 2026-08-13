@@ -1,12 +1,12 @@
 use super::TokenType;
 
-/* Byte-class flags packed into a u8; combine with bitwise OR for membership tests. */
+/* Byte-class flags packed into a u8, combine with bitwise OR for membership tests. */
 pub const ID_START: u8 = 1;
 pub const ID_CONT: u8 = 2;
 pub const DIGIT: u8 = 4;
 pub const SPACE: u8 = 8;
 
-// 256-byte LUT: replaces per-byte branches with indexed flag loads.
+// 256-byte LUT replacing per-byte branches with indexed flag loads.
 pub static BYTE_CLASS: [u8; 256] = {
     let mut t = [0u8; 256];
     let mut i = 0usize;
@@ -24,7 +24,7 @@ pub static BYTE_CLASS: [u8; 256] = {
     t
 };
 
-/* Single-char operator dispatch: byte -> index into SINGLE_MAP. */
+/* Single-char operator dispatch, byte -> index into SINGLE_MAP. */
 pub static SINGLE_TOK: [u8; 128] = {
     let mut t = [0u8; 128];
     t[b'(' as usize] = 1; t[b')' as usize] = 2;
@@ -121,7 +121,7 @@ pub fn keyword(s: &[u8]) -> Option<TokenType> {
 }
 
 
-/* f-string prefix: f, F, fr, Fr, fR, FR, rf, rF, Rf, RF. */
+/* f-string prefix, f, F, fr, Fr, fR, FR, rf, rF, Rf, RF. */
 #[inline]
 pub fn is_fstring_prefix(s: &[u8]) -> bool {
     match s.len() {
@@ -134,7 +134,7 @@ pub fn is_fstring_prefix(s: &[u8]) -> bool {
     }
 }
 
-/* Regular string prefix: r, R, u, U. The b/B variants live in `is_bytes_prefix` to emit a distinct `Bytes` token. */
+/* Regular string prefix, r, R, u, U. The b/B variants live in `is_bytes_prefix` to emit a distinct `Bytes` token. */
 #[inline]
 pub fn is_string_prefix(s: &[u8]) -> bool {
     match s.len() {
@@ -143,7 +143,7 @@ pub fn is_string_prefix(s: &[u8]) -> bool {
     }
 }
 
-/* Bytes literal prefix: b, B, br, Br, bR, BR, rb, Rb, rB, RB. Emitted as `Bytes` so the parser produces `Value::Bytes`. */
+/* Bytes literal prefix, b, B, br, Br, bR, BR, rb, Rb, rB, RB. Emitted as `Bytes` so the parser produces `Value::Bytes`. */
 #[inline]
 pub fn is_bytes_prefix(s: &[u8]) -> bool {
     match s.len() {
@@ -156,7 +156,7 @@ pub fn is_bytes_prefix(s: &[u8]) -> bool {
     }
 }
 
-/* UTF-8 byte length from lead byte; supports non-ASCII identifiers. */
+/* UTF-8 byte length from lead byte, supports non-ASCII identifiers. */
 #[inline]
 pub fn utf8_char_len(first: u8) -> usize {
     match first {
@@ -167,7 +167,7 @@ pub fn utf8_char_len(first: u8) -> usize {
     }
 }
 
-/* Reverse lookup for diagnostics: TokenType -> quoted display name. */
+/* Reverse lookup for diagnostics, TokenType -> quoted display name. */
 pub const fn token_to_str(kind: &TokenType) -> &'static str {
     match kind {
         // Keywords

@@ -1,7 +1,3 @@
-/*
-`edge init`: scaffold a ready-to-run project (entry script, host page, manifest).
-*/
-
 use anyhow::{bail, Context, Result};
 use compiler::devkit::SCAFFOLD_MAIN_PY;
 use std::fs;
@@ -14,6 +10,7 @@ fn index_html(title: &str) -> String {
     INDEX_HTML.replace("__EDGE_TITLE__", title)
 }
 
+/// Scaffold a ready-to-run project (entry script, host page, manifest).
 pub fn run(name: Option<&str>, bare: bool) -> Result<()> {
     let dir = name.unwrap_or(".");
     let root = Path::new(dir);

@@ -134,8 +134,7 @@ pub fn run(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/* Loads a run target, returning its source and the base dir imports resolve against.
-   A directory runs its main.py and resolves packages.json inside it, a file uses the manifest dir. */
+/* Loads a run target, returning its source and the base dir imports resolve against. A directory runs its main.py and resolves packages.json inside it, a file uses the manifest dir. */
 fn load_run(dir: &str, run: &str) -> Result<(String, String)> {
     let path = Path::new(dir).join(run);
     if path.is_dir() {

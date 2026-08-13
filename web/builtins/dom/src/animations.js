@@ -1,12 +1,10 @@
-/* Web Animations API; `finish_msg` arrives via `receive()` on completion. */
-
 export default ({ node, animations }, { pushEvent, emitError }) => ({
     // keyframes/options are JSON. finish_msg wakes receive() with {msg, animation_handle, ok:true}. Auto-disposes on finish or cancel.
     animate: (h, keyframesJson, optionsJson, finish_msg) => {
         const target = node(h);
         const keyframes = JSON.parse(keyframesJson);
         const opts = optionsJson !== undefined ? JSON.parse(optionsJson || '{}') : {};
-        /* Infinity doesn't survive JSON; accept "Infinity" as a string escape. */
+        /* Infinity doesn't survive JSON, accept "Infinity" as a string escape. */
         if (opts.iterations === 'Infinity') opts.iterations = Infinity;
         const anim = target.animate(keyframes, opts);
         const slot = animations.length;
@@ -17,7 +15,7 @@ export default ({ node, animations }, { pushEvent, emitError }) => ({
                 animations[slot] = null;
             })
             .catch((e) => {
-                // AbortError on cancel is expected; surface anything else.
+                // AbortError on cancel is expected, surface anything else.
                 if (e && e.name !== 'AbortError') emitError('animate', e);
                 animations[slot] = null;
             });

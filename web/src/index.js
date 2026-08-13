@@ -1,11 +1,8 @@
-/*
-Public entry. `createWorker(opts)` spawns a Web Worker around `engine.js` and returns a proxy whose methods round-trip via postMessage. See README for options.
-*/
-
 import { DEFAULT_SYSTEM, DEFAULT_IMPORTS } from './defaults.js';
 
+/* Public entry. `createWorker(opts)` spawns a Web Worker around `engine.js` and returns a proxy whose methods round-trip via postMessage. See README for options. */
 export async function createWorker(opts) {
-    // Chromium blocks `new Worker(crossOriginUrl)` even with `type:'module'`; cross-origin runtimes need the Blob bootstrap below.
+    // Chromium blocks `new Worker(crossOriginUrl)` even with `type:'module'`, cross-origin runtimes need the Blob bootstrap below.
     const workerUrl = new URL('./worker/worker.js', import.meta.url);
     const sameOrigin = workerUrl.origin === self.location.origin;
     const worker = sameOrigin
@@ -30,12 +27,12 @@ export async function createWorker(opts) {
         }
     }
 
-    /* Lazy system modules: name -> ESM url, imported only when the worker reports the bare name is used. Base defaults sit under user entries; `defaults:false` opts out. */
+    /* Lazy system modules, name -> ESM url, imported only when the worker reports the bare name is used. Base defaults sit under user entries, `defaults:false` opts out. */
     const systemUrls = { ...(opts?.defaults !== false ? DEFAULT_SYSTEM : {}), ...(opts?.systemModules || {}) };
     const loadedSystems = new Map(); // name -> export names, memoized across runs
     const loadSystemModule = async (name, manifestUrl) => {
         if (loadedSystems.has(name)) return loadedSystems.get(name);
-        // Embedder entries win; manifest-declared systems supply their own url.
+        // Embedder entries win, manifest-declared systems supply their own url.
         const url = systemUrls[name] ?? manifestUrl;
         if (!url) throw new Error(`no system module registered for '${name}'`);
         const mod = await import(url);
@@ -96,16 +93,16 @@ export async function createWorker(opts) {
         worker.postMessage({ type, reqId, ...payload });
     });
 
-    /* Strip mainThreadModules/systemModules before crossing postMessage: not structured-cloneable / loaded on the page. The worker only needs eager manifests and the lazy system names. */
+    /* Strip mainThreadModules/systemModules before crossing postMessage, not structured-cloneable / loaded on the page. The worker only needs eager manifests and the lazy system names. */
     const { mainThreadModules: _drop, systemModules: _dropSystems, ...workerOpts } = opts || {};
-    /* Fold the std .wasm defaults into imports here so the worker engine stays embedder-neutral; `defaults:false` opts out. */
+    /* Fold the std .wasm defaults into imports here so the worker engine stays embedder-neutral, `defaults:false` opts out. */
     const imports = { ...(opts?.defaults !== false ? DEFAULT_IMPORTS : {}), ...(opts?.imports || {}) };
     const ready = await send('load', {
         opts: { ...workerOpts, imports, availableSystems: Object.keys(systemUrls) },
         mainThreadManifests: manifests,
     });
 
-    /* Browser bridges fire `CustomEvent("edge-python-event")` on the global; route the detail to the Worker. Gated on `document` to skip Workers / Deno where this listener has no meaning. */
+    /* Browser bridges fire `CustomEvent("edge-python-event")` on the global, route the detail to the Worker. Gated on `document` to skip Workers / Deno where this listener has no meaning. */
     if (typeof document !== 'undefined') {
         addEventListener('edge-python-event', (e) => {
             if (typeof e.detail === 'string') pushEvent(e.detail);
@@ -117,15 +114,15 @@ export async function createWorker(opts) {
         loadMs: ready.loadMs,
 
         run: (src, runOpts = {}) => send('run', { src, ...runOpts }),
-        /* Preempt every `interval` back-edges; 0 disables. */
+        /* Preempt every `interval` back-edges, 0 disables. */
         setPreemptInterval: (interval) => send('set-preempt-interval', { interval }),
-        /* Park the program; resolves true when parked. */
+        /* Park the program, resolves true when parked. */
         pause: () => send('pause'),
         /* Continue a program parked by pause(). */
         resume: () => send('resume'),
-        /* Snapshot the paused program; throws when none. */
+        /* Snapshot the paused program, throws when none. */
         saveState: () => send('save-state'),
-        /* Boot from a blob; resolves like run(). */
+        /* Boot from a blob, resolves like run(). */
         restoreState: (blob) => send('restore-state', { blob }),
         stateGlobals: () => send('state-globals'),
         stateStack: () => send('state-stack'),
@@ -157,13 +154,13 @@ function crossOriginBootstrap(workerUrl) {
     });
 }
 
-/* Blob URL inherits the page's origin -> sidesteps Chromium's cross-origin block; the imported module then loads under CORS (Cloudflare Pages OK by default). `Function.toString` keeps the bootstrap as real JS in source. */
+/* Blob URL inherits the page's origin -> sidesteps Chromium's cross-origin block. The imported module then loads under CORS (Cloudflare Pages OK by default). `Function.toString` keeps the bootstrap as real JS in source. */
 function spawnCrossOriginWorker(workerUrl) {
     const source = `(${crossOriginBootstrap.toString()})(${JSON.stringify(workerUrl)});`;
     const blob = new Blob([source], { type: 'application/javascript' });
     const blobUrl = URL.createObjectURL(blob);
     const worker = new Worker(blobUrl, { type: 'module' });
-    // Defer revoke a tick; some browsers race it against the module fetch.
+    // Defer revoke a tick, some browsers race it against the module fetch.
     setTimeout(() => URL.revokeObjectURL(blobUrl), 0);
     return worker;
 }

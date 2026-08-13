@@ -1,13 +1,10 @@
-/*
-CAS-backed fetch keyed by lockfile hash; else fetch + hash + store. Null on 404 (opportunistic ok), throws on drift.
-*/
-
 import { sha256Hex } from './specs.js';
 
+/* CAS-backed fetch keyed by lockfile hash, else fetch + hash + store. Null on 404 (opportunistic ok), throws on drift. */
 export async function fetchWithLockfile(spec, lockfile, ctx) {
     const { cache, baseUrl, knownMissing, integrityActive } = ctx;
 
-    // An explicit #sha256- fragment pins the bytes; it stays in the cache key but leaves the request URL.
+    // An explicit #sha256- fragment pins the bytes. It stays in the cache key but leaves the request URL.
     const fragAt = spec.indexOf('#sha256-');
     const pin = fragAt === -1 ? null : spec.slice(fragAt + 8);
     const target = fragAt === -1 ? spec : spec.slice(0, fragAt);
@@ -22,7 +19,7 @@ export async function fetchWithLockfile(spec, lockfile, ctx) {
 
     let resp;
     try {
-        // Specs are root-relative; the URL join clamps escapes at the origin.
+        // Specs are root-relative, the URL join clamps escapes at the origin.
         const url = target.includes('://') ? target : new URL(target, baseUrl ?? self.location.href).toString();
         resp = await fetch(url);
     } catch (e) {

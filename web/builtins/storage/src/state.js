@@ -1,5 +1,4 @@
 /* Shared handle tables. One `makeState()` per `createWorker` so multiple workers don't share open IndexedDB connections. */
-
 export const makeState = () => {
     const dbs = [];
 

@@ -12,7 +12,7 @@ pub(crate) fn range_int(heap: &mut HeapPool, i: i64) -> Result<Val, VmErr> {
     else { heap.alloc(HeapObj::LongInt(i as i128)) }
 }
 
-// Lazy walker for short-circuit builtins; Vec variant copies because list/set/dict can't stream without a mutable heap borrow.
+// Lazy walker for short-circuit builtins, Vec variant copies because list/set/dict can't stream without a mutable heap borrow.
 pub(crate) enum IterCursor {
     Range { cur: i64, end: i64, step: i64 },
     Vec { items: Vec<Val>, idx: usize },
@@ -21,7 +21,7 @@ pub(crate) enum IterCursor {
 }
 
 impl IterCursor {
-    // Next value; allocates only for StrChars. Err on alloc failure, Ok(None) on exhaustion.
+    // Next value, allocates only for StrChars. Err on alloc failure, Ok(None) on exhaustion.
     pub fn next(&mut self, heap: &mut HeapPool) -> Result<Option<Val>, VmErr> {
         match self {
             Self::Range { cur, end, step } => {
@@ -95,7 +95,7 @@ impl<'a> VM<'a> {
         self.alloc_and_push_list(items)
     }
 
-    /* sorted(iterable, key=fn, reverse=False) — delegates to call_sorted when key is absent. */
+    /* sorted(iterable, key=fn, reverse=False), delegates to call_sorted when key is absent. */
     pub fn call_sorted_with_key(&mut self, key: Option<Val>, reverse: bool, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         let key = match key {
             Some(k) if !k.is_none() => k,
@@ -132,7 +132,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* Decorate-sort-undecorate: applies key fn to each item, sorts by resulting keys, returns reordered items. */
+    /* Decorate-sort-undecorate, applies key fn to each item, sorts by resulting keys, returns reordered items. */
     fn sort_by_key(&mut self, items: Vec<Val>, key: Val, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<Vec<Val>, VmErr> {
         let mut keys: Vec<Val> = Vec::with_capacity(items.len());
         for &item in &items {
@@ -141,12 +141,12 @@ impl<'a> VM<'a> {
             self.exec_call(1, chunk, slots)?;
             keys.push(self.pop()?);
         }
-        // Root both keys and items: a `__lt__` comparison can run user code that GCs.
+        // Root both keys and items because a `__lt__` comparison can run user code that GCs.
         let order = self.sorted_order(&keys, &items, chunk, slots)?;
         Ok(order.into_iter().map(|i| items[i]).collect())
     }
 
-    /* Root the operands (comparators can run GC-triggering user code), stable-sort `keys` via `sort_lt`, and return the index permutation. `extra_roots` keeps caller-only values (e.g. the items in a keyed sort) alive across comparisons. First comparison error wins; later comparisons degrade to Equal. */
+    /* Root the operands (comparators can run GC-triggering user code), stable-sort `keys` via `sort_lt`, and return the index permutation. `extra_roots` keeps caller-only values (e.g. the items in a keyed sort) alive across comparisons. First comparison error wins, later comparisons degrade to Equal. */
     fn sorted_order(&mut self, keys: &[Val], extra_roots: &[Val], chunk: &SSAChunk, slots: &mut [Val]) -> Result<Vec<usize>, VmErr> {
         let roots_base = self.temp_roots.len();
         for &v in keys.iter().chain(extra_roots.iter()) { self.temp_roots.push(v); }
@@ -176,7 +176,7 @@ impl<'a> VM<'a> {
         self.lt_vals(a, b)
     }
 
-    /* In-place sort dispatching `__lt__`; roots items since a comparison can run user code that GCs. */
+    /* In-place sort dispatching `__lt__`, roots items since a comparison can run user code that GCs. */
     pub(crate) fn sort_by_lt(&mut self, items: &mut [Val], chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         let snapshot = items.to_vec();
         let order = self.sorted_order(&snapshot, &[], chunk, slots)?;
@@ -184,7 +184,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* Stable merge sort over `0..n`; unlike `slice::sort_by` it tolerates a non-total `cmp` (NaN keys) without aborting. */
+    /* Stable merge sort over `0..n`, unlike `slice::sort_by` it tolerates a non-total `cmp` (NaN keys) without aborting. */
     fn stable_sort_indices<F>(n: usize, mut cmp: F) -> Vec<usize>
     where F: FnMut(usize, usize) -> core::cmp::Ordering {
         let mut idx: Vec<usize> = (0..n).collect();
@@ -234,7 +234,7 @@ impl<'a> VM<'a> {
         if positional.is_empty() || positional.len() > 2 {
             return Err(cold_type("enumerate() takes 1 or 2 positional arguments"));
         }
-        // `start` is positional (`enumerate(xs, 5)`) or keyword (`enumerate(xs, start=5)`); default 0.
+        // `start` is positional (`enumerate(xs, 5)`) or keyword (`enumerate(xs, start=5)`), default 0.
         let mut start = if positional.len() == 2 { positional[1] } else { Val::int(0) };
         for pair in kw_flat.chunks_exact(2) {
             match self.kw_name(pair[0]) {
@@ -309,7 +309,7 @@ impl<'a> VM<'a> {
             HeapObj::FrozenSet(v) => Some(v.iter().cloned().collect()),
             HeapObj::Range(s, e, st) if include_range => {
                 let (mut cur, end, step) = (*s, *e, *st);
-                // Materialised length is user-controlled; cap it against the heap budget.
+                // Materialised length is user-controlled, cap it against the heap budget.
                 let span = (end as i128 - cur as i128).unsigned_abs();
                 let count = if step == 0 { 0 } else { span / (step as i128).unsigned_abs() };
                 if count > self.heap.limit() as u128 { return Err(cold_heap()); }
@@ -333,7 +333,7 @@ impl<'a> VM<'a> {
             _ => return Err(self.not_iterable(o)),
         };
         if let Some(v) = snapshot {
-            // Cost scales with element count; charge it so repeated materialisation stays bounded.
+            // Cost scales with element count, charge it so repeated materialisation stays bounded.
             self.charge_steps(v.len())?;
             return Ok(v);
         }
@@ -355,7 +355,7 @@ impl<'a> VM<'a> {
             return self.str_to_char_vals(&s);
         }
         if let HeapObj::Bytes(b) = self.heap.get(o) {
-            // bytes iterates as ints (Python semantics; same as bytes[i]).
+            // bytes iterates as ints (Python semantics, same as bytes[i]).
             return Ok(b.iter().map(|&byte| Val::int(byte as i64)).collect());
         }
         if let HeapObj::Dict(rc) = self.heap.get(o) {
@@ -389,11 +389,11 @@ impl<'a> VM<'a> {
 
     pub fn call_next(&mut self, argc: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         if argc == 0 || argc > 2 { return Err(cold_type("next() takes 1 or 2 arguments")); }
-        // `next(it, default)`: the 2nd arg is returned instead of raising StopIteration on exhaustion.
+        // `next(it, default)` returns the 2nd arg instead of raising StopIteration on exhaustion.
         let default = if argc == 2 { Some(self.pop()?) } else { None };
         let o = self.pop()?;
         if !o.is_heap() { return Err(cold_type("next() requires an iterator")); }
-        // User iterator: dispatch __next__, mapping StopIteration to the optional default.
+        // For a user iterator, dispatch __next__, mapping StopIteration to the optional default.
         if matches!(self.heap.get(o), HeapObj::Instance(..)) {
             return match self.try_call_dunder(o, "__next__", &[], chunk, slots) {
                 Ok(Some(v)) => { self.push(v); Ok(()) }
@@ -432,12 +432,12 @@ impl<'a> VM<'a> {
         }
     }
 
-    /* `map(fn, iter)`, eager; returns a list. Re-enters `exec_call` per item so closures with captures see the caller's chunk/slots. */
+    /* `map(fn, iter)`, eager, returns a list. Re-enters `exec_call` per item so closures with captures see the caller's chunk/slots. */
     pub fn call_map(&mut self, argc: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         if argc < 2 { return Err(cold_type("map() must have at least two arguments")); }
         let mut args = self.pop_n(argc as usize)?;
         let fn_val = args.remove(0);
-        // Materialise each iterable; the parallel walk stops at the shortest, like zip.
+        // Materialise each iterable, the parallel walk stops at the shortest, like zip.
         let mut lists: Vec<Vec<Val>> = Vec::with_capacity(args.len());
         for it in args { lists.push(self.iter_to_vec_general(it)?); }
         let n = lists.iter().map(|l| l.len()).min().unwrap_or(0);
@@ -452,7 +452,7 @@ impl<'a> VM<'a> {
         self.alloc_and_push_list(out)
     }
 
-    /* `filter(pred, iter)`, eager; keeps truthy `pred(item)`. Same call-shape as `map`. `pred=None` falls back to Python's identity-truthy filter. */
+    /* `filter(pred, iter)`, eager, keeps truthy `pred(item)`. Same call-shape as `map`. `pred=None` falls back to Python's identity-truthy filter. */
     pub fn call_filter(&mut self, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         let iterable = self.pop()?;
         let fn_val = self.pop()?;
@@ -473,13 +473,13 @@ impl<'a> VM<'a> {
         self.alloc_and_push_list(out)
     }
 
-    /* Short-circuit truthiness scan shared by `all`/`any`: stops at the first element whose truthiness equals `find`, pushing `find`; pushes `!find` on exhaustion. */
+    /* Short-circuit truthiness scan shared by `all`/`any`, stops at the first element whose truthiness equals `find`, pushing `find`. Pushes `!find` on exhaustion. */
     fn scan_truthy(&mut self, op: u16, find: bool, arity_err: &'static str) -> Result<(), VmErr> {
         if op != 1 { return Err(cold_type(arity_err)); }
         let o = self.pop()?;
         // Generators step lazily so evaluation stops at the deciding element (short-circuit).
         if o.is_heap() && matches!(self.heap.get(o), HeapObj::Coroutine(..)) {
-            // Root the coroutine on the VM stack; each resume can allocate and trigger GC.
+            // Root the coroutine on the VM stack, each resume can allocate and trigger GC.
             self.push(o);
             let decided = loop {
                 self.charge_step()?;
@@ -524,7 +524,7 @@ impl<'a> VM<'a> {
                     return self.alloc_and_push_list(items);
                 }
                 HeapObj::Coroutine(..) => {
-                    // Keep the coroutine and its yielded values rooted on the VM stack; each resume can allocate and trigger GC.
+                    // Keep the coroutine and its yielded values rooted on the VM stack, each resume can allocate and trigger GC.
                     self.push(o);
                     let base = self.stack.len();
                     loop {
@@ -534,7 +534,7 @@ impl<'a> VM<'a> {
                         self.yielded = false;
                         self.push(v);
                     }
-                    // A shorter stack must not panic split_off; clamp.
+                    // A shorter stack must not panic split_off, clamp.
                     let out = self.stack.split_off(base.min(self.stack.len()));
                     self.pop()?; // drop the rooted coroutine
                     return self.alloc_and_push_list(out);

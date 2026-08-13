@@ -90,7 +90,7 @@ impl<'a> R<'a> {
     fn str(&mut self) -> Result<String, SnapErr> {
         String::from_utf8(self.bytes()?).map_err(|_| "snapshot string not utf-8".to_string())
     }
-    /* Static-str decode leaks; stored errors are rare. */
+    /* Static-str decode leaks, stored errors are rare. */
     fn leakstr(&mut self) -> Result<&'static str, SnapErr> {
         Ok(alloc::boxed::Box::leak(self.str()?.into_boxed_str()))
     }
@@ -649,7 +649,7 @@ pub fn restore(vm: &mut VM, blob: &[u8]) -> Result<(), SnapErr> {
     })?;
 
     if r.p != r.b.len() { return Err("snapshot has trailing bytes".to_string()); }
-    // Derived flag, not serialized: recompute from the restored module bindings.
+    // Derived flag, not serialized, recompute from the restored module bindings.
     vm.builtins_rebound = vm.module_state.keys().any(|k| NativeFnId::from_name(k).is_some());
     rehash(vm, fills)?;
     rebuild_mro(vm)

@@ -11,14 +11,14 @@ use alloc::{string::{String, ToString}, vec::Vec};
 
 impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
-    /* `{}`: dict/set literal or comprehension; always eat(Rbrace) to keep `bracket_stack` in sync. */
+    /* `{}` is a dict/set literal or comprehension, always eat(Rbrace) to keep `bracket_stack` in sync. */
     pub(super) fn brace_literal(&mut self) {
         if matches!(self.peek(), Some(TokenType::Rbrace)) {
             self.advance();
             self.chunk.emit(OpCode::BuildDict, 0);
             return;
         }
-        // `{**m, ...}`: leading mapping-unpack => dict built incrementally.
+        // `{**m, ...}`, leading mapping-unpack => dict built incrementally.
         if self.eat_if(TokenType::DoubleStar) {
             self.chunk.emit(OpCode::BuildDict, 0);
             self.expr();
@@ -26,7 +26,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             self.dict_tail(0, true);
             return;
         }
-        // `{*s, ...}`: leading iterable-unpack => set built incrementally.
+        // `{*s, ...}`, leading iterable-unpack => set built incrementally.
         if self.eat_if(TokenType::Star) {
             self.chunk.emit(OpCode::BuildSet, 0);
             self.expr();
@@ -49,7 +49,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     self.comprehension_loop(&[(key_start, key_ins), (val_start, val_ins)], OpCode::MapAdd, &versions_before);
                     self.eat(TokenType::Rbrace);
                 } else {
-                    // First pair already emitted; dict_tail consolidates if a later `**` appears.
+                    // First pair already emitted, dict_tail consolidates if a later `**` appears.
                     self.dict_tail(1, false);
                 }
             }
@@ -57,14 +57,14 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 if self.maybe_comprehension(key_start, OpCode::BuildSet, OpCode::SetAdd) {
                     self.eat(TokenType::Rbrace);
                 } else {
-                    // First element already emitted; set_tail consolidates if a later `*` appears.
+                    // First element already emitted, set_tail consolidates if a later `*` appears.
                     self.set_tail(1, false);
                 }
             }
         }
     }
 
-    /* If `for` follows, lower [elem_start..] as a comprehension; true when consumed. */
+    /* If `for` follows, lower [elem_start..] as a comprehension, true when consumed. */
     pub(super) fn maybe_comprehension(&mut self, elem_start: usize, build: OpCode, append: OpCode) -> bool {
         if !matches!(self.peek(), Some(TokenType::For)) { return false; }
         let versions_before = self.ssa_versions.clone();
@@ -74,14 +74,14 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         true
     }
 
-    /* `[]`: list literal or list-comp; always eat(Rsqb) to keep `bracket_stack` in sync. */
+    /* `[]` is a list literal or list-comp, always eat(Rsqb) to keep `bracket_stack` in sync. */
     pub(super) fn list_literal(&mut self) {
         if matches!(self.peek(), Some(TokenType::Rsqb)) {
             self.advance();
             self.chunk.emit(OpCode::BuildList, 0);
             return;
         }
-        // `[*it, ...]`: leading iterable-unpack => list built incrementally.
+        // `[*it, ...]`, leading iterable-unpack => list built incrementally.
         if self.eat_if(TokenType::Star) {
             self.chunk.emit(OpCode::BuildList, 0);
             self.expr();
@@ -94,13 +94,12 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         if self.maybe_comprehension(elem_start, OpCode::BuildList, OpCode::ListAppend) {
             self.eat(TokenType::Rsqb);
         } else {
-            // First element already emitted; list_tail consolidates if a later `*` appears.
+            // First element already emitted, list_tail consolidates if a later `*` appears.
             self.list_tail(1, false);
         }
     }
 
-    /* Finishes a `{}` dict after the first pair. `pairs` = loose key/val pairs on the stack; `incremental` = a Dict object is already on the stack. On the first `**` the loose pairs are consolidated with `BuildDict pairs`, then merges use `DictUpdate`/`MapAdd`. */
-    /* Shared tail for `{}`/`[]` displays after the first element: comma-separated elems with optional spreads, switching to incremental build on the first spread. */
+    /* Shared tail for `{}`/`[]` displays after the first element. `count` = loose elems on the stack, `incremental` = container already on the stack. First spread consolidates loose elems with `build count`, then merges use `update`/`add`. */
     #[allow(clippy::too_many_arguments)]
     fn container_tail(
         &mut self, mut count: u16, mut incremental: bool,
@@ -139,7 +138,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             OpCode::BuildList, OpCode::ListExtend, OpCode::ListAppend, |s| s.expr());
     }
 
-    /* Shared comprehension scaffolding: parses the for/if clauses, returns (loop starts, ForIter patch sites, SSA remap for loop vars). */
+    /* Shared comprehension scaffolding, parses the for/if clauses, returns (loop starts, ForIter patch sites, SSA remap for loop vars). */
     fn comp_header(&mut self, versions_before: &HashMap<String, u32>) -> (Vec<u16>, Vec<usize>, Vec<(u16, u16)>) {
         let mut loop_starts: Vec<u16> = Vec::new();
         let mut for_iters: Vec<usize> = Vec::new();
@@ -176,7 +175,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             for_iters.push(fi);
         }
 
-        // Linear scan: size 1-5 beats HashMap and avoids monomorphizing for u16 keys.
+        // Linear scan, size 1-5 beats HashMap and avoids monomorphizing for u16 keys.
         let mut var_map: Vec<(u16, u16)> = Vec::new();
         for var in &all_vars {
             let old_ver = versions_before.get(var).copied().unwrap_or(0);
@@ -195,7 +194,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     /* Re-emit captured element bodies inside the loop, remapping loop vars and shifting internal jumps. */
     fn replay_comp_bodies(&mut self, elem_bodies: &[(usize, Vec<Instruction>)], var_map: &[(u16, u16)]) {
         for (orig_base, body) in elem_bodies {
-            // Body is relocated by this delta; internal jump targets (from `or`/`and`/membership) must shift with it.
+            // Body is relocated by this delta, internal jump targets (from `or`/`and`/membership) must shift with it.
             let delta = self.chunk.instructions.len() as i64 - *orig_base as i64;
             for ins in body {
                 let operand = if matches!(ins.opcode, OpCode::LoadName | OpCode::StoreName) {
@@ -210,7 +209,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* Emits for/if comprehension scaffolding; reinjcts body with loop-bound SSA slots. */
+    /* Emits for/if comprehension scaffolding, reinjects body with loop-bound SSA slots. */
     pub(super) fn comprehension_loop(&mut self, elem_bodies: &[(usize, Vec<Instruction>)], append_op: OpCode, versions_before: &HashMap<String, u32>) {
         let (loop_starts, for_iters, var_map) = self.comp_header(versions_before);
         self.replay_comp_bodies(elem_bodies, &var_map);
@@ -222,16 +221,16 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* `any(genexpr)` / `all(genexpr)`: same scaffolding, but each element decides instead of appending, so evaluation stops at the first hit like Python. */
+    /* `any(genexpr)` / `all(genexpr)`, same scaffolding but each element decides instead of appending, so evaluation stops at the first hit like Python. */
     pub(super) fn scan_comprehension(&mut self, elem_bodies: &[(usize, Vec<Instruction>)], find_true: bool, versions_before: &HashMap<String, u32>) {
         let (loop_starts, for_iters, var_map) = self.comp_header(versions_before);
         self.replay_comp_bodies(elem_bodies, &var_map);
-        // `all` exits on falsy: invert so one JumpIfFalse serves both.
+        // `all` exits on falsy, invert so one JumpIfFalse serves both.
         if !find_true { self.chunk.emit(OpCode::Not, 0); }
         if let Some(&ls) = loop_starts.last() {
             self.chunk.emit(OpCode::JumpIfFalse, ls);
         }
-        // Decided: unwind every active iterator before leaving the loops.
+        // Decided, unwind every active iterator before leaving the loops.
         for _ in &for_iters { self.chunk.emit(OpCode::PopIter, 0); }
         self.chunk.emit(if find_true { OpCode::LoadTrue } else { OpCode::LoadFalse }, 0);
         let done = self.emit_jump(OpCode::Jump);
@@ -243,11 +242,11 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.patch(done);
     }
 
-    /* f-string: emits literal+expr parts until FstringEnd, returns the count; caller wraps in BuildString. `fs_start/fs_end` anchor unclosed-string errors. */
+    /* f-string emits literal+expr parts until FstringEnd, returns the count, caller wraps in BuildString. `fs_start/fs_end` anchor unclosed-string errors. */
     pub(super) fn fstring(&mut self, fs_start: usize, fs_end: usize) -> u16 {
         let mut parts = 0u16;
         let mut got_end = false;
-        // Raw f-strings (`rf"..."`) keep backslashes literal; plain ones decode escapes like a normal string.
+        // Raw f-strings (`rf"..."`) keep backslashes literal, plain ones decode escapes like a normal string.
         let is_raw = super::types::has_raw_prefix(&self.source[fs_start..fs_end]);
         if matches!(self.peek(), Some(TokenType::FstringEnd)) {
             self.advance();
@@ -280,16 +279,16 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     let saved_in_fstring = self.in_fstring_expr;
                     self.in_fstring_expr = true;
                     self.expr();
-                    // Bare tuple in a replacement field: `f"{1,}"` builds (1,).
+                    // Bare tuple in a replacement field, `f"{1,}"` builds (1,).
                     if matches!(self.peek(), Some(TokenType::Comma)) {
                         let n = self.tuple_rest(1, |s| matches!(s.peek(), Some(TokenType::Rbrace | TokenType::Colon | TokenType::Exclamation | TokenType::Equal) | None));
                         self.chunk.emit(OpCode::BuildTuple, n);
                     }
                     self.in_fstring_expr = saved_in_fstring;
                     let expr_end_byte = self.last_end;
-                    /* FormatValue operand: bit0=has-spec, bits1-2=conversion (0=none,1=!r,2=!s,3=!a). */
+                    /* FormatValue operand, bit0=has-spec, bits1-2=conversion (0=none,1=!r,2=!s,3=!a). */
                     let mut flags = 0u16;
-                    // `=` debug: emits "expr=" prefix; defaults to !r when no conv/spec given.
+                    // `=` debug emits "expr=" prefix, defaults to !r when no conv/spec given.
                     let mut debug_prefix: Option<String> = None;
                     if matches!(self.peek(), Some(TokenType::Equal)) {
                         self.advance();
@@ -358,7 +357,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         parts
     }
 
-    /* Dispatches call: print/range opcodes; imported natives (shadow builtins); builtins table; else LoadName+Call. */
+    /* Dispatches call, print/range opcodes, imported natives (shadow builtins), builtins table, else LoadName+Call. */
     pub(super) fn call(&mut self, name: String) -> bool {
         let call_pos = self.last_end as u32;
         // A rebound builtin name must call the binding, not the fused opcode.
@@ -413,7 +412,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             return true;
         }
 
-        // `any`/`all` over a genexpr lowers to a short-circuit scan; other shapes keep the fused opcode.
+        // `any`/`all` over a genexpr lowers to a short-circuit scan, other shapes keep the fused opcode.
         if matches!(name.as_str(), "any" | "all") {
             let find_true = name == "any";
             self.advance();
@@ -467,7 +466,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.advance();
         let mut argc = 0u16;
         self.comma_list(|t| t == TokenType::Rpar, |s| {
-            // Allow `range(*args)`; UnpackArgs spreads the iterable at runtime.
+            // Allow `range(*args)`, UnpackArgs spreads the iterable at runtime.
             if s.eat_if(TokenType::Star) { s.expr(); s.chunk.emit(OpCode::UnpackArgs, 1); }
             else { s.expr(); }
             argc = argc.saturating_add(1);
@@ -508,7 +507,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     let elem_start = s.chunk.instructions.len();
                     s.name(t);
                     s.infix_bp(0);
-                    // Name-led arg bypasses expr(); parse a trailing ternary here too.
+                    // Name-led arg bypasses expr(), parse a trailing ternary here too.
                     s.saw_newline = false;
                     s.ternary_tail(elem_start);
                     s.maybe_comprehension(elem_start, OpCode::BuildList, OpCode::ListAppend);
@@ -525,7 +524,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         (pos, kw)
     }
 
-    /* class: compiles body into fresh chunk, emits MakeClass+decorators+StoreName. */
+    /* class compiles body into fresh chunk, emits MakeClass+decorators+StoreName. */
     pub(super) fn class_def(&mut self) { self.class_def_with(0) }
 
     /* Consume the next Name, or emit a non-syncing diagnostic and return a synthetic name so parsing continues. */
@@ -548,10 +547,10 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     }
 
     pub(super) fn class_def_with(&mut self, decorators: u16) {
-        // Missing name: non-syncing diagnostic + synthetic name so body still parses.
+        // Missing name, non-syncing diagnostic + synthetic name so body still parses.
         let cname = self.ident_or_missing("expected class name");
 
-        // Bases are pushed left-to-right; `MakeClass` pops `num_bases` and stores them in the Class.
+        // Bases are pushed left-to-right, `MakeClass` pops `num_bases` and stores them in the Class.
         let mut num_bases: u16 = 0;
         if self.eat_if(TokenType::Lpar) {
             while !matches!(self.peek(), Some(TokenType::Rpar) | None) {
@@ -567,7 +566,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         let body = self.with_fresh_chunk(|s| s.compile_block());
 
         let ci = self.chunk.classes.len() as u16;
-        // Operand packs `(num_bases << 8) | class_idx`; each field is one byte to keep the dispatch decode cheap.
+        // Operand packs `(num_bases << 8) | class_idx`, each field is one byte to keep the dispatch decode cheap.
         if ci > 0xFF { self.error("too many classes in this scope (limit 255)"); return; }
         if num_bases > 0xFF { self.error("too many base classes (limit 255)"); return; }
         self.chunk.classes.push(body);
@@ -579,9 +578,9 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.emit_store_new(&cname);
     }
 
-    /* def/async def: parses signature, compiles body, emits MakeFunction/MakeCoroutine+decorators+StoreName. */
+    /* def/async def parses signature, compiles body, emits MakeFunction/MakeCoroutine+decorators+StoreName. */
     pub(super) fn func_def_inner(&mut self, decorators: u16, is_async: bool) {
-        // Missing name: non-syncing diagnostic + synthetic name so signature+body still parse.
+        // Missing name, non-syncing diagnostic + synthetic name so signature+body still parse.
         let fname = self.ident_or_missing("expected function name");
         let (params, defaults) = self.parse_params();
         let body = self.compile_body(&params);
@@ -595,7 +594,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     }
 
     pub(super) fn parse_params(&mut self) -> (Vec<String>, u16) {
-        // No `(`: diagnostic, consume `:` so compile_body starts at Indent correctly.
+        // No `(`, diagnostic, consume `:` so compile_body starts at Indent correctly.
         if !matches!(self.peek(), Some(TokenType::Lpar)) {
             self.diag_at_peek("expected '('");
             self.eat_if(TokenType::Colon);
@@ -604,16 +603,16 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.advance();
         let mut params = Vec::new();
         let mut defaults = 0u16;
-        // Lone `*` flips kw_only; subsequent params get `~` prefix.
+        // Lone `*` flips kw_only, subsequent params get `~` prefix.
         let mut kw_only = false;
-        // Break on Rarrow: signals end of params (return type follows).
+        // Break on Rarrow, signals end of params (return type follows).
         while !matches!(self.peek(), Some(TokenType::Rpar | TokenType::Rarrow) | None) {
             if self.eat_if(TokenType::Slash) {
                 self.eat_if(TokenType::Comma);
                 continue;
             }
             if self.eat_if(TokenType::Star) {
-                // Lone `*`: flip kw-only, no param emitted.
+                // Lone `*`, flip kw-only, no param emitted.
                 if matches!(self.peek(), Some(TokenType::Comma | TokenType::Rpar)) {
                     self.eat_if(TokenType::Comma);
                     kw_only = true;
@@ -652,7 +651,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         (params, defaults)
     }
 
-    /* Drains annotation via `advance_raw` (keeps bracket_stack clean); breaks on Rarrow to avoid infinite drain. */
+    /* Drains annotation via `advance_raw` (keeps bracket_stack clean), breaks on Rarrow to avoid infinite drain. */
     pub(super) fn drain_annotation(&mut self) {
         if self.eat_if(TokenType::Colon) {
             let mut depth = 0u32;
@@ -679,7 +678,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     pub(super) fn compile_body(&mut self, params: &[String]) -> SSAChunk {
         let mut body = self.with_fresh_chunk(|s| {
             for p in params {
-                // Base name shadows the enclosing scope; prefix/`=` marker must be stripped.
+                // Base name shadows the enclosing scope, prefix/`=` marker must be stripped.
                 s.ssa_versions.insert(super::types::param_base_name(p).to_string(), 0);
                 let _ = s.push_ssa_name(super::types::param_base_name(p), 0);
             }
@@ -708,9 +707,9 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         body
     }
 
-    /* A body is memoizable-pure only if every name it loads is bound locally; free names (globals, builtins) introduce mutable state, making memoization stale. */
+    /* A body is memoizable-pure only if every name it loads is bound locally, free names (globals, builtins) introduce mutable state, making memoization stale. */
     fn body_reads_free_name(body: &SSAChunk, params: &[String]) -> bool {
-        // SSA names are `base_version`; strip the trailing `_<digits>` to compare bases.
+        // SSA names are `base_version`, strip the trailing `_<digits>` to compare bases.
         fn base(n: &str) -> &str {
             match n.rfind('_') {
                 Some(i) if i + 1 < n.len() && n[i + 1..].bytes().all(|b| b.is_ascii_digit()) => &n[..i],

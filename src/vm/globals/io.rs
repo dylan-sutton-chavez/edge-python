@@ -5,7 +5,7 @@ use super::super::types::*;
 
 impl<'a> VM<'a> {
 
-    /* `print(*args, sep=' ', end='\n')`: joins args with `sep`, appends `end`; streams exact bytes via `print_hook` or buffers. Leaves no value (statement-shaped); value uses get a None pushed by the parser / the generic Call path. */
+    /* `print(*args, sep=' ', end='\n')` joins args with `sep`, appends `end`, streams exact bytes via `print_hook` or buffers. Leaves no value (statement-shaped), value uses get a None pushed by the parser / the generic Call path. */
     pub fn call_print(&mut self, op: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         let (positional, kw_flat, _np, _nk) = self.parse_call_args(op)?;
         let mut sep = String::from(" ");
@@ -16,7 +16,7 @@ impl<'a> VM<'a> {
             match kname.as_str() {
                 "sep" => sep = self.print_str_kwarg(pair[1], " ", "sep")?,
                 "end" => end = self.print_str_kwarg(pair[1], "\n", "end")?,
-                // No file/stdout selection or buffering in the sandbox; accept and ignore.
+                // No file/stdout selection or buffering in the sandbox, accept and ignore.
                 "file" | "flush" => {}
                 _ => return Err(VmErr::TypeMsg(crate::s!("'", str &kname, "' is an invalid keyword argument for print()"))),
             }
@@ -29,7 +29,7 @@ impl<'a> VM<'a> {
             body.push_str(&s);
         }
         body.push_str(&end);
-        // Byte-stream contract: hand over the exact bytes; no newline is added or removed.
+        // Byte-stream contract, hand over the exact bytes, no newline is added or removed.
         match self.print_hook {
             Some(hook) => hook(&body),
             None => self.emit_buffered_output(&body),
@@ -46,7 +46,7 @@ impl<'a> VM<'a> {
         }
     }
 
-    /* Append `text` to the line-buffered output; '\n' closes a line, text without one leaves the line open so a later `print(end="")` continues it. */
+    /* Append `text` to the line-buffered output, '\n' closes a line, text without one leaves the line open so a later `print(end="")` continues it. */
     fn emit_buffered_output(&mut self, text: &str) {
         let mut rest = text;
         loop {
@@ -73,12 +73,12 @@ impl<'a> VM<'a> {
         self.output_open = true;
     }
 
-    /* Returns empty string in sandbox; no stdin access in WASM. */
+    /* Returns empty string in sandbox, no stdin access in WASM. */
     pub fn call_input(&mut self) -> Result<(), VmErr> {
         let s = if !self.input_buffer.is_empty() {
             self.input_buffer.remove(0)
         } else if self.strict_input {
-            // Host-driven mode: no blocking stdin read (also keeps headless/fuzz runs from hanging).
+            // Host-driven mode, no blocking stdin read (also keeps headless/fuzz runs from hanging).
             return Err(VmErr::Runtime("input() requires host-provided data"));
         } else {
             #[cfg(not(target_arch = "wasm32"))]
@@ -106,7 +106,7 @@ impl<'a> VM<'a> {
         let val = self.pop()?;
         let result = match spec_val {
             Some(sv) => {
-                // `sv` may be a non-heap value (int/float); guard before indexing the heap.
+                // `sv` may be a non-heap value (int/float), guard before indexing the heap.
                 let spec = match sv.is_heap().then(|| self.heap.get(sv)) {
                     Some(HeapObj::Str(s)) => s.clone(),
                     _ => return Err(cold_type("format() spec must be a string")),

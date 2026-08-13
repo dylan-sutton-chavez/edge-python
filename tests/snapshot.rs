@@ -26,10 +26,10 @@ mod test {
         globals_contains: Vec<String>,
         #[serde(default)]
         stack_contains: Vec<String>,
-        // Preempt every n back-edges; 0 keeps the case cooperative-only.
+        // Preempt every n back-edges, 0 keeps the case cooperative-only.
         #[serde(default)]
         preempt_interval: usize,
-        // Save/restore at this preempt count; 0 never hops.
+        // Save/restore at this preempt count, 0 never hops.
         #[serde(default)]
         hop_at: usize,
         #[serde(default)]
@@ -60,7 +60,7 @@ mod test {
         if case.unmetered { Limits::none() } else { Limits::sandbox() }
     }
 
-    /* Restore target: bare VM, state arrives from the blob. */
+    /* Restore target is a bare VM, state arrives from the blob. */
     fn fresh(case: &Case, interval: usize) -> VM<'static> {
         let mut vm = VM::with_limits(parse_static(&case.src), limits_for(case));
         vm.set_preempt_interval(interval);
@@ -92,7 +92,7 @@ mod test {
         next
     }
 
-    /* One driver: `hop_events` hops at each event pause, `hop_at_preempt` at that preempt. */
+    /* One driver, `hop_events` hops at each event pause, `hop_at_preempt` at that preempt. */
     fn run_case(case: &Case, interval: usize, hop_events: u32, hop_at_preempt: usize) -> Run {
         let mut vm = boot(case, interval);
         let mut idx = 0;
@@ -162,7 +162,7 @@ mod test {
         }
     }
 
-    /* Cooperative cases run direct, roundtrip and double; preempt cases add a hopped preempt run. */
+    /* Cooperative cases run direct, roundtrip and double, preempt cases add a hopped preempt run. */
     #[test]
     fn snapshot_cases() {
         let cases: Vec<Case> = serde_json::from_str(include_str!("cases/snapshot.json")).expect("invalid JSON");
@@ -194,7 +194,7 @@ mod test {
         report("snapshot case failure", failures);
     }
 
-    /* Property: every interactive vm.json case survives a save/restore at each pause. */
+    /* Property, every interactive vm.json case survives a save/restore at each pause. */
     #[test]
     fn vm_corpus_roundtrip() {
         let cases: Vec<Case> = serde_json::from_str(include_str!("cases/vm.json")).expect("invalid JSON");
@@ -211,7 +211,7 @@ mod test {
         report("corpus roundtrip mismatch", failures);
     }
 
-    /* Property: preempting at every back-edge changes no corpus result. */
+    /* Property, preempting at every back-edge changes no corpus result. */
     #[test]
     fn vm_corpus_preempt_equivalence() {
         let cases: Vec<Case> = serde_json::from_str(include_str!("cases/vm.json")).expect("invalid JSON");

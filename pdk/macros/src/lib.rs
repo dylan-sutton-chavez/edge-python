@@ -1,13 +1,9 @@
-/*
-Plugin proc macros: `#[plugin_fn]` wraps a free fn as a plugin ABI export.
-`#[plugin_class]` synthesises state plumbing; `#[plugin_methods]` lowers an impl into `__class_<Name>_<method>` exports; `#[plugin_ctor]` tags the constructor.
-*/
-
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{quote, format_ident};
 use syn::{parse_macro_input, FnArg, ImplItem, ItemFn, ItemImpl, ItemStruct, Pat, ReturnType, Type};
 
+/// Wraps a free fn as a plugin ABI export.
 #[proc_macro_attribute]
 pub fn plugin_fn(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as ItemFn);
@@ -17,7 +13,7 @@ pub fn plugin_fn(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let user_output = input.sig.output.clone();
     let user_block = input.block.clone();
 
-    // Wrapper claims the original name; user fn moves to `__edge_impl_<name>`.
+    // Wrapper claims the original name. The user fn moves to `__edge_impl_<name>`.
     let impl_name = syn::Ident::new(
         &format!("__edge_impl_{}", user_name),
         proc_macro2::Span::call_site(),
@@ -47,7 +43,7 @@ pub fn plugin_fn(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     let is_result = matches!(&return_ty, syn::Type::Path(p) if p.path.segments.last().map(|s| s.ident == "Result").unwrap_or(false));
 
-    // Host always appends a trailing kwargs slot. Param order: fixed positionals, optional `Args`, optional `Kwargs`.
+    // Host always appends a trailing kwargs slot. Param order is fixed positionals, optional `Args`, optional `Kwargs`.
     let type_named = |ty: &syn::Type, n: &str| matches!(ty, Type::Path(p) if p.path.segments.last().map(|s| s.ident == n).unwrap_or(false));
     let last_is_kwargs = bindings.last().map(|(_, ty)| type_named(ty, "Kwargs")).unwrap_or(false);
     let args_idx = bindings.iter().position(|(_, ty)| type_named(ty, "Args"));
@@ -168,6 +164,7 @@ pub fn plugin_const(_attr: TokenStream, item: TokenStream) -> TokenStream {
     plugin_fn(TokenStream::new(), TokenStream::from(quote!(#input)))
 }
 
+/// Synthesises per-class state plumbing (static map plus id counter).
 #[proc_macro_attribute]
 pub fn plugin_class(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as ItemStruct);
@@ -206,11 +203,13 @@ pub fn plugin_class(_attr: TokenStream, item: TokenStream) -> TokenStream {
     expanded.into()
 }
 
+/// Tags the constructor inside a `#[plugin_methods]` impl.
 #[proc_macro_attribute]
 pub fn plugin_ctor(_attr: TokenStream, item: TokenStream) -> TokenStream {
     item
 }
 
+/// Lowers an impl block into `__class_<Name>_<method>` exports.
 #[proc_macro_attribute]
 pub fn plugin_methods(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as ItemImpl);
@@ -257,7 +256,7 @@ pub fn plugin_methods(_attr: TokenStream, item: TokenStream) -> TokenStream {
             ReturnType::Default => syn::parse_quote!(()),
             ReturnType::Type(_, t) => (**t).clone(),
         };
-        // Detect if user method already returns Result; avoids generating Result<Result<T>>.
+        // Detect if user method already returns Result, avoiding a generated Result<Result<T>>.
         let is_user_result = matches!(&user_ret_ty, Type::Path(p)
             if p.path.segments.last().map(|s| s.ident == "Result").unwrap_or(false));
         let (wrapper_ret, call_expr) = if is_user_result {

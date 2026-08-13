@@ -82,7 +82,7 @@ impl FileResolver {
         Err(format!("no packages.json above '{start_dir}' declares '{name}'\nhelp: declare it, or use a relative import"))
     }
 
-    /* Nearest ancestor dir holding a packages.json; a --packages override is the only root. */
+    /* Nearest ancestor dir holding a packages.json, a --packages override is the only root. */
     fn manifest_root(&self, spec: &str) -> Result<String, String> {
         if let Some(m) = &self.packages {
             return Ok(dir_of(m).to_string());
@@ -192,7 +192,7 @@ fn std_default(name: &str) -> Option<String> {
     }
 }
 
-/* Native twin of an official std package: local under EDGE_STD_DIR, contract-versioned CDN otherwise. */
+/* Native twin of an official std package, local under EDGE_STD_DIR, contract-versioned CDN otherwise. */
 fn native_std_spec(name: &str) -> String {
     let file = format!("{name}-{}.{}", std::env::consts::ARCH, std::env::consts::DLL_EXTENSION);
     match local_std_dir() {

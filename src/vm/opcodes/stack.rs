@@ -2,15 +2,15 @@ use super::*;
 
 impl<'a> VM<'a> {
 
-    /* StoreName: single SSA slot write after register coalescing. */
+    /* StoreName does a single SSA slot write after register coalescing. */
     pub(crate) fn handle_store(&mut self, operand: u16, slots: &mut [Val]) -> Result<(), VmErr> {
         let v = self.pop()?;
-        // Malformed bytecode can carry an out-of-range slot; drop the write rather than panic.
+        // Malformed bytecode can carry an out-of-range slot, so drop the write rather than panic.
         if let Some(s) = slots.get_mut(operand as usize) { *s = v; }
         Ok(())
     }
 
-    /* Container constructors: list / tuple / dict / set / slice / string. */
+    /* Container constructors for list / tuple / dict / set / slice / string. */
     pub(crate) fn handle_build(&mut self, op: OpCode, operand: u16) -> Result<(), VmErr> {
         match op {
             OpCode::BuildList => {
@@ -49,14 +49,13 @@ impl<'a> VM<'a> {
             OpCode::UnpackSequence => self.exec_unpack_seq(operand as usize)?,
             OpCode::UnpackEx => self.unpack_ex(operand)?,
             OpCode::FormatValue => {
-                /* Operand layout: bit 0 has_spec, bits 1..=2 conversion (0 none, 1 !r, 2 !s, 3 !a). See parser/literals.rs. */
+                /* Operand layout is bit 0 has_spec, bits 1..=2 conversion (0 none, 1 !r, 2 !s, 3 !a). See parser/literals.rs. */
                 let has_spec = (operand & 1) != 0;
                 let conv = (operand >> 1) & 0b11;
                 let spec_val = if has_spec { Some(self.pop()?) } else { None };
                 let v = self.pop()?;
 
-                // Conversion flags consult the dunder-aware helpers so `f"{x!s}"` honours `__str__`.
-                // Charge each result's length; a big Str is one heap object the object quota misses.
+                // Conversion flags consult the dunder-aware helpers so `f"{x!s}"` honours `__str__`. Charge each result's length, a big Str is one heap object the object quota misses.
                 let converted = match conv {
                     1 => { let s = self.repr_op(v, chunk, slots)?; self.charge_steps(s.len())?; self.heap.alloc(HeapObj::Str(s))? }
                     2 => { let s = self.display_op(v, chunk, slots)?; self.charge_steps(s.len())?; self.heap.alloc(HeapObj::Str(s))? }
@@ -70,12 +69,12 @@ impl<'a> VM<'a> {
 
                 let result = match spec_val {
                     Some(sv) => {
-                        // `try_get`: a non-heap spec value is a TypeError, not a bad-index heap access.
+                        // `try_get` since a non-heap spec value is a TypeError, not a bad-index heap access.
                         let spec = match self.heap.try_get(sv) {
                             Some(HeapObj::Str(s)) => s.clone(),
                             _ => return Err(cold_type("format spec must be a string")),
                         };
-                        // Instance `__format__(spec)` runs through `format_op`; built-ins fall through to the spec engine.
+                        // Instance `__format__(spec)` runs through `format_op` while built-ins fall through to the spec engine.
                         self.format_op(converted, &spec, chunk, slots)?
                     }
                     None => {
@@ -118,14 +117,14 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* Merge the source on top of the stack into the container below it: `{**m}`, `{*s}`, `[*it]`. */
+    /* Merge the source on top of the stack into the container below it for `{**m}`, `{*s}`, `[*it]`. */
     pub(crate) fn handle_spread_merge(&mut self, op: OpCode) -> Result<(), VmErr> {
         let src = self.pop()?;
         let acc = *self.stack.last().ok_or(VmErr::Runtime("stack underflow"))?;
         if !acc.is_heap() { return Err(cold_runtime("spread accumulator corrupted")); }
         match op {
             OpCode::DictUpdate => {
-                // `**` requires a mapping; later keys overwrite earlier ones.
+                // `**` requires a mapping, and later keys overwrite earlier ones.
                 let pairs: Vec<(Val, Val)> = match self.heap.try_get(src) {
                     Some(HeapObj::Dict(rc)) => rc.borrow().iter().collect(),
                     _ => return Err(cold_type("argument after ** must be a mapping")),
@@ -157,7 +156,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* Yield: keep the value on the stack and flag the executor to suspend. */
+    /* Yield keeps the value on the stack and flags the executor to suspend. */
     pub(crate) fn handle_yield(&mut self) -> Result<(), VmErr> {
         let v = self.pop()?;
         self.push(v);
@@ -165,7 +164,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* Side-effecting / impure ops: assert, del, global/nonlocal, import, type alias, raise, await. */
+    /* Side-effecting / impure ops, assert, del, global/nonlocal, import, type alias, raise, await. */
     pub(crate) fn handle_side(&mut self, op: OpCode, operand: u16, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         match op {
             OpCode::Assert => {
@@ -201,7 +200,7 @@ impl<'a> VM<'a> {
             OpCode::Global | OpCode::Nonlocal => self.mark_impure(),
             OpCode::Raise | OpCode::RaiseFrom => {
                 self.mark_impure();
-                // Bare `raise` (operand 1): re-raise the exception currently being handled.
+                // Bare `raise` (operand 1) re-raises the exception currently being handled.
                 if op == OpCode::Raise && operand == 1 {
                     let Some(exc) = self.handling_exc else {
                         return Err(VmErr::Runtime("No active exception to re-raise"));
@@ -213,7 +212,7 @@ impl<'a> VM<'a> {
                 // RaiseFrom emits both `expr` then `from expr`, the topmost value is the cause, but the exception to raise is the LHS.
                 if op == OpCode::RaiseFrom { let _cause = self.pop()?; }
                 let exc = self.pop()?;
-                // Stash the Val for `except as e` binding; non-Exc values use `display()`.
+                // Stash the Val for `except as e` binding, with non-Exc values using `display()`.
                 self.pending.exc_val = None;
                 // Extract owned (class name, first arg) so display() can run after the heap borrow ends.
                 let info: Option<(alloc::string::String, Option<Val>)> = if exc.is_heap() {
@@ -223,7 +222,7 @@ impl<'a> VM<'a> {
                             Some((n.clone(), args.first().copied()))
                         }
                         HeapObj::Type(n) => {
-                            // Bare `raise X`: build empty ExcInstance so `e.args` is `()`.
+                            // Bare `raise X` builds an empty ExcInstance so `e.args` is `()`.
                             let n = n.clone();
                             let inst = self.heap.alloc(
                                 HeapObj::ExcInstance(n.clone(), Vec::new()))?;
@@ -239,13 +238,13 @@ impl<'a> VM<'a> {
                 let msg = match info {
                     Some((n, Some(arg))) => { let detail = self.display(arg); crate::s!(str &n, ": ", str &detail) }
                     Some((n, None)) => n,
-                    // Non-exception value (str, int, ...): raises TypeError, catchable by `except Exception`.
+                    // Non-exception value (str, int, ...) raises TypeError, catchable by `except Exception`.
                     None => crate::s!("TypeError: exceptions must derive from BaseException"),
                 };
                 return Err(VmErr::Raised(msg));
             }
             OpCode::Await => {
-                // Coroutine: park on it (single-driver) so the top loop runs it to completion, even across suspension; sync values pass through.
+                // Coroutine parks on it (single-driver) so the top loop runs it to completion, even across suspension. Sync values pass through.
                 let val = self.pop()?;
                 if val.is_heap() && matches!(self.heap.get(val), HeapObj::Coroutine(..)) {
                     self.await_coroutine(val)?;

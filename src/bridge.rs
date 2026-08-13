@@ -1,5 +1,4 @@
-// The FFI safety contract lives in docs/content/reference/abi.md, per-fn sections would duplicate it.
-#![allow(clippy::missing_safety_doc)]
+#![allow(clippy::missing_safety_doc)] // safety contract in docs/content/reference/abi.md, per-fn sections would duplicate it
 
 use crate::abi::{classify_decode, classify_encode, DecodeBits, EncodeRequest, ErrorKind, ErrorStash, HandleTable, Op, PrimitiveBytes, TAG_INVALID};
 use crate::vm::types::{DictMap, HeapObj, Val, VmErr};
@@ -103,7 +102,7 @@ pub(crate) unsafe fn safe_handles<'a>(ptr: *const u32, len: u32) -> &'a [u32] {
     unsafe { core::slice::from_raw_parts(ptr, len as usize) }
 }
 
-/* Owned UTF-8 string from an FFI `(ptr, len)`; empty on null or invalid UTF-8. */
+/* Owned UTF-8 string from an FFI `(ptr, len)`, empty on null or invalid UTF-8. */
 pub(crate) unsafe fn safe_str_owned(ptr: *const u8, len: u32) -> String {
     core::str::from_utf8(unsafe { safe_bytes(ptr, len) }).unwrap_or("").to_string()
 }
@@ -113,7 +112,7 @@ pub(crate) fn in_vm(err: &'static str, f: impl FnOnce(&mut VM<'static>) -> Resul
     with_vm(f).ok_or(VmErr::Runtime(err))?
 }
 
-/* `dispatch_*` prologue: resolve `recv_h` and run `f` against the live VM. Fails on stale handle or call outside `run()`. */
+/* `dispatch_*` prologue, resolve `recv_h` and run `f` against the live VM. Fails on stale handle or call outside `run()`. */
 pub(crate) fn with_recv<F>(invalid_recv_msg: &'static str, recv_h: u32, f: F) -> Result<Val, VmErr>
 where F: FnOnce(&mut VM<'static>, Val) -> Result<Val, VmErr>
 { let recv = get_val(recv_h).ok_or(VmErr::Runtime(invalid_recv_msg))?; with_vm(|vm| f(vm, recv)).ok_or(VmErr::Runtime("edge_op called outside run()"))? }
@@ -151,7 +150,7 @@ pub fn take_error() -> Option<(u32, String)> {
     with_bridge(|b| b.error_stash.take())
 }
 
-/* Inverse of `err_to_kind`: rebuilds a `VmErr` from (kind, msg). Exhaustive over `ErrorKind` so new variants can't slip into `Raised`. */
+/* Inverse of `err_to_kind`, rebuilds a `VmErr` from (kind, msg). Exhaustive over `ErrorKind` so new variants can't slip into `Raised`. */
 pub fn error_from_kind(kind: u32, msg: String) -> VmErr {
     match ErrorKind::from_u32(kind) {
         Some(ErrorKind::Type) => VmErr::TypeMsg(msg),
@@ -160,7 +159,7 @@ pub fn error_from_kind(kind: u32, msg: String) -> VmErr {
         Some(ErrorKind::Attribute) => VmErr::Attribute(msg),
         Some(ErrorKind::Index) => VmErr::Raised(s!("IndexError: ", str &msg)),
         Some(ErrorKind::Key) => VmErr::Raised(s!("KeyError: ", str &msg)),
-        // Custom kinds carry the user-defined class name in `msg` (`<ClassName>: <text>`); pass through unchanged.
+        // Custom kinds carry the user-defined class name in `msg` (`<ClassName>: <text>`), pass through unchanged.
         Some(ErrorKind::Custom) | None => VmErr::Raised(msg),
     }
 }
@@ -199,11 +198,11 @@ fn dispatch_call(recv_h: u32, name: &str, args: &[Val]) -> Result<Val, VmErr> {
     with_recv("edge_op call: invalid receiver handle", recv_h, |vm, recv| {
         // `__call__` means "invoke `recv` as a callable", letting plugins forward arbitrary Python hooks (lambdas, builtins, classes) through `Handle::call("__call__", args)`. Pushes args + callee then drives `exec_call` so every callable kind (`Extern`, `NativeFn`, `Func`, `BoundMethod`, `Class`, ...) routes through the same dispatch path the VM uses normally. Empty caller-slots are fine because lambdas/hooks that escape a plugin call cannot reference caller-frame locals, they can still capture their own defining scope through the regular Func captures vector.
         if name == "__call__" {
-            // Stack layout for `Call`: callee at the bottom, then positional args (top is the rightmost). `parse_call_args` pops args first, then `exec_call` pops the callee.
+            // Stack layout for `Call`, callee at the bottom, then positional args (top is the rightmost). `parse_call_args` pops args first, then `exec_call` pops the callee.
             let stack_before = vm.stack.len();
             vm.stack.push(recv);
             for a in args { vm.stack.push(*a); }
-            let operand = args.len() as u16; // (num_kw<<8)|num_pos; no kwargs from FFI hooks.
+            let operand = args.len() as u16; // (num_kw<<8)|num_pos, no kwargs from FFI hooks.
             let chunk: &crate::parser::SSAChunk = unsafe { &*(vm.chunk as *const _) };
             let mut empty_slots: [Val; 0] = [];
             vm.exec_call(operand, chunk, &mut empty_slots)?;
@@ -219,12 +218,12 @@ fn dispatch_call(recv_h: u32, name: &str, args: &[Val]) -> Result<Val, VmErr> {
         if vm.stack.len() != stack_before + 1 {
             return Err(VmErr::Runtime("edge_op call: method left no result"));
         }
-        // The length check above guarantees a value is present; `ok_or` keeps the FFI boundary panic-free if a future change drops the invariant.
+        // The length check above guarantees a value is present, `ok_or` keeps the FFI boundary panic-free if a future change drops the invariant.
         vm.stack.pop().ok_or(VmErr::Runtime("edge_op call: stack drained mid-dispatch"))
     })
 }
 
-/* GetAttr: module/instance attr, or bind builtin method as BoundMethod. */
+/* GetAttr, module/instance attr, or bind builtin method as BoundMethod. */
 fn dispatch_get_attr(recv_h: u32, name: &str) -> Result<Val, VmErr> {
     with_recv("edge_op get_attr: invalid receiver handle", recv_h, |vm, recv| {
         // Module attribute.
@@ -259,7 +258,7 @@ fn dispatch_get_attr(recv_h: u32, name: &str) -> Result<Val, VmErr> {
     })
 }
 
-/* SetAttr: writes to instance `__dict__`; rejects modules and builtins. */
+/* SetAttr writes to instance `__dict__`, rejects modules and builtins. */
 fn dispatch_set_attr(recv_h: u32, name: &str, args: &[Val]) -> Result<Val, VmErr> {
     if args.len() != 1 {
         return Err(VmErr::TypeMsg(s!("set_attr expects exactly 1 value, got ", int args.len() as i64)));
@@ -279,7 +278,7 @@ fn dispatch_set_attr(recv_h: u32, name: &str, args: &[Val]) -> Result<Val, VmErr
     })
 }
 
-/* GetItem: built-in indexing only, FFI has no bytecode frame to drive instance `__getitem__` dispatch. */
+/* GetItem, built-in indexing only, FFI has no bytecode frame to drive instance `__getitem__` dispatch. */
 fn dispatch_get_item(recv_h: u32, args: &[Val]) -> Result<Val, VmErr> {
     if args.len() != 1 {
         return Err(VmErr::TypeMsg(s!("get_item expects 1 index, got ", int args.len() as i64)));
@@ -295,7 +294,7 @@ fn dispatch_get_item(recv_h: u32, args: &[Val]) -> Result<Val, VmErr> {
     })
 }
 
-/* SetItem: built-in item-assignment only, same rationale as `dispatch_get_item`. */
+/* SetItem, built-in item-assignment only, same rationale as `dispatch_get_item`. */
 fn dispatch_set_item(recv_h: u32, args: &[Val]) -> Result<Val, VmErr> {
     if args.len() != 2 {
         return Err(VmErr::TypeMsg(s!("set_item expects (index, value), got ", int args.len() as i64, " args")));
@@ -322,7 +321,7 @@ fn dispatch_len(recv_h: u32) -> Result<Val, VmErr> {
     })
 }
 
-/* Iter: flatten any iterable into a List for guest GetItem/Len access. */
+/* Iter, flatten any iterable into a List for guest GetItem/Len access. */
 fn dispatch_iter(recv_h: u32) -> Result<Val, VmErr> {
     with_recv("edge_op iter: invalid receiver handle", recv_h, |vm, recv| {
         let items: Vec<Val> = match vm.heap.get(recv) {
@@ -352,7 +351,7 @@ fn dispatch_iter(recv_h: u32) -> Result<Val, VmErr> {
     })
 }
 
-/* IterNext: pops list head; raises StopIteration when empty. */
+/* IterNext pops the list head, raises StopIteration when empty. */
 fn dispatch_iter_next(recv_h: u32) -> Result<Val, VmErr> {
     with_recv("edge_op iter_next: invalid receiver handle", recv_h, |vm, recv| {
         if let HeapObj::List(rc) = vm.heap.get(recv) {
@@ -374,10 +373,10 @@ fn dispatch_type_of(recv_h: u32) -> Result<Val, VmErr> {
     })
 }
 
-// Bootstrap encoder: classifies (tag, bytes) into a Val handle; returns 0 on Invalid.
+// Bootstrap encoder, classifies (tag, bytes) into a Val handle, returns 0 on Invalid.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn host_edge_encode(tag: u32, ptr: *const u8, len: u32) -> u32 {
-    // Alloc in the live VM; 0 when outside run() or OOM.
+    // Alloc in the live VM, 0 when outside run() or OOM.
     fn alloc_and_put(obj: HeapObj) -> u32 {
         match with_vm(|vm| vm.heap.alloc(obj).ok()).flatten() {
             Some(val) => put_val(val),
@@ -400,7 +399,7 @@ pub unsafe extern "C" fn host_edge_encode(tag: u32, ptr: *const u8, len: u32) ->
     }
 }
 
-/* Wire tree to heap value. Str keys only for dicts; mirrors `classify_encode` inline-int split. */
+/* Wire tree to heap value. Str keys only for dicts, mirrors `classify_encode` inline-int split. */
 fn wire_to_val(vm: &mut crate::vm::VM, w: &crate::abi::WireValue) -> Result<Val, VmErr> {
     use crate::abi::WireValue;
     Ok(match w {
@@ -449,7 +448,7 @@ fn val_to_wire(vm: &crate::vm::VM, v: Val, depth: u32, seen: &mut Vec<u64>) -> O
             WireValue::decode_body(tag, &buf)
         }
         DB::Heap => {
-            // Shared references are fine; re-entering a value mid-walk is a cycle.
+            // Shared references are fine, re-entering a value mid-walk is a cycle.
             let guard = |vm: &crate::vm::VM, seen: &mut Vec<u64>, items: &[Val]| -> Option<Vec<crate::abi::WireValue>> {
                 items.iter().map(|it| val_to_wire(vm, *it, depth + 1, seen)).collect()
             };
@@ -490,7 +489,7 @@ fn val_to_wire(vm: &crate::vm::VM, v: Val, depth: u32, seen: &mut Vec<u64>) -> O
     }
 }
 
-// Bootstrap decoder: writes tag to `*out_tag`, bytes to `dst[..dst_max]`.
+// Bootstrap decoder, writes tag to `*out_tag`, bytes to `dst[..dst_max]`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn host_edge_decode(h: u32, out_tag: *mut u32, dst: *mut u8, dst_max: u32) -> i32 {
     let copy_into = |tag: u32, bytes: &[u8]| -> i32 {
@@ -517,7 +516,7 @@ pub unsafe extern "C" fn host_edge_decode(h: u32, out_tag: *mut u32, dst: *mut u
             PrimitiveBytes::Sixteen(a) => copy_into(tag, &a),
         },
         DecodeBits::Heap => {
-            // Str, Bytes, LongInt and TLV composites decode; sets, instances and other non-transit values go through `edge_op`.
+            // Str, Bytes, LongInt and TLV composites decode, sets, instances and other non-transit values go through `edge_op`.
             enum Decoded { Str(alloc::string::String), Bytes(Vec<u8>), LongInt(i128), Wire(u32, Vec<u8>), Other }
             let decoded = with_vm(|vm| match vm.heap.get(v) {
                 HeapObj::Str(s) => Decoded::Str(s.clone()),
@@ -569,7 +568,7 @@ pub unsafe extern "C" fn host_edge_take_error(out_kind: *mut u32, dst: *mut u8, 
         None => return -1,
     };
     if len > dst_max as usize { return -(len as i32); }
-    // Buffer fits, drain and copy. None on `take()` means a lost peek/take race; return no-pending-error instead of panicking across FFI.
+    // Buffer fits, drain and copy. None on `take()` means a lost peek/take race, return no-pending-error instead of panicking across FFI.
     let Some((_, msg)) = with_bridge(|b| b.error_stash.take()) else { return -1; };
     let bytes = msg.as_bytes();
     unsafe {

@@ -1,12 +1,8 @@
-/*
-Web Worker entry. Receives postMessage requests from `createWorker`, dispatches to the engine, posts responses.
-*/
-
 import * as engine from './engine.js';
 
 const onLine = (text) => self.postMessage({ type: 'line', text });
 
-/* Deferred host calls: post `{type:'host-call', reqId, module, name, args}` to main and await `{type:'host-call-response'}`. */
+/* Deferred host calls post `{type:'host-call', reqId, module, name, args}` to main and await `{type:'host-call-response'}`. */
 let nextHostReqId = 0;
 const pendingHostCalls = new Map();
 
@@ -16,7 +12,7 @@ engine.setHostCallDelegate((module, name, args) => new Promise((resolve, reject)
     self.postMessage({ type: 'host-call', reqId, module, name, args });
 }));
 
-/* Lazy system load: post `{type:'load-system', reqId, name, url}` to main and await `{type:'load-system-response'}` with export names. */
+/* Lazy system loads post `{type:'load-system', reqId, name, url}` to main and await `{type:'load-system-response'}` with export names. */
 let nextLoadSystemReqId = 0;
 const pendingLoadSystem = new Map();
 
@@ -39,9 +35,9 @@ const handlers = {
     reset: () => engine.reset(),
     clearCache: () => engine.clearCache(),
     dispose: () => { engine.dispose(); self.close(); },
-    /* Wake a paused `receive()` in the running script; fire-and-forget, no response needed. */
+    /* Wake a paused `receive()` in the running script, fire-and-forget, no response needed. */
     'push-event': (data) => engine.pushEvent(data.message),
-    /* Main thread answered a deferred host call; resolve the waiting delegate Promise. */
+    /* Main thread answered a deferred host call, resolve the waiting delegate Promise. */
     'host-call-response': (data) => {
         const cb = pendingHostCalls.get(data.reqId);
         if (!cb) return;
@@ -49,7 +45,7 @@ const handlers = {
         if (data.error) cb.reject(new Error(data.error));
         else cb.resolve(data.value);
     },
-    /* Main thread loaded a lazy system module; resolve with its export names. */
+    /* Main thread loaded a lazy system module, resolve with its export names. */
     'load-system-response': (data) => {
         const cb = pendingLoadSystem.get(data.reqId);
         if (!cb) return;
@@ -59,6 +55,7 @@ const handlers = {
     },
 };
 
+/* Web Worker entry, receives postMessage requests from `createWorker`, dispatches to the engine, posts responses. */
 self.onmessage = async ({ data }) => {
     const handler = handlers[data.type];
     if (!handler) {
@@ -67,7 +64,7 @@ self.onmessage = async ({ data }) => {
     }
     try {
         const result = await handler(data);
-        /* Fire-and-forget message types skip the response post; only reply when an outer reqId was attached. */
+        /* Fire-and-forget message types skip the response post, only reply when an outer reqId was attached. */
         if (data.reqId != null && data.type !== 'host-call-response' && data.type !== 'load-system-response' && data.type !== 'push-event') {
             self.postMessage({ type: 'response', reqId: data.reqId, result });
         }

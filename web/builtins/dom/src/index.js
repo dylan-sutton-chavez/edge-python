@@ -1,5 +1,3 @@
-/* Factory consumed by `createWorker({ mainThreadModules: { dom } })`. Composes all handler slices over a shared `state`. */
-
 import { makeState } from './state.js';
 import tree from './tree.js';
 import style from './style.js';
@@ -10,6 +8,7 @@ import animations from './animations.js';
 import media from './media.js';
 import platform from './platform.js';
 
+/* Factory consumed by `createWorker({ mainThreadModules: { dom } })`. Composes all handler slices over a shared `state`. */
 export const dom = (ctx) => {
     const state = makeState();
     let errorMsg = null;
@@ -37,7 +36,7 @@ export const dom = (ctx) => {
         { bind_global_error: (msg) => { errorMsg = msg; } },
     );
 
-    /* Mutators an `apply_batch` op list may call; anything returning a value cannot batch. */
+    /* Mutators an `apply_batch` op list may call, anything returning a value cannot batch. */
     const BATCHABLE = new Set([
         'set_text', 'set_html', 'set_attribute', 'remove_attribute',
         'add_class', 'remove_class', 'set_data',
@@ -46,7 +45,7 @@ export const dom = (ctx) => {
         'set_value', 'set_checked',
     ]);
 
-    /* One call, many mutations: `ops` is a list of `[name, ...args]`. See the `dom_batch` package for the Python side. */
+    /* One call, many mutations, `ops` is a list of `[name, ...args]`. See the `dom_batch` package for the Python side. */
     handlers.apply_batch = (ops) => {
         for (const [name, ...args] of ops) {
             if (!BATCHABLE.has(name)) throw new Error(`apply_batch: '${name}' is not batchable`);

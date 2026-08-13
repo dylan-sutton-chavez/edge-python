@@ -10,7 +10,7 @@ use alloc::{string::ToString, vec::Vec, string::String};
 
 impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
-    /* Entry: Pratt parse, then optional ternary. Recursion is bounded inside `expr_bp`. */
+    /* Entry, Pratt parse, then optional ternary. Recursion is bounded inside `expr_bp`. */
     pub(super) fn expr(&mut self) {
         self.saw_newline = false;
         let val_start = self.chunk.instructions.len();
@@ -18,7 +18,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.ternary_tail(val_start);
     }
 
-    /* Ternary: value was emitted first (single-pass), so reorder `[value][cond]` into `[cond][JumpIfFalse][value][Jump][else]` for Python evaluation order. */
+    /* Ternary, value was emitted first (single-pass), so reorder `[value][cond]` into `[cond][JumpIfFalse][value][Jump][else]` for Python evaluation order. */
     pub(super) fn ternary_tail(&mut self, val_start: usize) {
         if self.saw_newline || !matches!(self.peek(), Some(TokenType::If)) { return; }
         self.advance();
@@ -35,7 +35,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         let val_delta = self.chunk.instructions.len() as i64 - val_start as i64;
         self.push_shifted(val_ins, val_delta);
 
-        // Remap recorded call ips; re-sort so resolve_call's binary search holds.
+        // Remap recorded call ips, re-sort so resolve_call's binary search holds.
         for e in &mut self.chunk.call_byte_pos[calls_from..] {
             let d = if (e.0 as usize) < cond_start { val_delta } else { cond_delta };
             e.0 = (e.0 as i64 + d) as u32;
@@ -67,7 +67,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.infix_bp(0);
     }
 
-    /* Pratt parser: unary prefix then infix loop via `binding_power` table. Bounds every recursive descent (prefix `-`/`+`/`~`/`await`/`not`, right-associative `**`, infix right operands) so deep chains raise instead of overflowing the native/WASM stack. */
+    /* Pratt parser, unary prefix then infix loop via `binding_power` table. Bounds every recursive descent (prefix `-`/`+`/`~`/`await`/`not`, right-associative `**`, infix right operands) so deep chains raise instead of overflowing the native/WASM stack. */
     pub(super) fn expr_bp(&mut self, min_bp: u8) {
         self.expr_depth += 1;
         if self.expr_depth > MAX_EXPR_DEPTH {
@@ -199,7 +199,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* Atoms: literals, names, numbers, strings, f-strings, containers. */
+    /* Atoms, literals, names, numbers, strings, f-strings, containers. */
     pub(super) fn parse_atom(&mut self) {
         let errs_before = self.errors.len();
         let t = self.advance();
@@ -207,7 +207,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             TokenType::Name => self.name(t),
             TokenType::String | TokenType::FstringStart => self.string_group(t),
             TokenType::Bytes => {
-                // Adjacent bytes literals concat; mixing with str surfaces a diagnostic.
+                // Adjacent bytes literals concat, mixing with str surfaces a diagnostic.
                 let mut buf = parse_bytes_literal(self.lexeme(&t));
                 while matches!(self.peek(), Some(TokenType::Bytes)) {
                     let t = self.advance();
@@ -250,7 +250,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             // `yield` / `yield from` as an expression value (keyword already consumed).
             TokenType::Yield => self.emit_yield(),
             TokenType::Lambda => self.parse_lambda(),
-            // Caret at consumed token; skip if `advance()` already reported the error.
+            // Caret at consumed token, skip if `advance()` already reported the error.
             _ => {
                 if self.errors.len() == errs_before {
                     self.error_at(t.start, t.end, "expected expression");
@@ -299,7 +299,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* Name: assignment, walrus `:=`, call, or plain load. */
+    /* Name, assignment, walrus `:=`, call, or plain load. */
     pub(super) fn name(&mut self, t: Token) {
         let name = self.lexeme(&t).to_string();
         match self.peek() {
@@ -322,7 +322,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 }
             }
             Some(TokenType::Lpar) => {
-                // A void call (`print(...)`) in value position must still leave a value; materialise its None.
+                // A void call (`print(...)`) in value position must still leave a value, materialise its None.
                 if !self.call(name) { self.emit_const(Value::None); }
             }
             _ => self.emit_load_ssa(name),
@@ -348,7 +348,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             return;
         }
         let (digits, base) = Self::parse_int_prefix(&s);
-        // No leading zeros; all-zero runs still valid.
+        // No leading zeros, all-zero runs still valid.
         if base == 10 && digits.len() > 1 && digits.starts_with('0') && digits.bytes().any(|b| b != b'0') {
             self.error("leading zeros in decimal integer literals are not permitted");
             return;
@@ -374,7 +374,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* Subscript after `[`: plain index or `a:b:c` slice with None defaults. Eats the closing `]`; emits BuildSlice for slices. Returns true when a slice was built. */
+    /* Subscript after `[` is a plain index or `a:b:c` slice with None defaults. Eats the closing `]`, emits BuildSlice for slices. Returns true when a slice was built. */
     pub(super) fn parse_subscript(&mut self) -> bool {
         if matches!(self.peek(), Some(TokenType::Colon)) {
             self.chunk.emit(OpCode::LoadNone, 0);
@@ -405,14 +405,14 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* Postfix trailers: `.attr`, [i], [s:e], (args), chained. A trailer must start on the same line, so a statement boundary ends the chain (else `x = []` ⏎ `[i]` parses as `[][i]`). */
+    /* Postfix trailers, `.attr`, [i], [s:e], (args), chained. A trailer must start on the same line, so a statement boundary ends the chain (else `x = []` ⏎ `[i]` parses as `[][i]`). */
     pub(super) fn postfix_tail(&mut self) {
         loop {
             match self.peek_same_line() {
                 Some(TokenType::Lsqb) => {
                     self.advance();
                     self.parse_subscript();
-                    // Subscript assignment: StoreItem; for slices runtime replaces the range.
+                    // Subscript assignment, StoreItem, for slices runtime replaces the range.
                     if !self.in_target_list && matches!(self.peek(), Some(TokenType::Equal)) {
                         self.advance();
                         self.expr();
@@ -432,7 +432,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     let t = self.advance();
                     let (start, end) = (t.start, t.end);
                     let idx = self.chunk.push_name(&self.source[start..end]);
-                    // Attribute assignment: StoreAttr, mirroring the subscript case. In f-strings `=` is the debug marker.
+                    // Attribute assignment, StoreAttr, mirroring the subscript case. In f-strings `=` is the debug marker.
                     if !self.in_fstring_expr && !self.in_target_list && matches!(self.peek(), Some(TokenType::Equal)) {
                         self.advance();
                         self.expr();
@@ -470,7 +470,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* lambda: fresh chunk, compiles body to Return, emits MakeFunction. */
+    /* lambda, fresh chunk, compiles body to Return, emits MakeFunction. */
     pub(super) fn parse_lambda(&mut self) {
         let mut params = Vec::new();
         let mut defaults = 0u16;
@@ -499,7 +499,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
         let body = self.with_fresh_chunk(|s| {
             s.ssa_versions = outer_versions;
-            // Base name shadows the enclosing scope; prefix/`=` marker must be stripped.
+            // Base name shadows the enclosing scope, prefix/`=` marker must be stripped.
             for p in &params { s.ssa_versions.insert(super::types::param_base_name(p).to_string(), 0); }
             s.expr();
             s.chunk.emit(OpCode::ReturnValue, 0);

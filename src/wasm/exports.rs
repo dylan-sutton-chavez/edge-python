@@ -10,7 +10,7 @@ use super::{ModuleEntry, PausedRun, SZ, now_ns_host, stream_print, with_runtime,
 use super::resolver::WasmHostResolver;
 use crate::bridge::{self, VmGuard, safe_bytes, safe_str_owned};
 
-/* Packed `u32` from `run_start` / `run_resume`: top 3 bits = kind, low 29 = out-buffer length. */
+/* Packed `u32` from `run_start` / `run_resume`, top 3 bits = kind, low 29 = out-buffer length. */
 const STATUS_KIND_SHIFT: u32 = 29;
 const STATUS_PAYLOAD_MASK: u32 = (1 << STATUS_KIND_SHIFT) - 1;
 const STATUS_DONE: u32 = 0 << STATUS_KIND_SHIFT;
@@ -19,9 +19,9 @@ const STATUS_PENDING_FRAME: u32 = 2 << STATUS_KIND_SHIFT;
 const STATUS_PENDING_EVENT: u32 = 3 << STATUS_KIND_SHIFT;
 const STATUS_ERROR: u32 = 4 << STATUS_KIND_SHIFT;
 const STATUS_PENDING_HOST_CALL: u32 = 5 << STATUS_KIND_SHIFT;
-// Uncaught `SystemExit`: clean termination, low 8 bits carry the POSIX exit code (not a buffer length).
+// Uncaught `SystemExit`, clean termination, low 8 bits carry the POSIX exit code (not a buffer length).
 const STATUS_EXIT: u32 = 6 << STATUS_KIND_SHIFT;
-// Preempt tick; resumes with no host action.
+// Preempt tick, resumes with no host action.
 const STATUS_PREEMPTED: u32 = 7 << STATUS_KIND_SHIFT;
 
 fn err_status(msg: &str) -> u32 {
@@ -29,7 +29,7 @@ fn err_status(msg: &str) -> u32 {
     STATUS_ERROR | ((n as u32) & STATUS_PAYLOAD_MASK)
 }
 
-/* Lex and parse with the host resolver; Err is rendered diagnostics. */
+/* Lex and parse with the host resolver, Err is rendered diagnostics. */
 fn parse_source(src: &str) -> Result<SSAChunk, String> {
     let (tokens, lex_errs) = lex(src);
     let dir = with_runtime(|rt| rt.entry_dir.clone());
@@ -61,7 +61,7 @@ fn boot_vm(chunk: SSAChunk, limits: Limits) -> VM<'static> {
     vm
 }
 
-/* Drain host-supplied stdin bytes; invalid UTF-8 degrades to empty. */
+/* Drain host-supplied stdin bytes, invalid UTF-8 degrades to empty. */
 fn take_input(vm: &mut VM) {
     let inp_text = with_runtime(|rt| {
         if rt.inp_len == 0 { return String::new(); }
@@ -125,7 +125,7 @@ pub unsafe extern "C" fn reset_modules() {
     with_runtime(|rt| {
         rt.registry.clear();
         rt.manifests.clear();
-        // Paused run references the now-stale module table; drop it for a clean reset.
+        // Paused run references the now-stale module table, drop it for a clean reset.
         rt.paused_run = None;
         rt.repl_vm = None;
         rt.repl_mode = false;
@@ -142,14 +142,14 @@ fn read_src(len: usize) -> Result<String, core::str::Utf8Error> {
     })
 }
 
-/* Entry dir for the next parse; host writes it into SRC. */
+/* Entry dir for the next parse, host writes it into SRC. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_entry_dir(len: usize) {
     let dir = read_src(len).unwrap_or_default();
     with_runtime(|rt| rt.entry_dir = dir);
 }
 
-/* Pre-fetch feed: each import as `b<TAB>name` (bare, resolve via manifest), `r<TAB>path` (importer-relative) or `R<TAB>path` (manifest-root-relative), one per line. */
+/* Pre-fetch feed, each import as `b<TAB>name` (bare, resolve via manifest), `r<TAB>path` (importer-relative) or `R<TAB>path` (manifest-root-relative), one per line. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn extract_imports(len: usize) -> usize {
     use crate::packages::{scan_imports, ImportSpec};
@@ -172,7 +172,7 @@ pub unsafe extern "C" fn extract_imports(len: usize) -> usize {
     unsafe { write_out(&buf) }
 }
 
-/* Drive one segment of execution; on `Pending*` re-stash the VM into the recycled `PausedRun` box. */
+/* Drive one segment of execution, on `Pending*` re-stash the VM into the recycled `PausedRun` box. */
 fn step_vm(mut vm: VM<'static>, src: &str, prev_paused: Option<Box<PausedRun>>) -> u32 {
     let result = {
         let _guard = VmGuard::new(&mut vm);
@@ -229,7 +229,7 @@ fn step_vm(mut vm: VM<'static>, src: &str, prev_paused: Option<Box<PausedRun>>) 
     }
 }
 
-/* Terminal-state VM: the REPL keeps it for the next input, one-shot runs drop it. */
+/* Terminal-state VM, the REPL keeps it for the next input, one-shot runs drop it. */
 fn park_repl_or_drop(mut vm: VM<'static>) {
     let repl_mode = with_runtime(|rt| rt.repl_mode);
     if repl_mode {
@@ -239,7 +239,7 @@ fn park_repl_or_drop(mut vm: VM<'static>) {
     }
 }
 
-/* REPL entry: first call boots the interpreter, later calls adopt each input as a new entry chunk on the SAME interpreter, so history never re-executes. */
+/* REPL entry, first call boots the interpreter, later calls adopt each input as a new entry chunk on the SAME interpreter, so history never re-executes. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn repl_eval(len: usize) -> u32 {
     let src = match read_src(len) {
@@ -268,7 +268,7 @@ pub unsafe extern "C" fn repl_eval(len: usize) -> u32 {
             vm
         }
     };
-    // Named native imports live only in the chunk's extern table; mirror them so later inputs resolve them.
+    // Named native imports live only in the chunk's extern table, mirror them so later inputs resolve them.
     if let Err(e) = vm.bind_chunk_externs() {
         let traceback = e.render_traceback(&src, vm.error_pos(), None, vm.call_stack_frames(), vm.function_names_ref());
         park_repl_or_drop(vm);
@@ -302,7 +302,7 @@ pub unsafe extern "C" fn run_resume() -> u32 {
         Some(p) => p,
         None => return err_status("RuntimeError: run_resume called with no paused run"),
     };
-    // Take VM out so `step_vm` owns it; recycle the empty Box for the next stash.
+    // Take VM out so `step_vm` owns it, recycle the empty Box for the next stash.
     let mut paused_box = paused;
     let vm = paused_box.vm.take().expect("paused_run with no VM is a runtime bug");
     step_vm(vm, "", Some(paused_box))
@@ -327,7 +327,7 @@ pub unsafe extern "C" fn run_push_event(ptr: *const u8, len: u32) -> i32 {
     })
 }
 
-/* `set_host_*` prologue: take `handle`'s Val (1 = stale) and run `f` on the paused VM (3 = no paused run). */
+/* `set_host_*` prologue, take `handle`'s Val (1 = stale) and run `f` on the paused VM (3 = no paused run). */
 fn with_paused_vm(handle: u32, f: impl FnOnce(&mut VM<'static>, crate::vm::types::Val) -> i32) -> i32 {
     let Some(val) = bridge::get_val(handle) else { return 1; };
     bridge::release_handles(&[handle]);
@@ -338,19 +338,19 @@ fn with_paused_vm(handle: u32, f: impl FnOnce(&mut VM<'static>, crate::vm::types
     })
 }
 
-/* Wake a `WaitingHostCall` coro: inject `handle`'s Val into its saved-stack top. 0 ok / 1 stale / 2 no waiter / 3 no paused run. */
+/* Wake a `WaitingHostCall` coro, inject `handle`'s Val into its saved-stack top. 0 ok / 1 stale / 2 no waiter / 3 no paused run. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_host_result(handle: u32) -> i32 {
     with_paused_vm(handle, |vm, val| if vm.inject_host_result(val) { 0 } else { 2 })
 }
 
-/* Wake the `WaitingHostCall(id)` coro with `handle`'s Val; lets the host resolve concurrent calls out of order. Same return codes as `set_host_result`. */
+/* Wake the `WaitingHostCall(id)` coro with `handle`'s Val, lets the host resolve concurrent calls out of order. Same return codes as `set_host_result`. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_host_result_by_id(id: u32, handle: u32) -> i32 {
     with_paused_vm(handle, |vm, val| if vm.inject_host_result_by_id(id as u64, val) { 0 } else { 2 })
 }
 
-/* Raise an error into the `WaitingHostCall(id)` coro so its try/except can catch it; one failed host call affects only its coro. `msg_handle` is a string Val (via `encodeAny`). Same return codes as `set_host_result`. */
+/* Raise an error into the `WaitingHostCall(id)` coro so its try/except can catch it, one failed host call affects only its coro. `msg_handle` is a string Val (via `encodeAny`). Same return codes as `set_host_result`. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_host_error_by_id(id: u32, kind: u32, msg_handle: u32) -> i32 {
     with_paused_vm(msg_handle, |vm, val| {
@@ -370,13 +370,13 @@ pub extern "C" fn last_yield_deadline_ns() -> u64 {
 
 use crate::vm::snapshot;
 
-/* Preempt every `n` loop back-edges; 0 disables. */
+/* Preempt every `n` loop back-edges, 0 disables. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_preempt_interval(n: u32) {
     with_runtime(|rt| rt.preempt_every = n as usize);
 }
 
-/* Serialize the parked run; -1 when none. */
+/* Serialize the parked run, -1 when none. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn save_state() -> i64 {
     let blob = with_runtime(|rt| {
@@ -437,7 +437,7 @@ pub unsafe extern "C" fn state_globals() -> usize {
     unsafe { write_out(json.as_deref().unwrap_or("{}")) }
 }
 
-/* Parked coroutines as JSON; `[]` when idle. */
+/* Parked coroutines as JSON, `[]` when idle. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn state_stack() -> usize {
     let json = with_runtime(|rt| {
@@ -455,7 +455,7 @@ pub unsafe extern "C" fn run(len: usize) -> usize {
         },
     };
 
-    // Legacy path keeps a borrowed chunk; nothing is leaked.
+    // Legacy path keeps a borrowed chunk, nothing is leaked.
     let out: String = match parse_source(&src) {
         Err(rendered) => rendered,
         Ok(chunk) => {
@@ -471,7 +471,7 @@ pub unsafe extern "C" fn run(len: usize) -> usize {
 
             match result {
                 Ok(_) => String::new(),
-                // Legacy `run` cannot suspend; embedders that need `sleep(n>0)` / `frame()` / `receive()` must drive `run_start` + `run_resume`.
+                // Legacy `run` cannot suspend, embedders that need `sleep(n>0)` / `frame()` / `receive()` must drive `run_start` + `run_resume`.
                 Err(VmErr::HostYield(_)) => String::from(
                     "RuntimeError: scheduler suspended; this build's legacy `run` entry has no resume, drive `run_start` / `run_resume` instead.",
                 ),

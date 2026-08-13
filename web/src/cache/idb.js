@@ -1,11 +1,8 @@
-/*
-IndexedDB cache: `cas` (hash -> bytes) + `lockfile` (spec -> hash). Engine falls back to MemoryCache if `open()` rejects.
-*/
-
 const IDB_NAME = 'edgepython';
 const IDB_VER = 1;
 const VERSION_KEY = '\0v'; // '\0' isolates sentinel, canonical specs never contain null bytes
 
+/* IndexedDB cache with `cas` (hash -> bytes) and `lockfile` (spec -> hash) stores. The engine falls back to MemoryCache if `open()` rejects. */
 export class IdbCache {
     constructor() {
         this.db = null;

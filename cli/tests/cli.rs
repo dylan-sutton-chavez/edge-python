@@ -1,8 +1,3 @@
-/*
-JSON-driven CLI suite. Each case in `cli.json` is one tempdir + one spawn of the `edge` binary.
-Every case runs unconditionally so a real bug can't hide behind a tag.
-*/
-
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -24,6 +19,7 @@ struct Case {
     #[serde(default)] contains: BTreeMap<String, String>,
 }
 
+/// JSON-driven CLI suite, each case in `cli.json` is one tempdir plus one spawn of the `edge` binary. Every case runs unconditionally so a real bug can't hide behind a tag.
 #[test]
 fn cli_suite() {
     let cases: Vec<Case> = serde_json::from_str(include_str!("cli.json")).expect("cli.json parse");

@@ -1,7 +1,3 @@
-/* 
-Compile-time import: Native binds to extern_table (CallExtern); Code inlines MakeFunction+StoreName. 
-*/
-
 use crate::s;
 
 use super::Parser;
@@ -12,9 +8,10 @@ use crate::util::hash::FxHashSet;
 
 use alloc::{string::{String, ToString}, vec::Vec};
 
+/* Compile-time import lowering where Native binds to extern_table (CallExtern) and Code inlines MakeFunction+StoreName. */
 impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
-    /* `import name [as alias]`: resolves and binds module as HeapObj::Module under alias. Compile-time only, no import opcodes reach the VM. */
+    /* `import name [as alias]` resolves and binds module as HeapObj::Module under alias. Compile-time only, no import opcodes reach the VM. */
     pub(super) fn import_stmt(&mut self) {
         self.advance(); // 'import'
         loop {
@@ -29,7 +26,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* `from <spec> import names|*`: spec is a bare name or dotted path; `*` binds all exports. Names may be parenthesized for multi-line lists, trailing comma allowed. */
+    /* `from <spec> import names|*`, spec is a bare name or dotted path, `*` binds all exports. Names may be parenthesized for multi-line lists, trailing comma allowed. */
     pub(super) fn parse_from_stmt(&mut self) {
         self.advance(); // 'from'
         let Some((spec, _, spec_span)) = self.read_module_spec() else { return; };
@@ -57,7 +54,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.resolve_and_bind_named(&spec, spec_span, names);
     }
 
-    /* Reads a dotted module spec: leading dots anchor at the importer dir, a dotted name at the nearest packages.json dir, a plain name stays bare. Returns (resolver spec, default alias, span). */
+    /* Reads a dotted module spec, leading dots anchor at the importer dir, a dotted name at the nearest packages.json dir, a plain name stays bare. Returns (resolver spec, default alias, span). */
     fn read_module_spec(&mut self) -> Option<(String, String, (usize, usize))> {
         let first = self.advance();
         let first_start = first.start;
@@ -93,7 +90,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         Some((spec, alias, (first_start, end)))
     }
 
-    /* Consumes `name(.name)*` given the first name token; returns (dotted name, end position). */
+    /* Consumes `name(.name)*` given the first name token, returns (dotted name, end position). */
     fn dotted_name(&mut self, first: Token) -> (String, usize) {
         let mut name = self.lexeme(&first).to_string();
         let mut end = first.end;
@@ -112,7 +109,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         n
     }
 
-    /* Parses or returns cached SSAChunk. Only path/URL specs cached; bare names skipped to avoid cross-manifest collisions. */
+    /* Parses or returns cached SSAChunk. Only path/URL specs cached, bare names skipped to avoid cross-manifest collisions. */
     fn parse_or_get_cached(&mut self, spec: &str, src: &str, span: (usize, usize)) -> Option<alloc::rc::Rc<SSAChunk>> {
         let cache_safe = spec.contains('/') || spec.contains("://");
         if cache_safe
@@ -147,7 +144,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         Some(rc)
     }
 
-    /* Registers import deduped by spec; returns LoadModule operand index. */
+    /* Registers import deduped by spec, returns LoadModule operand index. */
     fn register_import(&mut self, spec: &str, kind: ImportKind) -> u16 {
         if let Some(i) = self.chunk.imports.iter().position(|e| e.spec == spec) {
             return i as u16;
@@ -160,7 +157,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         i
     }
 
-    /* Collects public top-level names from StoreName/MakeFunction; used by import-star. */
+    /* Collects public top-level names from StoreName/MakeFunction, used by import-star. */
     fn module_public_exports(sub: &SSAChunk) -> Vec<String> {
         let mut exports: Vec<String> = Vec::new();
         let mut seen: FxHashSet<String> = FxHashSet::default();
@@ -193,7 +190,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* Emit `LoadModule + LoadAttr(name) + StoreName(alias)`: bind a module attribute under `alias`. */
+    /* Emit `LoadModule + LoadAttr(name) + StoreName(alias)` to bind a module attribute under `alias`. */
     fn bind_module_attr(&mut self, import_idx: u16, name: &str, alias: &str) {
         self.chunk.emit(OpCode::LoadModule, import_idx);
         let attr_idx = self.chunk.push_name(name);
@@ -201,7 +198,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.emit_store_new(alias);
     }
 
-    /* Named import: registers module, emits LoadModule+LoadAttr+StoreName; Native also populates extern_table for functions. */
+    /* Named import registers module, emits LoadModule+LoadAttr+StoreName, Native also populates extern_table for functions. */
     fn resolve_and_bind_named(&mut self, spec: &str, span: (usize, usize), names: Vec<(String, String)>) {
         let resolved = match self.resolver.resolve(spec) {
             Ok(r) => r,
@@ -215,7 +212,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             Resolved::Native { bindings, classes, consts, .. } => {
                 // Register module first so LoadModule can target it for class and const imports.
                 let import_idx = self.register_import(&url, Self::native_import_kind(&bindings, &classes, &consts));
-                // Classes and consts bind via LoadModule+LoadAttr (module attr); functions take the extern_table fast path.
+                // Classes and consts bind via LoadModule+LoadAttr (module attr), functions take the extern_table fast path.
                 for (name, alias) in &names {
                     if classes.iter().any(|c| c.name == *name) || consts.iter().any(|c| c.name == *name) {
                         self.bind_module_attr(import_idx, name, alias);
@@ -248,7 +245,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* `import X`: registers module, emits LoadModule+StoreName; VM builds a singleton Val at init. */
+    /* `import X` registers module, emits LoadModule+StoreName, VM builds a singleton Val at init. */
     fn resolve_and_bind_all(&mut self, spec: &str, span: (usize, usize), alias: &str) {
         let resolved = match self.resolver.resolve(spec) {
             Ok(r) => r,
@@ -267,7 +264,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.emit_store_new(alias);
     }
 
-    /* Star import: Native fills extern_index; Code scans top-level and emits LoadModule+LoadAttr+StoreName per export. */
+    /* Star import, Native fills extern_index, Code scans top-level and emits LoadModule+LoadAttr+StoreName per export. */
     fn resolve_and_bind_star(&mut self, spec: &str, span: (usize, usize)) {
         let resolved = match self.resolver.resolve(spec) {
             Ok(r) => r,

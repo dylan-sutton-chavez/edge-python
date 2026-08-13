@@ -19,7 +19,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    // `staticmethod(func)`: wraps a function so the class chain returns it unbound, with no `self`.
+    // `staticmethod(func)` wraps a function so the class chain returns it unbound, with no `self`.
     pub fn call_staticmethod(&mut self, argc: u16) -> Result<(), VmErr> {
         let args = self.pop_n(argc as usize)?;
         let [func] = args.as_slice() else {
@@ -30,7 +30,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    // `classmethod(func)`: wraps a function so attribute lookup binds the class.
+    // `classmethod(func)` wraps a function so attribute lookup binds the class.
     pub fn call_classmethod(&mut self, argc: u16) -> Result<(), VmErr> {
         let args = self.pop_n(argc as usize)?;
         let [func] = args.as_slice() else {
@@ -41,7 +41,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    // `super()` zero-arg: reads the running method's `(class, self)` off the top frame and returns a Super proxy.
+    // `super()` zero-arg reads the running method's `(class, self)` off the top frame and returns a Super proxy.
     pub fn call_super(&mut self) -> Result<(), VmErr> {
         let binding = self.call_stack.last()
             .and_then(|f| f.current_class.zip(f.current_self));
@@ -79,7 +79,7 @@ impl<'a> VM<'a> {
     pub fn call_id(&mut self) -> Result<(), VmErr> {
         let o = self.pop()?;
         // Use the NaN-boxed bit pattern as identity. Truncate to fit `INT_MAX`.
-        let id = ((o.0 as i64).wrapping_abs()) & Val::INT_MAX; // wrapping_abs: i64::MIN (e.g. -0.0 bits) would overflow plain abs
+        let id = ((o.0 as i64).wrapping_abs()) & Val::INT_MAX; // wrapping_abs since i64::MIN (e.g. -0.0 bits) would overflow plain abs
         self.push(Val::int(id));
         Ok(())
     }
@@ -88,7 +88,7 @@ impl<'a> VM<'a> {
         use core::hash::{Hash, Hasher};
         let o = self.pop()?;
 
-        // instance dispatch, user `__hash__` wins; `__eq__` without `__hash__` makes the instance unhashable.
+        // instance dispatch, user `__hash__` wins, `__eq__` without `__hash__` makes the instance unhashable.
         if o.is_heap() && let HeapObj::Instance(cls, _) = self.heap.get(o) {
             let cls = *cls;
             let has_hash = self.lookup_class_member(cls, "__hash__").is_some();
@@ -105,10 +105,10 @@ impl<'a> VM<'a> {
             if has_eq {
                 return Err(cold_type("unhashable type: instance defines __eq__ without __hash__"));
             }
-            // Default fallback: pointer identity, mirroring Python's `object.__hash__`.
+            // Default fallback, pointer identity, mirroring Python's `object.__hash__`.
         }
 
-        // Python guarantees hash(n)==n for ints in range (hash(-1) is -2); bool hashes as 0/1.
+        // Python guarantees hash(n)==n for ints in range (hash(-1) is -2), bool hashes as 0/1.
         if o.is_int() { let n = o.as_int(); self.push(Val::int(if n == -1 { -2 } else { n })); return Ok(()); }
         if o.is_bool() { self.push(Val::int(o.as_bool() as i64)); return Ok(()); }
 
@@ -128,12 +128,12 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* Type-name based isinstance check. Accepts Type / NativeFn (builtin types) / user Class on the right; allows int<->bool aliasing and walks user inheritance via `is_subclass`. */
+    /* Type-name based isinstance check. Accepts Type / NativeFn (builtin types) / user Class on the right, allows int<->bool aliasing and walks user inheritance via `is_subclass`. */
     pub fn call_isinstance(&mut self) -> Result<(), VmErr> {
         let (arg2, obj) = (self.pop()?, self.pop()?);
         let obj_ty = self.type_name(obj);
 
-        // For exception matching: when `obj` is a Type itself or an ExcInstance, compare names against the asserted type.
+        // For exception matching, when `obj` is a Type itself or an ExcInstance, compare names against the asserted type.
         let obj_type_name: Option<String> = if obj.is_heap() {
             match self.heap.get(obj) {
                 HeapObj::Type(n) => Some(n.clone()),
@@ -181,7 +181,7 @@ impl<'a> VM<'a> {
         self.check_classinfo(arg2, check_one)
     }
 
-    /* Shared `isinstance`/`issubclass` classinfo dispatch: a tuple matches if any member does, else a single check. `single` already emits the correct TypeError for non-heap / wrong-variant args. */
+    /* Shared `isinstance`/`issubclass` classinfo dispatch, a tuple matches if any member does, else a single check. `single` already emits the correct TypeError for non-heap / wrong-variant args. */
     fn check_classinfo<F>(&mut self, arg2: Val, single: F) -> Result<(), VmErr>
     where F: Fn(Val, &HeapPool) -> Result<bool, VmErr> {
         let result = if arg2.is_heap() && let HeapObj::Tuple(items) = self.heap.get(arg2) {
@@ -197,7 +197,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    /* `issubclass(C, B)`: both are classes (B may be a tuple). Walks the exception hierarchy for built-ins and the inheritance chain for user classes; unlike `isinstance`, arg 1 must itself be a class. */
+    /* `issubclass(C, B)`, both are classes (B may be a tuple). Walks the exception hierarchy for built-ins and the inheritance chain for user classes. Unlike `isinstance`, arg 1 must itself be a class. */
     pub fn call_issubclass(&mut self) -> Result<(), VmErr> {
         let (arg2, sub) = (self.pop()?, self.pop()?);
 

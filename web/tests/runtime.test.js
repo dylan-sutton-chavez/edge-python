@@ -1,14 +1,8 @@
-/*
-Drives <edge-python> through index.html: boots one tag, then feeds every runtime.json case to its worker
-via run(), comparing #app for output cases and the run trace for error cases.
-Run: deno test --allow-all web/tests/runtime.test.js
-*/
-
 import { chromium } from "npm:playwright@latest";
 import { readFileSync } from "node:fs";
 import { DEFAULT_IMPORTS } from "../src/defaults.js";
 
-// One CDN host now serves every family under a path prefix (/std, /system, /runtime); derive it from the manifest.
+// One CDN host now serves every family under a path prefix (/std, /system, /runtime), derive it from the manifest.
 const CDN_HOST = new URL(Object.values(DEFAULT_IMPORTS)[0]).host;
 
 const REPO = new URL("../../", import.meta.url).pathname; // edge-python/ repo root
@@ -22,6 +16,7 @@ const TYPES = {
     ".py": "text/x-python", ".json": "application/json",
 };
 
+/* Drives <edge-python> through index.html, boots one tag, then feeds every runtime.json case to its worker via run(), comparing #app for output cases and the run trace for error cases. Run with deno test --allow-all web/tests/runtime.test.js. */
 Deno.test("runtime: <edge-python> runs the corpus through index.html", async () => {
     const browser = await chromium.launch();
     const page = await browser.newPage();
@@ -35,13 +30,13 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
     const SYSTEM_DIR = new URL("../../web/builtins", import.meta.url).pathname;
     await page.route("**/*", (r) => {
         const u = new URL(r.request().url());
-        // Prefer the in-tree std/ and system/ artifacts; if absent (CI checks out only the js/ subset), fall back to the CDN-deployed copy.
+        // Prefer the in-tree std/ and system/ artifacts, if absent (CI checks out only the js/ subset) fall back to the CDN-deployed copy.
         if (u.host === CDN_HOST && u.pathname.startsWith("/std/")) {
             // /std/<name>.wasm lives at <name>/target/wasm32-unknown-unknown/release/ in the tree.
             const name = u.pathname.slice("/std/".length).replace(/\.wasm$/, "");
             const file = `${STD_DIR}/${name}/target/wasm32-unknown-unknown/release/${name}.wasm`;
             try { return r.fulfill({ contentType: "application/wasm", body: readFileSync(file) }); }
-            catch { return r.continue(); } // no local std build: use the deployed wasm
+            catch { return r.continue(); } // no local std build, use the deployed wasm
         }
         if (u.host === CDN_HOST && u.pathname.startsWith("/web/builtins/")) {
             // Production (Pages) flattens builtins/<cap>/src/* to builtins/<cap>/*, map back to the tree layout.
@@ -53,7 +48,7 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
         if (u.host === CDN_HOST && u.pathname === "/compiler.wasm") {
             const local = `${REPO}target/wasm32-unknown-unknown/release/compiler.wasm`;
             try { return r.fulfill({ contentType: "application/wasm", body: readFileSync(local) }); }
-            catch { return r.continue(); } // no local build: use the deployed wasm
+            catch { return r.continue(); } // no local build, use the deployed wasm
         }
         if (u.host !== "localhost") return r.continue(); // any other CDN asset (compiler.wasm, runtime) passes through
         const ext = u.pathname.slice(u.pathname.lastIndexOf("."));
@@ -74,7 +69,7 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
         });
 
         const reqd = (frag) => requested.some((u) => u.includes(frag));
-        // Lazy system: a system ESM must not load at boot, only when a run first imports it.
+        // Lazy system, a system ESM must not load at boot, only when a run first imports it.
         if (reqd("/app/ui.js")) throw new Error("system ui.js loaded at boot; system modules must be lazy");
 
         for (const c of cases) {
@@ -156,7 +151,7 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
         if (!(pausedAt > 0 && pausedAt < 1000000)) throw new Error(`preempt: expected a mid-loop pause, n was ${JSON.stringify(pre.globalsAtPause.n)}`);
         if (!(pre.blobLen > 100)) throw new Error(`preempt: implausible blob length ${pre.blobLen}`);
 
-        // Documented tag path: fresh element via proxy.
+        // Documented tag path, fresh element via proxy.
         const tagged = await page.evaluate(async () => {
             const el = document.createElement("edge-python");
             const ready = new Promise((res) => el.addEventListener("ready", res, { once: true }));
@@ -174,7 +169,7 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
         if (!(tagged.blobLen > 100)) throw new Error(`preempt via element: implausible blob length ${tagged.blobLen}`);
         if (tagged.out !== "") throw new Error(`preempt via element: run reported ${JSON.stringify(tagged.out)}`);
 
-        // Laziness: only what the corpus imports gets fetched; declared-but-unused stays untouched.
+        // Laziness, only what the corpus imports gets fetched. Declared-but-unused stays untouched.
         if (!reqd("/app/ui.js")) throw new Error("system ui was used but ui.js never loaded");
         if (!reqd("json.wasm")) throw new Error("json default imported but json.wasm never fetched");
         if (!reqd("/web/builtins/time")) throw new Error("time system default imported but never loaded");

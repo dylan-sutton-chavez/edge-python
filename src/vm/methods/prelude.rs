@@ -1,7 +1,3 @@
-/*
-Internal prelude for `vm/methods`. Per-type files do `use super::prelude::*;` for VM, Val, HeapObj, helpers, receiver-unwrap primitives.
-*/
-
 pub(super) use crate::vm::{VM, Val, VmErr, HeapObj, DictMap};
 pub(super) use super::recv::{
     recv_str, recv_bytes, val_to_str, extract_sequence,

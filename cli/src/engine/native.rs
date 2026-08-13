@@ -7,7 +7,7 @@ use std::path::Path;
 
 use super::{Backend, Outcome};
 
-/// The in-process engine behind the same seam as the browser session; no server, no CDP.
+/// The in-process engine behind the same seam as the browser session, no server, no CDP.
 pub struct NativeSession {
     vm: Option<VM<'static>>,
     packages: Option<String>,
@@ -51,14 +51,14 @@ impl Backend for NativeSession {
         })
     }
 
-    /// Next eval boots a fresh interpreter; dropping the VM is the whole reset.
+    /// Next eval boots a fresh interpreter, dropping the VM is the whole reset.
     fn reset(&mut self) -> Result<()> {
         self.vm = None;
         Ok(())
     }
 }
 
-/// One-shot native run mirroring `engine::run`; returns the process exit code.
+/// One-shot native run mirroring `engine::run`, returns the process exit code.
 pub fn run(file: Option<&Path>, opts: &RunOpts) -> Result<i32> {
     if let Some(state) = &opts.restore_state {
         return Ok(restore_and_run(state, opts));
@@ -72,7 +72,7 @@ pub fn run(file: Option<&Path>, opts: &RunOpts) -> Result<i32> {
     let (src, name) = match file {
         Some(p) => (std::fs::read_to_string(p).map_err(|e| anyhow::anyhow!("reading {}: {e}", p.display()))?, path_spec(p)),
         None => {
-            // A bare `edge run` from a terminal would block on stdin forever; force a pipe or path.
+            // A bare `edge run` from a terminal would block on stdin forever, force a pipe or path.
             if stdin.is_terminal() {
                 anyhow::bail!("no script given; pass a file path or pipe Python to stdin");
             }

@@ -1,12 +1,8 @@
-/*
-Built-in methods for `str` receivers. Arity is checked by the dispatcher.
-*/
-
 use super::prelude::*;
 
 use core::iter;
 
-// `str.encode([encoding])`, UTF-8/ASCII only; other names error to block silent mismatches.
+// `str.encode([encoding])`, UTF-8/ASCII only, other names error to block silent mismatches.
 pub fn encode(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let s = recv_str(vm, recv)?;
     if let Some(arg) = pos.first() {
@@ -24,7 +20,7 @@ pub fn encode(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     vm.push(v); Ok(())
 }
 
-// str: zero-arg transforms `recv_str -> f -> push`.
+// str zero-arg transforms `recv_str -> f -> push`.
 macro_rules! str_transform {
     ($name:ident, $f:expr) => {
         pub fn $name(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
@@ -38,7 +34,7 @@ str_transform!(lower, |s: &str| s.to_lowercase());
 str_transform!(capitalize, capitalize_first);
 str_transform!(title, title_case);
 
-// str.strip / lstrip / rstrip: trim whitespace, or any char in the optional arg.
+// str.strip / lstrip / rstrip trim whitespace, or any char in the optional arg.
 enum Trim { Both, Start, End }
 fn strip_impl(vm: &mut VM, recv: Val, pos: &[Val], mode: Trim) -> Result<(), VmErr> {
     let s = recv_str(vm, recv)?;
@@ -105,7 +101,7 @@ pub fn endswith(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     Ok(())
 }
 
-// Optional char-index `start`/`stop` window (pos[1], pos[2]); negatives count from the end.
+// Optional char-index `start`/`stop` window (pos[1], pos[2]), negatives count from the end.
 fn slice_window(s: &str, pos: &[Val], from: usize) -> (Vec<char>, usize, usize) {
     let chars: Vec<char> = s.chars().collect();
     let n = chars.len() as i64;
@@ -175,17 +171,17 @@ fn rsplit_ws_max(s: &str, m: usize) -> Vec<String> {
     out
 }
 
-// `str.split`/`rsplit([sep[, maxsplit]])`; `from_right` counts from the right and reverses sep-mode results.
+// `str.split`/`rsplit([sep[, maxsplit]])`, `from_right` counts from the right and reverses sep-mode results.
 fn split_impl(vm: &mut VM, recv: Val, pos: &[Val], from_right: bool) -> Result<(), VmErr> {
     let s = recv_str(vm, recv)?;
-    // Optional second arg: maxsplit (<0 means unlimited).
+    // Optional second arg is maxsplit (<0 means unlimited).
     let maxsplit: Option<usize> = match pos.get(1) {
         Some(n) if n.is_int() => { let m = n.as_int(); if m < 0 { None } else { Some(m as usize) } }
         Some(_) => return Err(cold_type("maxsplit must be an integer")),
         None => None,
     };
     let strs: Vec<String> = if pos.is_empty() || pos[0].is_none() {
-        // No separator: split on runs of whitespace, dropping empties.
+        // No separator, split on runs of whitespace, dropping empties.
         match maxsplit {
             Some(m) => if from_right { rsplit_ws_max(&s, m) } else { split_ws_max(&s, m) },
             None => s.split_whitespace().map(String::from).collect(),
@@ -217,7 +213,7 @@ pub fn replace(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let s = recv_str(vm, recv)?;
     let old = val_to_str(vm, pos[0])?;
     let new = val_to_str(vm, pos[1])?;
-    // Optional third arg: max replacements (<0 means all).
+    // Optional third arg is max replacements (<0 means all).
     let out = match pos.get(2) {
         Some(n) if n.is_int() && n.as_int() >= 0 => s.replacen(old.as_str(), new.as_str(), n.as_int() as usize),
         Some(n) if !n.is_int() => return Err(cold_type("replace count must be an integer")),
@@ -226,16 +222,16 @@ pub fn replace(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     vm.alloc_and_push_str(out)
 }
 
-// `str.rsplit([sep[, maxsplit]])`: like split but counts from the right.
+// `str.rsplit([sep[, maxsplit]])`, like split but counts from the right.
 pub fn rsplit(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> { split_impl(vm, recv, pos, true) }
 
-// `str.format(*args)`: positional/auto/explicit-index fields with `{[idx][!r|!s][:spec]}`. Keyword fields aren't supported (the method dispatcher forbids kwargs).
+// `str.format(*args)` takes positional/auto/explicit-index fields with `{[idx][!r|!s][:spec]}`. Keyword fields aren't supported (the method dispatcher forbids kwargs).
 pub fn format(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let tmpl = recv_str(vm, recv)?;
     let chars: Vec<char> = tmpl.chars().collect();
     let mut out = String::with_capacity(tmpl.len());
     let mut auto = 0usize;
-    // Numbering mode: Some(true)=manual, Some(false)=auto.
+    // Numbering mode, Some(true)=manual, Some(false)=auto.
     let mut manual: Option<bool> = None;
     let mut ci = 0;
     while ci < chars.len() {
@@ -268,7 +264,7 @@ pub fn format(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
                 Some("s") => { let d = vm.display(val); vm.heap.alloc(HeapObj::Str(d))? }
                 Some(_) => return Err(cold_value("unknown conversion specifier")),
             };
-            // Empty spec means str(x); use full display so containers render, not just scalars.
+            // Empty spec means str(x), use full display so containers render, not just scalars.
             let rendered = if spec.is_empty() {
                 vm.display(target)
             } else {
@@ -289,11 +285,11 @@ pub fn format(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
 str_transform!(casefold, |s: &str| s.to_lowercase());
 str_transform!(swapcase, |s: &str| s.chars().map(|c| if c.is_uppercase() { c.to_lowercase().to_string() } else if c.is_lowercase() { c.to_uppercase().to_string() } else { c.to_string() }).collect::<String>());
 
-/* Parse a pad-method `(width[, fill])` arg pair; `width_err` names the method for the width TypeError. */
+/* Parse a pad-method `(width[, fill])` arg pair, `width_err` names the method for the width TypeError. */
 fn width_and_fill(vm: &mut VM, pos: &[Val], width_err: &'static str) -> Result<(usize, char), VmErr> {
     if !pos[0].is_int() { return Err(cold_type(width_err)); }
     let width = pos[0].as_int().max(0) as usize;
-    // User-controlled width drives the output size; cap it so a huge value errors instead of aborting in the allocator.
+    // User-controlled width drives the output size, cap it so a huge value errors instead of aborting in the allocator.
     if width > vm.heap.limit() { return Err(cold_heap()); }
     let fill = if pos.len() > 1 {
         let f = val_to_str(vm, pos[1])?;
@@ -303,7 +299,7 @@ fn width_and_fill(vm: &mut VM, pos: &[Val], width_err: &'static str) -> Result<(
     Ok((width, fill))
 }
 
-// `str.ljust`/`rjust(width[, fill])`: pad to width in code points.
+// `str.ljust`/`rjust(width[, fill])` pad to width in code points.
 fn justify(vm: &mut VM, recv: Val, pos: &[Val], right: bool) -> Result<(), VmErr> {
     let s = recv_str(vm, recv)?;
     let (width, fill) = width_and_fill(vm, pos, "width must be an integer")?;
@@ -317,7 +313,7 @@ pub fn rjust(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> { justify
 
 pub fn expandtabs(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let s = recv_str(vm, recv)?;
-    // Holds tabsize in a C int; out-of-range is an OverflowError before any expansion.
+    // Holds tabsize in a C int, out-of-range is an OverflowError before any expansion.
     let ts = match pos.first() {
         Some(n) if n.is_int() => {
             let raw = n.as_int();
@@ -331,7 +327,7 @@ pub fn expandtabs(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let mut col = 0usize;
     for c in s.chars() {
         match c {
-            // A large tabsize can blow the column count past the heap budget; bail before materialising the spaces.
+            // A large tabsize can blow the column count past the heap budget, bail before materialising the spaces.
             '\t' => {
                 let n = if ts == 0 { 0 } else { ts - (col % ts) };
                 if col.saturating_add(n) > limit { return Err(cold_heap()); }
@@ -345,7 +341,7 @@ pub fn expandtabs(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     vm.alloc_and_push_str(out)
 }
 
-// str predicates: all chars satisfy a class, and (for cased ones) at least one cased char exists.
+// str predicates, all chars satisfy a class, and (for cased ones) at least one cased char exists.
 pub fn isspace(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
     let s = recv_str(vm, recv)?;
     vm.push(Val::bool(!s.is_empty() && s.chars().all(|c| c.is_whitespace())));
@@ -365,7 +361,7 @@ pub fn islower(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
 }
 pub fn istitle(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
     let s = recv_str(vm, recv)?;
-    // Titlecased: every cased run starts uppercase and continues lowercase; needs >=1 cased char.
+    // Titlecased means every cased run starts uppercase and continues lowercase, needs >=1 cased char.
     let mut prev_cased = false;
     let mut any_cased = false;
     let mut ok = true;
@@ -402,7 +398,7 @@ pub fn removesuffix(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
 // `str.splitlines()`, split on \n / \r / \r\n, dropping the separator (keepends=False).
 pub fn splitlines(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
     let s = recv_str(vm, recv)?;
-    // line boundaries: \n \r \r\n \v \f \x1c \x1d \x1e \x85.
+    // line boundaries \n \r \r\n \v \f \x1c \x1d \x1e \x85.
     const BREAKS: &[char] = &['\n', '\r', '\u{0b}', '\u{0c}', '\u{1c}', '\u{1d}', '\u{1e}', '\u{85}', '\u{2028}', '\u{2029}'];
     let mut parts: Vec<Val> = Vec::new();
     let mut cur = String::new();
@@ -422,7 +418,7 @@ pub fn splitlines(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
     vm.alloc_and_push_list(parts)
 }
 
-// `str.partition` / `rpartition`, (head, sep, tail); on miss returns (s,"","") / ("","",s).
+// `str.partition` / `rpartition`, (head, sep, tail), on miss returns (s,"","") / ("","",s).
 fn partition_impl(vm: &mut VM, recv: Val, pos: &[Val], from_right: bool) -> Result<(), VmErr> {
     let s = recv_str(vm, recv)?;
     let sep = val_to_str(vm, pos[0])?;
@@ -430,8 +426,8 @@ fn partition_impl(vm: &mut VM, recv: Val, pos: &[Val], from_right: bool) -> Resu
     let hit = if from_right { s.rfind(sep.as_str()) } else { s.find(sep.as_str()) };
     let (a, b, c): (String, String, String) = match hit {
         Some(i) => (s[..i].to_string(), sep.clone(), s[i + sep.len()..].to_string()),
-        None if from_right => (String::new(), String::new(), s), // miss: original at the tail
-        None => (s, String::new(), String::new()), // miss: original at the head
+        None if from_right => (String::new(), String::new(), s), // miss, original at the tail
+        None => (s, String::new(), String::new()), // miss, original at the head
     };
     let av = vm.heap.alloc(HeapObj::Str(a))?;
     let bv = vm.heap.alloc(HeapObj::Str(b))?;
@@ -441,7 +437,7 @@ fn partition_impl(vm: &mut VM, recv: Val, pos: &[Val], from_right: bool) -> Resu
 pub fn partition(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> { partition_impl(vm, recv, pos, false) }
 pub fn rpartition(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> { partition_impl(vm, recv, pos, true) }
 
-// str: padding.
+// str padding.
 pub fn center(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let s = recv_str(vm, recv)?;
     let (width, fill) = width_and_fill(vm, pos, "center() width must be an integer")?;
@@ -457,7 +453,7 @@ pub fn zfill(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     if !pos[0].is_int() { return Err(cold_type("zfill() requires an integer argument")); }
     let s = recv_str(vm, recv)?;
     let width = pos[0].as_int().max(0) as usize;
-    // User-controlled width drives the output size; cap it so a huge value errors instead of aborting in the allocator.
+    // User-controlled width drives the output size, cap it so a huge value errors instead of aborting in the allocator.
     if width > vm.heap.limit() { return Err(cold_heap()); }
     let nchars = s.chars().count();
     let out = if nchars >= width {

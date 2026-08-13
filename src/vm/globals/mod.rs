@@ -1,5 +1,3 @@
-// Global functions split by domain. Submodules add `impl VM` methods to the same type.
-
 use super::VM;
 
 pub mod async_ops;

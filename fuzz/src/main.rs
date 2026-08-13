@@ -13,25 +13,25 @@ const MAX_WAKEUPS: u32 = 16;
 
 fn main() {
     fuzz!(|data: &[u8]| {
-        // Source is text; reject non-UTF-8 rather than counting it as coverage.
+        // Source is text, reject non-UTF-8 rather than counting it as coverage.
         let Ok(src) = core::str::from_utf8(data) else { return };
 
         let (tokens, _lex_errs) = lex(src);
         let (chunk, parse_errs) = Parser::new(src, tokens.into_iter()).parse();
 
-        // Only valid programs reach the VM; the chunk is unreliable after a parse error.
+        // Only valid programs reach the VM, the chunk is unreliable after a parse error.
         if !parse_errs.is_empty() {
             return;
         }
 
-        // Bounded budget turns runaway loops and allocations into VmErr, not hangs. Tight `ops` so bounded loops finish within AFL's hang timeout; library default `sandbox()` is far larger.
+        // Bounded budget turns runaway loops and allocations into VmErr, not hangs. Tight `ops` so bounded loops finish within AFL's hang timeout. Library default `sandbox()` is far larger.
         let limits = Limits { ops: 100_000, ..Limits::sandbox() };
         let mut vm = VM::with_limits(&chunk, limits);
-        // Host-driven input: never block on real stdin (AFL feeds the program via shmem).
+        // Host-driven input, never block on real stdin (AFL feeds the program via shmem).
         vm.strict_input = true;
         vm.set_preempt_interval(PREEMPT_EVERY);
 
-        // Drive every park kind; snapshot the first.
+        // Drive every park kind, snapshot the first.
         let mut hopped = false;
         let mut wakeups = 0;
         loop {
@@ -56,7 +56,7 @@ fn main() {
             }
 
             if matches!(park, SchedulerStatus::Preempted) { continue; }
-            // receive() needs an event; frame() re-enters.
+            // receive() needs an event, frame() re-enters.
             if wakeups >= MAX_WAKEUPS { break; }
             wakeups += 1;
             if matches!(park, SchedulerStatus::PendingEvent) && vm.push_event("e").is_err() { break; }

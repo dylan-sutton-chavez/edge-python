@@ -63,8 +63,7 @@ impl Barrier {
         self.inflight.fetch_sub(1, Ordering::Release);
     }
 
-    /* Blocks an idle shard until work arrives or the swarm quiesces, true means shut down.
-       The last shard to idle with an empty in-flight count flips shutdown and wakes everyone. */
+    /* Blocks an idle shard until work arrives or the swarm quiesces, true means shut down, the last shard to idle with an empty in-flight count flips shutdown and wakes everyone. */
     pub fn park_until_work_or_done(&self) -> bool {
         let mut q = self.idle.lock().unwrap();
         q.idle += 1;

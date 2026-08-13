@@ -1,5 +1,3 @@
-/* CSSOM, layout queries, focus. */
-
 export default ({ node }) => ({
     set_style: (h, prop, value) => { node(h).style[prop] = value; },
     get_style: (h, prop) => node(h).style[prop] || '',

@@ -1,5 +1,3 @@
-/* Server-Sent Events, push-event pattern (one-way streaming, native browser `EventSource`). */
-
 export default ({ sseSources, allocSse, sse }, { pushEvent }) => ({
     /* `sse_open(url, msg, options_json?)` -> handle. `options_json` accepts `{ withCredentials: bool }`. Every event (open/message/error) arrives via `receive()` tagged `msg`. */
     sse_open: (url, msg, optionsJson) => {

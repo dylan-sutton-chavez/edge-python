@@ -1,10 +1,7 @@
-/*
-Integer surface over `i128`. Results that exceed `i128` raise `ValueError`, since Edge Python ints cap at `i128`.
-*/
-
 use alloc::string::String;
 use wasm_pdk::*;
 
+// Results that exceed `i128` raise `ValueError`, since Edge Python ints cap at `i128`.
 fn too_large(what: &str) -> Error {
     Error::Value(match what {
         "factorial" => String::from("factorial() result exceeds the i128 range"),
@@ -32,7 +29,7 @@ fn factorial(n: i128) -> Result<i128> {
     Ok(acc)
 }
 
-// Variadic gcd, matching `math.gcd(*integers)`; `gcd()` is 0.
+// Variadic gcd, matching `math.gcd(*integers)`, `gcd()` is 0.
 #[plugin_fn]
 fn gcd(nums: Args) -> Result<i128> {
     let mut g: i128 = 0;
@@ -43,7 +40,7 @@ fn gcd(nums: Args) -> Result<i128> {
     Ok(g)
 }
 
-// Variadic lcm, matching `math.lcm(*integers)`; `lcm()` is 1, any zero yields 0.
+// Variadic lcm, matching `math.lcm(*integers)`, `lcm()` is 1, any zero yields 0.
 #[plugin_fn]
 fn lcm(nums: Args) -> Result<i128> {
     let mut l: i128 = 1;
@@ -60,7 +57,7 @@ fn lcm(nums: Args) -> Result<i128> {
 fn isqrt(n: i128) -> Result<i128> {
     if n < 0 { return Err(Error::Value(String::from("isqrt() argument must be nonnegative"))); }
     if n == 0 { return Ok(0); }
-    // Newton's method on integers; division keeps every step within `i128`.
+    // Newton's method on integers, division keeps every step within `i128`.
     let mut x = n;
     let mut y = (x + 1) / 2;
     while y < x { x = y; y = (x + n / x) / 2; }
@@ -83,7 +80,7 @@ fn comb(n: i128, k: i128) -> Result<i128> {
     Ok(acc)
 }
 
-// `perm(n)` is `n!`; optional `k` gives the falling factorial `n*(n-1)*...*(n-k+1)`.
+// `perm(n)` is `n!`, optional `k` gives the falling factorial `n*(n-1)*...*(n-k+1)`.
 #[plugin_fn]
 fn perm(n: i128, rest: Args) -> Result<i128> {
     if n < 0 { return Err(Error::Value(String::from("perm() arguments must be non-negative"))); }

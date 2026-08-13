@@ -1,13 +1,12 @@
-/* IndexedDB async handlers; the worker parks the coro on the returned Promise so Python sees `idb_*` as yielding builtins composing with `gather` / `with_timeout`. */
-
-/* IDBRequest -> Promise. Native IndexedDB is callback-only; this is the standard one-liner wrapper. */
+/* IDBRequest -> Promise. Native IndexedDB is callback-only, this is the standard one-liner wrapper. */
 const promisify = (req) => new Promise((resolve, reject) => {
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
 });
 
+/* IndexedDB async handlers. The worker parks the coro on the returned Promise so Python sees `idb_*` as yielding builtins composing with `gather` / `with_timeout`. */
 export default ({ dbs, allocDb, db }) => ({
-    /* `idb_open(name, version, schema_json?)`, `schema_json` accepts `{"stores": ["name1", "name2"]}`; missing stores are created on upgrade. Returns a handle. */
+    /* `idb_open(name, version, schema_json?)`, `schema_json` accepts `{"stores": ["name1", "name2"]}`. Missing stores are created on upgrade. Returns a handle. */
     idb_open: async (name, version, schemaJson) => {
         const schema = schemaJson !== undefined ? JSON.parse(schemaJson || '{}') : {};
         const stores = schema.stores ?? [];
@@ -21,7 +20,7 @@ export default ({ dbs, allocDb, db }) => ({
         return allocDb(await promisify(req));
     },
 
-    /* Values cross the worker as JSON strings; `value_json` is parsed before put, get serializes back. */
+    /* Values cross the worker as JSON strings, `value_json` is parsed before put, get serializes back. */
     idb_put: async (h, store, key, valueJson) => {
         const tx = db(h).transaction(store, 'readwrite');
         await promisify(tx.objectStore(store).put(JSON.parse(valueJson), key));

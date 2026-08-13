@@ -1,7 +1,3 @@
-/*
-Reference `wasm-pdk` module showcasing #[plugin_class], #[plugin_const], and variadic Args. Build with `cargo build --release --target wasm32-unknown-unknown -p slugify-mod`.
-*/
-
 #![cfg_attr(target_arch = "wasm32", no_std, no_main)]
 
 extern crate alloc;
@@ -18,7 +14,7 @@ static A: lol_alloc::LeakingPageAllocator = lol_alloc::LeakingPageAllocator;
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! { core::arch::wasm32::unreachable() }
 
-/// Module constant materialised once at import. Showcases #[plugin_const].
+/// Module constant materialised once at import. Showcases #[plugin_const]. Build the module with `cargo build --release --target wasm32-unknown-unknown -p slugify-mod`.
 #[plugin_const]
 fn version() -> i64 { 1 }
 
@@ -33,7 +29,7 @@ fn join_all(sep: String, parts: Args) -> Result<String> {
     Ok(out)
 }
 
-/// Accumulates slug parts across calls; exercises mutable state and Option/Result returns.
+/// Accumulates slug parts across calls. Exercises mutable state and Option/Result returns.
 #[plugin_class]
 pub struct Slugger {
     parts: Vec<String>,

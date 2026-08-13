@@ -263,8 +263,7 @@ impl GroupState {
         key
     }
 
-    /* Picks a node for a message, an idle one first, else a fresh spawn under the ceiling,
-       else the least-loaded live node when the group is saturated. */
+    /* Picks a node for a message, an idle one first, else a fresh spawn under the ceiling, else the least-loaded live node when the group is saturated. */
     fn pick(&mut self) -> Option<usize> {
         while let Some(key) = self.idle_free.pop() {
             if self.nodes.get(key).is_some_and(|n| n.idle && !n.done) {

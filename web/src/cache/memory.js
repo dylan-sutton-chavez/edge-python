@@ -1,8 +1,4 @@
-/*
-In-memory cache backend; same shape as `cache/idb.js`. Used when `integrity:false` or IDB unavailable.
-Methods are sync but callers `await` uniformly: stays interchangeable with `IdbCache`.
-*/
-
+/* In-memory cache backend, same shape as `cache/idb.js`. Used when `integrity:false` or IDB unavailable. Methods are sync but callers `await` uniformly, keeping it interchangeable with `IdbCache`. */
 export class MemoryCache {
     constructor() {
         this.cas = new Map(); // hash -> bytes
@@ -32,7 +28,7 @@ export class MemoryCache {
         this.lockfile.clear();
     }
 
-    setVersion(_version) { /* no-op: nothing to invalidate across sessions */ }
+    setVersion(_version) { /* no-op, nothing to invalidate across sessions */ }
 
     getVersion() { return null; }
 }

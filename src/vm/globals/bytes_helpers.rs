@@ -7,7 +7,7 @@ use super::super::types::*;
 
 impl<'a> VM<'a> {
 
-    /* `bytes_fromhex(s)`, hex string -> bytes; tolerates whitespace, errors on odd length / non-hex. */
+    /* `bytes_fromhex(s)`, hex string -> bytes, tolerates whitespace, errors on odd length / non-hex. */
     pub fn call_bytes_fromhex(&mut self) -> Result<(), VmErr> {
         let v = self.pop()?;
         let s = self.str_of(v, "bytes_fromhex() argument must be a string")?;
@@ -28,7 +28,7 @@ impl<'a> VM<'a> {
         self.push(v); Ok(())
     }
 
-    /* `int_from_bytes(b, byteorder)`, unsigned bytes -> int ("big"/"little"). Up to 8 bytes (u64); values above 47-bit Val auto-promote to LongInt. */
+    /* `int_from_bytes(b, byteorder)`, unsigned bytes -> int ("big"/"little"). Up to 8 bytes (u64), values above 47-bit Val auto-promote to LongInt. */
     pub fn call_int_from_bytes(&mut self) -> Result<(), VmErr> {
         let order = self.pop()?;
         let v = self.pop()?;
@@ -49,13 +49,13 @@ impl<'a> VM<'a> {
         } else {
             for (i, &b) in buf.iter().enumerate() { acc |= (b as u64) << (i * 8); }
         }
-        // u64 always fits in i128; int_to_val picks inline-Val or LongInt storage.
+        // u64 always fits in i128, int_to_val picks inline-Val or LongInt storage.
         let val = self.int_to_val(Some(acc as i128))?;
         self.push(val);
         Ok(())
     }
 
-    // `int_to_bytes(n, length, byteorder)`, non-negative int -> bytes of `length`; errors if it overflows.
+    // `int_to_bytes(n, length, byteorder)`, non-negative int -> bytes of `length`, errors if it overflows.
     pub fn call_int_to_bytes(&mut self) -> Result<(), VmErr> {
         let order = self.pop()?;
         let length = self.pop()?;
@@ -86,7 +86,7 @@ impl<'a> VM<'a> {
         self.push(v); Ok(())
     }
 
-    // `import_module(name)`, fetch an already-imported module by alias; returns its `HeapObj::Module` Val.
+    // `import_module(name)`, fetch an already-imported module by alias, returns its `HeapObj::Module` Val.
     pub fn call_import_module(&mut self) -> Result<(), VmErr> {
         let spec = self.pop()?;
         if !spec.is_heap() {
