@@ -111,11 +111,8 @@ impl<'a> VM<'a> {
 
     #[inline]
     pub(crate) fn checked_jump(&mut self, target: usize, limit: usize) -> Result<usize, VmErr> {
-        // Sandbox-off skips the budget decrement, the bounds check still runs.
-        if !self.sandbox_off {
-            if self.budget == 0 { return Err(cold_budget()); }
-            self.budget -= 1;
-        }
+        if self.budget == 0 { return Err(cold_budget()); }
+        self.budget -= 1;
         if target > limit { return Err(cold_runtime("jump target out of bounds")); }
         Ok(target)
     }

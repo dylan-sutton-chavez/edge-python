@@ -10,7 +10,7 @@ use super::{Pending, VM};
 use super::types::*;
 
 const MAGIC: u32 = 0x4E53_5045;
-const FORMAT: u32 = 1;
+const FORMAT: u32 = 2;
 
 pub type SnapErr = String;
 
@@ -514,7 +514,6 @@ pub fn save(vm: &VM, source: &str) -> Vec<u8> {
     w.usz(vm.budget);
     w.usz(vm.max_calls);
     w.usz(vm.heap.limit());
-    w.boolean(vm.sandbox_off);
     w.boolean(vm.strict_input);
     w.usz(vm.heap.snapshot_objs().count());
     for obj in vm.heap.snapshot_objs() {
@@ -550,7 +549,7 @@ pub fn source_of(blob: &[u8]) -> Result<&str, SnapErr> {
     Ok(header(blob)?.source)
 }
 
-/* Sandbox profile recorded at save time. */
+/* Sandbox profile recorded at save time. The remaining budget rides in the blob, so `ops` here is only a placeholder that `restore` overwrites. */
 pub fn limits_of(blob: &[u8]) -> Result<Limits, SnapErr> {
     let h = header(blob)?;
     let mut r = R::new(blob);
@@ -558,8 +557,7 @@ pub fn limits_of(blob: &[u8]) -> Result<Limits, SnapErr> {
     let _budget = r.usz()?;
     let calls = r.usz()?;
     let heap = r.usz()?;
-    let sandbox_off = r.boolean()?;
-    Ok(Limits { calls, ops: if sandbox_off { usize::MAX } else { 1 }, heap })
+    Ok(Limits { calls, ops: 1, heap })
 }
 
 fn collect_externs(chunk: &SSAChunk, map: &mut ExternMap) {
@@ -605,7 +603,6 @@ pub fn restore(vm: &mut VM, blob: &[u8]) -> Result<(), SnapErr> {
     vm.max_calls = r.usz()?;
     // Boot limits win over the recorded value.
     let _heap_limit = r.usz()?;
-    vm.sandbox_off = r.boolean()?;
     vm.strict_input = r.boolean()?;
 
     let mut externs = ExternMap::default();

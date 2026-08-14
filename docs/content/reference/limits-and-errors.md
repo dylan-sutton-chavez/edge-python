@@ -3,15 +3,15 @@ title: "Limits and errors"
 description: "Sandbox limits, integer width, error types, and runtime guarantees."
 ---
 
-## Sandbox limits
+## Sandboxed execution
 
-The VM has two limit profiles, chosen with `VM::with_limits`. Both shipped engines, the browser runtime and the CLI's native engine, run every script under the `sandbox` profile. The `none` profile is the library default for Rust embedders who construct a `VM` directly and want no metering.
+Every execution is metered, there is no unmetered mode. Both shipped engines, the browser runtime and the CLI's native engine, run every script under these limits, and `edge swarm` groups can override them per field.
 
-| Limit | `sandbox` (shipped engines) | `none` (library default) | What hitting it raises |
-|---|---|---|---|
-| Max call depth | 256 | 1,000 | `RecursionError` |
-| Max operations | 100,000,000 | unbounded | `RuntimeError` |
-| Max live objects | 100,000 | 10,000,000 | `MemoryError` |
+| Limit | Value | What hitting it raises |
+|---|---|---|
+| Max call depth | 256 | `RecursionError` |
+| Max operations | 100,000,000 | `RuntimeError` |
+| Max live objects | 100,000 | `MemoryError` |
 
 ```python
 def loop(n):

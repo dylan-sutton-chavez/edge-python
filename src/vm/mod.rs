@@ -158,8 +158,6 @@ pub struct VM<'a> {
     pub(crate) active_const_pools: Vec<*const [Val]>,
     /* Slot-slice ptrs for every live exec() frame, GC roots so a frame's mutating locals survive a nested resume. */
     pub(crate) active_slots: Vec<*const [Val]>,
-    /* Cached `ops == usize::MAX` so the hot path skips the budget decrement. */
-    pub(crate) sandbox_off: bool,
     pub(crate) with_stack: Vec<Val>,
     /* GC roots for operands popped off the stack but still read after a dunder call that can collect. */
     pub(crate) temp_roots: Vec<Val>,
@@ -211,10 +209,9 @@ pub struct VM<'a> {
 }
 
 impl<'a> VM<'a> {
-    pub fn new(chunk: &'a SSAChunk) -> Self { Self::with_limits(chunk, Limits::none()) }
+    pub fn new(chunk: &'a SSAChunk) -> Self { Self::with_limits(chunk, Limits::sandbox()) }
 
     pub fn with_limits(chunk: &'a SSAChunk, limits: Limits) -> Self {
-        let sandbox_off = limits.ops == usize::MAX;
         let mut vm = Self {
             stack: Vec::with_capacity(256),
             iter_stack: Vec::with_capacity(16),
@@ -287,7 +284,6 @@ impl<'a> VM<'a> {
             propagation_maps: HashMap::default(),
             active_const_pools: Vec::new(),
             active_slots: Vec::new(),
-            sandbox_off,
         };
         vm.build_function_table(chunk, None, None);
         vm.index_functions(0);

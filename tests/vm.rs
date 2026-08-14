@@ -59,7 +59,7 @@ mod test {
         }
     }
 
-    /* Runs every vm.json case under `Limits::sandbox()` rather than `none()`, the budget / heap / call-depth guards are off under `none` (`sandbox_off` short-circuits them), so only the bounded profile exercises the charge_step / charge_steps / back-edge-budget paths and lets cases assert that runaway allocation, recursion, and materialisation surface as `MemoryError` / `RecursionError` instead of hanging. Every case must therefore stay within the sandbox budget. */
+    /* Runs vm.json cases under sandbox limits testing budget heap depth guards verifying runaway allocation recursion materialization produce MemoryError RecursionError */
     #[test]
     fn test_cases() {
         let cases: Vec<Case> = serde_json::from_str(include_str!("cases/vm.json")).expect("invalid JSON");

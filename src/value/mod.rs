@@ -14,12 +14,11 @@ pub use err::*;
 pub use math::*;
 pub use scheduler::*;
 
-/* Per-execution caps for recursion depth, op budget, heap quota. */
+/* Per-execution caps for recursion depth, op budget, heap quota. Every execution is metered, tighter values are allowed, none is not. */
 #[derive(Clone, Copy)]
 pub struct Limits { pub calls: usize, pub ops: usize, pub heap: usize }
 
 impl Limits {
-    pub fn none() -> Self { Self { calls: 1_000, ops: usize::MAX, heap: 10_000_000 } }
     pub fn sandbox() -> Self { Self { calls: 256, ops: 100_000_000, heap: 100_000 } }
 }
 

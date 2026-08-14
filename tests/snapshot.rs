@@ -36,7 +36,7 @@ mod test {
         min_preempts: usize,
         #[serde(default)]
         max_preempts: Option<usize>,
-        // Run with `Limits::none` so preempts don't ride the budget check.
+        // Run on a huge budget so preempts don't ride the budget check.
         #[serde(default)]
         unmetered: bool,
     }
@@ -57,7 +57,7 @@ mod test {
     }
 
     fn limits_for(case: &Case) -> Limits {
-        if case.unmetered { Limits::none() } else { Limits::sandbox() }
+        if case.unmetered { Limits { calls: 1_000, ops: usize::MAX, heap: 10_000_000 } } else { Limits::sandbox() }
     }
 
     /* Restore target is a bare VM, state arrives from the blob. */

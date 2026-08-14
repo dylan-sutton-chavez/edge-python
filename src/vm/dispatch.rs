@@ -510,10 +510,8 @@ impl<'a> VM<'a> {
                 let target = self.checked_jump(op as usize, n)?;
                 // Backward jumps are loop back-edges, charge them so `while` is bounded like `for`.
                 if target <= rip {
-                    if !self.sandbox_off {
-                        if self.budget == 0 { return Err(cold_budget()); }
-                        self.budget -= 1;
-                    }
+                    if self.budget == 0 { return Err(cold_budget()); }
+                    self.budget -= 1;
                     if self.heap.needs_gc() { self.collect(slots); }
                     // Back-edges are the only preempt sampling point.
                     if self.preempt_left != 0 {
@@ -895,29 +893,23 @@ impl<'a> VM<'a> {
     /* Charge one unit against the op budget for native loops (custom-iterator drain, generator collect) that bypass the dispatch back-edge counter. */
     #[inline]
     pub(crate) fn charge_step(&mut self) -> Result<(), VmErr> {
-        if !self.sandbox_off {
-            if self.budget == 0 { return Err(cold_budget()); }
-            self.budget -= 1;
-        }
+        if self.budget == 0 { return Err(cold_budget()); }
+        self.budget -= 1;
         Ok(())
     }
 
     /* Charge `n` units at once for native builtins (sort, materialise) whose cost scales with input size. */
     #[inline]
     pub(crate) fn charge_steps(&mut self, n: usize) -> Result<(), VmErr> {
-        if !self.sandbox_off {
-            if self.budget < n { self.budget = 0; return Err(cold_budget()); }
-            self.budget -= n;
-        }
+        if self.budget < n { self.budget = 0; return Err(cold_budget()); }
+        self.budget -= n;
         Ok(())
     }
 
     #[inline(never)]
     fn exec_for_iter(&mut self, op: u16, ip: &mut usize, n: usize, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
-        if !self.sandbox_off {
-            if self.budget == 0 { return Err(cold_budget()); }
-            self.budget -= 1;
-        }
+        if self.budget == 0 { return Err(cold_budget()); }
+        self.budget -= 1;
         if self.heap.needs_gc() { self.collect(slots); }
         // Coroutine iteration, resume via call instead of next_item().
         if let Some(IterFrame::Coroutine(coro_val)) = self.iter_stack.last() {
