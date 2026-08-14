@@ -44,7 +44,7 @@ fn collect(s: &str) {
 #[test]
 fn a_real_plugin_runs_through_the_full_native_chain() {
     let so = build_slugify();
-    let dir = std::env::temp_dir().join("edge_trap_fullchain");
+    let dir = std::env::temp_dir().join("edge_proxy_fullchain");
     std::fs::create_dir_all(&dir).unwrap();
     let manifest = dir.join("packages.json");
     std::fs::write(&manifest, format!("{{ \"imports\": {{ \"slugify_mod\": \"{}\" }} }}", so.display())).unwrap();
@@ -87,7 +87,7 @@ pub extern "C" fn __fn_pid(_a: *const u32, _c: u32, _o: *mut u32) -> i32 {
 "#;
 
     fn build_pid() -> PathBuf {
-        let dir = std::env::temp_dir().join("edge_trap_gating");
+        let dir = std::env::temp_dir().join("edge_proxy_gating");
         std::fs::create_dir_all(&dir).unwrap();
         let src = dir.join("plugin.rs");
         std::fs::write(&src, SRC).unwrap();
@@ -112,13 +112,13 @@ pub extern "C" fn __fn_pid(_a: *const u32, _c: u32, _o: *mut u32) -> i32 {
         let f: PluginFn = *sym;
         // A leaf fits in the bytes past its entry, so neutralizing that span reaches its syscall.
         let span = 64;
-        let n = unsafe { trap::neutralize(f as *mut u8, span) };
+        let n = unsafe { proxy::neutralize(f as *mut u8, span) };
         assert!(n >= 1, "the reachable syscall instruction must be neutralized");
-        trap::register_range(f as usize, f as usize + span);
-        let _ = trap::take_block();
+        proxy::register_range(f as usize, f as usize + span);
+        let _ = proxy::take_block();
         let args = [0u32];
         let mut out = 0u32;
-        let _ = unsafe { trap::run_plugin(f, args.as_ptr(), 1, &mut out) };
-        assert!(trap::take_block(), "the reachable syscall must be trapped, never a real pid");
+        let _ = unsafe { proxy::run_plugin(f, args.as_ptr(), 1, &mut out) };
+        assert!(proxy::take_block(), "the reachable syscall must be trapped, never a real pid");
     }
 }

@@ -77,8 +77,8 @@ fn confine(path: &Path) -> Result<(), String> {
             for seg in shlib.segments() {
                 if seg.is_code() {
                     let base = seg.actual_virtual_memory_address(shlib).0 as *mut u8;
-                    unsafe { trap::neutralize(base, seg.len()) };
-                    trap::register_range(base as usize, base as usize + seg.len());
+                    unsafe { proxy::neutralize(base, seg.len()) };
+                    proxy::register_range(base as usize, base as usize + seg.len());
                 }
             }
         }
@@ -103,11 +103,11 @@ fn bind(name: String, f: PluginFn) -> NativeBinding {
         let mut argv: Vec<u32> = args.iter().map(|v| put_val(*v)).collect();
         argv.push(kwargs.map_or(0, put_val));
         let mut out: u32 = 0;
-        let status = unsafe { trap::run_plugin(f, argv.as_ptr(), argv.len() as u32, &mut out) };
+        let status = unsafe { proxy::run_plugin(f, argv.as_ptr(), argv.len() as u32, &mut out) };
         // A trapped syscall aborts the call, the guard reports it and we never read `out`.
-        if trap::take_block() {
+        if proxy::take_block() {
             release_handles(&argv);
-            return Err(error_from_kind(ErrorKind::Runtime as u32, trap::block_message().to_string()));
+            return Err(error_from_kind(ErrorKind::Runtime as u32, proxy::block_message().to_string()));
         }
         // Status 2 means deferred, the scheduler parks the calling coroutine.
         if status == 2 {

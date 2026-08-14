@@ -29,33 +29,33 @@ fn write_code(code: &[u8]) -> *mut u8 {
 #[test]
 fn a_benign_plugin_returns_its_value() {
     let base = write_code(BENIGN);
-    let n = unsafe { trap::neutralize(base, BENIGN.len()) };
+    let n = unsafe { proxy::neutralize(base, BENIGN.len()) };
     assert_eq!(n, 0, "a benign function has no syscall to neutralize");
-    trap::register_range(base as usize, base as usize + BENIGN.len());
+    proxy::register_range(base as usize, base as usize + BENIGN.len());
     let f: PluginFn = unsafe { core::mem::transmute(base) };
     let mut out = 0u32;
-    let r = unsafe { trap::run_plugin(f, core::ptr::null(), 0, &mut out) };
-    assert!(!trap::take_block(), "a benign function must not trip the guard");
+    let r = unsafe { proxy::run_plugin(f, core::ptr::null(), 0, &mut out) };
+    assert!(!proxy::take_block(), "a benign function must not trip the guard");
     assert_eq!(r, 42, "the function's own return value must pass through");
 }
 
 #[test]
 fn a_reachable_syscall_is_trapped_and_reported() {
     let base = write_code(SYSCALL);
-    let n = unsafe { trap::neutralize(base, SYSCALL.len()) };
+    let n = unsafe { proxy::neutralize(base, SYSCALL.len()) };
     assert_eq!(n, 1, "the one syscall instruction must be neutralized");
-    trap::register_range(base as usize, base as usize + SYSCALL.len());
+    proxy::register_range(base as usize, base as usize + SYSCALL.len());
     let f: PluginFn = unsafe { core::mem::transmute(base) };
     let mut out = 0u32;
-    let _ = unsafe { trap::run_plugin(f, core::ptr::null(), 0, &mut out) };
-    assert!(trap::take_block(), "the reachable syscall must be trapped");
-    assert!(trap::block_message().contains("move this to a system package"));
+    let _ = unsafe { proxy::run_plugin(f, core::ptr::null(), 0, &mut out) };
+    assert!(proxy::take_block(), "the reachable syscall must be trapped");
+    assert!(proxy::block_message().contains("move this to a system package"));
 }
 
 // Builds a cdylib, opens it, and cycles one loaded text page through the neutralize protections.
 #[test]
 fn loaded_library_text_can_be_reprotected() {
-    let dir = std::env::temp_dir().join("edge_trap_reprotect");
+    let dir = std::env::temp_dir().join("edge_proxy_reprotect");
     std::fs::create_dir_all(&dir).unwrap();
     let src = dir.join("t.rs");
     std::fs::write(&src, "#[no_mangle]\npub extern \"C\" fn answer() -> i32 { 42 }\n").unwrap();

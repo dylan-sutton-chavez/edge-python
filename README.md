@@ -56,7 +56,7 @@ A Cargo workspace at the repo root holds the engine, `abi`, `pdk`, `rt` and `ski
 ├── std
 ├── tests
 │   └── cases
-└── trap
+└── proxy
 ```
 
 ```bash
