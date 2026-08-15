@@ -1,3 +1,23 @@
+/* Recursive value the wire's TLV encoding can carry, mirrors `abi/src/lib.rs` `tag`. ArrayBuffer is accepted on encode, decode never produces one. */
+export type EdgeValue = null | boolean | number | bigint | string | Uint8Array | ArrayBuffer | EdgeValue[] | { [key: string]: EdgeValue };
+
+/* Handle-codec surface returned by `makeRt`, passed to capability loaders so handlers skip NaN-boxing. */
+export interface Rt {
+    decodeStr(h: number): string
+    decodeInt(h: number): number | bigint
+    decodeBool(h: number): boolean
+    decodeFloat(h: number): number
+    encodeStr(s: string): number
+    encodeInt(n: number | bigint): number
+    encodeBool(b: boolean): number
+    encodeFloat(f: number): number
+    encodeNone(): number
+    decodeAny(h: number): EdgeValue
+    encodeAny(v: EdgeValue): number
+}
+
+import type { CompilerExports } from './wasm.ts';
+
 const TD = new TextDecoder();
 const TE = new TextEncoder();
 
@@ -17,13 +37,13 @@ const I128_MIN = -(1n << 127n);
 const SAFE_MAX = BigInt(Number.MAX_SAFE_INTEGER);
 
 // i128 LE read, BigInt past 2^53.
-function readI128(v, off) {
+function readI128(v: DataView, off: number): number | bigint {
     const big = (v.getBigInt64(off + 8, true) << 64n) | v.getBigUint64(off, true);
     return big >= -SAFE_MAX && big <= SAFE_MAX ? Number(big) : big;
 }
 
 // i128 LE write, throws beyond i128.
-function writeI128(v, off, n) {
+function writeI128(v: DataView, off: number, n: number | bigint): void {
     const big = BigInt(n);
     if (big > I128_MAX || big < I128_MIN) throw new RangeError(`int out of i128 range: ${n}`);
     v.setBigUint64(off, big & U64_MASK, true);
@@ -31,7 +51,7 @@ function writeI128(v, off, n) {
 }
 
 /* Handle-codec helpers wrapping `host_edge_decode` / `host_edge_encode`, passed to capability loaders so handlers skip NaN-boxing. */
-export function makeRt(getExports) {
+export function makeRt(getExports: () => CompilerExports): Rt {
     return {
         decodeStr: (h) => decodeStr(getExports(), h),
         decodeInt: (h) => decodeInt(getExports(), h),
@@ -50,7 +70,7 @@ export function makeRt(getExports) {
 }
 
 // Shared alloc/decode/retry cycle, returns tag+bytes.
-function rawDecode(exps, handle) {
+function rawDecode(exps: CompilerExports, handle: number): { tag: number, bytes: Uint8Array } {
     const tagPtr = exps.wasm_alloc(4);
     let cap = 256;
     let dstPtr = exps.wasm_alloc(cap);
@@ -69,53 +89,53 @@ function rawDecode(exps, handle) {
     return { tag, bytes };
 }
 
-function decodeBytes(exps, handle, expectedTag) {
+function decodeBytes(exps: CompilerExports, handle: number, expectedTag: number): Uint8Array {
     const { tag, bytes } = rawDecode(exps, handle);
     if (tag !== expectedTag) throw new Error(`expected tag ${expectedTag}, got ${tag}`);
     return bytes;
 }
 
-const decodeStr = (exps, h) => TD.decode(decodeBytes(exps, h, TAG_BYTES));
-const decodeInt = (exps, h) => {
+const decodeStr = (exps: CompilerExports, h: number) => TD.decode(decodeBytes(exps, h, TAG_BYTES));
+const decodeInt = (exps: CompilerExports, h: number) => {
     const b = decodeBytes(exps, h, TAG_INT);
     return readI128(new DataView(b.buffer, b.byteOffset, 16), 0);
 };
-const decodeBool = (exps, h) => decodeBytes(exps, h, TAG_BOOL)[0] !== 0;
-const decodeFloat = (exps, h) => {
+const decodeBool = (exps: CompilerExports, h: number) => decodeBytes(exps, h, TAG_BOOL)[0] !== 0;
+const decodeFloat = (exps: CompilerExports, h: number) => {
     const b = decodeBytes(exps, h, TAG_FLOAT);
     return new DataView(b.buffer, b.byteOffset, 8).getFloat64(0, true);
 };
 
 // Alloc `len` guest bytes, fill via `write(ptr)`, encode to a handle, free. Pairs alloc/free so lengths can't drift.
-function encodeScalar(exps, tag, len, write) {
+function encodeScalar(exps: CompilerExports, tag: number, len: number, write: (ptr: number) => void): number {
     const ptr = exps.wasm_alloc(len);
     write(ptr);
     const h = exps.host_edge_encode(tag, ptr, len);
     exps.wasm_free(ptr, len);
     return h;
 }
-function encodeStr(exps, s) {
+function encodeStr(exps: CompilerExports, s: string): number {
     const bytes = TE.encode(s);
     return encodeScalar(exps, TAG_BYTES, bytes.length, (ptr) => new Uint8Array(exps.memory.buffer, ptr, bytes.length).set(bytes));
 }
-function encodeInt(exps, n) {
+function encodeInt(exps: CompilerExports, n: number | bigint): number {
     return encodeScalar(exps, TAG_INT, 16, (ptr) => writeI128(new DataView(exps.memory.buffer), ptr, n));
 }
-function encodeBool(exps, b) {
+function encodeBool(exps: CompilerExports, b: boolean): number {
     return encodeScalar(exps, TAG_BOOL, 1, (ptr) => { new Uint8Array(exps.memory.buffer, ptr, 1)[0] = b ? 1 : 0; });
 }
-function encodeFloat(exps, f) {
+function encodeFloat(exps: CompilerExports, f: number): number {
     return encodeScalar(exps, TAG_FLOAT, 8, (ptr) => new DataView(exps.memory.buffer).setFloat64(ptr, f, true));
 }
 
 // Decode any tag to a JS value.
-function decodeAny(exps, handle) {
+function decodeAny(exps: CompilerExports, handle: number): EdgeValue {
     const { tag, bytes } = rawDecode(exps, handle);
     return decodeBody(tag, bytes);
 }
 
 /* Wire payload to JS value. LIST/DICT payloads hold nested TLV nodes (tag:u32le len:u32le payload). */
-function decodeBody(tag, bytes) {
+function decodeBody(tag: number, bytes: Uint8Array): EdgeValue {
     const view = () => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     switch (tag) {
         case TAG_NONE: return null;
@@ -129,7 +149,7 @@ function decodeBody(tag, bytes) {
             const v = view();
             const count = v.getUint32(0, true);
             let pos = 4;
-            const nextNode = () => {
+            const nextNode = (): EdgeValue => {
                 const t = v.getUint32(pos, true);
                 const len = v.getUint32(pos + 4, true);
                 const payload = bytes.subarray(pos + 8, pos + 8 + len);
@@ -139,10 +159,10 @@ function decodeBody(tag, bytes) {
             if (tag === TAG_LIST) {
                 return Array.from({ length: count }, nextNode);
             }
-            const obj = {};
+            const obj: { [key: string]: EdgeValue } = {};
             for (let i = 0; i < count; i++) {
                 const key = nextNode();
-                obj[key] = nextNode();
+                obj[String(key)] = nextNode();
             }
             return obj;
         }
@@ -151,7 +171,7 @@ function decodeBody(tag, bytes) {
 }
 
 /* JS value -> handle, chooses tag from typeof. Bigint also accepted for int. */
-function encodeAny(exps, value) {
+function encodeAny(exps: CompilerExports, value: EdgeValue): number {
     if (value === null || value === undefined) return exps.host_edge_encode(TAG_NONE, 0, 0);
     if (typeof value === 'boolean') return encodeBool(exps, value);
     if (typeof value === 'bigint') return encodeInt(exps, value);
@@ -169,14 +189,14 @@ function encodeAny(exps, value) {
 }
 
 /* JS value to {tag, body}, used for nested nodes and composite roots. */
-function encodeNode(value) {
+function encodeNode(value: EdgeValue): { tag: number, body: Uint8Array } {
     if (value === null || value === undefined) return { tag: TAG_NONE, body: new Uint8Array(0) };
     if (typeof value === 'boolean') return { tag: TAG_BOOL, body: Uint8Array.of(value ? 1 : 0) };
     if (typeof value === 'number' || typeof value === 'bigint') {
         const body = new Uint8Array(typeof value === 'number' && !Number.isInteger(value) ? 8 : 16);
         const v = new DataView(body.buffer);
         if (body.length === 8) {
-            v.setFloat64(0, value, true);
+            v.setFloat64(0, value as number, true);
             return { tag: TAG_FLOAT, body };
         }
         writeI128(v, 0, value);
@@ -196,7 +216,7 @@ function encodeNode(value) {
 }
 
 // count:u32le then each node framed as tag:u32le len:u32le payload.
-function joinNodes(count, nodes) {
+function joinNodes(count: number, nodes: { tag: number, body: Uint8Array }[]): Uint8Array {
     const total = 4 + nodes.reduce((n, { body }) => n + 8 + body.length, 0);
     const out = new Uint8Array(total);
     const v = new DataView(out.buffer);

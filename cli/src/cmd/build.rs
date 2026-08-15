@@ -199,7 +199,7 @@ fn vendor_runtime(out_dir: &Path) -> Result<()> {
     for rel in RUNTIME_FILES {
         let bytes = match &local {
             Some(dir) => {
-                let path = Path::new(dir).join(rel);
+                let path = Path::new(dir).join(rel.replacen("src/", "dist/", 1));
                 fs::read(&path).with_context(|| format!("reading {}", path.display()))?
             }
             None => {

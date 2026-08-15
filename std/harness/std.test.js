@@ -1,6 +1,6 @@
 import { chromium } from "npm:playwright@latest";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
-import { DEFAULT_IMPORTS } from "../../web/src/defaults.js";
+import { DEFAULT_IMPORTS } from "../../web/src/defaults.ts";
 
 const ROOT = new URL("../", import.meta.url).pathname;
 const RUNTIME = new URL("../../web/", import.meta.url).pathname;

@@ -1,6 +1,6 @@
 import { chromium } from "npm:playwright@latest";
 import { readFileSync } from "node:fs";
-import { DEFAULT_IMPORTS } from "../src/defaults.js";
+import { DEFAULT_IMPORTS } from "../src/defaults.ts";
 
 // One CDN host now serves every family under a path prefix (/std, /system, /runtime), derive it from the manifest.
 const CDN_HOST = new URL(Object.values(DEFAULT_IMPORTS)[0]).host;
@@ -18,6 +18,10 @@ const TYPES = {
 
 /* Drives <edge-python> through index.html, boots one tag, then feeds every runtime.json case to its worker via run(), comparing #app for output cases and the run trace for error cases. Run with deno test --allow-all web/tests/runtime.test.js. */
 Deno.test("runtime: <edge-python> runs the corpus through index.html", async () => {
+    // Build web/src TypeScript into web/dist so the browser can load it.
+    const tsc = (cfg) => new Deno.Command(Deno.execPath(), { args: ["run", "-A", "npm:typescript@5.9.3/tsc", "-p", cfg], cwd: new URL("../", import.meta.url).pathname }).output();
+    for (const c of ["tsconfig.json", "tsconfig.worker.json"]) { const r = await tsc(c); if (!r.success) throw new Error(`tsc: ${c}`); }
+
     const browser = await chromium.launch();
     const page = await browser.newPage();
     const errors = [];

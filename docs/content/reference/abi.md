@@ -368,7 +368,7 @@ For `from <name> import <names>` where the manifest maps `<name>` to a `.wasm` U
 4. Marshals args as handles.
 5. Propagates results.
 
-The reference browser shim is `web/src/native.js` in the repo. The CLI's [native engine](/reference/modules#the-native-engine) implements the same six imports over `dlopen`. WASI hosts and Rust embedders mirror the shape.
+The reference browser shim is `web/src/native.ts` in the repo. The CLI's [native engine](/reference/modules#the-native-engine) implements the same six imports over `dlopen`. WASI hosts and Rust embedders mirror the shape.
 
 ## Constraints and caveats
 

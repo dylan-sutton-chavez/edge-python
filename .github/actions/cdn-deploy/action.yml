@@ -18,6 +18,12 @@ runs:
         name: compiler_wasm
         path: /tmp/compiler/
 
+    - name: Download web/dist
+      uses: actions/download-artifact@v8
+      with:
+        name: web_dist
+        path: /tmp/web-dist/
+
     - name: Download std artifacts
       uses: actions/download-artifact@v8
       with:
@@ -53,9 +59,7 @@ runs:
         printf '/compiler.wasm\n  Content-Type: application/wasm\n  Content-Encoding: br\n  Cache-Control: public, max-age=0, must-revalidate\n' > _site/_headers
 
         # web package served under /web/ (public embed URLs); tests/ not shipped.
-        cp -r web/src _site/web/src
-        # Compat alias: cached index.js builds resolve ../worker/worker.js.
-        cp -r web/src/worker _site/web/src/worker
+        cp -r /tmp/web-dist/. _site/web/src
 
         # std: <pkg>.wasm / <pkg>.py.
         cp -r /tmp/std/. _site/std/

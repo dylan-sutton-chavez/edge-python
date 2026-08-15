@@ -255,7 +255,7 @@ pub fn base_dir(file: &Path) -> Option<String> {
     Some(format!("{parent}/"))
 }
 
-/* Test hooks, EDGE_FAKE_CONTRACT lands after element.js so the fake wins, EDGE_RUNTIME_DIR swaps the CDN runtime and compiler for locally served copies. */
+/* Test hooks, EDGE_FAKE_CONTRACT lands after element.ts so the fake wins, EDGE_RUNTIME_DIR swaps the CDN runtime and compiler for locally served copies. */
 fn harness_page() -> String {
     let mut page = HARNESS.replacen("%CONTRACT%", compiler::devkit::RUNTIME_CONTRACT, 1);
     if let Ok(v) = std::env::var("EDGE_FAKE_CONTRACT") {
@@ -265,7 +265,7 @@ fn harness_page() -> String {
     }
     if std::env::var("EDGE_RUNTIME_DIR").is_ok() {
         page = page
-            .replacen("https://cdn.edgepython.com/web/src/element.js", "/web/src/element.js", 1)
+            .replacen("https://cdn.edgepython.com/web/src/element.js", "/web/dist/element.js", 1)
             // The worker resolves no relative URLs, so the wasm override must be absolute.
             .replacen(
                 "<script type=\"module\">",

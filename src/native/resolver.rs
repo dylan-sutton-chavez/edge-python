@@ -180,7 +180,7 @@ impl FileResolver {
     }
 }
 
-/* Official std packages resolvable by bare name with no manifest, mirrors web/src/defaults.js. */
+/* Official std packages resolvable by bare name with no manifest, mirrors web/src/defaults.ts. */
 fn std_default(name: &str) -> Option<String> {
     match name {
         "json" | "re" | "math" | "struct" => Some(native_std_spec(name)),

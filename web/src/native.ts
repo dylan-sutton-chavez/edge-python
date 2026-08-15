@@ -1,28 +1,58 @@
-/* `nativeTable` is indexed by `baseId` from `register_native_module`, entries are wasmpdk fns or JS handlers, dispatched by `host_call_native`. */
-export const nativeTable = [];
+import type { CompilerExports } from './wasm.ts';
 
-export function resetNativeTable() {
+/* A registered native fn, tagged with dispatch metadata by the loader that produced it. */
+export interface NativeFn {
+    (...args: unknown[]): unknown
+    __edge_kind?: 'wasmpdk' | 'capability'
+    __edge_name?: string
+    __edge_module?: string
+    __edge_main_thread?: boolean
+    __edge_alloc?: (size: number) => number
+    __edge_free?: (ptr: number, len: number) => void
+    __edge_memory?: WebAssembly.Memory
+}
+
+export interface NativeModuleResult {
+    kind: string
+    names: string[]
+    fns: NativeFn[]
+}
+
+export interface NativeLoader {
+    match(module: WebAssembly.Module): boolean
+    load(module: WebAssembly.Module, ctx: NativeLoadCtx): Promise<NativeModuleResult>
+}
+
+export interface NativeLoadCtx {
+    loaders: NativeLoader[]
+    compilerExports: CompilerExports
+}
+
+/* `nativeTable` is indexed by `baseId` from `register_native_module`, entries are wasmpdk fns or JS handlers, dispatched by `host_call_native`. */
+export const nativeTable: NativeFn[] = [];
+
+export function resetNativeTable(): void {
     nativeTable.length = 0;
 }
 
 /* Build the 6 `env.edge_*` imports for wasm-pdk plugins, bridging guest and compiler memory. */
-export function makeGuestEnv(compilerExports) {
+export function makeGuestEnv(compilerExports: CompilerExports) {
     const compMem = () => new Uint8Array(compilerExports.memory.buffer);
     const compView = () => new DataView(compilerExports.memory.buffer);
 
-    return (guestExports) => {
+    return (guestExports: { memory: WebAssembly.Memory }) => {
         const gMem = () => new Uint8Array(guestExports.memory.buffer);
         const gView = () => new DataView(guestExports.memory.buffer);
 
-        const stage = (ptr, len) => {
+        const stage = (ptr: number, len: number): number => {
             const c = compilerExports.wasm_alloc(Math.max(1, len));
             if (len) compMem().set(gMem().subarray(ptr, ptr + len), c);
             return c;
         };
-        const unstage = (c, len) => compilerExports.wasm_free(c, Math.max(1, len));
+        const unstage = (c: number, len: number): void => compilerExports.wasm_free(c, Math.max(1, len));
 
         return {
-            edge_op: (op, recv, name_ptr, name_len, argv_ptr, argc, out) => {
+            edge_op: (op: number, recv: number, name_ptr: number, name_len: number, argv_ptr: number, argc: number, out: number): number => {
                 const cName = stage(name_ptr, name_len);
                 const argvLen = Math.max(4, argc * 4);
                 const cArgv = compilerExports.wasm_alloc(argvLen);
@@ -38,14 +68,14 @@ export function makeGuestEnv(compilerExports) {
                 return ret;
             },
 
-            edge_encode: (tag, ptr, len) => {
+            edge_encode: (tag: number, ptr: number, len: number): number => {
                 const c = stage(ptr, len);
                 const h = compilerExports.host_edge_encode(tag, c, len);
                 unstage(c, len);
                 return h;
             },
 
-            edge_decode: (h, out_tag, dst, dst_max) => {
+            edge_decode: (h: number, out_tag: number, dst: number, dst_max: number): number => {
                 const bufLen = Math.max(1, dst_max);
                 const cTag = compilerExports.wasm_alloc(4);
                 const cBuf = compilerExports.wasm_alloc(bufLen);
@@ -57,15 +87,15 @@ export function makeGuestEnv(compilerExports) {
                 return ret;
             },
 
-            edge_release: (h) => compilerExports.host_edge_release(h),
+            edge_release: (h: number): void => compilerExports.host_edge_release(h),
 
-            edge_throw: (kind, msg_ptr, msg_len) => {
+            edge_throw: (kind: number, msg_ptr: number, msg_len: number): void => {
                 const c = stage(msg_ptr, msg_len);
                 compilerExports.host_edge_throw(kind, c, msg_len);
                 unstage(c, msg_len);
             },
 
-            edge_take_error: (out_kind, dst, dst_max) => {
+            edge_take_error: (out_kind: number, dst: number, dst_max: number): number => {
                 const bufLen = Math.max(1, dst_max);
                 const cKind = compilerExports.wasm_alloc(4);
                 const cBuf = compilerExports.wasm_alloc(bufLen);
@@ -83,10 +113,10 @@ export function makeGuestEnv(compilerExports) {
 }
 
 /* Built-in Path A fallback, instantiate guest, walk exports, annotate each fn with its guest's `__edge_alloc` + `__edge_memory`. */
-async function builtinWasmPdkLoader(module, ctx) {
+async function builtinWasmPdkLoader(module: WebAssembly.Module, ctx: NativeLoadCtx): Promise<NativeModuleResult> {
     const envFactory = makeGuestEnv(ctx.compilerExports);
     // Forward reference, the getter captures `instance` lazily. It's only read when env functions fire during VM execution, by which point `instance` is bound.
-    const env = envFactory({ get memory() { return instance.exports.memory; } });
+    const env = envFactory({ get memory() { return instance.exports.memory as WebAssembly.Memory; } });
     // WebAssembly.instantiate(Module, ...) returns the Instance directly, not {module, instance}.
     const instance = await WebAssembly.instantiate(module, { env });
 
@@ -97,17 +127,18 @@ async function builtinWasmPdkLoader(module, ctx) {
         );
     }
 
-    const names = [];
-    const fns = [];
-    for (const [k, v] of Object.entries(instance.exports)) {
-        if (k === 'memory' || typeof v !== 'function') continue;
+    const names: string[] = [];
+    const fns: NativeFn[] = [];
+    for (const [k, value] of Object.entries(instance.exports)) {
+        if (k === 'memory' || typeof value !== 'function') continue;
         // Keep convention exports (__fn_/__class_/__const_), drop ABI internals like __edge_alloc.
         if (k.startsWith('__') && !k.startsWith('__class_') && !k.startsWith('__const_') && !k.startsWith('__fn_')) continue;
+        const v = value as NativeFn;
         names.push(k);
-        v.__edge_alloc = instance.exports.__edge_alloc;
+        v.__edge_alloc = instance.exports.__edge_alloc as (size: number) => number;
         // Optional on older plugins, callers use `?.`.
-        v.__edge_free = instance.exports.__edge_free;
-        v.__edge_memory = instance.exports.memory;
+        v.__edge_free = instance.exports.__edge_free as ((ptr: number, len: number) => void) | undefined;
+        v.__edge_memory = instance.exports.memory as WebAssembly.Memory;
         v.__edge_kind = 'wasmpdk';
         fns.push(v);
     }
@@ -115,14 +146,14 @@ async function builtinWasmPdkLoader(module, ctx) {
 }
 
 /* Try custom loaders first, built-in Path A is the implicit fallback. */
-export async function loadNativeModule(_spec, bytes, ctx) {
-    const module = await WebAssembly.compile(bytes);
+export async function loadNativeModule(_spec: string, bytes: Uint8Array, ctx: NativeLoadCtx): Promise<NativeModuleResult> {
+    const module = await WebAssembly.compile(bytes as BufferSource);
 
     for (const loader of ctx.loaders) {
         if (loader.match(module)) {
             const result = await loader.load(module, ctx);
             // Tag each fn with its dispatch kind so host_call_native picks the right path.
-            for (const fn of result.fns) fn.__edge_kind = result.kind;
+            for (const fn of result.fns) fn.__edge_kind = result.kind as 'wasmpdk' | 'capability';
             annotateNames(result);
             return result;
         }
@@ -134,6 +165,6 @@ export async function loadNativeModule(_spec, bytes, ctx) {
 }
 
 /* Pair each fn with its declared name so deferred dispatch can route by name on the main thread. */
-function annotateNames({ names, fns }) {
+function annotateNames({ names, fns }: NativeModuleResult): void {
     for (let i = 0; i < fns.length; i++) fns[i].__edge_name = names[i];
 }

@@ -1,18 +1,18 @@
 /* Byte cap on any source handed to the compiler, mirrors the wasm SRC buffer (compiler SZ). */
 export const SOURCE_LIMIT = 1 << 20;
 
-export const sha256Hex = async (bytes) => {
-    const digest = await crypto.subtle.digest('SHA-256', bytes);
+export const sha256Hex = async (bytes: Uint8Array): Promise<string> => {
+    const digest = await crypto.subtle.digest('SHA-256', bytes as BufferSource);
     return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
 /* Mirror `compiler::packages::manifest` so transitive imports canonicalize identically on both sides. */
-export const dirOf = (spec) => {
+export const dirOf = (spec: string): string => {
     const i = spec.lastIndexOf('/');
     return i === -1 ? '' : spec.slice(0, i + 1);
 };
 
-export const parentDir = (dir) => {
+export const parentDir = (dir: string): string | null => {
     if (dir === '') return null;
     const trimmed = dir.endsWith('/') ? dir.slice(0, -1) : dir;
     const sch = trimmed.indexOf('://');
@@ -21,7 +21,7 @@ export const parentDir = (dir) => {
     return i === -1 ? '' : trimmed.slice(0, i + 1);
 };
 
-export const joinRel = (base, target) => {
+export const joinRel = (base: string, target: string): string => {
     if (target.includes('://') || target.startsWith('/') || target.startsWith('mt:')) return target;
     if (base.includes('://')) return new URL(target, base).toString();
     let b = base, t = target;

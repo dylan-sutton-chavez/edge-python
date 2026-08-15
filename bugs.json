@@ -352,28 +352,28 @@
     },
     {
       "id": "bug-036",
-      "file": "web/src/worker/engine.js",
-      "line": 250,
+      "file": "web/src/worker/engine.ts",
+      "line": 257,
       "title": "pause() reports 'parked' but only PREEMPTED yields actually hold the program",
-      "description": "settlePause(true) fires at the top of the drive loop for every yield kind, but the resumeGate await exists only in the STATUS_PREEMPTED branch. For PENDING_TIMER/FRAME/HOST_CALL the driver services the yield and calls run_resume() — the program keeps running after pause() resolved true. A pause during a long sleep() is also only noticed after the timer fires. Contradicts the pause doc in web/src/index.js:122 and the README.",
+      "description": "settlePause(true) fires at the top of the drive loop for every yield kind, but the resumeGate await exists only in the STATUS_PREEMPTED branch. For PENDING_TIMER/FRAME/HOST_CALL the driver services the yield and calls run_resume() — the program keeps running after pause() resolved true. A pause during a long sleep() is also only noticed after the timer fires. Contradicts the pause doc in web/src/index.ts:166 and the README.",
       "repro": "program with sleep(5); call pause() from the host; it resolves true yet the program continues after the sleep",
       "actual": "pause() resolves true but execution continues on the next serviced yield",
       "expected": "program stays parked until resume()"
     },
     {
       "id": "bug-037",
-      "file": "web/src/worker/engine.js",
-      "line": 72,
+      "file": "web/src/worker/engine.ts",
+      "line": 79,
       "title": "IndexedDB cache wiped on every page load when version is omitted (the default)",
-      "description": "`if (!version || stored !== version) { await cache.clear(); }` — version defaults to null (and element.js never passes one), so !version is always true and the persistent cache is cleared on every createWorker, making it useless across page loads. README documents invalidation only on version mismatch.",
+      "description": "`if (!version || stored !== version) { await cache.clear(); }` — version defaults to null (and element.ts never passes one), so !version is always true and the persistent cache is cleared on every createWorker, making it useless across page loads. README documents invalidation only on version mismatch.",
       "repro": "createWorker without a version; reload the page; cache is empty again",
       "actual": "cache cleared on every load",
       "expected": "cache persists; cleared only when a provided version mismatches"
     },
     {
       "id": "bug-038",
-      "file": "web/src/prefetch.js",
-      "line": 85,
+      "file": "web/src/prefetch.ts",
+      "line": 134,
       "title": "Synthetic root packages.json shadows a physical one",
       "description": "Whenever the resolution table is non-empty, prefetch does fetchedSources.set('packages.json', synthetic). The walk-up then finds 'packages.json' already cached and never fetches the real file, silently dropping its imports/host/extends for programmatic runs with entryDir=''.",
       "repro": "programmatic run with a real root packages.json next to the entry plus any imports",
@@ -382,8 +382,8 @@
     },
     {
       "id": "bug-039",
-      "file": "web/src/index.js",
-      "line": 156,
+      "file": "web/src/index.ts",
+      "line": 200,
       "title": "Cross-origin worker bootstrap failure hangs createWorker forever",
       "description": "On dynamic-import failure the blob bootstrap posts { type: 'error', message: 'worker bootstrap failed: ...' } with no reqId; the main-thread handler does pending.get(data.reqId) -> undefined and returns early, so the send('load') promise never settles and no onerror fires.",
       "repro": "embed cross-origin with an unreachable CDN URL",
@@ -589,8 +589,8 @@
     {"file": "std/json/src/parser.rs", "line": 147, "comment_says": "'Python hands list[tuple] but wasm-pdk has no new_tuple (the hook can tuple(p) for p in pairs if it needs them)'", "code_does": "Handle::new_tuple exists now (pdk/src/lib.rs:583) and is already used by std/math/src/float.rs:197; the stated constraint is gone"},
     {"file": "std/math/src/float.rs", "line": 110, "comment_says": "'Variadic Euclidean norm, matching math.hypot(*coordinates)'", "code_does": "naive sum-of-squares with no scaling; hypot(1e308, 1e308) overflows to inf where math.hypot returns 1.414e308 (see bug-021)"},
     {"file": "src/vm/opcodes/dunder.rs", "line": 27, "comment_says": "compare_dunder_names returns '(forward, reflected, negate)'; '__ne__' is negated '__eq__'", "code_does": "negate is false for every opcode including NotEq; the actual __ne__ fallback (negate __eq__) lives in try_compare_dunder lines 104-108, so the negate field/branch is dead"},
-    {"file": "web/src/worker/engine.js", "line": 59, "comment_says": "'Re-applied at every run since resetNativeTable clears them.'", "code_does": "hostImportMap(registerHost, incremental) deliberately skips re-registration in incremental/REPL mode (engine.js:131-132, 209)"},
-    {"file": "web/src/fetch.js", "line": 2, "comment_says": "'Null on 404 (opportunistic ok), throws on drift.'", "code_does": "the function returns null on any network failure or non-ok status (fetch.js:23-32), not just 404"},
+    {"file": "web/src/worker/engine.ts", "line": 65, "comment_says": "'Re-applied at every run since resetNativeTable clears them.'", "code_does": "systemImportMap(registerSystem, skipRegistration) deliberately skips re-registration in incremental/REPL mode (engine.ts:139, 216)"},
+    {"file": "web/src/fetch.ts", "line": 11, "comment_says": "'Null on 404 (opportunistic ok), throws on drift.'", "code_does": "the function returns null on any network failure or non-ok status (fetch.ts:28-42), not just 404"},
     {"file": "web/builtins/dom/src/media.js", "line": 14, "comment_says": "'NaN until metadata loads; coerce to 0...'", "code_does": "code coerces any non-finite duration (isFinite check), including Infinity from live streams, to 0"},
     {"file": "cli/src/engine/web.rs", "line": 92, "comment_says": "doc on `pub fn run`: 'Write a raw stdout chunk (byte-stream...) and flush so streaming output appears at once.'", "code_does": "run writes nothing itself; that sentence describes engine::emit_chunk (engine/mod.rs:23-28). Misplaced leftover doc line"},
     {"file": "cli/src/manifest.rs", "line": 36, "comment_says": "'Official package registry. Mirrors the runtime's built-in default manifest.' directly above pub enum Kind", "code_does": "Kind is just the Std/Host tag; the registry is the registry() function at line 45. Comment sits on the wrong item"},
@@ -601,7 +601,7 @@
     {"file": "src/vm/globals/io.rs", "line": 93, "comment_says": "wasm32 error string says 'input() requires host data in WASM (use set_input)'", "code_does": "no set_input export exists in src/wasm/exports.rs; the inp buffer is dead surface, so the message points users at a nonexistent API"},
     {"file": "src/vm/methods/mod.rs", "line": 179, "comment_says": "dict.update(**kwargs) is 'the one builtin method taking keywords'", "code_does": "list.sort(key=, reverse=) also takes keywords, intercepted before the dispatcher at src/vm/opcodes/function.rs:426-429; accurate only for the dispatcher path"},
     {"file": "src/value/mod.rs", "line": 162, "comment_says": "comment on HeapObj::Class says resolve_attr 'DFS-walks them on miss'", "code_does": "the VM uses a cached C3 linearization (c3_merge, mro_cache in src/vm/opcodes/attr_lookup.rs:39-56 and src/vm/dispatch.rs:1035-1041)"},
-    {"file": "web/src/index.js", "line": 2, "comment_says": "'See README for options'", "code_does": "runtime/README.md was deleted and its content absorbed into docs/content/reference/modules.md and abi.md; the comment points at a file that no longer exists"}
+    {"file": "web/src/index.ts", "line": 47, "comment_says": "'See README for options'", "code_does": "runtime/README.md was deleted and its content absorbed into docs/content/reference/modules.md and abi.md; the comment points at a file that no longer exists"}
   ],
   "disorder": [
     {"file": "std/json/src/serializer.rs", "line": 34, "kind": "dead-code", "action": "cleaned", "description": "SerCtx.depth field was written once at construction and never read (actual depth is threaded through the separate `depth` parameter). Removed the field and its initializer; cargo check --manifest-path std/json/Cargo.toml passes."},

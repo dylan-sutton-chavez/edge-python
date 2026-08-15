@@ -82,7 +82,7 @@ deno run -A npm:playwright install --with-deps chromium # once
 cd web/builtins && SYSPKG=<dom|network|storage|time> deno test --allow-all tests/
 ```
 
-The browser runtime lints and tests with Deno too, `deno lint web/` and `deno test --allow-all web/tests/runtime.test.js`.
+The browser runtime (`web/src`) is TypeScript, linted and tested with `deno lint web/` and `deno test --allow-all web/tests/runtime.test.js`.
 
 ## Architecture
 

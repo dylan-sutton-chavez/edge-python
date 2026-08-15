@@ -1,9 +1,15 @@
-import { MemoryCache } from '../cache/memory.js';
-import { bfsPrefetch } from '../prefetch.js';
-import { makeCompilerEnv } from '../env.js';
-import { makeRt } from '../rt.js';
-import { nativeTable, resetNativeTable } from '../native.js';
-import { SOURCE_LIMIT } from '../specs.js';
+import { MemoryCache } from '../cache/memory.ts';
+import { bfsPrefetch } from '../prefetch.ts';
+import { makeCompilerEnv } from '../env.ts';
+import type { DeferredHostCall } from '../env.ts';
+import { makeRt } from '../rt.ts';
+import type { Rt, EdgeValue } from '../rt.ts';
+import { nativeTable, resetNativeTable } from '../native.ts';
+import type { NativeFn, NativeLoader } from '../native.ts';
+import { SOURCE_LIMIT } from '../specs.ts';
+import type { CompilerExports } from '../wasm.ts';
+import type { CacheBackend } from '../cache/types.ts';
+import type { LoadOpts, MainThreadManifest, RunOpts, ExecResult } from '../protocol.ts';
 
 const TE = new TextEncoder();
 const TD = new TextDecoder();
@@ -21,41 +27,46 @@ const STATUS_EXIT = 6; // uncaught SystemExit, clean termination, low 8 bits = e
 const STATUS_PREEMPTED = 7; // preempt tick, resumes with no host action
 const ERR_RUNTIME = 2; // abi/src/lib.rs error_kind::RUNTIME, for failed deferred host calls
 
+interface ExecuteOpts extends RunOpts {
+    payload: Uint8Array
+    start: (e: CompilerExports, n: number) => number
+}
+
 // Worker-lifetime state
-let wasmModule = null;
-let compilerExports = null;
-let cache = null;
+let wasmModule: WebAssembly.Module | null = null;
+let compilerExports: CompilerExports | null = null;
+let cache: CacheBackend | null = null;
 let integrityActive = false;
-let loaders = [];
-let importsMap = null;
+let loaders: NativeLoader[] = [];
+let importsMap: Record<string, string> | null = null;
 // Resolves run()'s current `await` when a `PendingEvent` wake-up arrives via `pushEvent`.
-let eventWaiter = null;
+let eventWaiter: (() => void) | null = null;
 // Events `pushEvent`'d before the VM was ready (no `compilerExports`, or no paused run yet). Drained at the next `PENDING_EVENT` yield.
-const pendingEvents = [];
+const pendingEvents: string[] = [];
 /* Deferred host calls captured by env.host_call_native, keyed by the VM-assigned call_id. Drained concurrently in the PENDING_HOST_CALL branch. */
-const pendingHostCalls = new Map();
+const pendingHostCalls = new Map<number, DeferredHostCall>();
 // Back-edges between preempt yields, 0 disables.
 let preemptEvery = 0;
 let pauseRequested = false;
 // True from run entry so mid-boot pause waits.
 let running = false;
 // Resolves pause() once actually parked.
-let pauseAck = null;
+let pauseAck: ((parked: boolean) => void) | null = null;
 // Resolves at resume() to release a preempt hold.
-let resumeGate = null;
-/* (name, args) => Promise<value>. Set by worker.js (postMessage round-trip) or by a main-thread embedder. */
-let hostCallDelegate = null;
+let resumeGate: (() => void) | null = null;
+/* (name, args) => Promise<value>. Set by worker.ts (postMessage round-trip) or by a main-thread embedder. */
+let hostCallDelegate: ((module: string, name: string, args: EdgeValue[]) => Promise<EdgeValue>) | null = null;
 /* System modules resolvable by bare name but loaded on demand. (name) => Promise<exportNames>. */
-let loadSystemDelegate = null;
-let lazySystemNames = [];
+let loadSystemDelegate: ((name: string, url?: string) => Promise<string[]>) | null = null;
+let lazySystemNames: string[] = [];
 // Source/missing caches persist across runs so the BFS skips refetching modules and re-probing 404'd `packages.json` paths on every Run press. Wiped by `clearCache()`.
-const fetchedSources = new Map();
-const knownMissing = new Set();
+const fetchedSources = new Map<string, Uint8Array>();
+const knownMissing = new Set<string>();
 /* Synthetic native modules (handlers live on main thread). Re-applied at every `run` since `resetNativeTable` clears them. */
-let mainThreadManifests = [];
+let mainThreadManifests: MainThreadManifest[] = [];
 
-/* Engine orchestrator, internal to the Worker. Consumers use `createWorker` in `src/index.js`. Lifecycle is `load` once -> many `run` cycles -> `dispose`, and each run instantiates the compiler fresh with no state leak. */
-export async function load({ wasmUrl, integrity = true, loaders: loaderUrls = [], imports = null, version = null, availableSystems = [] }, manifests = []) {
+/* Engine orchestrator, internal to the Worker. Consumers use `createWorker` in `src/index.ts`. Lifecycle is `load` once -> many `run` cycles -> `dispose`, and each run instantiates the compiler fresh with no state leak. */
+export async function load({ wasmUrl, integrity = true, loaders: loaderUrls = [], imports = null, version = null, availableSystems = [] }: LoadOpts, manifests: MainThreadManifest[] = []): Promise<{ integrityActive: boolean, loadMs: number }> {
     const t0 = performance.now();
     importsMap = imports;
     lazySystemNames = availableSystems;
@@ -72,7 +83,7 @@ export async function load({ wasmUrl, integrity = true, loaders: loaderUrls = []
     }
 
     loaders = await Promise.all(
-        loaderUrls.map(async (url) => (await import(url)).default)
+        loaderUrls.map(async (url) => (await import(url)).default as NativeLoader)
     );
 
     mainThreadManifests = manifests;
@@ -86,7 +97,7 @@ export async function load({ wasmUrl, integrity = true, loaders: loaderUrls = []
     return { integrityActive, loadMs: performance.now() - t0 };
 }
 
-export async function run(opts) {
+export async function run(opts: RunOpts): Promise<ExecResult> {
     running = true;
     try {
         const payload = TE.encode(opts.src);
@@ -101,21 +112,21 @@ export async function run(opts) {
 }
 
 /* Shared run/restore core, instance, host imports, prefetch, then drive `start`. */
-async function execute({ src, payload, start, entryDir = '', baseUrl = null, onLine, incremental = false }) {
+async function execute({ src, payload, start, entryDir = '', baseUrl = null, onLine, incremental = false }: ExecuteOpts): Promise<ExecResult> {
     if (!wasmModule) throw new Error('engine.load() must be called first');
     entryDir = entryDir.replace(/^(\.\/)+/, ''); // specs never carry ./
 
-    let lockfile = new Map();
+    let lockfile = new Map<string, string>();
     if (integrityActive) {
-        try { lockfile = await cache.loadLockfile(); }
+        try { lockfile = await (cache as CacheBackend).loadLockfile(); }
         catch { /* lockfile load failure is non-fatal, treat as empty */ }
     }
 
     /* rt built first (lazy getter) so makeCompilerEnv can decode handles during deferred host calls. */
-    const rt = makeRt(() => compilerExports);
+    const rt = makeRt(() => compilerExports as CompilerExports);
 
-    /* Incremental mode reuses the existing wasm instance so module-level state (imports, defs) persists across runs. `onLine` lives in worker.js and is stable, so old env closures still post correctly. */
-    let exports;
+    /* Incremental mode reuses the existing wasm instance so module-level state (imports, defs) persists across runs. `onLine` lives in worker.ts and is stable, so old env closures still post correctly. */
+    let exports: CompilerExports;
     if (incremental && compilerExports) {
         exports = compilerExports;
     } else {
@@ -131,7 +142,7 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
     writePayload();
 
     await bfsPrefetch(src, exports, lockfile, {
-        cache,
+        cache: cache as CacheBackend,
         baseUrl,
         entryDir,
         knownMissing,
@@ -143,7 +154,7 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
         rt,
         loaders,
         // Lazy system, fetch export names from the page, then register the mt: stubs here.
-        loadSystem: (name, url) => {
+        loadSystem: (name: string, url?: string) => {
             if (!loadSystemDelegate) throw new Error(`system '${name}' imported but no main-thread loader is wired`);
             return loadSystemDelegate(name, url);
         },
@@ -165,7 +176,7 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
     const result = await drive(exports, rt, start(exports, payload.length), t0);
 
     if (integrityActive) {
-        try { await cache.saveLockfile(lockfile); }
+        try { await (cache as CacheBackend).saveLockfile(lockfile); }
         catch { /* persistence failure is non-fatal, lockfile lives in-memory until next save */ }
     }
 
@@ -173,17 +184,17 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
 }
 
 /* Register a main-thread module at `mt:<name>`, push a stub per export (the real call defers to the page) and tell the compiler its export names. */
-const makeRegisterSystem = (exports) => (name, exportNames) => {
+const makeRegisterSystem = (exports: CompilerExports) => (name: string, exportNames: string[]): void => {
     const baseId = nativeTable.length;
     for (const fnName of exportNames) {
-        const stub = () => {};
+        const stub: NativeFn = () => {};
         stub.__edge_kind = 'capability';
         stub.__edge_main_thread = true;
         stub.__edge_name = fnName;
         stub.__edge_module = name;
         nativeTable.push(stub);
     }
-    const writeBytes = (bytes) => {
+    const writeBytes = (bytes: Uint8Array): number => {
         const ptr = exports.wasm_alloc(Math.max(1, bytes.length));
         new Uint8Array(exports.memory.buffer, ptr, bytes.length).set(bytes);
         return ptr;
@@ -198,9 +209,9 @@ const makeRegisterSystem = (exports) => (name, exportNames) => {
 };
 
 /* Eager mt: registrations plus the name -> mt:<name> import grafts shared by run() and restoreState(). */
-function systemImportMap(registerSystem, skipRegistration) {
-    const mainThreadSpecs = new Set();
-    const augmentedImports = { ...(importsMap || {}) }; // defaults already folded in by the embedder (index.js)
+function systemImportMap(registerSystem: (name: string, exportNames: string[]) => void, skipRegistration: boolean): { mainThreadSpecs: Set<string>, augmentedImports: Record<string, string> } {
+    const mainThreadSpecs = new Set<string>();
+    const augmentedImports: Record<string, string> = { ...(importsMap || {}) }; // defaults already folded in by the embedder (index.ts)
     for (const m of mainThreadManifests) {
         if (!skipRegistration) registerSystem(m.name, m.exports);
         mainThreadSpecs.add(`mt:${m.name}`);
@@ -213,9 +224,9 @@ function systemImportMap(registerSystem, skipRegistration) {
 }
 
 /* Fresh instance, resets module registry and native table. */
-async function makeInstance(onLine, lockfile, rt) {
+async function makeInstance(onLine: ((text: string) => void) | undefined, lockfile: Map<string, string>, rt: Rt): Promise<CompilerExports> {
     const env = makeCompilerEnv({
-        getExports: () => compilerExports,
+        getExports: () => compilerExports as CompilerExports,
         onLine: onLine ?? (() => {}),
         fetchedSources,
         lockfile,
@@ -223,22 +234,22 @@ async function makeInstance(onLine, lockfile, rt) {
         rt,
         captureHostCall: (id, call) => { pendingHostCalls.set(id, call); },
     });
-    const { exports } = await WebAssembly.instantiate(wasmModule, { env });
-    compilerExports = exports;
-    exports.reset_modules();
-    applyPreemptInterval(exports);
+    const { exports } = await WebAssembly.instantiate(wasmModule as WebAssembly.Module, { env } as unknown as WebAssembly.Imports);
+    compilerExports = exports as unknown as CompilerExports;
+    compilerExports.reset_modules();
+    applyPreemptInterval(compilerExports);
     resetNativeTable();
-    return exports;
+    return compilerExports;
 }
 
-function settlePause(parked) {
+function settlePause(parked: boolean): void {
     const ack = pauseAck;
     pauseAck = null;
     if (ack) ack(parked);
 }
 
 /* Service yields until Done / Error / Exit. */
-async function drive(exports, rt, status, t0) {
+async function drive(exports: CompilerExports, rt: Rt, status: number, t0: number): Promise<ExecResult> {
     while (true) {
         const kind = (status >>> STATUS_KIND_SHIFT) & 7;
         if (kind === STATUS_DONE || kind === STATUS_ERROR || kind === STATUS_EXIT) break;
@@ -247,7 +258,7 @@ async function drive(exports, rt, status, t0) {
         if (kind === STATUS_PREEMPTED) {
             // Macrotask, so queued postMessage events land.
             await new Promise((r) => setTimeout(r, 0));
-            if (pauseRequested) await new Promise((r) => { resumeGate = r; });
+            if (pauseRequested) await new Promise<void>((r) => { resumeGate = r; });
         } else if (kind === STATUS_PENDING_TIMER) {
             const deadlineNs = exports.last_yield_deadline_ns();
             const nowNs = BigInt(Date.now()) * 1_000_000n;
@@ -263,7 +274,7 @@ async function drive(exports, rt, status, t0) {
                 injected++;
             }
             if (injected === 0) {
-                await new Promise(r => { eventWaiter = r; });
+                await new Promise<void>(r => { eventWaiter = r; });
             }
         } else if (kind === STATUS_PENDING_HOST_CALL) {
             if (pendingHostCalls.size === 0) throw new Error('PENDING_HOST_CALL without captured args (compiler/runtime drift)');
@@ -272,17 +283,17 @@ async function drive(exports, rt, status, t0) {
             pendingHostCalls.clear();
             // a failed call raises only in its own coro, so one bad fetch can't sink the batch
             const outcomes = await Promise.allSettled(batch.map(async ([id, call]) => {
-                let rv;
+                let rv: number;
                 try {
-                    const handle = rt.encodeAny(await hostCallDelegate(call.module, call.name, call.args));
+                    const handle = rt.encodeAny(await (hostCallDelegate as NonNullable<typeof hostCallDelegate>)(call.module, call.name, call.args));
                     rv = exports.set_host_result_by_id(id, handle);
                 } catch (e) {
-                    rv = exports.set_host_error_by_id(id, ERR_RUNTIME, rt.encodeAny(e?.message ?? String(e)));
+                    rv = exports.set_host_error_by_id(id, ERR_RUNTIME, rt.encodeAny(e instanceof Error ? e.message : String(e)));
                 }
                 if (rv !== 0) throw new Error(`host-call ${id} delivery returned ${rv} for '${call.module}.${call.name}'`);
             }));
             const drift = outcomes.find((o) => o.status === 'rejected');
-            if (drift) throw drift.reason;
+            if (drift) throw (drift as PromiseRejectedResult).reason;
         } else {
             // Unknown kind, bail out instead of looping forever.
             break;
@@ -306,7 +317,7 @@ async function drive(exports, rt, status, t0) {
 }
 
 /* Header layout mirrors vm/snapshot.rs `header`. */
-function snapshotSource(blob) {
+function snapshotSource(blob: Uint8Array): string {
     if (blob.length < 24) throw new Error('not an edge-python snapshot');
     const v = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
     if (v.getUint32(0, true) !== 0x4E535045) throw new Error('not an edge-python snapshot');
@@ -316,7 +327,7 @@ function snapshotSource(blob) {
 }
 
 /* Older wasm lacks the export, only preemption needs it. */
-function applyPreemptInterval(exports) {
+function applyPreemptInterval(exports: CompilerExports): void {
     if (!exports.set_preempt_interval) {
         if (preemptEvery > 0) throw new Error('preemption needs a newer compiler.wasm');
         return;
@@ -325,20 +336,20 @@ function applyPreemptInterval(exports) {
 }
 
 /* Preempt every `n` back-edges, 0 disables. */
-export function setPreemptInterval(n) {
+export function setPreemptInterval(n: number): void {
     preemptEvery = Math.max(0, n | 0);
     if (compilerExports) applyPreemptInterval(compilerExports);
 }
 
 /* Park the run, resolves true once parked. */
-export function pause() {
+export function pause(): Promise<boolean> {
     if (!running) return Promise.resolve(false);
     pauseRequested = true;
     return new Promise((r) => { pauseAck = r; });
 }
 
 /* Release a preempt-held run, no-op otherwise. */
-export function resume() {
+export function resume(): void {
     pauseRequested = false;
     const gate = resumeGate;
     resumeGate = null;
@@ -346,7 +357,7 @@ export function resume() {
 }
 
 /* Serialize the parked run, throws when none. */
-export function saveState() {
+export function saveState(): Uint8Array {
     if (!compilerExports) throw new Error('nothing to save: no run has started');
     const len = Number(compilerExports.save_state());
     if (len < 0) throw new Error('nothing to save: the program is not paused');
@@ -354,7 +365,7 @@ export function saveState() {
 }
 
 /* Boot from the blob's embedded source, continue from the saved state. Resolves like run(). */
-export async function restoreState({ blob, onLine }) {
+export async function restoreState({ blob, onLine }: { blob: Uint8Array | ArrayBuffer, onLine?: (text: string) => void }): Promise<ExecResult> {
     running = true;
     try {
         const payload = blob instanceof Uint8Array ? blob : new Uint8Array(blob);
@@ -366,21 +377,21 @@ export async function restoreState({ blob, onLine }) {
 }
 
 /* Parked program's module bindings as JSON. */
-export function stateGlobals() {
+export function stateGlobals(): Record<string, unknown> {
     if (!compilerExports) return {};
     const len = compilerExports.state_globals();
     return JSON.parse(TD.decode(new Uint8Array(compilerExports.memory.buffer, compilerExports.out_ptr(), len)));
 }
 
 /* Parked program's coroutines as JSON. */
-export function stateStack() {
+export function stateStack(): unknown[] {
     if (!compilerExports) return [];
     const len = compilerExports.state_stack();
     return JSON.parse(TD.decode(new Uint8Array(compilerExports.memory.buffer, compilerExports.out_ptr(), len)));
 }
 
 /* Inject directly into the paused VM. Returns false if the VM isn't ready yet (no compilerExports, or no paused run) so callers can buffer. */
-function injectEvent(message) {
+function injectEvent(message: string): boolean {
     if (!compilerExports) return false;
     const bytes = TE.encode(message);
     const ptr = compilerExports.wasm_alloc(bytes.length);
@@ -391,7 +402,7 @@ function injectEvent(message) {
 }
 
 /* Push a string into the VM's event queue, wakes `receive()`. Buffers if the VM isn't paused on PENDING_EVENT yet, the driver loop drains the buffer at the next yield, so callers never need to know about the VM's readiness window. */
-export function pushEvent(message) {
+export function pushEvent(message: unknown): boolean {
     const msg = String(message);
     if (!injectEvent(msg)) {
         pendingEvents.push(msg);
@@ -405,29 +416,29 @@ export function pushEvent(message) {
     return true;
 }
 
-/* Register the host-call delegate. worker.js wires a postMessage round-trip, no other consumer is supported. */
-export function setHostCallDelegate(fn) {
+/* Register the host-call delegate. worker.ts wires a postMessage round-trip, no other consumer is supported. */
+export function setHostCallDelegate(fn: (module: string, name: string, args: EdgeValue[]) => Promise<EdgeValue>): void {
     hostCallDelegate = fn;
 }
 
-/* Register the lazy system loader, (name) => Promise<exportNames>. worker.js wires the postMessage round-trip. */
-export function setLoadSystemDelegate(fn) {
+/* Register the lazy system loader, (name) => Promise<exportNames>. worker.ts wires the postMessage round-trip. */
+export function setLoadSystemDelegate(fn: (name: string, url?: string) => Promise<string[]>): void {
     loadSystemDelegate = fn;
 }
 
-export function reset() {
+export function reset(): void {
     if (compilerExports) compilerExports.reset_modules();
     resetNativeTable();
     pendingHostCalls.clear();
 }
 
-export async function clearCache() {
+export async function clearCache(): Promise<void> {
     fetchedSources.clear();
     knownMissing.clear();
     if (cache) await cache.clear();
 }
 
-export function dispose() {
+export function dispose(): void {
     wasmModule = null;
     compilerExports = null;
     cache = null;
@@ -443,10 +454,10 @@ export function dispose() {
     mainThreadManifests = [];
 }
 
-async function openCache(integrity) {
+async function openCache(integrity: boolean): Promise<CacheBackend> {
     if (!integrity) return new MemoryCache();
     try {
-        const { IdbCache } = await import('../cache/idb.js');
+        const { IdbCache } = await import('../cache/idb.ts');
         const idb = new IdbCache();
         await idb.open();
         return idb;
@@ -454,7 +465,7 @@ async function openCache(integrity) {
         console.warn(
             '[edge-python] integrity:true requested but IndexedDB unavailable; '
             + 'running with in-memory cache. Check worker.integrityActive to detect.',
-            e?.message ?? ''
+            e instanceof Error ? e.message : ''
         );
         return new MemoryCache();
     }

@@ -48,7 +48,7 @@ pub fn registry(name: &str) -> Option<(Kind, String)> {
     }
 }
 
-/// CDN url for a std package. Most ship as `.wasm`, `test` is pure Edge Python served as `.py`. Mirrors web/src/defaults.js.
+/// CDN url for a std package. Most ship as `.wasm`, `test` is pure Edge Python served as `.py`. Mirrors web/src/defaults.ts.
 fn std_url(name: &str) -> String {
     let ext = if name == "test" { "py" } else { "wasm" };
     format!("https://cdn.edgepython.com/std/{name}.{ext}")

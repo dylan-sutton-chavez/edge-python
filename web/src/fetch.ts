@@ -1,7 +1,15 @@
-import { sha256Hex } from './specs.js';
+import { sha256Hex } from './specs.ts';
+import type { CacheBackend } from './cache/types.ts';
+
+export interface FetchCtx {
+    cache: CacheBackend
+    baseUrl?: string | null
+    knownMissing: Set<string>
+    integrityActive: boolean
+}
 
 /* CAS-backed fetch keyed by lockfile hash, else fetch + hash + store. Null on 404 (opportunistic ok), throws on drift. */
-export async function fetchWithLockfile(spec, lockfile, ctx) {
+export async function fetchWithLockfile(spec: string, lockfile: Map<string, string>, ctx: FetchCtx): Promise<Uint8Array | null> {
     const { cache, baseUrl, knownMissing, integrityActive } = ctx;
 
     // An explicit #sha256- fragment pins the bytes. It stays in the cache key but leaves the request URL.
@@ -17,7 +25,7 @@ export async function fetchWithLockfile(spec, lockfile, ctx) {
         }
     }
 
-    let resp;
+    let resp: Response;
     try {
         // Specs are root-relative, the URL join clamps escapes at the origin.
         const url = target.includes('://') ? target : new URL(target, baseUrl ?? self.location.href).toString();

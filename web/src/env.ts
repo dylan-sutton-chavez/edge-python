@@ -1,13 +1,38 @@
-import { nativeTable } from './native.js';
+import { nativeTable } from './native.ts';
+import type { CompilerExports } from './wasm.ts';
+import type { Rt, EdgeValue } from './rt.ts';
 
 const TD = new TextDecoder();
 const TE = new TextEncoder();
 const ERR_RUNTIME = 2; // abi/src/lib.rs error_kind::RUNTIME
 
+export interface DeferredHostCall {
+    module: string
+    name: string
+    args: EdgeValue[]
+}
+
+export interface CompilerEnv {
+    host_print(ptr: number, len: number): void
+    host_call_native(id: number, call_id: number, argv_ptr: number, argc: number, out_ptr: number): number
+    host_now_ns(): bigint
+    host_fetch_bytes(specPtr: number, specLen: number, hashPtr: number, outLenPtr: number): number
+}
+
+export interface MakeCompilerEnvOpts {
+    getExports: () => CompilerExports
+    onLine: (text: string) => void
+    fetchedSources: Map<string, Uint8Array>
+    lockfile: Map<string, string>
+    integrityActive: boolean
+    rt?: Rt
+    captureHostCall?: (id: number, call: DeferredHostCall) => void
+}
+
 /* The `env.*` imports the compiler declares (host_print, host_call_native, host_fetch_bytes, host_now_ns), wired to closure-captured engine state. */
-export function makeCompilerEnv({ getExports, onLine, fetchedSources, lockfile, integrityActive, rt, captureHostCall }) {
-    const readStr = (ptr, len) => TD.decode(new Uint8Array(getExports().memory.buffer, ptr, len));
-    const setU32 = (ptr, v) => new DataView(getExports().memory.buffer).setUint32(ptr, v, true);
+export function makeCompilerEnv({ getExports, onLine, fetchedSources, lockfile, integrityActive, rt, captureHostCall }: MakeCompilerEnvOpts): CompilerEnv {
+    const readStr = (ptr: number, len: number) => TD.decode(new Uint8Array(getExports().memory.buffer, ptr, len));
+    const setU32 = (ptr: number, v: number) => new DataView(getExports().memory.buffer).setUint32(ptr, v, true);
 
     return {
         host_print: (ptr, len) => onLine(readStr(ptr, len)),
@@ -33,35 +58,35 @@ export function makeCompilerEnv({ getExports, onLine, fetchedSources, lockfile, 
                     }
                     try {
                         const args = handles.map((h) => rt.decodeAny(h));
-                        captureHostCall(call_id, { module: fn.__edge_module, name: fn.__edge_name, args });
+                        captureHostCall(call_id, { module: fn.__edge_module as string, name: fn.__edge_name as string, args });
                         return 2;
                     } catch (e) {
-                        stashError(exports, e?.message ?? String(e));
+                        stashError(exports, e instanceof Error ? e.message : String(e));
                         return 1;
                     }
                 }
                 try {
-                    const resultHandle = fn(handles);
+                    const resultHandle = fn(handles) as number;
                     new DataView(exports.memory.buffer).setUint32(out_ptr, resultHandle, true);
                     return 0;
                 } catch (e) {
-                    stashError(exports, e?.message ?? String(e));
+                    stashError(exports, e instanceof Error ? e.message : String(e));
                     return 1;
                 }
             }
 
             // wasmpdk, stage argv, call, copy back. Views as fns because `fn(...)` can re-enter `wasm_alloc` and detach a cached view.
-            const guestView = () => new DataView(fn.__edge_memory.buffer);
+            const guestView = () => new DataView((fn.__edge_memory as WebAssembly.Memory).buffer);
             const compView = () => new DataView(exports.memory.buffer);
 
             const argvLen = Math.max(4, argc * 4);
-            const g_argv = fn.__edge_alloc(argvLen);
-            const g_out = fn.__edge_alloc(4);
+            const g_argv = (fn.__edge_alloc as (size: number) => number)(argvLen);
+            const g_out = (fn.__edge_alloc as (size: number) => number)(4);
             for (let i = 0; i < argc; i++) {
                 guestView().setUint32(g_argv + i * 4, compView().getUint32(argv_ptr + i * 4, true), true);
             }
 
-            const status = fn(g_argv, argc, g_out);
+            const status = fn(g_argv, argc, g_out) as number;
             if (status === 0) {
                 compView().setUint32(out_ptr, guestView().getUint32(g_out, true), true);
             }
@@ -98,7 +123,7 @@ export function makeCompilerEnv({ getExports, onLine, fetchedSources, lockfile, 
     };
 }
 
-function stashError(exports, message) {
+function stashError(exports: CompilerExports, message: string): void {
     const bytes = TE.encode(message);
     const ptr = exports.wasm_alloc(bytes.length);
     new Uint8Array(exports.memory.buffer, ptr, bytes.length).set(bytes);

@@ -1,9 +1,9 @@
 name: JS
-description: Deno/JS runtime. lint = deno lint; test = Deno + Playwright suite.
+description: Deno/TypeScript runtime. lint = deno lint + deno check; build = tsc emit to web/dist; test = Deno + Playwright suite.
 
 inputs:
   mode:
-    description: "lint | test"
+    description: "lint | build | test"
     required: true
 
 runs:
@@ -25,6 +25,31 @@ runs:
       if: inputs.mode == 'lint'
       shell: bash
       run: deno lint web/
+
+    # web/src is TypeScript, split main-thread (dom lib) / worker (webworker lib) since tsc rejects mixing the two.
+    - name: Type check
+      if: inputs.mode == 'lint'
+      shell: bash
+      run: |
+        deno check --config web/src/deno.json web/src/index.ts web/src/element.ts
+        deno check --config web/src/worker/deno.json web/src/worker/worker.ts web/src/worker/engine.ts
+
+    # Strips types to web/dist, the shape the CDN and the Playwright suite both serve. Pinned tsc version, no package.json in this repo.
+    - name: Build
+      if: inputs.mode == 'build'
+      shell: bash
+      working-directory: web
+      run: |
+        deno run -A npm:typescript@5.9.3/tsc -p tsconfig.json
+        deno run -A npm:typescript@5.9.3/tsc -p tsconfig.worker.json
+
+    - name: Upload web/dist
+      if: inputs.mode == 'build'
+      uses: actions/upload-artifact@v6
+      with:
+        name: web_dist
+        path: web/dist
+        retention-days: 1
 
     # Test against this run's compiler, not the deployed CDN copy.
     - name: Download compiler wasm

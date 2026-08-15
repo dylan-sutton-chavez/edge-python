@@ -58,6 +58,17 @@ jobs:
         with:
           mode: test
 
+  # Strips web/src to plain JS, the CDN can't serve TypeScript. Independent of the compiler build.
+  js-build:
+    name: JS / Build
+    needs: [js-lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/js
+        with:
+          mode: build
+
   web:
     name: Web / ${{ matrix.capability }}
     needs: [js]
@@ -151,7 +162,7 @@ jobs:
 
   cli-test:
     name: CLI / Test / ${{ matrix.suite }}
-    needs: [web, std, native, cli-release]
+    needs: [web, std, native, cli-release, js-build]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -159,6 +170,11 @@ jobs:
         suite: [engine, network, workers, skill]
     steps:
       - uses: actions/checkout@v6
+      - name: Download web/dist (JS build output)
+        uses: actions/download-artifact@v8
+        with:
+          name: web_dist
+          path: web/dist
       - uses: ./.github/actions/cli
         with:
           mode: test
@@ -166,7 +182,7 @@ jobs:
 
   cdn:
     name: Cloudflare Upload (CDN)
-    needs: [cli-test, native]
+    needs: [cli-test, native, js-build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
