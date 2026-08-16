@@ -66,7 +66,7 @@ const knownMissing = new Set<string>();
 /* Synthetic native modules (handlers live on main thread). Re-applied at every `run` since `resetNativeTable` clears them. */
 let mainThreadManifests: MainThreadManifest[] = [];
 
-// Guards the lazy export getters, a null deref here means run() raced load().
+// compilerExports for the lazy rt/env getters, throws while the instance boots.
 const requireExports = (): CompilerExports => {
     if (!compilerExports) throw new Error('engine.load() must be called first');
     return compilerExports;

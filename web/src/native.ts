@@ -1,6 +1,6 @@
 import type { CompilerExports } from './wasm.ts';
 
-/* A registered native fn, tagged with dispatch metadata by the loader that produced it. The `__edge_kind` discriminant picks the host_call_native path. */
+/* A registered native fn, tagged with dispatch metadata by the loader that produced it. */
 interface NativeFnBase {
     (...args: unknown[]): unknown
     __edge_kind?: 'wasmpdk' | 'capability'

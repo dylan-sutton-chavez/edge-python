@@ -128,7 +128,7 @@ async function runCapability(cap) {
     const failures = [];
     try {
         await page.goto("http://localhost/tests/index.html");
-        // Boot the tag once in <head>: the per-case body wipe leaves it connected, and dom cases never count it.
+        // Boot the tag once in <head>, the per-case body wipe leaves it connected and dom cases never count it.
         let bootTimer;
         try {
             await Promise.race([

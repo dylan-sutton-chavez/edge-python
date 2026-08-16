@@ -46,7 +46,7 @@ interface Pending {
 // WorkerRequest without the reqId, `send` attaches it.
 type DistOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
-/* Public entry. `createWorker(opts)` spawns a Web Worker around `engine.ts` and returns a proxy whose methods round-trip via postMessage. See README for options. */
+/* Public entry. `createWorker(opts)` spawns a Web Worker around `engine.ts` and returns a proxy whose methods round-trip via postMessage. */
 export async function createWorker(opts?: CreateWorkerOpts): Promise<WorkerHandle> {
     // Chromium blocks `new Worker(crossOriginUrl)` even with `type:'module'`, cross-origin runtimes need the Blob bootstrap below.
     const workerUrl = new URL('./worker/worker.js', import.meta.url);
@@ -151,7 +151,7 @@ export async function createWorker(opts?: CreateWorkerOpts): Promise<WorkerHandl
 
     /* Strip mainThreadModules/systemModules before crossing postMessage, not structured-cloneable / loaded on the page. The worker only needs eager manifests and the lazy system names. */
     const { mainThreadModules: _drop, systemModules: _dropSystems, ...workerOpts } = opts || {};
-    /* Fold the std .wasm defaults into imports here so the worker engine stays embedder-neutral, `defaults:false` opts out. */
+    /* Fold the std .wasm defaults into imports here so the worker engine stays embedder-neutral, pass `defaults` false to opt out. */
     const imports: Record<string, string> = { ...(opts?.defaults !== false ? DEFAULT_IMPORTS : {}), ...(opts?.imports || {}) };
     const ready = await send<{ integrityActive: boolean, loadMs: number }>({
         type: 'load',
@@ -198,7 +198,7 @@ export async function createWorker(opts?: CreateWorkerOpts): Promise<WorkerHandl
     };
 }
 
-/* Runs inside the worker. Buffers messages during the dynamic import, otherwise the 'load' postMessage dispatches before worker.js installs self.onmessage and the first message is lost. Kept as a source string, tsc rewrites import() specifiers in compiled code and the rewrite helper would not exist inside the Blob. */
+/* Buffers messages until the imported worker.js installs self.onmessage, the first postMessage would be lost otherwise. A source string because tsc rewrites import() in compiled code and the helper would not exist inside the Blob. */
 const crossOriginBootstrap = `
 const buffered = [];
 const enqueue = (event) => buffered.push(event.data);

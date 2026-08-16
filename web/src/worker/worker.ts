@@ -6,7 +6,7 @@ import type { WorkerRequest, WorkerMessage } from '../protocol.ts';
 const post = (msg: WorkerMessage) => self.postMessage(msg);
 const onLine = (text: string) => post({ type: 'line', text });
 
-/* A deferred request/response round-trip to the main thread. `call` posts and parks, `settle` resolves the parked Promise when its answer arrives. */
+/* A deferred request/response round-trip to the main thread, `call` posts and parks, `settle` resolves the parked Promise. */
 function makeRpc<Args extends unknown[], Res>(send: (reqId: number, ...args: Args) => void) {
     let nextId = 0;
     const pending = new Map<number, { resolve: (v: Res) => void, reject: (e: Error) => void }>();
@@ -26,12 +26,10 @@ function makeRpc<Args extends unknown[], Res>(send: (reqId: number, ...args: Arg
     };
 }
 
-// Deferred host calls park until the main thread answers.
 const hostCalls = makeRpc<[string, string, EdgeValue[]], EdgeValue>(
     (reqId, module, name, args) => post({ type: 'host-call', reqId, module, name, args }));
 engine.setHostCallDelegate(hostCalls.call);
 
-// Lazy system loads park until the main thread answers with export names.
 const systemLoads = makeRpc<[string, string | undefined], string[]>(
     (reqId, name, url) => post({ type: 'load-system', reqId, name, url }));
 engine.setLoadSystemDelegate(systemLoads.call);
