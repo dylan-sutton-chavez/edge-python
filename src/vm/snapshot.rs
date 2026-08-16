@@ -524,6 +524,15 @@ pub fn save(vm: &VM, source: &str) -> Vec<u8> {
     }
     put_vm_state(&mut w, vm);
     w.seq(&vm.call_stack, put_call_frame);
+    // Builtin-iterator marks ride as trailing heap slot indices, absent in older blobs.
+    let mut marked: Vec<u32> = Vec::new();
+    for (idx, obj) in vm.heap.snapshot_objs().enumerate() {
+        if let Some(HeapObj::List(rc)) = obj
+            && vm.is_iter_list(rc) {
+            marked.push(idx as u32);
+        }
+    }
+    w.seq(&marked, |w, &i| w.u32(i));
     w.b
 }
 
@@ -549,15 +558,15 @@ pub fn source_of(blob: &[u8]) -> Result<&str, SnapErr> {
     Ok(header(blob)?.source)
 }
 
-/* Sandbox profile recorded at save time. The remaining budget rides in the blob, so `ops` here is only a placeholder that `restore` overwrites. */
+/* Sandbox profile recorded at save time, ops is the remaining budget. */
 pub fn limits_of(blob: &[u8]) -> Result<Limits, SnapErr> {
     let h = header(blob)?;
     let mut r = R::new(blob);
     r.p = h.body;
-    let _budget = r.usz()?;
+    let ops = r.usz()?;
     let calls = r.usz()?;
     let heap = r.usz()?;
-    Ok(Limits { calls, ops: 1, heap })
+    Ok(Limits { calls, ops, heap })
 }
 
 fn collect_externs(chunk: &SSAChunk, map: &mut ExternMap) {
@@ -645,6 +654,15 @@ pub fn restore(vm: &mut VM, blob: &[u8]) -> Result<(), SnapErr> {
         })
     })?;
 
+    vm.iter_marks.clear();
+    // Optional trailing section, blobs written before iterator marks end at the call stack.
+    if r.p < r.b.len() {
+        for idx in r.seq(R::u32)? {
+            if let Some(HeapObj::List(rc)) = vm.heap.try_get(Val::heap(idx)) {
+                vm.iter_marks.push(Rc::downgrade(rc));
+            }
+        }
+    }
     if r.p != r.b.len() { return Err("snapshot has trailing bytes".to_string()); }
     // Derived flag, not serialized, recompute from the restored module bindings.
     vm.builtins_rebound = vm.module_state.keys().any(|k| NativeFnId::from_name(k).is_some());

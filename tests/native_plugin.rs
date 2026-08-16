@@ -122,3 +122,149 @@ pub extern "C" fn __fn_pid(_a: *const u32, _c: u32, _o: *mut u32) -> i32 {
         assert!(proxy::take_block(), "the reachable syscall must be trapped, never a real pid");
     }
 }
+
+/* Direct tests against the public bridge entry points, a dedicated cdylib fixture would only forward to these same symbols. */
+mod bridge_ops {
+    use super::*;
+    use compiler::abi::{Op, Tag, WireValue};
+    use compiler::bridge::{host_edge_decode, host_edge_encode, host_edge_op, take_error, VmGuard};
+
+    struct Fixture {
+        vm: compiler::vm::VM<'static>,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let chunk = parse_source("x = 1\n", "", None).expect("parse");
+            Self { vm: boot_vm(chunk, Limits::sandbox(), 0) }
+        }
+
+        fn encode_raw(&mut self, data: &[u8]) -> u32 {
+            let _guard = VmGuard::new(&mut self.vm);
+            let h = unsafe { host_edge_encode(Tag::Raw as u32, data.as_ptr(), data.len() as u32) };
+            assert_ne!(h, 0, "encode failed");
+            h
+        }
+
+        fn op(&mut self, op: Op, recv: u32, name: &str, argv: &[u32]) -> Result<u32, String> {
+            let _guard = VmGuard::new(&mut self.vm);
+            let mut out = 0u32;
+            let rc = unsafe {
+                host_edge_op(op as u32, recv, name.as_ptr(), name.len() as u32, argv.as_ptr(), argv.len() as u32, &mut out)
+            };
+            if rc == 0 { Ok(out) } else { Err(take_error().map(|(_, m)| m).unwrap_or_default()) }
+        }
+
+        fn decode(&mut self, h: u32) -> (u32, Vec<u8>) {
+            let _guard = VmGuard::new(&mut self.vm);
+            let mut tag = 0u32;
+            let mut buf = vec![0u8; 4096];
+            let n = unsafe { host_edge_decode(h, &mut tag, buf.as_mut_ptr(), buf.len() as u32) };
+            assert!(n >= 0, "decode failed");
+            buf.truncate(n as usize);
+            (tag, buf)
+        }
+
+        fn decode_int(&mut self, h: u32) -> i128 {
+            let (tag, bytes) = self.decode(h);
+            assert_eq!(tag, Tag::Int as u32, "expected an int");
+            i128::from_le_bytes(bytes.try_into().unwrap())
+        }
+
+        fn decode_list(&mut self, h: u32) -> Vec<i128> {
+            let (tag, bytes) = self.decode(h);
+            match WireValue::decode_body(tag, &bytes) {
+                Some(WireValue::List(items)) => items.into_iter().map(|i| match i {
+                    WireValue::Int(v) => v,
+                    other => panic!("expected int item, got {other:?}"),
+                }).collect(),
+                other => panic!("expected a list, got {other:?}"),
+            }
+        }
+
+        fn len_of(&mut self, h: u32) -> i128 {
+            let r = self.op(Op::Len, h, "", &[]).unwrap();
+            self.decode_int(r)
+        }
+    }
+
+    #[test]
+    fn ffi_len_accepts_bytes() {
+        let mut f = Fixture::new();
+        let h = f.encode_raw(&[1, 2, 255]);
+        assert_eq!(f.len_of(h), 3);
+    }
+
+    #[test]
+    fn ffi_len_of_empty_bytes_is_zero() {
+        let mut f = Fixture::new();
+        let h = f.encode_raw(&[]);
+        assert_eq!(f.len_of(h), 0);
+    }
+
+    #[test]
+    fn ffi_iter_flattens_bytes_to_ints() {
+        let mut f = Fixture::new();
+        let h = f.encode_raw(&[1, 2, 255]);
+        let list = f.op(Op::Iter, h, "", &[]).unwrap();
+        assert_eq!(f.decode_list(list), vec![1, 2, 255]);
+    }
+
+    #[test]
+    fn ffi_iter_of_empty_bytes_is_empty() {
+        let mut f = Fixture::new();
+        let h = f.encode_raw(&[]);
+        let list = f.op(Op::Iter, h, "", &[]).unwrap();
+        assert_eq!(f.decode_list(list), Vec::<i128>::new());
+    }
+
+    #[test]
+    fn ffi_iter_result_is_a_real_list() {
+        let mut f = Fixture::new();
+        let h = f.encode_raw(&[7, 8, 9]);
+        let list = f.op(Op::Iter, h, "", &[]).unwrap();
+        assert_eq!(f.len_of(list), 3);
+    }
+
+    fn call_with_n_args(f: &mut Fixture, n: usize) -> Result<u32, String> {
+        let recv = f.encode_raw(&[0]);
+        let argv: Vec<u32> = (0..n).map(|_| f.encode_raw(&[0])).collect();
+        f.op(Op::Call, recv, "__call__", &argv)
+    }
+
+    #[test]
+    fn ffi_call_zero_args_still_dispatches() {
+        let mut f = Fixture::new();
+        let err = call_with_n_args(&mut f, 0).unwrap_err();
+        assert!(err.contains("not callable"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn ffi_call_255_args_passes_the_guard() {
+        let mut f = Fixture::new();
+        let err = call_with_n_args(&mut f, 255).unwrap_err();
+        assert!(err.contains("not callable"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn ffi_call_256_args_raises_arity_error() {
+        let mut f = Fixture::new();
+        let err = call_with_n_args(&mut f, 256).unwrap_err();
+        assert!(err.contains("too many arguments"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn ffi_call_300_args_raises_arity_error() {
+        let mut f = Fixture::new();
+        let err = call_with_n_args(&mut f, 300).unwrap_err();
+        assert!(err.contains("too many arguments"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn ffi_call_arity_error_leaves_no_stack_desync() {
+        let mut f = Fixture::new();
+        let _ = call_with_n_args(&mut f, 256).unwrap_err();
+        let h = f.encode_raw(&[1, 2, 3]);
+        assert_eq!(f.len_of(h), 3);
+    }
+}

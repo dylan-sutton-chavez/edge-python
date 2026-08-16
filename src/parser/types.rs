@@ -435,7 +435,7 @@ pub(super) fn parse_string(s: &str) -> String {
     if is_raw { inner.to_string() } else { unescape(inner) }
 }
 
-/* Parses b"..." to raw bytes, non-ASCII pass through, \xHH=single byte, \u/\U/\N rejected. */
+/* Parses b"..." to raw bytes, non-ASCII pass through, \xHH and up-to-3-digit \ooo decode to one byte, \u/\U/\N pass through verbatim. */
 pub(super) fn parse_bytes_literal(s: &str) -> alloc::vec::Vec<u8> {
     let bytes = s.as_bytes();
     let is_raw = has_raw_prefix(s);
@@ -470,7 +470,17 @@ pub(super) fn parse_bytes_literal(s: &str) -> alloc::vec::Vec<u8> {
             b'\\' => { out.push(b'\\'); j += 2; }
             b'\'' => { out.push(b'\''); j += 2; }
             b'"' => { out.push(b'"'); j += 2; }
-            b'0' => { out.push(0); j += 2; }
+            b'0'..=b'7' => {
+                // Octal takes up to 3 digits, mirroring push_escape, truncated to one byte.
+                let mut v = (body[j + 1] - b'0') as u32;
+                let mut k = j + 2;
+                while k < body.len() && k < j + 4 && matches!(body[k], b'0'..=b'7') {
+                    v = v * 8 + (body[k] - b'0') as u32;
+                    k += 1;
+                }
+                out.push(v as u8);
+                j = k;
+            }
             b'x' => {
                 // \xHH takes exactly two hex digits.
                 if j + 3 < body.len() {

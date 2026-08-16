@@ -202,5 +202,45 @@
   {
     "src": "print(loads('NaN', parse_constant=lambda s: 'CONST:' + s))",
     "output": ["CONST:NaN"]
+  },
+  {
+    "src": "loads('01')",
+    "error": "trailing data"
+  },
+  {
+    "src": "loads('1.')",
+    "error": "invalid number"
+  },
+  {
+    "src": "loads('1e')",
+    "error": "invalid number"
+  },
+  {
+    "src": "loads('00')",
+    "error": "trailing data"
+  },
+  {
+    "src": "print(loads('0'))\nprint(loads('0.5'))\nprint(loads('1e5'))\nprint(loads('-0.5e+2'))",
+    "output": ["0", "0.5", "100000.0", "-50.0"]
+  },
+  {
+    "src": "dumps({'fn': dumps})",
+    "error": "'function' is not JSON-serializable"
+  },
+  {
+    "src": "def f():\n    pass\ndumps({'fn': f})",
+    "error": "'function' is not JSON-serializable"
+  },
+  {
+    "src": "dumps([dumps])",
+    "error": "'function' is not JSON-serializable"
+  },
+  {
+    "src": "print(dumps({'a': [1, 2.5, 'x', None, True]}))",
+    "output": ["{\"a\":[1,2.5,\"x\",null,true]}"]
+  },
+  {
+    "src": "print(dumps({'fn': dumps}, default=lambda o: 'obj'))",
+    "output": ["{\"fn\":\"obj\"}"]
   }
 ]

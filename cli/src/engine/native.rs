@@ -90,11 +90,11 @@ pub fn run(file: Option<&Path>, opts: &RunOpts) -> Result<i32> {
         }
     };
     let mut vm = boot_vm(chunk, Limits::sandbox(), opts.preempt);
-    // With a file argument piped stdin feeds `input()`, one line per call.
+    // With a file argument piped stdin feeds `input()`, one line per call with any CR dropped.
     if file.is_some() && !stdin.is_terminal() {
         let mut buf = String::new();
         if stdin.read_to_string(&mut buf).is_ok() && !buf.is_empty() {
-            vm.input_buffer = buf.split('\n').map(String::from).collect();
+            vm.input_buffer = buf.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l).to_string()).collect();
         }
     }
     Ok(drive(&mut vm, &src, Some(&name), opts))

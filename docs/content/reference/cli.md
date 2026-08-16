@@ -124,7 +124,7 @@ $ edge add math network
   updated packages.json
 ```
 
-Point a name at a custom URL with `edge add foo=https://example.com/foo.wasm`. The kind is inferred from the URL: `.wasm` means std, anything else means system. `edge remove` deletes entries the same way.
+Point a name at a custom URL with `edge add foo=https://example.com/foo.wasm`. The kind is inferred from the URL: `.wasm` and `.py` mean std, anything else means system. `edge remove` deletes entries the same way.
 
 ## `edge build`: pack the app
 

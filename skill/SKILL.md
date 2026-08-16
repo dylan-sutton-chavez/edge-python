@@ -72,7 +72,7 @@ A persistent interpreter across prompts. Imports, definitions and mutations surv
 
 ### edge init, edge add, edge remove
 
-`edge init [name]` scaffolds `main.py`, `packages.json` and `index.html`, with `--bare` skipping the HTML. `edge add json network` writes manifest entries for known packages, and `edge add foo=<url>` registers a custom URL, a `.wasm` URL is treated as a std package and anything else as a system module. `edge remove` deletes entries. Unknown names abort the whole command before any write.
+`edge init [name]` scaffolds `main.py`, `packages.json` and `index.html`, with `--bare` skipping the HTML. `edge add json network` writes manifest entries for known packages, and `edge add foo=<url>` registers a custom URL, a `.wasm` or `.py` URL is treated as a std package and anything else as a system module. `edge remove` deletes entries. Unknown names abort the whole command before any write.
 
 ### edge serve
 
@@ -217,7 +217,7 @@ print(describe([10, 20, 30]))
 list of 3
 ```
 
-`match` is a soft keyword. A parenthesized subject like `match (a, b):` parses as a call, so leave the subject unparenthesized.
+`match` is a soft keyword. A parenthesized subject like `match (a, b):` works as a statement, and `match(a, b)` in expression position still parses as a call.
 
 ### Missing pieces by type
 
@@ -598,7 +598,7 @@ print(json.dumps({"bad": object()}, default=str))
 
 ```text Output
 {"n":21,"xs":[1,2]}
-{"bad":"<instance>"}
+{"bad":"<object instance>"}
 ```
 
 ### math
@@ -878,7 +878,7 @@ Truthiness follows Python, the falsy set is `None`, `False`, `0`, `0.0`, `""`, `
 
 ## Sandbox limits
 
-Programs run under a fixed budget. Exceeding one raises the matching catchable exception.
+Programs run under a fixed budget. Exceeding one raises the matching exception, catchable except the op-limit `RuntimeError` whose handler re-raises on its first operation because the budget is still exhausted.
 
 | Limit | Value | Raised |
 |---|---|---|

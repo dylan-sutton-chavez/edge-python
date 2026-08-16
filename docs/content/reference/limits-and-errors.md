@@ -13,6 +13,8 @@ Every execution is metered, there is no unmetered mode. Both shipped engines, th
 | Max operations | 100,000,000 | `RuntimeError` |
 | Max live objects | 100,000 | `MemoryError` |
 
+The op-limit `RuntimeError` cannot be caught. The `except` handler is entered but its first operation re-raises because the budget is still exhausted.
+
 ```python
 def loop(n):
   return loop(n + 1)

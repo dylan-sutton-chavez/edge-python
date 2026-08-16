@@ -45,7 +45,6 @@ fn neumaier(sum: f64, comp: f64, x: f64) -> (f64, f64) {
     (t, comp + c)
 }
 
-/* `int(s, base)` parsing, optional sign, optional 0x/0o/0b prefix (matching the base, or inferred when base==0), `_` digit separators, radix 0 or 2..=36. */
 // Rounds an integer to -k decimal digits using banker's rounding, matching Python.
 fn round_int_banker(n: i128, k: u32) -> i128 {
     let factor = 10i128.checked_pow(k.min(38)).unwrap_or(i128::MAX);
@@ -56,6 +55,7 @@ fn round_int_banker(n: i128, k: u32) -> i128 {
     if up { q + 1 } else { q }.saturating_mul(factor)
 }
 
+/* `int(s, base)` parsing, optional sign, optional 0x/0o/0b prefix (matching the base, or inferred when base==0), `_` digit separators, radix 0 or 2..=36. */
 fn parse_int_radix(s: &str, base: i64) -> Result<i128, VmErr> {
     if base != 0 && !(2..=36).contains(&base) {
         return Err(cold_value("int() base must be >= 2 and <= 36, or 0"));
@@ -101,8 +101,14 @@ fn parse_int_radix(s: &str, base: i64) -> Result<i128, VmErr> {
         alloc::string::String::from(body)
     };
     if cleaned.is_empty() { return Err(cold_value("int(): invalid literal")); }
-    let mag = i128::from_str_radix(&cleaned, radix).map_err(|_| cold_value("int(): invalid literal"))?;
-    Ok(if neg { -mag } else { mag })
+    // Parse the magnitude unsigned so i128::MIN fits, then apply the sign.
+    let mag = u128::from_str_radix(&cleaned, radix).map_err(|_| cold_value("int(): invalid literal"))?;
+    if neg {
+        if mag > (1u128 << 127) { return Err(cold_value("int(): invalid literal")); }
+        Ok((mag as i128).wrapping_neg())
+    } else {
+        i128::try_from(mag).map_err(|_| cold_value("int(): invalid literal"))
+    }
 }
 
 impl<'a> VM<'a> {
@@ -428,6 +434,8 @@ impl<'a> VM<'a> {
                         b = (b * b).rem_euclid(m);
                     }
                 }
+                // Result takes the sign of the modulus, matching Python.
+                if modulus < 0 && result != 0 { result -= m; }
                 let r = self.int_to_val(Some(result))?;
                 self.push(r);
                 Ok(())
@@ -457,7 +465,14 @@ impl<'a> VM<'a> {
                 }
                 return self.int_to_val(Some(result));
             }
-            return Ok(Val::float(fpowi(ai as f64, exp as i32)));
+            if ai == 0 { return Err(VmErr::Raised(String::from("ZeroDivisionError: 0.0 cannot be raised to a negative power"))); }
+            // Clamp instead of wrapping so a huge negative exponent underflows to 0.0, base ±1 keeps its parity.
+            let r = match ai {
+                1 => 1.0,
+                -1 => if exp % 2 == 0 { 1.0 } else { -1.0 },
+                _ => fpowi(ai as f64, exp.clamp(i32::MIN as i64, -1) as i32),
+            };
+            return Ok(Val::float(r));
         }
         let to_f = |v: Val| -> Result<f64, VmErr> {
             if v.is_int() { Ok(v.as_int() as f64) }
@@ -468,6 +483,8 @@ impl<'a> VM<'a> {
             }
             else { Err(cold_type(err_msg)) }
         };
-        Ok(Val::float(fpowf(to_f(a)?, to_f(b)?)))
+        let (fa, fb) = (to_f(a)?, to_f(b)?);
+        if fa == 0.0 && fb < 0.0 { return Err(VmErr::Raised(String::from("ZeroDivisionError: 0.0 cannot be raised to a negative power"))); }
+        Ok(Val::float(fpowf(fa, fb)))
     }
 }

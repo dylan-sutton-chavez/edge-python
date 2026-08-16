@@ -103,7 +103,9 @@ fn serialize_into(value: &Handle, out: &mut String, ctx: &mut SerCtx, depth: usi
                 let replacement = default.call("__call__", &[value.raw()])?;
                 return serialize_into(&replacement, out, ctx, depth);
             }
-            Err(Error::Type(format!("'{}' is not JSON-serializable", other)))
+            // Native callables type as `builtin_function_or_method`, take the user-function error path.
+            let name = if other == "builtin_function_or_method" { "function" } else { other };
+            Err(Error::Type(format!("'{}' is not JSON-serializable", name)))
         }
     }
 }

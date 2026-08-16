@@ -318,7 +318,7 @@ The `FormatValue` operand is a small flags field:
 - bit 0: set when a format spec string is on the stack just below the value
 - bits 1-2: conversion (`0` none, `1` `!r`, `2` `!s`, `3` `!a`)
 
-The VM applies the conversion first, then the spec mini-language `[[fill]align][sign][#][0][width][,|_][.precision][type]` with type chars `s d b o x X f F e E g G n % c`. `n` aliases `d` with no locale. The `=` self-documenting form (`{expr=}`) emits a literal `expr=` prefix. Adjacent string literals concatenate at parse time. Spec parse failures raise `ValueError` at runtime.
+The VM applies the conversion first, then the spec mini-language `[[fill]align][sign][#][0][width][,|_][.precision][type]` with type chars `s d b o x X f F e E g G n % c`. `n` aliases `d` with no locale, on floats it keeps the plain str() digits. The `=` self-documenting form (`{expr=}`) emits a literal `expr=` prefix. Adjacent string literals concatenate at parse time. Spec parse failures raise `ValueError` at runtime.
 
 ## Limits
 

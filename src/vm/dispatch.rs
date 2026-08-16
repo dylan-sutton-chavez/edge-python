@@ -927,10 +927,10 @@ impl<'a> VM<'a> {
             }
             return Ok(());
         }
-        // user-defined iterator calls `__next__`, `StopIteration` ends the loop without propagating, other exceptions surface.
+        // user-defined iterator steps `__next__` or drains a builtin-iterator list, `StopIteration` ends the loop without propagating, other exceptions surface.
         if let Some(IterFrame::UserDefined(iter_val)) = self.iter_stack.last() {
             let iter = *iter_val;
-            match self.try_call_dunder(iter, "__next__", &[], chunk, slots) {
+            match self.iter_next_proto(iter, chunk, slots) {
                 Ok(Some(item)) => { self.push(item); }
                 Ok(None) => {
                     self.yield_from_value = Val::none();

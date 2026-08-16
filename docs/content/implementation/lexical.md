@@ -177,7 +177,7 @@ At EOF the lexer drains the remaining levels off the indent stack for clean bloc
 
 ## Soft-keyword disambiguation
 
-`type`, `match`, and `case` are soft keywords. Each collides with a builtin or identifier use, so the lexer disambiguates by peeking at the next token. If the following token is one of `(`, `:`, `=`, `,`, `)`, `]`, `Newline`, or `EOF`, the word downgrades to `Name`. Otherwise it stays a keyword.
+`type`, `match`, and `case` are soft keywords. Each collides with a builtin or identifier use, so the lexer disambiguates by peeking at the next token. If the following token is one of `(`, `:`, `=`, `,`, `)`, `]`, `Newline`, or `EOF`, the word downgrades to `Name`, except that `(` keeps keyword force when a colon follows the matching close paren at statement start. Otherwise it stays a keyword.
 
 ```python
 def match(s, p):
@@ -193,7 +193,7 @@ print(type)
 None
 ```
 
-A statement subject like `match x:` starts with a name or literal, so it keeps keyword force. A parenthesized subject like `match (a, b):` is the one case this heuristic misreads as a call.
+A statement subject like `match x:` starts with a name or literal, so it keeps keyword force. A parenthesized subject like `match (a, b):` keeps it too, while a call like `match(a, b)` still downgrades to `Name`.
 
 `_` always emits as `Underscore`. The parser distinguishes wildcard from name use grammatically.
 

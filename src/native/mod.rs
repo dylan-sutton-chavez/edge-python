@@ -79,5 +79,7 @@ pub fn boot_vm(chunk: SSAChunk, limits: Limits, preempt: usize) -> VM<'static> {
     vm.print_hook = Some(stream_stdout);
     vm.set_time_hook(now_ns);
     vm.set_preempt_interval(preempt);
+    // Named native imports live only in the chunk's extern table, mirror them so LoadName resolves them.
+    let _ = vm.bind_chunk_externs();
     vm
 }

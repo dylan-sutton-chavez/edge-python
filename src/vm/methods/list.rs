@@ -1,9 +1,10 @@
 use super::prelude::*;
 
-/* `list.__next__()` consumes the front item, StopIteration when empty (iter() yields a list). */
+/* `list.__next__()` drains a flagged builtin-iterator list, plain lists raise TypeError like the next() builtin. */
 pub fn next_method(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
     let HeapObj::List(rc) = vm.heap.get(recv) else { return Err(cold_type("__next__: receiver is not a list")); };
     let rc = rc.clone();
+    if !vm.is_iter_list(&rc) { return Err(VmErr::TypeMsg(crate::s!("'list' object is not an iterator"))); }
     let mut v = rc.borrow_mut();
     if v.is_empty() { return Err(VmErr::Raised(crate::s!("StopIteration"))); }
     let item = v.remove(0);

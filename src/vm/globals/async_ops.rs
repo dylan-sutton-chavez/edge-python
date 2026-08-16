@@ -285,7 +285,11 @@ impl<'a> VM<'a> {
                         _ => results.push(Val::none()),
                     }
                 }
-                if let Some(e) = first_err { return self.raise_into_outer(outer, e); }
+                if let Some(e) = first_err {
+                    // pending.exc_val may hold a later child's instance, force a rebuild from the first-in-order error.
+                    self.pending.exc_val = None;
+                    return self.raise_into_outer(outer, e);
+                }
                 match self.heap.alloc(HeapObj::List(Rc::new(RefCell::new(results)))) {
                     Ok(list) => { self.splice_outer_placeholder(outer, list); CoroState::Ready }
                     Err(e) => self.raise_into_outer(outer, e),

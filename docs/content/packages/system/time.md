@@ -5,7 +5,7 @@ description: "Clocks, calendar functions, and a suspending sleep."
 
 `time` is clocks and calendar functions. Import it by bare name or declare it in the `system` field of `packages.json`. The native engine builds it in, see [the native engine](/reference/modules#the-native-engine).
 
-The surface is `time`, `time_ns`, `monotonic`, `monotonic_ns`, `perf_counter`, `perf_counter_ns`, `sleep`, `gmtime`, `localtime`, `mktime`, `strftime`, `strptime`, `asctime`, `ctime`, `timezone`, `altzone`, `daylight`, `tzname`. `sleep` suspends the coroutine. `gmtime` and `localtime` return the nine fields as a JSON string in `struct_time` order, decode them with `json.loads`. `tm_wday` is Monday=0, `tm_yday` is 1-based, and `tm_isdst` is always -1. `time_ns` returns a decimal string, because epoch nanoseconds exceed what a JS number can hold. `timezone`, `altzone`, `daylight`, and `tzname` are calls, not constants, and `tzname` returns the IANA zone name.
+The surface is `time`, `time_ns`, `monotonic`, `monotonic_ns`, `perf_counter`, `perf_counter_ns`, `sleep`, `gmtime`, `localtime`, `mktime`, `strftime`, `strptime`, `asctime`, `ctime`, `timezone`, `altzone`, `daylight`, `tzname`. `sleep` suspends the coroutine. `gmtime` and `localtime` return the nine fields as a JSON string in `struct_time` order, decode them with `json.loads`. `tm_wday` is Monday=0, `tm_yday` is 1-based, and `tm_isdst` is always -1. `time_ns` returns a decimal string on the web, because epoch nanoseconds exceed what a JS number can hold, and an int in the native engine. `timezone`, `altzone`, `daylight`, and `tzname` are calls, not constants, and `tzname` returns the IANA zone name.
 
 `gmtime` takes epoch seconds and returns UTC fields, which read the same on every host:
 

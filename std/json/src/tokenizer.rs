@@ -149,18 +149,30 @@ impl<'a> Tokenizer<'a> {
     fn read_number(&mut self) -> Result<Token, JsonError> {
         let start = self.pos;
         let mut is_float = false;
+        let bad = || JsonError { msg: "invalid number".to_string(), pos: start };
         if self.src[self.pos] == b'-' { self.pos += 1; }
-        while self.pos < self.src.len() && self.src[self.pos].is_ascii_digit() { self.pos += 1; }
+        // JSON grammar `-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`, so a leading zero stands alone and `.`/`e` require digits.
+        match self.src.get(self.pos) {
+            Some(b'0') => self.pos += 1,
+            Some(c) if c.is_ascii_digit() => {
+                while self.pos < self.src.len() && self.src[self.pos].is_ascii_digit() { self.pos += 1; }
+            }
+            _ => return Err(bad()),
+        }
         if self.pos < self.src.len() && self.src[self.pos] == b'.' {
             is_float = true;
             self.pos += 1;
+            let digits = self.pos;
             while self.pos < self.src.len() && self.src[self.pos].is_ascii_digit() { self.pos += 1; }
+            if self.pos == digits { return Err(bad()); }
         }
         if self.pos < self.src.len() && matches!(self.src[self.pos], b'e' | b'E') {
             is_float = true;
             self.pos += 1;
             if self.pos < self.src.len() && matches!(self.src[self.pos], b'+' | b'-') { self.pos += 1; }
+            let digits = self.pos;
             while self.pos < self.src.len() && self.src[self.pos].is_ascii_digit() { self.pos += 1; }
+            if self.pos == digits { return Err(bad()); }
         }
         let text = core::str::from_utf8(&self.src[start..self.pos]).map_err(|_| self.err("non-utf8 number"))?.to_string();
         if is_float {
@@ -177,4 +189,33 @@ fn utf8_len(b: u8) -> Option<usize> {
     else if b & 0xF0 == 0xE0 { Some(3) }
     else if b & 0xF8 == 0xF0 { Some(4) }
     else { None }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tok(src: &str) -> Result<Token, JsonError> {
+        Tokenizer::new(src).next_token()
+    }
+
+    #[test]
+    fn number_grammar() {
+        assert!(matches!(tok("0"), Ok(Token::Int(0, _))));
+        assert!(matches!(tok("0.5"), Ok(Token::Float(_, _))));
+        assert!(matches!(tok("1e5"), Ok(Token::Float(_, _))));
+        assert!(matches!(tok("-0.5e+2"), Ok(Token::Float(_, _))));
+        assert!(tok("1.").is_err());
+        assert!(tok("1e").is_err());
+        assert!(tok("1e+").is_err());
+        assert!(tok("-").is_err());
+    }
+
+    #[test]
+    fn leading_zero_stands_alone() {
+        // `01` tokenizes as `0` then `1` so the parser reports trailing data
+        let mut t = Tokenizer::new("01");
+        assert!(matches!(t.next_token(), Ok(Token::Int(0, _))));
+        assert!(matches!(t.next_token(), Ok(Token::Int(1, _))));
+    }
 }

@@ -338,6 +338,56 @@ fn bundle_writes_a_package_file() {
     assert!(bytes.starts_with(b"EDGEPKG\x01"), "missing bundle magic");
 }
 
+// Web builds need the local runtime hooks, without them the fetch would hit the CDN.
+fn web_build(dir: &Path) -> Option<(String, String, i32)> {
+    if std::env::var_os("EDGE_RUNTIME_DIR").is_none() || std::env::var_os("EDGE_COMPILER_WASM").is_none() {
+        eprintln!("skipping, set EDGE_RUNTIME_DIR and EDGE_COMPILER_WASM to cover web builds");
+        return None;
+    }
+    Some(run_in(dir, &["build", "--web"], None))
+}
+
+/* A second web build must not collect the previous dist/ into dist/dist/. */
+#[test]
+fn rebuilding_web_does_not_nest_dist() {
+    let dir = scratch("rebuild");
+    std::fs::write(dir.join("main.py"), "print(\"ok\")\n").unwrap();
+    std::fs::write(dir.join("packages.json"), "{}\n").unwrap();
+    let Some((_, err, code)) = web_build(&dir) else { return };
+    assert_eq!(code, 0, "first build stderr was: {err}");
+    let (_, err, code) = web_build(&dir).unwrap();
+    assert_eq!(code, 0, "second build stderr was: {err}");
+    assert!(!dir.join("dist/dist").exists(), "dist was re-ingested on rebuild");
+    assert!(dir.join("dist/main.py").exists());
+}
+
+/* A stale dist/ present before the first build is excluded from collection. */
+#[test]
+fn a_stale_dist_is_not_collected() {
+    let dir = scratch("stale");
+    std::fs::write(dir.join("main.py"), "print(\"ok\")\n").unwrap();
+    std::fs::write(dir.join("packages.json"), "{}\n").unwrap();
+    std::fs::create_dir_all(dir.join("dist")).unwrap();
+    std::fs::write(dir.join("dist/stale.py"), "print(\"stale\")\n").unwrap();
+    let Some((_, err, code)) = web_build(&dir) else { return };
+    assert_eq!(code, 0, "build stderr was: {err}");
+    assert!(!dir.join("dist/dist").exists(), "stale dist was re-ingested");
+}
+
+/* Only the output dir itself is skipped, a deeper dir named dist is still packed. */
+#[test]
+fn a_deeper_dir_named_dist_is_packed() {
+    let dir = scratch("deepdist");
+    std::fs::write(dir.join("main.py"), "print(\"ok\")\n").unwrap();
+    std::fs::write(dir.join("packages.json"), "{}\n").unwrap();
+    std::fs::create_dir_all(dir.join("sub/dist")).unwrap();
+    std::fs::write(dir.join("sub/dist/keep.py"), "print(\"keep\")\n").unwrap();
+    let Some((_, err, code)) = web_build(&dir) else { return };
+    assert_eq!(code, 0, "build stderr was: {err}");
+    assert!(dir.join("dist/sub/dist/keep.py").exists());
+}
+
+
 // Locates a staged or locally built plugin, a staged one missing is a wiring bug.
 fn std_plugin(pkg: &str) -> Option<PathBuf> {
     match std::env::var("EDGE_STD_DIR") {

@@ -453,7 +453,7 @@ True
 
 ## int and float methods
 
-`int` exposes `bit_length()` (bits needed for the absolute value, `0` for zero), `bit_count()` (number of set bits), and `to_bytes(length=1, byteorder='big')` (unsigned, `OverflowError` when the value does not fit or is negative). `int.from_bytes(bytes, byteorder='big')` is a classmethod, unsigned, with no length cap. `float` exposes `is_integer()`.
+`int` exposes `bit_length()` (bits needed for the absolute value, `0` for zero), `bit_count()` (number of set bits), and `to_bytes(length=1, byteorder='big')` (unsigned, `OverflowError` when the value does not fit or is negative). `int.from_bytes(bytes, byteorder='big')` is a classmethod, unsigned, raising `OverflowError` past the 128-bit range. `float` exposes `is_integer()`.
 
 ```python
 print((255).bit_length())

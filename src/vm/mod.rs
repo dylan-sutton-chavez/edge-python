@@ -161,6 +161,8 @@ pub struct VM<'a> {
     pub(crate) with_stack: Vec<Val>,
     /* GC roots for operands popped off the stack but still read after a dunder call that can collect. */
     pub(crate) temp_roots: Vec<Val>,
+    /* Weak flags for lists produced by iterator builtins (iter/map/filter/zip/enumerate/reversed), next() drains only these and plain lists raise TypeError. Weak so a swept slot can never alias a fresh list. */
+    pub(crate) iter_marks: Vec<alloc::rc::Weak<core::cell::RefCell<Vec<Val>>>>,
     pub(crate) pending: Pending,
     /* Monotonic correlation id handed to each deferred host call, matched by `set_host_result_by_id`. */
     pub(crate) next_host_call_id: u64,
@@ -227,6 +229,7 @@ impl<'a> VM<'a> {
             max_calls: limits.calls,
             with_stack: Vec::new(),
             temp_roots: Vec::new(),
+            iter_marks: Vec::new(),
             pending: Pending::new(),
             next_host_call_id: 0,
             pending_sync_frames: Vec::new(),

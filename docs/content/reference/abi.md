@@ -107,9 +107,9 @@ Stashes an error visible after the guest returns `1`. Use it when the error did 
 | `NewSet` | 12 | construct set from `argv` items, unhashable item -> error |
 | `NewFrozenSet` | 13 | construct frozenset from `argv` items, unhashable item -> error |
 
-`Op::Iter` materialises the receiver into a List handle: a set yields items in hash-table order, a dict yields keys, a str splits to single-char strings. `Op::IterNext` advances it.
+`Op::Iter` materialises the receiver into a List handle: a set yields items in hash-table order, a dict yields keys, a str splits to single-char strings, a bytes yields its bytes as ints. `Op::IterNext` advances it.
 
-`TypeOf` returns the builtin type names: `"int"`, `"float"`, `"str"`, `"bytes"`, `"list"`, `"dict"`, `"set"`, `"tuple"`, `"NoneType"`, `"bool"`, `"object"` (user instance), and so on.
+`TypeOf` returns the builtin type names: `"int"`, `"float"`, `"str"`, `"bytes"`, `"list"`, `"dict"`, `"set"`, `"tuple"`, `"NoneType"`, `"bool"`, and so on. A user instance returns its class name.
 
 Values `14..u32::MAX` are reserved. Old hosts return `1` with kind `Runtime`.
 
@@ -375,7 +375,7 @@ The reference browser shim is `web/src/native.ts` in the repo. The CLI's [native
 - **Refcounted handles.** The guest releases every handle it creates via `edge_encode` / `edge_op`, except the one returned through `*out`. The host releases `argv` handles.
 - **`edge_decode` covers primitives plus `list` / `tuple` / `dict`** (TLV-encoded). Sets, instances, and cyclic values return `TAG_INVALID`. Walk those with `edge_op`.
 - **Trailing kwargs slot.** Every plugin call carries one extra `u32` after the positional argv: handle `0` when the caller passed no `name=value` arguments, otherwise a `dict` handle holding the pairs. The `#[plugin_fn]` macro folds it into a `Kwargs` parameter if declared (`fn foo(a: Handle, kw: Kwargs)`). Otherwise it is silently absorbed.
-- **Invoking a caller-supplied callable.** From the guest, `edge_op(Call, recv, "__call__", ...)` invokes `recv` directly. Lambdas, builtins, classes, and bound methods all route through the same dispatch the language uses. Use this for hooks like `default`, `object_hook`, `parse_int`.
+- **Invoking a caller-supplied callable.** From the guest, `edge_op(Call, recv, "__call__", ...)` invokes `recv` directly. Lambdas, builtins, classes, and bound methods all route through the same dispatch the language uses. Use this for hooks like `default`, `object_hook`, `parse_int`. Positional arguments cap at 255.
 - **Reentrance supported.** A guest's `edge_op` runs while the VM is paused on the script's `CallExtern`. Method dispatch routes through the same method table the language uses internally, so adding a method there makes it visible to existing modules with no recompile.
 - **Error-as-status, not panic.** Returning `1` does not abort the host. The host pulls the error and raises it as a typed exception.
 - **Memory ownership.** The host reads guest linear memory only at well-defined copy points. Guest-internal allocations stay private.

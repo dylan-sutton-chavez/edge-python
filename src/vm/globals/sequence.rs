@@ -57,6 +57,22 @@ impl IterCursor {
 
 impl<'a> VM<'a> {
 
+    /* True when `rc` backs a live builtin-iterator list flagged by alloc_and_push_iter. */
+    pub(crate) fn is_iter_list(&self, rc: &alloc::rc::Rc<core::cell::RefCell<Vec<Val>>>) -> bool {
+        self.iter_marks.iter().any(|w| w.upgrade().is_some_and(|r| alloc::rc::Rc::ptr_eq(&r, rc)))
+    }
+
+    /* Push a fresh list flagged as a builtin iterator, next() drains flagged lists only. */
+    pub(crate) fn alloc_and_push_iter(&mut self, items: Vec<Val>) -> Result<(), VmErr> {
+        self.alloc_and_push_list(items)?;
+        let v = *self.stack.last().ok_or(cold_runtime("stack underflow"))?;
+        if let HeapObj::List(rc) = self.heap.get(v) {
+            self.iter_marks.retain(|w| w.strong_count() > 0);
+            self.iter_marks.push(alloc::rc::Rc::downgrade(rc));
+        }
+        Ok(())
+    }
+
     pub fn call_len(&mut self, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         let o = self.pop()?;
         // instance `__len__` takes precedence over built-in length rules.
@@ -226,7 +242,7 @@ impl<'a> VM<'a> {
             self.extract_iter(o, true)?
         };
         items.reverse();
-        self.alloc_and_push_list(items)
+        self.alloc_and_push_iter(items)
     }
 
     pub fn call_enumerate(&mut self, op: u16) -> Result<(), VmErr> {
@@ -253,7 +269,7 @@ impl<'a> VM<'a> {
             let t = self.heap.alloc(HeapObj::Tuple(vec![idx, x]))?;
             pairs.push(t);
         }
-        self.alloc_and_push_list(pairs)
+        self.alloc_and_push_iter(pairs)
     }
 
     /* Pairs elements from N iterables into tuples, truncating to the shortest. */
@@ -270,7 +286,7 @@ impl<'a> VM<'a> {
             let t = self.heap.alloc(HeapObj::Tuple(tuple))?;
             pairs.push(t);
         }
-        self.alloc_and_push_list(pairs)
+        self.alloc_and_push_iter(pairs)
     }
 
     // TypeError for a non-iterable operand.
@@ -364,7 +380,7 @@ impl<'a> VM<'a> {
         self.extract_iter(o, true)
     }
 
-    /* `iter(x)`, eager flatten into a fresh List drained front-to-back by `next()`. Original isn't touched. Mirrors the universal ABI's `Op::Iter`. The 2-arg form `iter(callable, sentinel)` calls `callable()` until it returns `sentinel`, eagerly. */
+    /* `iter(x)`, eager flatten into a fresh List flagged as a builtin iterator so next() may drain it. Original isn't touched. Mirrors the universal ABI's `Op::Iter`. The 2-arg form `iter(callable, sentinel)` calls `callable()` until it returns `sentinel`, eagerly. */
     pub fn call_iter(&mut self, argc: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         if argc == 2 {
             let sentinel = self.pop()?;
@@ -379,12 +395,12 @@ impl<'a> VM<'a> {
                 if items.len() >= self.heap.limit() { return Err(cold_heap()); }
                 items.push(v);
             }
-            return self.alloc_and_push_list(items);
+            return self.alloc_and_push_iter(items);
         }
         if argc != 1 { return Err(cold_type("iter() takes 1 or 2 arguments")); }
         let o = self.pop()?;
         let items = self.iter_to_vec_general(o)?;
-        self.alloc_and_push_list(items)
+        self.alloc_and_push_iter(items)
     }
 
     pub fn call_next(&mut self, argc: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
@@ -404,9 +420,12 @@ impl<'a> VM<'a> {
                 Err(e) => Err(e),
             };
         }
-        // List path mirrors the ABI's IterNext op so script `next()` and host `Op::IterNext` match.
+        // Only flagged builtin-iterator lists drain here, plain lists raise TypeError like Python.
         if let HeapObj::List(rc) = self.heap.get(o) {
             let rc = rc.clone();
+            if !self.is_iter_list(&rc) {
+                return Err(VmErr::TypeMsg(s!("'list' object is not an iterator")));
+            }
             let mut v = rc.borrow_mut();
             if v.is_empty() {
                 drop(v);
@@ -449,7 +468,7 @@ impl<'a> VM<'a> {
             self.exec_call(arity, chunk, slots)?;
             out.push(self.pop()?);
         }
-        self.alloc_and_push_list(out)
+        self.alloc_and_push_iter(out)
     }
 
     /* `filter(pred, iter)`, eager, keeps truthy `pred(item)`. Same call-shape as `map`. `pred=None` falls back to Python's identity-truthy filter. */
@@ -470,7 +489,7 @@ impl<'a> VM<'a> {
             };
             if keep { out.push(item); }
         }
-        self.alloc_and_push_list(out)
+        self.alloc_and_push_iter(out)
     }
 
     /* Short-circuit truthiness scan shared by `all`/`any`, stops at the first element whose truthiness equals `find`, pushing `find`. Pushes `!find` on exhaustion. */

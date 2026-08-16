@@ -38,10 +38,12 @@ pub fn from_bytes(vm: &mut VM, _recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let buf = recv_bytes(vm, pos[0])?;
     let big = byteorder_is_big(vm, pos.get(1))?;
     let mut acc: i128 = 0;
+    // Checked accumulation so inputs wider than i128 raise instead of silently dropping high bits.
+    let step = |acc: i128, b: u8| acc.checked_mul(256).and_then(|a| a.checked_add(b as i128)).ok_or(cold_overflow());
     if big {
-        for &b in &buf { acc = (acc << 8) | b as i128; }
+        for &b in &buf { acc = step(acc, b)?; }
     } else {
-        for &b in buf.iter().rev() { acc = (acc << 8) | b as i128; }
+        for &b in buf.iter().rev() { acc = step(acc, b)?; }
     }
     let v = vm.int_to_val(Some(acc))?;
     vm.push(v); Ok(())

@@ -219,7 +219,8 @@ fn vendor_runtime(out_dir: &Path) -> Result<()> {
 /// Walk the project for `.py` files, skipping hidden dirs and the output directory itself.
 fn collect_scripts(project: &Path, out_dir: &Path) -> Vec<PathBuf> {
     let mut scripts = Vec::new();
-    walk(project, out_dir, &mut scripts);
+    let out_dir = fs::canonicalize(out_dir).unwrap_or_else(|_| out_dir.to_path_buf());
+    walk(project, &out_dir, &mut scripts);
     scripts
 }
 
@@ -227,7 +228,11 @@ fn walk(dir: &Path, out_dir: &Path, found: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path == out_dir { continue; }
+        // read_dir yields "./dist" while out_dir is "dist", so compare canonical forms.
+        if path.is_dir()
+            && fs::canonicalize(&path).ok().as_deref() == Some(out_dir) {
+                continue;
+            }
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         if name.starts_with('.') || name == "node_modules" || name == "target" {
             continue;
@@ -240,25 +245,24 @@ fn walk(dir: &Path, out_dir: &Path, found: &mut Vec<PathBuf>) {
     }
 }
 
-/// Cheap import scanner, regex-free, picks up `import X` and `from X import …` at the top level of a line.
+/// Cheap import scanner, regex-free, picks up `import X, Y` and `from X import …` at the top level of a line.
 fn crawl_imports(scripts: &[PathBuf]) -> BTreeSet<String> {
     let mut imports = BTreeSet::new();
     for path in scripts {
         let Ok(text) = fs::read_to_string(path) else { continue };
         for line in text.lines() {
             let line = line.trim();
-            let rest = if let Some(r) = line.strip_prefix("from ") {
-                r
-            } else if let Some(r) = line.strip_prefix("import ") {
-                r
-            } else {
-                continue;
-            };
-            for tok in rest.split(|c: char| c == ',' || c.is_whitespace()) {
-                if tok.is_empty() { continue; }
-                let name = tok.split('.').next().unwrap_or(tok);
-                if !name.is_empty() { imports.insert(name.to_string()); }
-                break; // first token after `import`/`from` is the module
+            if let Some(rest) = line.strip_prefix("from ") {
+                // Only the module before `import` counts, not the imported names.
+                if let Some(name) = rest.split(|c: char| c == '.' || c.is_whitespace()).next()
+                    && !name.is_empty() {
+                        imports.insert(name.to_string());
+                    }
+            } else if let Some(rest) = line.strip_prefix("import ") {
+                for tok in rest.split(',') {
+                    let name = tok.trim().split(|c: char| c == '.' || c.is_whitespace()).next().unwrap_or("");
+                    if !name.is_empty() { imports.insert(name.to_string()); }
+                }
             }
         }
     }
@@ -332,16 +336,15 @@ fn rewrite_manifest(
 
 /// Pick `main.py`/`app.py`/`index.py` if present, otherwise the first script found.
 fn find_entry(scripts: &[PathBuf], project: &Path) -> String {
+    let rel = |s: &PathBuf| s.strip_prefix(project).ok().map(|p| p.to_string_lossy().replace('\\', "/"));
     for c in ["main.py", "app.py", "index.py"] {
-        if scripts.iter().any(|s| s.file_name().and_then(|n| n.to_str()) == Some(c)) {
-            return c.to_string();
+        if let Some(s) = scripts.iter().find(|s| s.file_name().and_then(|n| n.to_str()) == Some(c)) {
+            return rel(s).unwrap_or_else(|| c.to_string());
         }
     }
     scripts
         .first()
-        .and_then(|s| s.strip_prefix(project).ok())
-        .and_then(|p| p.to_str())
-        .map(String::from)
+        .and_then(rel)
         .unwrap_or_else(|| "main.py".to_string())
 }
 
@@ -367,3 +370,107 @@ fn fetch(url: &str) -> Result<Vec<u8>> {
     let mut resp = ureq::get(url).call().map_err(|e| anyhow!("HTTP error: {e}"))?;
     resp.body_mut().read_to_vec().map_err(|e| anyhow!("reading body: {e}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn imports_of(src: &str) -> BTreeSet<String> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.py");
+        fs::write(&path, src).unwrap();
+        crawl_imports(&[path])
+    }
+
+    fn set(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn import_comma_list_vendors_every_module() {
+        assert_eq!(imports_of("import a, b\n"), set(&["a", "b"]));
+    }
+
+    #[test]
+    fn import_list_strips_dots_and_aliases() {
+        assert_eq!(imports_of("import a.b, c as d\n"), set(&["a", "c"]));
+    }
+
+    #[test]
+    fn from_import_keeps_only_the_module() {
+        assert_eq!(imports_of("from x import a, b\n"), set(&["x"]));
+        assert_eq!(imports_of("from x.y import z\n"), set(&["x"]));
+    }
+
+    #[test]
+    fn import_lines_mix_and_indent() {
+        let src = "import a\nfrom b.c import d\n  import e ,f\n";
+        assert_eq!(imports_of(src), set(&["a", "b", "e", "f"]));
+    }
+
+    #[test]
+    fn non_import_lines_and_relative_imports_add_nothing() {
+        let src = "x = 1\nprint('import a')\nfrom . import b\n";
+        assert_eq!(imports_of(src), set(&[]));
+    }
+
+    fn paths(dirs: &[&str]) -> Vec<PathBuf> {
+        dirs.iter().map(PathBuf::from).collect()
+    }
+
+    #[test]
+    fn nested_main_is_the_entry_with_its_path() {
+        let scripts = paths(&["./sub/main.py"]);
+        assert_eq!(find_entry(&scripts, Path::new(".")), "sub/main.py");
+    }
+
+    #[test]
+    fn root_main_wins_over_nested_candidates() {
+        let scripts = paths(&["./sub/app.py", "./main.py"]);
+        assert_eq!(find_entry(&scripts, Path::new(".")), "main.py");
+    }
+
+    #[test]
+    fn nested_app_is_the_entry_with_its_path() {
+        let scripts = paths(&["./util.py", "./sub/app.py"]);
+        assert_eq!(find_entry(&scripts, Path::new(".")), "sub/app.py");
+    }
+
+    #[test]
+    fn without_candidates_the_first_script_is_the_entry() {
+        let scripts = paths(&["./sub/tool.py"]);
+        assert_eq!(find_entry(&scripts, Path::new(".")), "sub/tool.py");
+    }
+
+    #[test]
+    fn empty_project_falls_back_to_main() {
+        assert_eq!(find_entry(&[], Path::new(".")), "main.py");
+    }
+
+    #[test]
+    fn walk_skips_the_output_dir_in_any_path_form() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path();
+        fs::write(project.join("main.py"), "").unwrap();
+        fs::create_dir(project.join("dist")).unwrap();
+        fs::write(project.join("dist/stale.py"), "").unwrap();
+        // The CLI hands over a bare relative "dist", so pass a non-normalized form here.
+        fs::create_dir(project.join("sub")).unwrap();
+        let out_dir = project.join("sub/..").join("dist");
+        let scripts = collect_scripts(project, &out_dir);
+        assert_eq!(scripts, paths(&[project.join("main.py").to_str().unwrap()]));
+    }
+
+    #[test]
+    fn walk_keeps_a_deeper_dir_named_like_the_output_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path();
+        fs::create_dir_all(project.join("sub/dist")).unwrap();
+        fs::write(project.join("sub/dist/keep.py"), "").unwrap();
+        fs::create_dir(project.join("dist")).unwrap();
+        let scripts = collect_scripts(project, &project.join("dist"));
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].ends_with("sub/dist/keep.py"));
+    }
+}
+

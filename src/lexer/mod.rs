@@ -87,25 +87,52 @@ pub fn lex(source: &str) -> (Vec<Token>, Vec<LexError>) {
         if ended { break; }
         if tok == TokenType::Endmarker { ended = true; }
 
-        /* Soft keywords demote to Name by the next token, so `match(...)`, `case(...)`, `type(...)` parse as calls not statements. */
+        /* Soft keywords demote to Name by the next token so `match(...)` parses as a call, kept when a colon follows the matching close paren at statement start. */
         let is_soft = matches!(tok, TokenType::Type | TokenType::Match | TokenType::Case);
-        let next_demotes = matches!(
-            raw.get(i + 1),
-            Some(&(
-                TokenType::Lpar
-                | TokenType::Colon
-                | TokenType::Equal
-                | TokenType::Comma
-                | TokenType::Rpar
-                | TokenType::Rsqb
-                | TokenType::Newline,
-                _, _, _,
-            )) | None
-        );
+        let next_demotes = if matches!(raw.get(i + 1), Some(&(TokenType::Lpar, _, _, _))) {
+            !paren_subject_stmt(&raw, i)
+        } else {
+            matches!(
+                raw.get(i + 1),
+                Some(&(
+                    TokenType::Colon
+                    | TokenType::Equal
+                    | TokenType::Comma
+                    | TokenType::Rpar
+                    | TokenType::Rsqb
+                    | TokenType::Newline,
+                    _, _, _,
+                )) | None
+            )
+        };
         let kind = if is_soft && next_demotes { TokenType::Name } else { tok };
         tokens.push(Token { kind, line, start, end });
     }
     (tokens, scanner.errors)
+}
+
+/* True when a soft keyword at `i` starts a `match (subject):` shape, scans from the open paren to its match and checks for a trailing colon, statement start only so expression calls still demote. */
+fn paren_subject_stmt(raw: &[(TokenType, usize, usize, usize)], i: usize) -> bool {
+    if i > 0 && !matches!(raw[i - 1].0, TokenType::Newline | TokenType::Indent | TokenType::Dedent) {
+        return false;
+    }
+    let mut depth = 1usize;
+    let mut j = i + 2;
+    while let Some(&(k, ..)) = raw.get(j) {
+        match k {
+            TokenType::Lpar => depth += 1,
+            TokenType::Rpar => {
+                depth -= 1;
+                if depth == 0 {
+                    return matches!(raw.get(j + 1), Some(&(TokenType::Colon, ..)));
+                }
+            }
+            TokenType::Endmarker => return false,
+            _ => {}
+        }
+        j += 1;
+    }
+    false
 }
 
 impl TokenType {

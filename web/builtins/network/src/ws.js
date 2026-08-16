@@ -25,7 +25,7 @@ export default ({ sockets, allocSocket, socket }, { pushEvent }) => ({
     /* `ws_close(h, code?, reason?)`, defaults to a clean close (1000). */
     ws_close: (h, code, reason) => {
         const ws = socket(h);
-        if (code !== undefined) ws.close(code, reason || '');
+        if (code !== undefined && code !== null) ws.close(code, reason || '');
         else ws.close();
         sockets[h] = null;
     },

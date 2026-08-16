@@ -612,12 +612,12 @@ False
 
 ### id, hash
 
-`id(x)` returns a stable numeric identifier for the value. `hash(x)` returns the hash of a hashable value. Lists, dicts, and sets are unhashable and raise `TypeError`. Ints hash to themselves. Floats hash by bit pattern, so `hash(1) != hash(1.0)`.
+`id(x)` returns a stable numeric identifier for the value. `hash(x)` returns the hash of a hashable value. Lists, dicts, and sets are unhashable and raise `TypeError`. Ints hash to themselves. Integral floats hash as the equal int, so `hash(1) == hash(1.0)`.
 
 ```python
 print(hash("hello") == hash("hello"))
 print(hash((1, 2, 3)) == hash((1, 2, 3)))
-print(hash(1) != hash(1.0))
+print(hash(1) == hash(1.0))
 
 try:
     hash([1, 2, 3])

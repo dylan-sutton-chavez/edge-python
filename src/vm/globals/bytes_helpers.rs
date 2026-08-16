@@ -100,7 +100,7 @@ impl<'a> VM<'a> {
         let val = self.globals.get(&name)
             .or_else(|| self.globals.get(&s!(str &name, "_0")))
             .copied()
-            .ok_or_else(|| VmErr::Name(s!("module '", str &name, "' not imported in this scope")))?;
+            .ok_or_else(|| VmErr::Raised(s!("NameError: module '", str &name, "' not imported in this scope")))?;
         if !val.is_heap() || !matches!(self.heap.get(val), HeapObj::Module(..)) {
             return Err(VmErr::TypeMsg(s!("'", str &name, "' is not a module")));
         }

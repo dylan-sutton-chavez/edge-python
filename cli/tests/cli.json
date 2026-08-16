@@ -165,6 +165,75 @@
     "stderr": ["ZeroDivisionError"]
   },
   {
+    "given": { "packages.json": "{}\n" },
+    "run": ["add", "test=https://example.com/test.py"],
+    "stdout": ["+ test", "std"],
+    "contains": { "packages.json": "\"imports\"" }
+  },
+  {
+    "given": { "packages.json": "{}\n" },
+    "run": ["add", "foo=https://example.com/foo.py"],
+    "contains": { "packages.json": "\"imports\": {\n    \"foo\": \"https://example.com/foo.py\"" }
+  },
+  {
+    "given": { "packages.json": "{}\n" },
+    "run": ["add", "bar=https://example.com/bar.js"],
+    "stdout": ["+ bar", "system"],
+    "contains": { "packages.json": "\"system\"" }
+  },
+  {
+    "given": { "packages.json": "{}\n" },
+    "run": ["add", "baz=https://example.com/baz.wasm"],
+    "stdout": ["+ baz", "std"],
+    "contains": { "packages.json": "\"imports\"" }
+  },
+  {
+    "given": { "packages.json": "{}\n" },
+    "run": ["add", "one=https://example.com/one.py", "two=https://example.com/two.js"],
+    "contains": { "packages.json": "\"imports\"" }
+  },
+  {
+    "given": { "ask.py": "s = input()\nprint(len(s))\n" },
+    "run": ["run", "ask.py"],
+    "stdin": "hello\r\n",
+    "stdout": ["5"]
+  },
+  {
+    "given": { "ask.py": "s = input()\nprint(len(s))\n" },
+    "run": ["run", "ask.py"],
+    "stdin": "hello\n",
+    "stdout": ["5"]
+  },
+  {
+    "given": { "ask.py": "a = input()\nb = input()\nprint(len(a))\nprint(len(b))\n" },
+    "run": ["run", "ask.py"],
+    "stdin": "x\r\nyy\r\n",
+    "stdout": ["1", "2"]
+  },
+  {
+    "given": { "ask.py": "s = input()\nprint(repr(s))\n" },
+    "run": ["run", "ask.py"],
+    "stdin": "hi\r\n",
+    "stdout": ["'hi'"]
+  },
+  {
+    "given": { "ask.py": "s = input()\nprint(len(s))\n" },
+    "run": ["run", "ask.py"],
+    "stdin": "hey\r",
+    "stdout": ["3"]
+  },
+  {
+    "given": { "sub/main.py": "print('ok')\n", "packages.json": "{}\n" },
+    "run": ["build", "--web"],
+    "creates": ["dist/sub/main.py"],
+    "contains": { "dist/index.html": "./sub/main.py" }
+  },
+  {
+    "given": { "main.py": "print('ok')\n", "packages.json": "{}\n" },
+    "run": ["build", "--web"],
+    "contains": { "dist/index.html": "./main.py" }
+  },
+  {
     "given": {"main.py": "print(1)"},
     "env": {"EDGE_FAKE_CONTRACT": "inf"},
     "engine": "web",

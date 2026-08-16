@@ -113,7 +113,17 @@ impl<'a> VM<'a> {
         if o.is_bool() { self.push(Val::int(o.as_bool() as i64)); return Ok(()); }
 
         let mut h = crate::util::hash::FxHasher::default();
-        if o.is_float() { o.as_float().to_bits().hash(&mut h); }
+        if o.is_float() {
+            let f = o.as_float();
+            // Integral floats hash as the equal int, same unification hash_depth uses for dict keys.
+            if f as i64 as f64 == f {
+                let n = f as i64;
+                let v = self.int_to_val(Some((if n == -1 { -2 } else { n }) as i128))?;
+                self.push(v);
+                return Ok(());
+            }
+            f.to_bits().hash(&mut h);
+        }
         else if o.is_none() { 0u64.hash(&mut h); }
         else if o.is_heap() {
             match self.heap.get(o) {
@@ -131,7 +141,12 @@ impl<'a> VM<'a> {
     /* Type-name based isinstance check. Accepts Type / NativeFn (builtin types) / user Class on the right, allows int<->bool aliasing and walks user inheritance via `is_subclass`. */
     pub fn call_isinstance(&mut self) -> Result<(), VmErr> {
         let (arg2, obj) = (self.pop()?, self.pop()?);
-        let obj_ty = self.type_name(obj);
+        // User instances keep the "object" label here, class membership is decided via obj_class below.
+        let obj_ty = if obj.is_heap() && matches!(self.heap.get(obj), HeapObj::Instance(..)) {
+            "object"
+        } else {
+            self.type_name(obj)
+        };
 
         // For exception matching, when `obj` is a Type itself or an ExcInstance, compare names against the asserted type.
         let obj_type_name: Option<String> = if obj.is_heap() {

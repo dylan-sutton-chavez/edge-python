@@ -481,8 +481,14 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.parse_args_body()
     }
 
-    // Parse args after `(` already consumed.
+    // Parse args after `(` already consumed. Depth-guarded since the name-led arg path recurses through `name`/`call` without passing `expr_bp`.
     pub(super) fn parse_args_body(&mut self) -> (u16, u16) {
+        self.expr_depth += 1;
+        if self.expr_depth > super::types::MAX_EXPR_DEPTH {
+            self.expr_depth -= 1;
+            self.error("expression too deeply nested");
+            return (0, 0);
+        }
         let mut pos = 0u16;
         let mut kw = 0u16;
         self.comma_list(|t| t == TokenType::Rpar, |s| {
@@ -521,6 +527,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             }
         });
         self.eat(TokenType::Rpar);
+        self.expr_depth -= 1;
         (pos, kw)
     }
 

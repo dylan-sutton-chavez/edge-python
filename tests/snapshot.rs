@@ -266,4 +266,29 @@ mod test {
         vm.run().expect("finish");
         assert_eq!(vm.output, vec!["[1, 2, {'k': 3}]"]);
     }
+
+    /* limits_of reports the profile recorded at save time, remaining budget included. */
+    #[test]
+    fn limits_of_reports_recorded_budget() {
+        let src = "x = 1\n";
+        let saved = |limits: Limits| {
+            let vm = VM::with_limits(parse_static(src), limits);
+            snapshot::save(&vm, src)
+        };
+        let l = snapshot::limits_of(&saved(Limits { calls: 7, ops: 1_234_567, heap: 42_000 })).unwrap();
+        assert_eq!((l.calls, l.ops, l.heap), (7, 1_234_567, 42_000));
+        let l = snapshot::limits_of(&saved(Limits::sandbox())).unwrap();
+        assert_eq!((l.calls, l.ops, l.heap), (256, 100_000_000, 100_000));
+        let l = snapshot::limits_of(&saved(Limits { calls: 1, ops: 5, heap: 9 })).unwrap();
+        assert_eq!((l.calls, l.ops, l.heap), (1, 5, 9));
+        let l = snapshot::limits_of(&saved(Limits { calls: 0, ops: 0, heap: 0 })).unwrap();
+        assert_eq!((l.calls, l.ops, l.heap), (0, 0, 0));
+
+        // A partially spent budget records the remainder, never the old ops 1 placeholder.
+        let src = "x = 1 + 2\n";
+        let mut vm = VM::with_limits(parse_static(src), Limits::sandbox());
+        vm.run().expect("run");
+        let l = snapshot::limits_of(&snapshot::save(&vm, src)).unwrap();
+        assert!(l.ops > 1 && l.ops < 100_000_000, "unexpected ops {}", l.ops);
+    }
 }

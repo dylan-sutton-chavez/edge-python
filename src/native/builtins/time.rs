@@ -13,7 +13,7 @@ const MONTHS_ABBR: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"
 pub(super) fn bindings() -> Vec<NativeBinding> {
     vec![
         NativeBinding::from_fn("time", |_, _, _| Ok(Val::float(crate::native::now_ns() as f64 / 1e9)), false),
-        NativeBinding::from_fn("time_ns", |h, _, _| h.alloc(HeapObj::Str(crate::native::now_ns().to_string())), false),
+        NativeBinding::from_fn("time_ns", |h, _, _| int_val(h, crate::native::now_ns() as i128), false),
         NativeBinding::from_fn("monotonic", |_, _, _| Ok(Val::float(mono_secs())), false),
         NativeBinding::from_fn("monotonic_ns", |h, _, _| int_val(h, (mono_secs() * 1e9) as i128), false),
         NativeBinding::from_fn("perf_counter", |_, _, _| Ok(Val::float(mono_secs())), false),
@@ -242,7 +242,7 @@ fn time_strptime(heap: &mut HeapPool, args: &[Val], _: Option<Val>) -> Result<Va
                 let v: i64 = input[start..pos].iter().collect::<String>().parse().map_err(|_| no_match())?;
                 match dir {
                     'Y' => y = v,
-                    'y' => y = 2000 + v,
+                    'y' => y = if v <= 68 { 2000 + v } else { 1900 + v },
                     'm' => mo = v.clamp(1, 12) as u32,
                     'd' => d = v.clamp(1, 31) as u32,
                     'H' => h = v as u32,

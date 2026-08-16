@@ -887,7 +887,7 @@ impl<'a> VM<'a> {
     pub(crate) fn dispatch_native(&mut self, id: super::super::types::NativeFnId, positional: &[Val], kw: &[Val], chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         use super::super::types::NativeFnId::*;
 
-        // `sorted()` is the only builtin taking kwargs (`key=`, `reverse=`), extract them before the no-kw guard.
+        // `sorted()` extracts `key=`/`reverse=` before the no-kw guard, print/min/max/enumerate/dict parse their own kwargs below like the fused opcodes do.
         let mut sort_key: Option<Val> = None;
         let mut sort_reverse = false;
         let leftover_storage: Vec<Val>;
@@ -905,7 +905,8 @@ impl<'a> VM<'a> {
             &leftover_storage
         } else { kw };
 
-        if !kw_remaining.is_empty() {
+        let kw_aware = matches!(id, Print | Min | Max | Enumerate | Dict);
+        if !kw_remaining.is_empty() && !kw_aware {
             return Err(cold_type("native function takes no keyword arguments"));
         }
         let argc = positional.len() as u16;
@@ -915,22 +916,27 @@ impl<'a> VM<'a> {
             && argc != n { return Err(cold_type("wrong number of arguments to builtin")); }
 
         for &v in positional { self.push(v); }
+        // Repack pos/kw counts so the handlers pop the same layout a fused call leaves.
+        let operand = if kw_aware && !kw_remaining.is_empty() {
+            for &v in kw_remaining { self.push(v); }
+            (((kw_remaining.len() / 2) as u16) << 8) | argc
+        } else { argc };
 
         match id {
             // Variadic
             Print => {
                 // CallPrint is statement-shaped (no trailing Pop). When reached via Call the parser emits Pop, so push None to keep the stack balanced.
-                self.call_print(argc, chunk, slots)?;
+                self.call_print(operand, chunk, slots)?;
                 self.push(Val::none());
                 Ok(())
             }
             Range => self.call_range(argc),
             Round => self.call_round(argc),
-            Min => self.call_min(argc, chunk, slots),
-            Max => self.call_max(argc, chunk, slots),
+            Min => self.call_min(operand, chunk, slots),
+            Max => self.call_max(operand, chunk, slots),
             Sum => self.call_sum(argc),
             Zip => self.call_zip(argc),
-            Dict => self.call_dict(argc),
+            Dict => self.call_dict(operand),
             Set => self.call_set(argc),
             Pow => self.call_pow(argc),
             All => self.call_all(argc),
@@ -949,7 +955,7 @@ impl<'a> VM<'a> {
             Chr => self.call_chr(),
             Ord => self.call_ord(),
             Sorted => self.call_sorted_with_key(sort_key, sort_reverse, chunk, slots),
-            Enumerate => self.call_enumerate(argc),
+            Enumerate => self.call_enumerate(operand),
             List => self.call_list(argc, chunk, slots),
             Tuple => self.call_tuple(argc, chunk, slots),
             Bin => self.call_bin(),

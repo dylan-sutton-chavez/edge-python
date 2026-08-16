@@ -125,6 +125,22 @@ impl<'a> VM<'a> {
         Ok(true)
     }
 
+    /* Step an iterator candidate once, flagged builtin-iterator lists drain the front, user instances dispatch `__next__`. `None` means no iterator protocol on the receiver. */
+    pub(crate) fn iter_next_proto(&mut self, iter: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Option<Val>, VmErr> {
+        if iter.is_heap()
+            && let HeapObj::List(rc) = self.heap.get(iter) {
+            let rc = rc.clone();
+            if self.is_iter_list(&rc) {
+                let mut v = rc.borrow_mut();
+                if v.is_empty() { return Err(VmErr::Raised(crate::s!("StopIteration"))); }
+                let item = v.remove(0);
+                drop(v);
+                return Ok(Some(item));
+            }
+        }
+        self.try_call_dunder(iter, "__next__", &[], chunk, slots)
+    }
+
     /* `in` operator prefers the container's `__contains__`. For built-in sequences with an instance item, iterate using `__eq__` so user equality is honoured. */
     pub(crate) fn contains_op(&mut self, container: Val, item: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<bool, VmErr> {
         if let Some(r) = self.try_call_dunder(container, "__contains__", &[item], chunk, slots)? {
@@ -155,7 +171,7 @@ impl<'a> VM<'a> {
             && let Some(iter) = self.try_call_dunder(container, "__iter__", &[], chunk, slots)? {
             loop {
                 self.charge_step()?;
-                match self.try_call_dunder(iter, "__next__", &[], chunk, slots) {
+                match self.iter_next_proto(iter, chunk, slots) {
                     Ok(Some(v)) => {
                         if self.eq_op(item, v, chunk, slots)? { return Ok(true); }
                     }
@@ -175,14 +191,14 @@ impl<'a> VM<'a> {
         Ok(eq_vals_with_heap(a, b, &self.heap))
     }
 
-    /* Drive a user-defined iterator to a Vec. Treats a missing or non-Instance receiver as "no protocol" by returning `None`. Used by `list(custom)`, `tuple(custom)`, etc. */
+    /* Drive a user instance's `__iter__` result to a Vec, stepping a user `__next__` or draining a builtin-iterator list. Treats a missing `__iter__` as "no protocol" by returning `None`. Used by `list(custom)`, `tuple(custom)`, etc. */
     pub(crate) fn iter_to_vec_op(&mut self, obj: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Option<Vec<Val>>, VmErr> {
         if !obj.is_heap() || !matches!(self.heap.get(obj), HeapObj::Instance(..)) { return Ok(None); }
         let Some(iter) = self.try_call_dunder(obj, "__iter__", &[], chunk, slots)? else { return Ok(None); };
         let mut out = Vec::new();
         loop {
             self.charge_step()?;
-            match self.try_call_dunder(iter, "__next__", &[], chunk, slots) {
+            match self.iter_next_proto(iter, chunk, slots) {
                 Ok(Some(v)) => out.push(v),
                 Ok(None) => return Ok(Some(out)),
                 Err(VmErr::Raised(ref m)) if m == "StopIteration" || m.starts_with("StopIteration:") => return Ok(Some(out)),

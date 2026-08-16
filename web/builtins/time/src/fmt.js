@@ -52,7 +52,7 @@ const strptime = (s, fmt) => {
     fields.forEach((f, i) => {
         const v = m[i + 1];
         if (f === "Y") Y = +v;
-        else if (f === "y") Y = 2000 + +v;
+        else if (f === "y") { const n = +v; Y = n <= 68 ? 2000 + n : 1900 + n; }
         else if (f === "m") mo = +v;
         else if (f === "d") d = +v;
         else if (f === "H") H = +v;
@@ -60,7 +60,10 @@ const strptime = (s, fmt) => {
         else if (f === "S") S = +v;
         else if (f === "b" || f === "B") mo = monthIndex(v) + 1;
     });
-    return toTuple(new Date(Date.UTC(Y, mo - 1, d, H, Mi, S)), true);
+    const dt = new Date(Date.UTC(Y, mo - 1, d, H, Mi, S));
+    // Any normalization (unknown month, mo or d out of range) is a mismatch.
+    if (dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) throw new Error(`time data '${s}' does not match format '${fmt}'`);
+    return toTuple(dt, true);
 };
 
 /* Pure calendar helpers. struct_time crosses as a JSON 9-tuple string, like storage's returns. */

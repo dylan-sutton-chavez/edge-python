@@ -198,6 +198,10 @@ fn dispatch_call(recv_h: u32, name: &str, args: &[Val]) -> Result<Val, VmErr> {
     with_recv("edge_op call: invalid receiver handle", recv_h, |vm, recv| {
         // `__call__` means "invoke `recv` as a callable", letting plugins forward arbitrary Python hooks (lambdas, builtins, classes) through `Handle::call("__call__", args)`. Pushes args + callee then drives `exec_call` so every callable kind (`Extern`, `NativeFn`, `Func`, `BoundMethod`, `Class`, ...) routes through the same dispatch path the VM uses normally. Empty caller-slots are fine because lambdas/hooks that escape a plugin call cannot reference caller-frame locals, they can still capture their own defining scope through the regular Func captures vector.
         if name == "__call__" {
+            // The Call operand packs argc in one byte, past 255 positional args it wraps into the kw field.
+            if args.len() > 255 {
+                return Err(VmErr::TypeMsg(s!("edge_op call(__call__): too many arguments (max 255, got ", int args.len() as i64, ")")));
+            }
             // Stack layout for `Call`, callee at the bottom, then positional args (top is the rightmost). `parse_call_args` pops args first, then `exec_call` pops the callee.
             let stack_before = vm.stack.len();
             vm.stack.push(recv);
@@ -311,6 +315,7 @@ fn dispatch_len(recv_h: u32) -> Result<Val, VmErr> {
     with_recv("edge_op len: invalid receiver handle", recv_h, |vm, recv| {
         let n: i64 = match vm.heap.get(recv) {
             HeapObj::Str(s) => s.chars().count() as i64,
+            HeapObj::Bytes(b) => b.len() as i64,
             HeapObj::List(rc) => rc.borrow().len() as i64,
             HeapObj::Dict(rc) => rc.borrow().entries.len() as i64,
             HeapObj::Set(rc) => rc.borrow().len() as i64,
@@ -329,6 +334,7 @@ fn dispatch_iter(recv_h: u32) -> Result<Val, VmErr> {
             HeapObj::Tuple(t) => t.clone(),
             HeapObj::Set(rc) => rc.borrow().iter().copied().collect(),
             HeapObj::Dict(rc) => rc.borrow().keys().collect(),
+            HeapObj::Bytes(b) => b.iter().map(|&byte| Val::int(byte as i64)).collect(),
             HeapObj::Range(s, e, st) => {
                 let mut out = Vec::new();
                 let (mut cur, end, step) = (*s, *e, *st);

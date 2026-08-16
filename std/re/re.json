@@ -118,5 +118,29 @@
   {
     "src": "compile('(')",
     "error": "missing closing parenthesis"
+  },
+  {
+    "src": "search(r'\\1', 'abc')",
+    "error": "invalid group reference"
+  },
+  {
+    "src": "print(search(r'(a)\\1', 'aa'))",
+    "output": ["aa"]
+  },
+  {
+    "src": "search(r'(a)\\2', 'aa')",
+    "error": "invalid group reference"
+  },
+  {
+    "src": "search(r'(\\1)', 'x')",
+    "error": "cannot refer to an open group"
+  },
+  {
+    "src": "print(search(r'(?P<x>\\w+) (?P=x)', 'hey hey'))",
+    "output": ["hey hey"]
+  },
+  {
+    "src": "print(search(r'(ab)\\1', 'abab'))",
+    "output": ["abab"]
   }
 ]

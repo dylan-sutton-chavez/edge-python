@@ -42,5 +42,45 @@
     {
         "src": "print(daylight() == 0 or daylight() == 1)",
         "output": ["True"]
+    },
+    {
+        "src": "print(type(time_ns()))",
+        "output": ["<class 'int'>"]
+    },
+    {
+        "src": "a = time_ns()\nb = time_ns()\nprint(type(b - a))\nprint(b - a >= 0)",
+        "output": ["<class 'int'>", "True"]
+    },
+    {
+        "src": "a = time_ns()\nprint(a <= time_ns())\nprint(a > 0)",
+        "output": ["True", "True"]
+    },
+    {
+        "src": "s = str(time_ns())\nprint(s.isdigit())\nprint(len(s) >= 18)",
+        "output": ["True", "True"]
+    },
+    {
+        "src": "print(type(time_ns()) is type(monotonic_ns()))",
+        "output": ["True"]
+    },
+    {
+        "src": "print(strptime('31 Dec 99', '%d %b %y'))",
+        "output": ["[1999,12,31,0,0,0,4,365,-1]"]
+    },
+    {
+        "src": "print(strptime('01 Jan 68', '%d %b %y'))",
+        "output": ["[2068,1,1,0,0,0,6,1,-1]"]
+    },
+    {
+        "src": "print(strptime('01 Jan 69', '%d %b %y'))",
+        "output": ["[1969,1,1,0,0,0,2,1,-1]"]
+    },
+    {
+        "src": "print(strptime('01 Jan 00', '%d %b %y'))",
+        "output": ["[2000,1,1,0,0,0,5,1,-1]"]
+    },
+    {
+        "src": "print(strptime('15 Jun 2021', '%d %b %Y'))",
+        "output": ["[2021,6,15,0,0,0,1,166,-1]"]
     }
 ]

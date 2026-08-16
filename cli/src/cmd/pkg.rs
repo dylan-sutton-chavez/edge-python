@@ -69,9 +69,9 @@ fn parse_spec(spec: &str) -> (&str, Option<String>) {
     (spec, None)
 }
 
-/// A `.wasm` url is a worker-side std package, anything else is a system package.
+/// A `.wasm` or `.py` url is a worker-side std package, anything else is a system package.
 fn kind_from_url(url: &str) -> Kind {
-    if url.ends_with(".wasm") {
+    if url.ends_with(".wasm") || url.ends_with(".py") {
         Kind::Std
     } else {
         Kind::System

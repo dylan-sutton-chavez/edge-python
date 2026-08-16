@@ -132,7 +132,14 @@ export async function createWorker(opts?: CreateWorkerOpts): Promise<WorkerHandl
             }
             case 'response':
             case 'error': {
-                if (data.reqId == null) return;
+                if (data.reqId == null) {
+                    // A requestless error is the bootstrap failing, nothing will ever answer.
+                    if (data.type === 'error') {
+                        for (const cb of pending.values()) cb.reject(new Error(data.message));
+                        pending.clear();
+                    }
+                    return;
+                }
                 const cb = pending.get(data.reqId);
                 if (!cb) return;
                 pending.delete(data.reqId);

@@ -138,7 +138,7 @@ fn fingerprint(dir: &Path) -> u64 {
                     .modified()
                     .ok()
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs())
+                    .map(|d| d.as_nanos() as u64)
                     .unwrap_or(0);
                 *acc = acc.wrapping_add(mtime).wrapping_add(meta.len());
             }
@@ -166,7 +166,7 @@ fn open_url(url: &str) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::escapes_root;
+    use super::{escapes_root, fingerprint};
 
     #[test]
     fn traversal_is_rejected_and_normal_paths_pass() {
@@ -177,4 +177,59 @@ mod tests {
             assert!(!escapes_root(rel), "should allow {rel:?}");
         }
     }
+
+    const SEC: u64 = 1_700_000_000;
+
+    fn write_at(dir: &std::path::Path, name: &str, body: &str, nanos: u32) {
+        let path = dir.join(name);
+        std::fs::write(&path, body).unwrap();
+        let f = std::fs::File::options().write(true).open(&path).unwrap();
+        f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::new(SEC, nanos)).unwrap();
+    }
+
+    #[test]
+    fn same_second_same_size_edit_bumps_the_fingerprint() {
+        let dir = tempfile::tempdir().unwrap();
+        write_at(dir.path(), "a.py", "xxxx", 100);
+        let before = fingerprint(dir.path());
+        write_at(dir.path(), "a.py", "yyyy", 200);
+        assert_ne!(before, fingerprint(dir.path()));
+    }
+
+    #[test]
+    fn an_untouched_tree_keeps_its_fingerprint() {
+        let dir = tempfile::tempdir().unwrap();
+        write_at(dir.path(), "a.py", "xxxx", 100);
+        assert_eq!(fingerprint(dir.path()), fingerprint(dir.path()));
+    }
+
+    #[test]
+    fn a_size_change_at_the_same_mtime_bumps_the_fingerprint() {
+        let dir = tempfile::tempdir().unwrap();
+        write_at(dir.path(), "a.py", "xxxx", 100);
+        let before = fingerprint(dir.path());
+        write_at(dir.path(), "a.py", "yyyyy", 100);
+        assert_ne!(before, fingerprint(dir.path()));
+    }
+
+    #[test]
+    fn a_new_file_bumps_the_fingerprint() {
+        let dir = tempfile::tempdir().unwrap();
+        write_at(dir.path(), "a.py", "xxxx", 100);
+        let before = fingerprint(dir.path());
+        write_at(dir.path(), "b.py", "zz", 100);
+        assert_ne!(before, fingerprint(dir.path()));
+    }
+
+    #[test]
+    fn a_whole_second_change_still_bumps_the_fingerprint() {
+        let dir = tempfile::tempdir().unwrap();
+        write_at(dir.path(), "a.py", "xxxx", 100);
+        let before = fingerprint(dir.path());
+        let path = dir.path().join("a.py");
+        let f = std::fs::File::options().write(true).open(&path).unwrap();
+        f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::new(SEC + 1, 100)).unwrap();
+        assert_ne!(before, fingerprint(dir.path()));
+    }
 }
+

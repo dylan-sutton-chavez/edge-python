@@ -9,6 +9,7 @@ pub fn parse(pattern: &str) -> Result<Program, ParseError> {
         pos: 0,
         group_count: 0,
         names: Vec::new(),
+        open: Vec::new(),
         flags: Flags::default(),
     };
     let root = p.alternation()?;
@@ -23,6 +24,7 @@ struct Parser<'a> {
     pos: usize,
     group_count: usize,
     names: Vec<(String, usize)>,
+    open: Vec<usize>, // indexes of groups whose closing paren is still ahead
     flags: Flags,
 }
 
@@ -143,8 +145,10 @@ impl<'a> Parser<'a> {
         if self.peek() != Some('?') {
             self.group_count += 1;
             let index = self.group_count;
+            self.open.push(index);
             let node = self.alternation()?;
             self.expect(')')?;
+            self.open.pop();
             return Ok(Node::Group { index, name: None, node: Box::new(node) });
         }
         self.bump(); // question mark
@@ -189,8 +193,10 @@ impl<'a> Parser<'a> {
         self.group_count += 1;
         let index = self.group_count;
         self.names.push((name.clone(), index));
+        self.open.push(index);
         let node = self.alternation()?;
         self.expect(')')?;
+        self.open.pop();
         Ok(Node::Group { index, name: Some(name), node: Box::new(node) })
     }
 
@@ -316,6 +322,8 @@ impl<'a> Parser<'a> {
                     let cand = n * 10 + d as usize;
                     if cand <= self.group_count { n = cand; self.bump(); } else { break; }
                 }
+                if n > self.group_count { return Err(self.err("invalid group reference")); }
+                if self.open.contains(&n) { return Err(self.err("cannot refer to an open group")); }
                 Node::Backref(n)
             }
             l if l.is_ascii_alphabetic() => return Err(self.err("bad escape")),
@@ -340,4 +348,25 @@ fn single(item: ClassItem) -> Vec<ClassItem> {
 
 fn is_flag_char(c: char) -> bool {
     matches!(c, 'i' | 's' | 'm' | 'a' | 'L' | 'u' | 'x')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backref_requires_an_existing_group() {
+        assert_eq!(parse(r"\1").err().unwrap().msg, "invalid group reference");
+        assert_eq!(parse(r"(a)\2").err().unwrap().msg, "invalid group reference");
+        assert_eq!(parse(r"\1(a)").err().unwrap().msg, "invalid group reference");
+        assert!(parse(r"(a)\1").is_ok());
+        assert!(parse(r"(?P<x>a)\1").is_ok());
+        assert!(parse(r"((a)\2)").is_ok());
+    }
+
+    #[test]
+    fn backref_to_an_open_group_is_rejected() {
+        assert_eq!(parse(r"(\1)").err().unwrap().msg, "cannot refer to an open group");
+        assert_eq!(parse(r"(a)(\2)").err().unwrap().msg, "cannot refer to an open group");
+    }
 }

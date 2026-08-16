@@ -11,8 +11,17 @@ fn too_large(what: &str) -> Error {
     })
 }
 
+// Custom ABI error kind, the engine renders the carried message verbatim.
+const CUSTOM_KIND: u32 = 6;
+
 // Euclidean gcd on non-negative inputs.
 fn gcd2(mut a: i128, mut b: i128) -> i128 {
+    while b != 0 { let t = b; b = a % b; a = t; }
+    a
+}
+
+// Unsigned variant, `unsigned_abs` keeps `i128::MIN` usable as an input.
+fn gcd2u(mut a: u128, mut b: u128) -> u128 {
     while b != 0 { let t = b; b = a % b; a = t; }
     a
 }
@@ -32,25 +41,32 @@ fn factorial(n: i128) -> Result<i128> {
 // Variadic gcd, matching `math.gcd(*integers)`, `gcd()` is 0.
 #[plugin_fn]
 fn gcd(nums: Args) -> Result<i128> {
-    let mut g: i128 = 0;
+    let mut g: u128 = 0;
     for h in &nums.0 {
         let n = i128::from_handle(h.raw())?;
-        g = gcd2(g, n.abs());
+        g = gcd2u(g, n.unsigned_abs());
     }
-    Ok(g)
+    // A gcd is never negative and 2^127 does not fit `i128`, so that one case raises OverflowError.
+    if g > i128::MAX as u128 {
+        return Err(Error::Custom { kind: CUSTOM_KIND, message: String::from("OverflowError: gcd() result exceeds the i128 range") });
+    }
+    Ok(g as i128)
 }
 
 // Variadic lcm, matching `math.lcm(*integers)`, `lcm()` is 1, any zero yields 0.
 #[plugin_fn]
 fn lcm(nums: Args) -> Result<i128> {
-    let mut l: i128 = 1;
+    let mut l: u128 = 1;
     for h in &nums.0 {
-        let n = i128::from_handle(h.raw())?.abs();
-        if n == 0 { return Ok(0); }
-        let g = gcd2(l, n);
-        l = (l / g).checked_mul(n).ok_or_else(|| too_large("lcm"))?;
+        if i128::from_handle(h.raw())? == 0 { return Ok(0); }
     }
-    Ok(l)
+    for h in &nums.0 {
+        let n = i128::from_handle(h.raw())?.unsigned_abs();
+        let g = gcd2u(l, n);
+        l = (l / g).checked_mul(n).ok_or_else(|| too_large("lcm"))?;
+        if l > i128::MAX as u128 { return Err(too_large("lcm")); }
+    }
+    Ok(l as i128)
 }
 
 #[plugin_fn]
@@ -59,7 +75,7 @@ fn isqrt(n: i128) -> Result<i128> {
     if n == 0 { return Ok(0); }
     // Newton's method on integers, division keeps every step within `i128`.
     let mut x = n;
-    let mut y = (x + 1) / 2;
+    let mut y = x / 2 + x % 2;
     while y < x { x = y; y = (x + n / x) / 2; }
     Ok(x)
 }
@@ -71,10 +87,11 @@ fn comb(n: i128, k: i128) -> Result<i128> {
     let k = k.min(n - k);
     let mut acc: i128 = 1;
     let mut i: i128 = 1;
-    // acc holds C(n, i) at each step, staying integral, so the divide is exact.
+    // acc holds C(n-k+i, i) at each step, the gcd reduction keeps intermediates within the final result.
     while i <= k {
-        acc = acc.checked_mul(n - k + i).ok_or_else(|| too_large("comb"))?;
-        acc /= i;
+        let g = gcd2(acc, i);
+        let t = (n - k + i) / (i / g);
+        acc = (acc / g).checked_mul(t).ok_or_else(|| too_large("comb"))?;
         i += 1;
     }
     Ok(acc)

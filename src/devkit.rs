@@ -141,6 +141,8 @@ impl Cursor<'_> {
                         Some(b'"') => out.push('"'),
                         Some(b'\\') => out.push('\\'),
                         Some(b'/') => out.push('/'),
+                        Some(b'b') => out.push('\u{8}'),
+                        Some(b'f') => out.push('\u{c}'),
                         Some(b'n') => out.push('\n'),
                         Some(b't') => out.push('\t'),
                         Some(b'r') => out.push('\r'),

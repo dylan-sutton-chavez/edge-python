@@ -17,11 +17,10 @@ pub fn run() -> Result<()> {
     let remove_browser = matches!(ans.trim(), "y" | "Y" | "yes" | "Yes" | "YES");
 
     // Spawning bash with the script as a file lets read prompts (none, in this path) work normally.
-    let temp = std::env::temp_dir().join("edge-uninstall.sh");
-    std::fs::write(&temp, UNINSTALL_SH).map_err(|e| anyhow!("staging uninstall script: {e}"))?;
+    let temp = stage_script()?;
 
     let mut cmd = Command::new("bash");
-    cmd.arg(&temp);
+    cmd.arg(temp.path());
     // Tell the script which prompt path the user already answered.
     cmd.env("EDGE_UNINSTALL_REMOVE_BROWSER", if remove_browser { "1" } else { "0" });
     // Point at the install dir derived from where this binary lives, so non-default installs still clean up.
@@ -31,9 +30,66 @@ pub fn run() -> Result<()> {
         }
 
     let status = cmd.status().map_err(|e| anyhow!("running bash: {e}"))?;
-    let _ = std::fs::remove_file(&temp);
     if !status.success() {
         bail!("uninstall script exited with code {:?}", status.code());
     }
     Ok(())
 }
+
+// A unique temp file, a predictable path in the shared temp dir invites symlink squatting.
+fn stage_script() -> Result<tempfile::NamedTempFile> {
+    let mut f = tempfile::NamedTempFile::new().map_err(|e| anyhow!("staging uninstall script: {e}"))?;
+    f.write_all(UNINSTALL_SH.as_bytes()).map_err(|e| anyhow!("staging uninstall script: {e}"))?;
+    Ok(f)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn staged_names_are_unique() {
+        let a = stage_script().unwrap();
+        let b = stage_script().unwrap();
+        assert_ne!(a.path(), b.path());
+    }
+
+    #[test]
+    fn staged_file_carries_the_bundled_script() {
+        let f = stage_script().unwrap();
+        assert_eq!(std::fs::read_to_string(f.path()).unwrap(), UNINSTALL_SH);
+    }
+
+    #[test]
+    fn staged_file_lands_in_the_temp_dir() {
+        let f = stage_script().unwrap();
+        assert_eq!(f.path().parent(), Some(std::env::temp_dir().as_path()));
+    }
+
+    #[test]
+    fn staged_file_is_removed_on_drop() {
+        let path = {
+            let f = stage_script().unwrap();
+            assert!(f.path().exists());
+            f.path().to_path_buf()
+        };
+        assert!(!path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_preplanted_symlink_at_the_old_path_is_not_followed() {
+        let target = std::env::temp_dir().join(format!("edge-uninstall-target-{}", std::process::id()));
+        let decoy = std::env::temp_dir().join("edge-uninstall.sh");
+        std::fs::write(&target, "keep me").unwrap();
+        let _ = std::fs::remove_file(&decoy);
+        std::os::unix::fs::symlink(&target, &decoy).unwrap();
+        let staged = stage_script().unwrap();
+        assert_ne!(staged.path(), decoy);
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep me");
+        drop(staged);
+        let _ = std::fs::remove_file(&decoy);
+        let _ = std::fs::remove_file(&target);
+    }
+}
+

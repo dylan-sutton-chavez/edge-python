@@ -4,6 +4,12 @@ use wasm_pdk::*;
 // Raises ValueError with this exact text on out-of-domain inputs.
 fn dom() -> Error { Error::Value(String::from("math domain error")) }
 
+// Custom ABI error kind, the engine renders the carried message verbatim.
+const CUSTOM_KIND: u32 = 6;
+
+// OverflowError for finite inputs whose exact result overflows f64, matching Python.
+fn range() -> Error { Error::Custom { kind: CUSTOM_KIND, message: String::from("OverflowError: math range error") } }
+
 // One-arg libm pass-throughs.
 macro_rules! libm1 { ($($f:ident),* $(,)?) => { $(
     #[plugin_fn]
@@ -68,7 +74,17 @@ dom1!(sqrt(x) if x < 0.0);
 libm1!(cbrt, exp, exp2, expm1);
 
 // libm yields NaN on a domain error such as a negative base with a fractional exponent.
-nan2!(pow);
+// Infinite results from finite inputs mean 0 to a negative power (domain error) or overflow (range error).
+#[plugin_fn]
+fn pow(x: f64, y: f64) -> Result<f64> {
+    let r = libm::pow(x, y);
+    if r.is_nan() && !x.is_nan() && !y.is_nan() { return Err(dom()); }
+    if r.is_infinite() && x.is_finite() && y.is_finite() {
+        if x == 0.0 { return Err(dom()); }
+        return Err(range());
+    }
+    Ok(r)
+}
 
 // Optional second positional `base`, matching `math.log(x[, base])`.
 #[plugin_fn]
@@ -80,6 +96,9 @@ fn log(x: f64, rest: Args) -> Result<f64> {
         1 => {
             let base = rest.get::<f64>(0).unwrap()?;
             if base <= 0.0 { return Err(dom()); }
+            if base == 1.0 {
+                return Err(Error::Custom { kind: CUSTOM_KIND, message: String::from("ZeroDivisionError: float division by zero") });
+            }
             Ok(ln / libm::log(base))
         }
         _ => Err(Error::Type(String::from("log expected at most 2 arguments"))),
@@ -103,12 +122,21 @@ dom1!(
 #[plugin_fn]
 fn atan2(y: f64, x: f64) -> f64 { libm::atan2(y, x) }
 
-// Variadic Euclidean norm, matching `math.hypot(*coordinates)`.
+// Variadic Euclidean norm with max-abs scaling, matching `math.hypot(*coordinates)`.
 #[plugin_fn]
 fn hypot(coords: Args) -> Result<f64> {
+    let mut max = 0.0_f64;
+    let mut has_nan = false;
+    for h in &coords.0 {
+        let v = f64::from_handle(h.raw())?.abs();
+        if v.is_nan() { has_nan = true; } else if v > max { max = v; }
+    }
+    if max.is_infinite() { return Ok(max); }
+    if has_nan { return Ok(f64::NAN); }
+    if max == 0.0 { return Ok(0.0); }
     let mut sum = 0.0;
-    for h in &coords.0 { let v = f64::from_handle(h.raw())?; sum += v * v; }
-    Ok(libm::sqrt(sum))
+    for h in &coords.0 { let v = f64::from_handle(h.raw())? / max; sum += v * v; }
+    Ok(max * libm::sqrt(sum))
 }
 
 // Euclidean distance between two equal-length coordinate sequences.
@@ -175,8 +203,8 @@ fn to_int(x: f64) -> Result<i128> {
     if !x.is_finite() {
         return Err(Error::Value(String::from("cannot convert float NaN or infinity to integer")));
     }
-    // Values at or beyond 2^127 saturate on cast, reject so the result is never silently clamped.
-    if x.abs() >= 170141183460469231731687303715884105728.0 {
+    // Values outside [-2^127, 2^127) saturate on cast, reject so the result is never silently clamped.
+    if !(-170141183460469231731687303715884105728.0..170141183460469231731687303715884105728.0).contains(&x) {
         return Err(Error::Value(String::from("int too large to convert")));
     }
     Ok(x as i128)

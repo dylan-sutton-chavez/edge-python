@@ -220,7 +220,13 @@ impl<'a> VM<'a> {
             HeapObj::Property(..) | HeapObj::PropertySetter(..) => "property",
             HeapObj::StaticMethod(..) => "staticmethod",
             HeapObj::ClassMethod(..) => "classmethod",
-            HeapObj::Instance(..) => "object",
+            HeapObj::Instance(cls, _) => {
+                // Leak the class name, the static return type cannot borrow the heap String.
+                if cls.is_heap() && let HeapObj::Class(name, _, _) = self.heap.get(*cls) {
+                    return alloc::boxed::Box::leak(name.clone().into_boxed_str());
+                }
+                "object"
+            }
             HeapObj::Coroutine(..) => "coroutine",
             HeapObj::Module(..) => "module",
             HeapObj::ExcInstance(..) => "exception",
@@ -258,7 +264,11 @@ impl<'a> VM<'a> {
             HeapObj::Bytes(b) => format_bytes(b),
             HeapObj::LongInt(i) => i128_to_dec(*i),
             HeapObj::Type(name) => s!("<class '", str name, "'>"),
-            HeapObj::Func(i, ..) => s!("<function ", int *i),
+            HeapObj::Func(i, ..) => {
+                // Empty name means lambda, same convention as the snapshot restore.
+                let name = match self.function_names.get(*i) { Some(n) if !n.is_empty() => n.as_str(), _ => "<lambda>" };
+                s!("<function ", str name, ">")
+            }
             HeapObj::Slice(s,e,st) => s!("slice(", str &self.display_d(*s, seen), ", ", str &self.display_d(*e, seen), ", ", str &self.display_d(*st, seen), ")"),
             HeapObj::Range(s,e,st) => if *st == 1 { s!("range(", int *s, ", ", int *e, ")") } else { s!("range(", int *s, ", ", int *e, ", ", int *st, ")") },
             HeapObj::List(l) => { let id = v.as_heap(); if seen.contains(&id) { return "[...]".into(); } seen.push(id); let mut o = s!(cap: 32; "["); self.append_reprs(&mut o, l.borrow().iter(), seen); o.push(']'); seen.pop(); o },
@@ -269,7 +279,7 @@ impl<'a> VM<'a> {
             // User classes live in `__main__`, Python qualifies the repr with the module.
             HeapObj::Class(name, _, _) => crate::s!("<class '__main__.", str name, "'>"),
             HeapObj::Instance(cls, _) => {
-                if cls.is_heap() && let HeapObj::Class(name, _, _) = self.heap.get(*cls) { return crate::s!("<", str name, " instance>"); }
+                if cls.is_heap() && let HeapObj::Class(name, _, _) | HeapObj::Type(name) = self.heap.get(*cls) { return crate::s!("<", str name, " instance>"); }
                 "<instance>".into()
             }
             HeapObj::BoundUserMethod(..) => "<bound method>".into(),
@@ -286,7 +296,8 @@ impl<'a> VM<'a> {
                 if args.len() == 1 {
                     if name == "KeyError" { self.repr_d(args[0], seen) } else { self.display_d(args[0], seen) }
                 } else if args.is_empty() {
-                    name.clone()
+                    // Bare exceptions stringify to an empty string, like Python.
+                    String::new()
                 } else {
                     let mut o = s!(cap: 32; str name, "(");
                     self.append_reprs(&mut o, args.iter(), seen);
@@ -424,6 +435,7 @@ impl<'a> VM<'a> {
             // Charge the copy cost so growing concatenation in a loop stays bounded (avoids O(n^2)).
             let copy_cost = match (self.heap.get(a), self.heap.get(b)) {
                 (HeapObj::Str(sa), HeapObj::Str(sb)) => Some(sa.len() + sb.len()),
+                (HeapObj::Bytes(ba), HeapObj::Bytes(bb)) => Some(ba.len() + bb.len()),
                 (HeapObj::List(va), HeapObj::List(vb)) => Some(va.borrow().len() + vb.borrow().len()),
                 (HeapObj::Tuple(va), HeapObj::Tuple(vb)) => Some(va.len() + vb.len()),
                 _ => None,
@@ -444,6 +456,10 @@ impl<'a> VM<'a> {
                 (HeapObj::Tuple(va), HeapObj::Tuple(vb)) => {
                     let mut tup = va.clone(); tup.extend_from_slice(vb);
                     return self.heap.alloc(HeapObj::Tuple(tup));
+                }
+                (HeapObj::Bytes(ba), HeapObj::Bytes(bb)) => {
+                    let mut r = ba.clone(); r.extend_from_slice(bb);
+                    return self.heap.alloc(HeapObj::Bytes(r));
                 }
                 _ => {}
             }
@@ -481,11 +497,12 @@ impl<'a> VM<'a> {
         if let (Some(ai), Some(bi)) = (as_i128(a, &self.heap), as_i128(b, &self.heap)) {
             return self.int_to_val(ai.checked_mul(bi));
         }
-        // Sequence repetition, str/list/tuple * int (count clamped to i64).
-        let (seq_val, count) = if a.is_heap() && b.is_int() && !matches!(self.heap.get(a), HeapObj::LongInt(_)) {
-            (a, b.as_int())
-        } else if a.is_int() && b.is_heap() && !matches!(self.heap.get(b), HeapObj::LongInt(_)) {
-            (b, a.as_int())
+        // Sequence repetition, str/bytes/list/tuple * int, bool counts as 0/1 (count clamped to i64).
+        let rep_count = |v: Val| if v.is_int() { Some(v.as_int()) } else if v.is_bool() { Some(v.as_bool() as i64) } else { None };
+        let (seq_val, count) = if a.is_heap() && !matches!(self.heap.get(a), HeapObj::LongInt(_)) && let Some(n) = rep_count(b) {
+            (a, n)
+        } else if b.is_heap() && !matches!(self.heap.get(b), HeapObj::LongInt(_)) && let Some(n) = rep_count(a) {
+            (b, n)
         } else {
             return Err(VmErr::TypeMsg(s!("unsupported operand type(s) for *: '", str self.type_name(a), "' and '", str self.type_name(b), "'")));
         };
@@ -493,6 +510,7 @@ impl<'a> VM<'a> {
         // Charge the fill up front so repeated `[x]*n` is bounded by the op budget, not just heap.
         let fill_cost = match self.heap.get(seq_val) {
             HeapObj::Str(s) => s.len().checked_mul(n),
+            HeapObj::Bytes(b) => b.len().checked_mul(n),
             HeapObj::List(rc) => rc.borrow().len().checked_mul(n),
             HeapObj::Tuple(v) => v.len().checked_mul(n),
             _ => None,
@@ -514,6 +532,12 @@ impl<'a> VM<'a> {
                 let src = v.clone();
                 let out = self.repeat_seq(&src, n)?;
                 return self.heap.alloc(HeapObj::Tuple(out));
+            }
+            HeapObj::Bytes(b) => {
+                let bytes = b.len().checked_mul(n).ok_or(cold_overflow())?;
+                if bytes > self.heap.limit() { return Err(cold_heap()); }
+                let r = b.repeat(n);
+                return self.heap.alloc(HeapObj::Bytes(r));
             }
             _ => {}
         }

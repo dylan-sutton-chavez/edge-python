@@ -76,4 +76,4 @@ runs:
     - name: Test
       if: inputs.mode == 'test'
       shell: bash
-      run: deno test --allow-all web/tests/runtime.test.js
+      run: deno test --allow-all web/tests/web.test.js

@@ -200,7 +200,8 @@ pub fn classify_encode(tag: u32, bytes: &[u8]) -> EncodeRequest<'_> {
             if bytes.len() != 8 { return EncodeRequest::Invalid; }
             let mut buf = [0u8; 8];
             buf.copy_from_slice(bytes);
-            EncodeRequest::Direct(f64::from_le_bytes(buf).to_bits())
+            // Val::float canonicalizes NaNs that would collide with the tag space.
+            EncodeRequest::Direct(crate::value::Val::float(f64::from_le_bytes(buf)).0)
         }
         Some(Tag::Bytes) => match core::str::from_utf8(bytes) {
             Ok(s) => EncodeRequest::AllocStr(s),

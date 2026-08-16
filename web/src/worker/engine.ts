@@ -63,7 +63,7 @@ let lazySystemNames: string[] = [];
 // Source/missing caches persist across runs so the BFS skips refetching modules and re-probing 404'd `packages.json` paths on every Run press. Wiped by `clearCache()`.
 const fetchedSources = new Map<string, Uint8Array>();
 const knownMissing = new Set<string>();
-/* Synthetic native modules (handlers live on main thread). Re-applied at every `run` since `resetNativeTable` clears them. */
+/* Synthetic native modules (handlers live on main thread). Registered on a fresh instance, incremental runs keep the existing native table. */
 let mainThreadManifests: MainThreadManifest[] = [];
 
 // compilerExports for the lazy rt/env getters, throws while the instance boots.
@@ -82,11 +82,12 @@ export async function load({ wasmUrl, integrity = true, loaders: loaderUrls = []
     cache = await openCache(integrity);
     integrityActive = Boolean(integrity) && cache.persistent;
 
-    if (integrityActive) {
+    // A provided version wipes the cache on mismatch, no version keeps it.
+    if (integrityActive && version) {
         const stored = await cache.getVersion();
-        if (!version || stored !== version) {
+        if (stored !== version) {
             await cache.clear();
-            if (version) await cache.setVersion(version);
+            await cache.setVersion(version);
         }
     }
 
@@ -256,12 +257,9 @@ async function drive(exports: CompilerExports, rt: Rt, status: number, t0: numbe
     while (true) {
         const kind = (status >>> STATUS_KIND_SHIFT) & 7;
         if (kind === STATUS_DONE || kind === STATUS_ERROR || kind === STATUS_EXIT) break;
-        // Any yield is a park, settle pause() here.
-        if (pauseRequested) settlePause(true);
         if (kind === STATUS_PREEMPTED) {
             // Macrotask, so queued postMessage events land.
             await new Promise((r) => setTimeout(r, 0));
-            if (pauseRequested) await new Promise<void>((r) => { resumeGate = r; });
         } else if (kind === STATUS_PENDING_TIMER) {
             const deadlineNs = exports.last_yield_deadline_ns();
             const nowNs = BigInt(Date.now()) * 1_000_000n;
@@ -303,6 +301,12 @@ async function drive(exports: CompilerExports, rt: Rt, status: number, t0: numbe
         } else {
             // Unknown kind, bail out instead of looping forever.
             break;
+        }
+
+        /* Every yield kind parks before the resume, a pause requested mid-wait lands once the wait ends. Events pushed while parked sit in the VM queue and are delivered by this resume. */
+        if (pauseRequested) {
+            settlePause(true);
+            await new Promise<void>((r) => { resumeGate = r; });
         }
 
         status = exports.run_resume();
@@ -354,7 +358,7 @@ export function pause(): Promise<boolean> {
     return new Promise((r) => { pauseAck = r; });
 }
 
-/* Release a preempt-held run, no-op otherwise. */
+/* Release a pause-held run, no-op otherwise. */
 export function resume(): void {
     pauseRequested = false;
     const gate = resumeGate;
