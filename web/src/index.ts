@@ -203,7 +203,8 @@ function crossOriginBootstrap(workerUrl: string) {
 
 /* Blob URL inherits the page's origin -> sidesteps Chromium's cross-origin block. The imported module then loads under CORS (Cloudflare Pages OK by default). `Function.toString` keeps the bootstrap as real JS in source. */
 function spawnCrossOriginWorker(workerUrl: string): Worker {
-    const source = `(${crossOriginBootstrap.toString()})(${JSON.stringify(workerUrl)});`;
+    const shim = 'function __rewriteRelativeImportExtension(p){return p;}';
+    const source = `${shim}(${crossOriginBootstrap.toString()})(${JSON.stringify(workerUrl)});`;
     const blob = new Blob([source], { type: 'application/javascript' });
     const blobUrl = URL.createObjectURL(blob);
     const worker = new Worker(blobUrl, { type: 'module' });

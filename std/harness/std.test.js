@@ -4,6 +4,7 @@ import { DEFAULT_IMPORTS } from "../../web/src/defaults.ts";
 
 const ROOT = new URL("../", import.meta.url).pathname;
 const RUNTIME = new URL("../../web/", import.meta.url).pathname;
+const DIST = RUNTIME + "dist/"; // tsc emit of web/src, built below
 const REPO = new URL("../../", import.meta.url).pathname;
 const CDN_HOST = new URL(Object.values(DEFAULT_IMPORTS)[0]).host;
 const MANIFEST = "/_packages.json"; // synthesized, keeps the agnostic <pkg>/ folder free of test artifacts
@@ -25,8 +26,20 @@ const TYPES = {
     ".py": "text/plain",
 };
 
+let distBuilt = false;
+async function buildDist() {
+    if (distBuilt) return;
+    const tsc = (cfg) => new Deno.Command(Deno.execPath(), { args: ["run", "-A", "npm:typescript@5.9.3/tsc", "-p", cfg], cwd: RUNTIME }).output();
+    for (const c of ["tsconfig.json", "tsconfig.worker.json"]) {
+        const r = await tsc(c);
+        if (!r.success) throw new Error(`tsc failed: ${c}`);
+    }
+    distBuilt = true;
+}
+
 // Agnostic driver, feeds each <pkg>/<pkg>.json corpus to the <edge-python> tag. Run with deno test --allow-all harness/
 async function runPackage(pkg) {
+    await buildDist();
     const dir = `${ROOT}${pkg}`;
     // Import the package's `.py` entry when it has one, else the built wasm.
     const hasPy = existsSync(`${dir}/src/entry.py`);
@@ -67,6 +80,14 @@ async function runPackage(pkg) {
             try { return route.fulfill({ contentType: "application/wasm", body: readFileSync(local) }); }
             catch { return route.continue(); } // no local build, use the deployed wasm
         }
+        if (url.host === CDN_HOST && url.pathname.startsWith("/web/src/")) {
+            const path = DIST + url.pathname.slice("/web/src/".length);
+            try {
+                return route.fulfill({ body: readFileSync(path), contentType: TYPES[path.slice(path.lastIndexOf("."))] ?? "application/octet-stream" });
+            } catch {
+                return route.continue();
+            }
+        }
         // In-tree runtime first, CI must test the checkout not the deploy.
         if (url.host === CDN_HOST && url.pathname.startsWith("/web/")) {
             const path = RUNTIME + url.pathname.slice("/web/".length);
@@ -91,17 +112,28 @@ async function runPackage(pkg) {
     try {
         await page.goto("http://localhost/harness/index.html");
         // Boot the tag once without an entry, reuse its worker, and capture stdout via onOutput.
-        await page.evaluate(async (manifestPath) => {
-            const el = document.createElement("edge-python");
-            el.setAttribute("packages", manifestPath);
-            const ready = new Promise((res) => el.addEventListener("ready", res, { once: true }));
-            document.head.appendChild(el);
-            await ready;
-            // Byte-stream stdout, one chunk per print() call (body + its `end`), collected verbatim.
-            globalThis.chunks = [];
-            el.worker.onOutput((chunk) => { globalThis.chunks.push(chunk); });
-            globalThis.el = el;
-        }, MANIFEST);
+        let bootTimer;
+        try {
+            await Promise.race([
+                page.evaluate(async (manifestPath) => {
+                    const el = document.createElement("edge-python");
+                    el.setAttribute("packages", manifestPath);
+                    const ready = new Promise((res) => el.addEventListener("ready", res, { once: true }));
+                    document.head.appendChild(el);
+                    await ready;
+                    // Byte-stream stdout, one chunk per print() call (body + its `end`), collected verbatim.
+                    globalThis.chunks = [];
+                    el.worker.onOutput((chunk) => { globalThis.chunks.push(chunk); });
+                    globalThis.el = el;
+                }, MANIFEST),
+                new Promise((_, reject) => { bootTimer = setTimeout(
+                    () => reject(new Error(`edge-python tag never fired 'ready' (page errors: ${errors.join(" | ") || "none"})`)),
+                    60_000,
+                ); }),
+            ]);
+        } finally {
+            clearTimeout(bootTimer);
+        }
 
         for (const [i, c] of cases.entries()) {
             const src = `from ${pkg} import *\n${c.src}`;
