@@ -5,7 +5,7 @@ const julOff = () => new Date(new Date().getFullYear(), 6, 1).getTimezoneOffset(
 /* Clock reads (sync) plus sleep, which yields so the worker parks the coro on the Promise, like fetch. */
 export default () => ({
     time: () => Date.now() / 1000,
-    time_ns: () => (BigInt(Date.now()) * 1_000_000n).toString(), // string, epoch ns overflows Number
+    time_ns: () => BigInt(Date.now()) * 1_000_000n, // epoch ns overflows Number
     monotonic: () => performance.now() / 1000,
     monotonic_ns: () => Math.round(performance.now() * 1e6),
     perf_counter: () => performance.now() / 1000,
