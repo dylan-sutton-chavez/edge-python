@@ -36,7 +36,7 @@ const twitterIcon = (
 )
 
 const navbar = (
-    <Navbar logo={<span style={{ fontWeight: 600 }}>Edge Python</span>} projectLink="https://github.com/dylan-sutton-chavez/edge-python" chatLink="https://x.com/pythonedge" chatIcon={twitterIcon}/>
+    <Navbar logo={<span style={{ fontWeight: 600 }}>Edge Python</span>} projectLink="https://github.com/dylan-sutton-chavez/edge-python" chatLink="https://x.com/edge_python" chatIcon={twitterIcon}/>
 )
 
 const footer = <Footer>Edge Python</Footer>
