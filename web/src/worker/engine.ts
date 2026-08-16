@@ -5,11 +5,12 @@ import type { DeferredHostCall } from '../env.ts';
 import { makeRt } from '../rt.ts';
 import type { Rt, EdgeValue } from '../rt.ts';
 import { nativeTable, resetNativeTable } from '../native.ts';
-import type { NativeFn, NativeLoader } from '../native.ts';
+import type { NativeLoader } from '../native.ts';
 import { SOURCE_LIMIT } from '../specs.ts';
 import type { CompilerExports } from '../wasm.ts';
 import type { CacheBackend } from '../cache/types.ts';
 import type { LoadOpts, MainThreadManifest, RunOpts, ExecResult } from '../protocol.ts';
+import { errMsg, writeBytes, ERR_RUNTIME } from '../util.ts';
 
 const TE = new TextEncoder();
 const TD = new TextDecoder();
@@ -25,11 +26,11 @@ const STATUS_ERROR = 4;
 const STATUS_PENDING_HOST_CALL = 5;
 const STATUS_EXIT = 6; // uncaught SystemExit, clean termination, low 8 bits = exit code
 const STATUS_PREEMPTED = 7; // preempt tick, resumes with no host action
-const ERR_RUNTIME = 2; // abi/src/lib.rs error_kind::RUNTIME, for failed deferred host calls
 
 interface ExecuteOpts extends RunOpts {
     payload: Uint8Array
     start: (e: CompilerExports, n: number) => number
+    onLine?: (text: string) => void
 }
 
 // Worker-lifetime state
@@ -65,14 +66,21 @@ const knownMissing = new Set<string>();
 /* Synthetic native modules (handlers live on main thread). Re-applied at every `run` since `resetNativeTable` clears them. */
 let mainThreadManifests: MainThreadManifest[] = [];
 
+// Guards the lazy export getters, a null deref here means run() raced load().
+const requireExports = (): CompilerExports => {
+    if (!compilerExports) throw new Error('engine.load() must be called first');
+    return compilerExports;
+};
+
 /* Engine orchestrator, internal to the Worker. Consumers use `createWorker` in `src/index.ts`. Lifecycle is `load` once -> many `run` cycles -> `dispose`, and each run instantiates the compiler fresh with no state leak. */
 export async function load({ wasmUrl, integrity = true, loaders: loaderUrls = [], imports = null, version = null, availableSystems = [] }: LoadOpts, manifests: MainThreadManifest[] = []): Promise<{ integrityActive: boolean, loadMs: number }> {
+    if (!wasmUrl) throw new Error('load: wasmUrl is required');
     const t0 = performance.now();
     importsMap = imports;
     lazySystemNames = availableSystems;
 
     cache = await openCache(integrity);
-    integrityActive = cache instanceof MemoryCache ? false : Boolean(integrity);
+    integrityActive = Boolean(integrity) && cache.persistent;
 
     if (integrityActive) {
         const stored = await cache.getVersion();
@@ -97,40 +105,40 @@ export async function load({ wasmUrl, integrity = true, loaders: loaderUrls = []
     return { integrityActive, loadMs: performance.now() - t0 };
 }
 
-export async function run(opts: RunOpts): Promise<ExecResult> {
+export async function run(opts: RunOpts, onLine?: (text: string) => void): Promise<ExecResult> {
     running = true;
     try {
         const payload = TE.encode(opts.src);
         if (payload.length > SOURCE_LIMIT) throw new Error(`source exceeds ${SOURCE_LIMIT} bytes`);
         // REPL inputs keep the interpreter alive in the wasm instance, implying incremental so the instance itself persists too.
         if (opts.repl) {
-            return await execute({ ...opts, payload, incremental: true, start: (e, n) => e.repl_eval(n) });
+            return await execute({ ...opts, onLine, payload, incremental: true, start: (e, n) => e.repl_eval(n) });
         }
-        return await execute({ ...opts, payload, start: (e, n) => e.run_start(n) });
+        return await execute({ ...opts, onLine, payload, start: (e, n) => e.run_start(n) });
     }
     finally { running = false; }
 }
 
 /* Shared run/restore core, instance, host imports, prefetch, then drive `start`. */
 async function execute({ src, payload, start, entryDir = '', baseUrl = null, onLine, incremental = false }: ExecuteOpts): Promise<ExecResult> {
-    if (!wasmModule) throw new Error('engine.load() must be called first');
+    if (!wasmModule || !cache) throw new Error('engine.load() must be called first');
     entryDir = entryDir.replace(/^(\.\/)+/, ''); // specs never carry ./
 
     let lockfile = new Map<string, string>();
     if (integrityActive) {
-        try { lockfile = await (cache as CacheBackend).loadLockfile(); }
+        try { lockfile = await cache.loadLockfile(); }
         catch { /* lockfile load failure is non-fatal, treat as empty */ }
     }
 
     /* rt built first (lazy getter) so makeCompilerEnv can decode handles during deferred host calls. */
-    const rt = makeRt(() => compilerExports as CompilerExports);
+    const rt = makeRt(requireExports);
 
     /* Incremental mode reuses the existing wasm instance so module-level state (imports, defs) persists across runs. `onLine` lives in worker.ts and is stable, so old env closures still post correctly. */
     let exports: CompilerExports;
     if (incremental && compilerExports) {
         exports = compilerExports;
     } else {
-        exports = await makeInstance(onLine, lockfile, rt);
+        exports = await makeInstance(wasmModule, onLine, lockfile, rt);
     }
 
     const registerSystem = makeRegisterSystem(exports);
@@ -142,7 +150,7 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
     writePayload();
 
     await bfsPrefetch(src, exports, lockfile, {
-        cache: cache as CacheBackend,
+        cache,
         baseUrl,
         entryDir,
         knownMissing,
@@ -176,7 +184,7 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
     const result = await drive(exports, rt, start(exports, payload.length), t0);
 
     if (integrityActive) {
-        try { await (cache as CacheBackend).saveLockfile(lockfile); }
+        try { await cache.saveLockfile(lockfile); }
         catch { /* persistence failure is non-fatal, lockfile lives in-memory until next save */ }
     }
 
@@ -187,23 +195,18 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
 const makeRegisterSystem = (exports: CompilerExports) => (name: string, exportNames: string[]): void => {
     const baseId = nativeTable.length;
     for (const fnName of exportNames) {
-        const stub: NativeFn = () => {};
-        stub.__edge_kind = 'capability';
-        stub.__edge_main_thread = true;
-        stub.__edge_name = fnName;
-        stub.__edge_module = name;
-        nativeTable.push(stub);
+        nativeTable.push(Object.assign(() => {}, {
+            __edge_kind: 'capability' as const,
+            __edge_main_thread: true,
+            __edge_name: fnName,
+            __edge_module: name,
+        }));
     }
-    const writeBytes = (bytes: Uint8Array): number => {
-        const ptr = exports.wasm_alloc(Math.max(1, bytes.length));
-        new Uint8Array(exports.memory.buffer, ptr, bytes.length).set(bytes);
-        return ptr;
-    };
     const specBytes = TE.encode(`mt:${name}`);
     const namesBytes = TE.encode(exportNames.join('\n'));
     exports.register_native_module(
-        writeBytes(specBytes), specBytes.length,
-        writeBytes(namesBytes), namesBytes.length,
+        writeBytes(exports, specBytes), specBytes.length,
+        writeBytes(exports, namesBytes), namesBytes.length,
         baseId,
     );
 };
@@ -224,9 +227,9 @@ function systemImportMap(registerSystem: (name: string, exportNames: string[]) =
 }
 
 /* Fresh instance, resets module registry and native table. */
-async function makeInstance(onLine: ((text: string) => void) | undefined, lockfile: Map<string, string>, rt: Rt): Promise<CompilerExports> {
+async function makeInstance(module: WebAssembly.Module, onLine: ((text: string) => void) | undefined, lockfile: Map<string, string>, rt: Rt): Promise<CompilerExports> {
     const env = makeCompilerEnv({
-        getExports: () => compilerExports as CompilerExports,
+        getExports: requireExports,
         onLine: onLine ?? (() => {}),
         fetchedSources,
         lockfile,
@@ -234,7 +237,7 @@ async function makeInstance(onLine: ((text: string) => void) | undefined, lockfi
         rt,
         captureHostCall: (id, call) => { pendingHostCalls.set(id, call); },
     });
-    const { exports } = await WebAssembly.instantiate(wasmModule as WebAssembly.Module, { env } as unknown as WebAssembly.Imports);
+    const { exports } = await WebAssembly.instantiate(module, { env } as unknown as WebAssembly.Imports);
     compilerExports = exports as unknown as CompilerExports;
     compilerExports.reset_modules();
     applyPreemptInterval(compilerExports);
@@ -269,7 +272,9 @@ async function drive(exports: CompilerExports, rt: Rt, status: number, t0: numbe
         } else if (kind === STATUS_PENDING_EVENT) {
             // Drain events buffered before VM was ready. `inject_event` wakes the waiter on the first and queues the rest for later `receive()` calls, no `await` needed.
             let injected = 0;
-            while (pendingEvents.length > 0 && injectEvent(pendingEvents[0])) {
+            while (pendingEvents.length > 0) {
+                const msg = pendingEvents[0];
+                if (msg === undefined || !injectEvent(msg)) break;
                 pendingEvents.shift();
                 injected++;
             }
@@ -279,16 +284,17 @@ async function drive(exports: CompilerExports, rt: Rt, status: number, t0: numbe
         } else if (kind === STATUS_PENDING_HOST_CALL) {
             if (pendingHostCalls.size === 0) throw new Error('PENDING_HOST_CALL without captured args (compiler/runtime drift)');
             if (!hostCallDelegate) throw new Error('native deferred but setHostCallDelegate() never set');
+            const delegate = hostCallDelegate;
             const batch = [...pendingHostCalls];
             pendingHostCalls.clear();
             // a failed call raises only in its own coro, so one bad fetch can't sink the batch
             const outcomes = await Promise.allSettled(batch.map(async ([id, call]) => {
                 let rv: number;
                 try {
-                    const handle = rt.encodeAny(await (hostCallDelegate as NonNullable<typeof hostCallDelegate>)(call.module, call.name, call.args));
+                    const handle = rt.encodeAny(await delegate(call.module, call.name, call.args));
                     rv = exports.set_host_result_by_id(id, handle);
                 } catch (e) {
-                    rv = exports.set_host_error_by_id(id, ERR_RUNTIME, rt.encodeAny(e instanceof Error ? e.message : String(e)));
+                    rv = exports.set_host_error_by_id(id, ERR_RUNTIME, rt.encodeAny(errMsg(e)));
                 }
                 if (rv !== 0) throw new Error(`host-call ${id} delivery returned ${rv} for '${call.module}.${call.name}'`);
             }));
@@ -394,10 +400,9 @@ export function stateStack(): unknown[] {
 function injectEvent(message: string): boolean {
     if (!compilerExports) return false;
     const bytes = TE.encode(message);
-    const ptr = compilerExports.wasm_alloc(bytes.length);
-    new Uint8Array(compilerExports.memory.buffer, ptr, bytes.length).set(bytes);
+    const ptr = writeBytes(compilerExports, bytes);
     const status = compilerExports.run_push_event(ptr, bytes.length);
-    compilerExports.wasm_free(ptr, bytes.length);
+    compilerExports.wasm_free(ptr, Math.max(1, bytes.length));
     return status === 0;
 }
 
@@ -465,7 +470,7 @@ async function openCache(integrity: boolean): Promise<CacheBackend> {
         console.warn(
             '[edge-python] integrity:true requested but IndexedDB unavailable; '
             + 'running with in-memory cache. Check worker.integrityActive to detect.',
-            e instanceof Error ? e.message : ''
+            errMsg(e)
         );
         return new MemoryCache();
     }

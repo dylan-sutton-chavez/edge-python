@@ -1,10 +1,10 @@
 import { nativeTable } from './native.ts';
 import type { CompilerExports } from './wasm.ts';
 import type { Rt, EdgeValue } from './rt.ts';
+import { errMsg, writeBytes, ERR_RUNTIME } from './util.ts';
 
 const TD = new TextDecoder();
 const TE = new TextEncoder();
-const ERR_RUNTIME = 2; // abi/src/lib.rs error_kind::RUNTIME
 
 export interface DeferredHostCall {
     module: string
@@ -58,10 +58,10 @@ export function makeCompilerEnv({ getExports, onLine, fetchedSources, lockfile, 
                     }
                     try {
                         const args = handles.map((h) => rt.decodeAny(h));
-                        captureHostCall(call_id, { module: fn.__edge_module as string, name: fn.__edge_name as string, args });
+                        captureHostCall(call_id, { module: fn.__edge_module, name: fn.__edge_name, args });
                         return 2;
                     } catch (e) {
-                        stashError(exports, e instanceof Error ? e.message : String(e));
+                        stashError(exports, errMsg(e));
                         return 1;
                     }
                 }
@@ -70,18 +70,18 @@ export function makeCompilerEnv({ getExports, onLine, fetchedSources, lockfile, 
                     new DataView(exports.memory.buffer).setUint32(out_ptr, resultHandle, true);
                     return 0;
                 } catch (e) {
-                    stashError(exports, e instanceof Error ? e.message : String(e));
+                    stashError(exports, errMsg(e));
                     return 1;
                 }
             }
 
             // wasmpdk, stage argv, call, copy back. Views as fns because `fn(...)` can re-enter `wasm_alloc` and detach a cached view.
-            const guestView = () => new DataView((fn.__edge_memory as WebAssembly.Memory).buffer);
+            const guestView = () => new DataView(fn.__edge_memory.buffer);
             const compView = () => new DataView(exports.memory.buffer);
 
             const argvLen = Math.max(4, argc * 4);
-            const g_argv = (fn.__edge_alloc as (size: number) => number)(argvLen);
-            const g_out = (fn.__edge_alloc as (size: number) => number)(4);
+            const g_argv = fn.__edge_alloc(argvLen);
+            const g_out = fn.__edge_alloc(4);
             for (let i = 0; i < argc; i++) {
                 guestView().setUint32(g_argv + i * 4, compView().getUint32(argv_ptr + i * 4, true), true);
             }
@@ -125,8 +125,7 @@ export function makeCompilerEnv({ getExports, onLine, fetchedSources, lockfile, 
 
 function stashError(exports: CompilerExports, message: string): void {
     const bytes = TE.encode(message);
-    const ptr = exports.wasm_alloc(bytes.length);
-    new Uint8Array(exports.memory.buffer, ptr, bytes.length).set(bytes);
+    const ptr = writeBytes(exports, bytes);
     exports.host_edge_throw(ERR_RUNTIME, ptr, bytes.length);
-    exports.wasm_free(ptr, bytes.length);
+    exports.wasm_free(ptr, Math.max(1, bytes.length));
 }

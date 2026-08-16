@@ -2,6 +2,6 @@
     "compilerOptions": {
         "lib": ["dom", "dom.iterable", "esnext"],
         "strict": true,
-        "noUncheckedIndexedAccess": false
+        "noUncheckedIndexedAccess": true
     }
 }

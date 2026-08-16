@@ -2,6 +2,6 @@
     "compilerOptions": {
         "lib": ["webworker", "esnext"],
         "strict": true,
-        "noUncheckedIndexedAccess": false
+        "noUncheckedIndexedAccess": true
     }
 }

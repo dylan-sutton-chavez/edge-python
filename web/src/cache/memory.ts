@@ -2,6 +2,7 @@
 import type { CacheBackend } from './types.ts';
 
 export class MemoryCache implements CacheBackend {
+    readonly persistent = false;
     cas = new Map<string, Uint8Array>(); // hash -> bytes
     lockfile = new Map<string, string>(); // spec -> hash
 

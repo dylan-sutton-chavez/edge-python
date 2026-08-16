@@ -6,6 +6,7 @@ const VERSION_KEY = '\0v'; // '\0' isolates sentinel, canonical specs never cont
 
 /* IndexedDB cache with `cas` (hash -> bytes) and `lockfile` (spec -> hash) stores. The engine falls back to MemoryCache if `open()` rejects. */
 export class IdbCache implements CacheBackend {
+    readonly persistent = true;
     db: IDBDatabase | null = null;
 
     async open(): Promise<void> {
@@ -22,7 +23,8 @@ export class IdbCache implements CacheBackend {
     }
 
     _tx(store: string, mode: IDBTransactionMode): IDBObjectStore {
-        return (this.db as IDBDatabase).transaction(store, mode).objectStore(store);
+        if (!this.db) throw new Error('IdbCache.open() must be called first');
+        return this.db.transaction(store, mode).objectStore(store);
     }
 
     _req<T>(req: IDBRequest<T>): Promise<T> {
@@ -33,7 +35,8 @@ export class IdbCache implements CacheBackend {
     }
 
     getBytes(hash: string): Promise<Uint8Array | null> {
-        return this._req(this._tx('cas', 'readonly').get(hash));
+        // IDB resolves undefined on a miss, normalize to the backend contract.
+        return this._req<Uint8Array | undefined>(this._tx('cas', 'readonly').get(hash)).then((r) => r ?? null);
     }
 
     putBytes(hash: string, bytes: Uint8Array): Promise<void> {
@@ -72,6 +75,6 @@ export class IdbCache implements CacheBackend {
     }
 
     getVersion(): Promise<string | null> {
-        return this._req(this._tx('lockfile', 'readonly').get(VERSION_KEY));
+        return this._req<string | undefined>(this._tx('lockfile', 'readonly').get(VERSION_KEY)).then((r) => r ?? null);
     }
 }

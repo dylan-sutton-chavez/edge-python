@@ -5,10 +5,11 @@
         "moduleResolution": "NodeNext",
         "lib": ["WebWorker", "ESNext"],
         "strict": true,
+        "noUncheckedIndexedAccess": true,
         "skipLibCheck": true,
         "rewriteRelativeImportExtensions": true,
         "verbatimModuleSyntax": true,
-        "noEmit": false,
+        "declaration": true,
         "rootDir": "./src",
         "outDir": "./dist"
     },

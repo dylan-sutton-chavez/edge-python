@@ -1,19 +1,30 @@
 import type { CompilerExports } from './wasm.ts';
 
-/* A registered native fn, tagged with dispatch metadata by the loader that produced it. */
-export interface NativeFn {
+/* A registered native fn, tagged with dispatch metadata by the loader that produced it. The `__edge_kind` discriminant picks the host_call_native path. */
+interface NativeFnBase {
     (...args: unknown[]): unknown
     __edge_kind?: 'wasmpdk' | 'capability'
     __edge_name?: string
-    __edge_module?: string
-    __edge_main_thread?: boolean
-    __edge_alloc?: (size: number) => number
-    __edge_free?: (ptr: number, len: number) => void
-    __edge_memory?: WebAssembly.Memory
 }
 
+export interface WasmPdkFn extends NativeFnBase {
+    __edge_kind: 'wasmpdk'
+    __edge_alloc: (size: number) => number
+    __edge_free?: (ptr: number, len: number) => void
+    __edge_memory: WebAssembly.Memory
+}
+
+export interface CapabilityFn extends NativeFnBase {
+    __edge_kind: 'capability'
+    __edge_name: string
+    __edge_module: string
+    __edge_main_thread?: boolean
+}
+
+export type NativeFn = WasmPdkFn | CapabilityFn;
+
 export interface NativeModuleResult {
-    kind: string
+    kind: 'wasmpdk' | 'capability'
     names: string[]
     fns: NativeFn[]
 }
@@ -133,7 +144,7 @@ async function builtinWasmPdkLoader(module: WebAssembly.Module, ctx: NativeLoadC
         if (k === 'memory' || typeof value !== 'function') continue;
         // Keep convention exports (__fn_/__class_/__const_), drop ABI internals like __edge_alloc.
         if (k.startsWith('__') && !k.startsWith('__class_') && !k.startsWith('__const_') && !k.startsWith('__fn_')) continue;
-        const v = value as NativeFn;
+        const v = value as WasmPdkFn;
         names.push(k);
         v.__edge_alloc = instance.exports.__edge_alloc as (size: number) => number;
         // Optional on older plugins, callers use `?.`.
@@ -152,8 +163,8 @@ export async function loadNativeModule(_spec: string, bytes: Uint8Array, ctx: Na
     for (const loader of ctx.loaders) {
         if (loader.match(module)) {
             const result = await loader.load(module, ctx);
-            // Tag each fn with its dispatch kind so host_call_native picks the right path.
-            for (const fn of result.fns) fn.__edge_kind = result.kind as 'wasmpdk' | 'capability';
+            // Tag each fn with its dispatch kind so host_call_native picks the right path. A union member write needs the base shape.
+            for (const fn of result.fns) (fn as NativeFnBase).__edge_kind = result.kind;
             annotateNames(result);
             return result;
         }
@@ -166,5 +177,8 @@ export async function loadNativeModule(_spec: string, bytes: Uint8Array, ctx: Na
 
 /* Pair each fn with its declared name so deferred dispatch can route by name on the main thread. */
 function annotateNames({ names, fns }: NativeModuleResult): void {
-    for (let i = 0; i < fns.length; i++) fns[i].__edge_name = names[i];
+    for (let i = 0; i < fns.length; i++) {
+        const fn = fns[i], name = names[i];
+        if (fn && name) fn.__edge_name = name;
+    }
 }

@@ -1,5 +1,6 @@
-/* Common shape of `MemoryCache` and `IdbCache`, lets `fetch.ts`/`prefetch.ts`/`engine.ts` stay backend-agnostic. */
+/* Common shape of `MemoryCache` and `IdbCache`, lets `fetch.ts`/`prefetch.ts`/`engine.ts` stay backend-agnostic. `persistent` marks cross-session storage, integrity only pays off there. */
 export interface CacheBackend {
+    readonly persistent: boolean
     open(): void | Promise<void>
     getBytes(hash: string): Uint8Array | null | Promise<Uint8Array | null>
     putBytes(hash: string, bytes: Uint8Array): void | Promise<void>

@@ -5,12 +5,14 @@ import { dirOf, joinRel, parentDir, SOURCE_LIMIT } from './specs.ts';
 import type { CompilerExports } from './wasm.ts';
 import type { CacheBackend } from './cache/types.ts';
 import type { Rt } from './rt.ts';
+import { errMsg, writeBytes } from './util.ts';
 
 const TD = new TextDecoder();
 const TE = new TextEncoder();
 
+// Import kinds emitted by the compiler, bare / importer-relative / root-relative.
 interface ImportRecord {
-    kind: string
+    kind: 'b' | 'r' | 'R'
     spec: string
 }
 
@@ -38,7 +40,8 @@ function schemeHint(spec: string): string | null {
     }
     // No scheme but a dotted first segment looks like a domain, yet the host treats it as a relative path.
     const relative = spec.startsWith('.') || spec.startsWith('/') || spec.includes('://');
-    if (!relative && spec.split('/')[0].includes('.')) {
+    const firstSegment = spec.split('/')[0];
+    if (!relative && firstSegment !== undefined && firstSegment.includes('.')) {
         return `'${spec}' has no scheme, so it resolved as a path on your own origin. `
              + `If it's a URL, prefix it with https://.`;
     }
@@ -57,7 +60,7 @@ function scanImports(src: string, exports: CompilerExports): ImportRecord[] {
     if (!outLen) return [];
     const text = TD.decode(new Uint8Array(exports.memory.buffer, exports.out_ptr(), outLen));
     return text.split('\n').filter(Boolean).map((line) => ({
-        kind: line[0],
+        kind: line[0] as ImportRecord['kind'],
         spec: line.slice(line.indexOf('\t') + 1),
     }));
 }
@@ -78,11 +81,6 @@ export async function bfsPrefetch(rootSrc: string, exports: CompilerExports, loc
     const manifestDirs = new Set<string>(); // dirs whose packages.json fetched successfully
     const systemEsmUrls = new Map<string, string>(); // name -> ESM url from discovered `system` declarations
 
-    const writeBytes = (bytes: Uint8Array): number => {
-        const ptr = exports.wasm_alloc(Math.max(1, bytes.length));
-        new Uint8Array(exports.memory.buffer, ptr, bytes.length).set(bytes);
-        return ptr;
-    };
     // Probe every ancestor manifest, mirroring the compiler walk-up.
     const enqueueManifestChain = (dir: string | null): void => {
         for (; dir != null; dir = parentDir(dir)) {
@@ -107,10 +105,10 @@ export async function bfsPrefetch(rootSrc: string, exports: CompilerExports, loc
     };
     const retryRoot = (): void => {
         for (let i = pendingRoot.length - 1; i >= 0; i--) {
-            const { spec, dir } = pendingRoot[i];
-            if (rootFor(dir) === undefined) continue;
+            const item = pendingRoot[i];
+            if (!item || rootFor(item.dir) === undefined) continue;
             pendingRoot.splice(i, 1);
-            enqueueRoot(spec, dir);
+            enqueueRoot(item.spec, item.dir);
         }
     };
 
@@ -140,7 +138,8 @@ export async function bfsPrefetch(rootSrc: string, exports: CompilerExports, loc
     enqueueManifestChain(entryDir);
 
     while (queue.length) {
-        const spec = queue.shift() as string;
+        const spec = queue.shift();
+        if (spec === undefined) break;
         if (visited.has(spec)) continue;
         visited.add(spec);
 
@@ -152,16 +151,14 @@ export async function bfsPrefetch(rootSrc: string, exports: CompilerExports, loc
             const name = spec.slice(3);
             let exportNames: string[];
             try { exportNames = await ctx.loadSystem(name, systemEsmUrls.get(name)); }
-            catch (e) { failures.push(`system '${name}' failed to load: ${e instanceof Error ? e.message : e}`); continue; }
+            catch (e) { failures.push(`system '${name}' failed to load: ${errMsg(e)}`); continue; }
             ctx.registerSystem(name, exportNames);
             mainThreadSpecs?.add(spec);
             continue;
         }
 
-        let bytes: Uint8Array;
-        if (fetchedSources.has(spec)) {
-            bytes = fetchedSources.get(spec) as Uint8Array;
-        } else {
+        let bytes = fetchedSources.get(spec);
+        if (bytes === undefined) {
             const fetched = await fetchWithLockfile(spec, lockfile, ctx);
             if (!fetched) {
                 // packages.json probes are opportunistic 404s, only a real module import is worth flagging.
@@ -203,7 +200,7 @@ export async function bfsPrefetch(rootSrc: string, exports: CompilerExports, loc
                 ({ names, fns } = await loadNativeModule(spec, bytes, ctx));
             } catch (e) {
                 // Bytes fetched but the module won't load (bad ABI / corrupt wasm), a scheme issue would have failed at fetch.
-                failures.push(`'${spec}' failed to load as a wasm module: ${e instanceof Error ? e.message : e}`);
+                failures.push(`'${spec}' failed to load as a wasm module: ${errMsg(e)}`);
                 continue;
             }
             const baseId = nativeTable.length;
@@ -212,8 +209,8 @@ export async function bfsPrefetch(rootSrc: string, exports: CompilerExports, loc
             const specBytes = TE.encode(spec);
             const namesBytes = TE.encode(names.join('\n'));
             exports.register_native_module(
-                writeBytes(specBytes), specBytes.length,
-                writeBytes(namesBytes), namesBytes.length,
+                writeBytes(exports, specBytes), specBytes.length,
+                writeBytes(exports, namesBytes), namesBytes.length,
                 baseId,
             );
             enqueueManifestChain(dirOf(spec));
@@ -222,7 +219,7 @@ export async function bfsPrefetch(rootSrc: string, exports: CompilerExports, loc
 
         // .py module, register, then scan ITS imports (bare + path) so transitive deps stay lazy too.
         const specBytes = TE.encode(spec);
-        exports.register_code_module(writeBytes(specBytes), specBytes.length, writeBytes(bytes), bytes.length);
+        exports.register_code_module(writeBytes(exports, specBytes), specBytes.length, writeBytes(exports, bytes), bytes.length);
 
         const dir = dirOf(spec);
         for (const imp of scanImports(TD.decode(bytes), exports)) enqueueImport(imp, dir);

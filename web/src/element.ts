@@ -1,5 +1,5 @@
 import { createWorker } from "./index.ts";
-import type { WorkerHandle, CreateWorkerOpts } from "./index.ts";
+import type { WorkerHandle } from "./index.ts";
 
 declare global {
     var __edgeContract: string
@@ -21,13 +21,13 @@ export class EdgePythonElement extends HTMLElement {
         let imports: Record<string, string> | undefined;
         if (pkg) {
             const base = new URL(pkg, location.href);
-            const manifest = await fetch(base).then(r => r.json());
+            const manifest: { system?: Record<string, string>, imports?: Record<string, string> } = await fetch(base).then(r => r.json());
             for (const [name, url] of Object.entries(manifest.system ?? {})) {
-                systemModules[name] = new URL(url as string, base).href;
+                systemModules[name] = new URL(url, base).href;
             }
             if (manifest.imports) {
                 imports = {};
-                for (const [name, url] of Object.entries(manifest.imports)) imports[name] = new URL(url as string, base).href;
+                for (const [name, url] of Object.entries(manifest.imports)) imports[name] = new URL(url, base).href;
             }
         }
 
@@ -36,7 +36,7 @@ export class EdgePythonElement extends HTMLElement {
             wasmUrl: this.getAttribute("wasm") ?? "https://cdn.edgepython.com/compiler.wasm",
             systemModules,
             imports,
-        } as CreateWorkerOpts);
+        });
         // `entry` is optional, omit it to just spin up the worker and drive it via run().
         if (file) await this.worker.run(await fetch(file).then(r => r.text()));
         this.dispatchEvent(new Event("ready"));

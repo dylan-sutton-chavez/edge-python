@@ -50,3 +50,6 @@ fuzz/edge.dict
 
 # MicroPython differential corpus (scratch, not part of this repo)
 _micropython/
+
+# deno writes lockfiles on the fly when running npm packages
+**/deno.lock

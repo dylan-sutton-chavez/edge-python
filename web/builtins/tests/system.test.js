@@ -54,7 +54,7 @@ async function startMock() {
     // The fixture prints its port on the first stdout line.
     const reader = child.stdout.getReader();
     const line = new TextDecoder().decode((await reader.read()).value);
-    reader.releaseLock();
+    await reader.cancel(); // the port line is all the fixture ever prints
     return { child, port: parseInt(line, 10) };
 }
 
