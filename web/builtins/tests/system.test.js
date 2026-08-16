@@ -5,6 +5,7 @@ import { DEFAULT_IMPORTS } from "../../src/defaults.ts";
 
 const ROOT = new URL("../", import.meta.url).pathname;
 const RUNTIME = new URL("../../", import.meta.url).pathname;
+const DIST = RUNTIME + "dist/"; // tsc emit of web/src, built below
 const REPO = new URL("../../../", import.meta.url).pathname;
 const CORPUS = new URL("../../../tests/cases/builtins/", import.meta.url).pathname;
 const CDN_HOST = new URL(Object.values(DEFAULT_IMPORTS)[0]).host;
@@ -32,6 +33,17 @@ const TYPES = {
     ".css": "text/css",
 };
 
+let distBuilt = false;
+async function buildDist() {
+    if (distBuilt) return;
+    const tsc = (cfg) => new Deno.Command(Deno.execPath(), { args: ["run", "-A", "npm:typescript@5.9.3/tsc", "-p", cfg], cwd: RUNTIME }).output();
+    for (const c of ["tsconfig.json", "tsconfig.worker.json"]) {
+        const r = await tsc(c);
+        if (!r.success) throw new Error(`tsc failed: ${c}`);
+    }
+    distBuilt = true;
+}
+
 // Boots the network fixture shared with the native runner, its port fills the corpus placeholders.
 async function startMock() {
     const bin = new URL(`../../../cli/target/debug/mock${Deno.build.os === "windows" ? ".exe" : ""}`, import.meta.url).pathname;
@@ -47,6 +59,7 @@ async function startMock() {
 }
 
 async function runCapability(cap) {
+    await buildDist();
     const dir = `${ROOT}${cap}`;
     // Import the capability's `.py` entry when it has one, else the JS system module.
     const hasPy = existsSync(`${dir}/src/entry.py`);
@@ -77,6 +90,15 @@ async function runCapability(cap) {
     /* Serve repo files from disk and synthesize the manifest. The fixture host is left unrouted so its real responses, including sse keep-alive streams, reach the browser directly rather than buffered. */
     await page.route((url) => url.host === "localhost" || url.host === CDN_HOST, (route) => {
         const url = new URL(route.request().url());
+        // web/src is TypeScript, serve its tsc emit so CI tests the checkout not the deploy.
+        if (url.host === CDN_HOST && url.pathname.startsWith("/web/src/")) {
+            const path = DIST + url.pathname.slice("/web/src/".length);
+            try {
+                return route.fulfill({ body: readFileSync(path), contentType: TYPES[path.slice(path.lastIndexOf("."))] ?? "application/octet-stream" });
+            } catch {
+                return route.continue();
+            }
+        }
         // In-tree runtime first, CI must test the checkout not the deploy.
         if (url.host === CDN_HOST && url.pathname.startsWith("/web/")) {
             const path = RUNTIME + url.pathname.slice("/web/".length);
@@ -106,20 +128,31 @@ async function runCapability(cap) {
     const failures = [];
     try {
         await page.goto("http://localhost/tests/index.html");
-        // Boot the tag once without an entry, reuse its worker, and capture stdout via onOutput. It lives in <head> so the per-case body wipe leaves it connected, and so dom cases counting body children never see the tag.
-        await page.evaluate(async (manifestPath) => {
-            const el = document.createElement("edge-python");
-            el.setAttribute("packages", manifestPath);
-            const ready = new Promise((res) => el.addEventListener("ready", res, { once: true }));
-            document.head.appendChild(el);
-            await ready;
-            // Byte-stream stdout, one chunk per print() call (body + its `end`). Collect verbatim.
-            globalThis.chunks = [];
-            el.worker.onOutput((chunk) => { globalThis.chunks.push(chunk); });
-            // DBs present once the runtime is up (its integrity cache), resetState must leave these alone.
-            globalThis.baseline = indexedDB.databases ? (await indexedDB.databases()).map((d) => d.name) : [];
-            globalThis.el = el;
-        }, MANIFEST);
+        // Boot the tag once in <head>: the per-case body wipe leaves it connected, and dom cases never count it.
+        let bootTimer;
+        try {
+            await Promise.race([
+                page.evaluate(async (manifestPath) => {
+                    const el = document.createElement("edge-python");
+                    el.setAttribute("packages", manifestPath);
+                    const ready = new Promise((res) => el.addEventListener("ready", res, { once: true }));
+                    document.head.appendChild(el);
+                    await ready;
+                    // Byte-stream stdout, one chunk per print() call (body + its `end`). Collect verbatim.
+                    globalThis.chunks = [];
+                    el.worker.onOutput((chunk) => { globalThis.chunks.push(chunk); });
+                    // DBs present once the runtime is up (its integrity cache), resetState must leave these alone.
+                    globalThis.baseline = indexedDB.databases ? (await indexedDB.databases()).map((d) => d.name) : [];
+                    globalThis.el = el;
+                }, MANIFEST),
+                new Promise((_, reject) => { bootTimer = setTimeout(
+                    () => reject(new Error(`edge-python tag never fired 'ready' (page errors: ${errors.join(" | ") || "none"})`)),
+                    60_000,
+                ); }),
+            ]);
+        } finally {
+            clearTimeout(bootTimer);
+        }
 
         for (const [i, c] of cases.entries()) {
             const body = c.src.replaceAll("{BASE}", base).replaceAll("{WS_BASE}", wsBase);
