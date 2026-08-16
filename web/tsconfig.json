@@ -1,12 +1,11 @@
 {
     "compilerOptions": {
         "target": "ESNext",
-        "module": "ESNext",
-        "moduleResolution": "Bundler",
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
         "lib": ["DOM", "DOM.Iterable", "ESNext"],
         "strict": true,
         "skipLibCheck": true,
-        "allowImportingTsExtensions": true,
         "rewriteRelativeImportExtensions": true,
         "verbatimModuleSyntax": true,
         "noEmit": false,

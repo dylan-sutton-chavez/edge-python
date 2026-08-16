@@ -1,3 +1,4 @@
+// deno-lint-ignore no-import-prefix
 import { chromium } from "npm:playwright@latest";
 import { readFileSync } from "node:fs";
 import { DEFAULT_IMPORTS } from "../src/defaults.ts";

@@ -64,4 +64,4 @@ runs:
       working-directory: web/builtins
       env:
         SYSPKG: ${{ inputs.capability }}
-      run: deno test --allow-all tests/
+      run: deno test --allow-all --node-modules-dir=none tests/
