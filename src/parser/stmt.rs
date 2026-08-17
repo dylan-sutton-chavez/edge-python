@@ -562,9 +562,10 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 self.advance();
                 self.emit_load_ssa(name.clone());
                 self.expr();
-                // In-place variants so list `+=` and set `|=`/`&=`/`^=` mutate the shared object (alias-visible).
+                // In-place variants so list `+=` and set `|=`/`&=`/`^=`/`-=` mutate the shared object (alias-visible).
                 let op = match op {
                     OpCode::Add => OpCode::InPlaceAdd,
+                    OpCode::Sub => OpCode::InPlaceSub,
                     OpCode::BitOr => OpCode::InPlaceBitOr,
                     OpCode::BitAnd => OpCode::InPlaceBitAnd,
                     OpCode::BitXor => OpCode::InPlaceBitXor,
@@ -729,29 +730,42 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     fn parse_del_target(&mut self) {
         if matches!(self.peek(), Some(TokenType::Name)) {
             let name = self.advance_text();
-            if self.eat_if(TokenType::Lsqb) {
-                // del `x[k]` or `x[a:b]`, BuildSlice so DelItem sees HeapObj::Slice.
+            if matches!(self.peek(), Some(TokenType::Dot | TokenType::Lsqb)) {
+                // Walk an interleaved `.attr` / `[subscript]` chain, delete only the final segment.
                 self.emit_load_ssa(name);
-                self.parse_subscript();
-                // Chained subscripts (`d[0][0]`), all but the last index in place.
-                while self.eat_if(TokenType::Lsqb) {
-                    self.chunk.emit(OpCode::GetItem, 0);
-                    self.parse_subscript();
+                loop {
+                    match self.peek() {
+                        Some(TokenType::Dot) => {
+                            self.eat(TokenType::Dot);
+                            let attr = self.advance_text();
+                            let idx = self.chunk.push_name(&attr);
+                            match self.peek() {
+                                Some(TokenType::Dot | TokenType::Lsqb) => {
+                                    self.chunk.emit(OpCode::LoadAttr, idx);
+                                }
+                                _ => {
+                                    self.chunk.emit(OpCode::DelAttr, idx);
+                                    return;
+                                }
+                            }
+                        }
+                        Some(TokenType::Lsqb) => {
+                            self.eat(TokenType::Lsqb);
+                            // BuildSlice so DelItem sees HeapObj::Slice for `x[a:b]`.
+                            self.parse_subscript();
+                            match self.peek() {
+                                Some(TokenType::Dot | TokenType::Lsqb) => {
+                                    self.chunk.emit(OpCode::GetItem, 0);
+                                }
+                                _ => {
+                                    self.chunk.emit(OpCode::DelItem, 0);
+                                    return;
+                                }
+                            }
+                        }
+                        _ => return,
+                    }
                 }
-                self.chunk.emit(OpCode::DelItem, 0);
-            } else if matches!(self.peek(), Some(TokenType::Dot)) {
-                // del `obj.attr` (chained), load object, LoadAttr intermediates, DelAttr last.
-                self.emit_load_ssa(name);
-                self.eat(TokenType::Dot);
-                let mut attr = self.advance_text();
-                while matches!(self.peek(), Some(TokenType::Dot)) {
-                    let idx = self.chunk.push_name(&attr);
-                    self.chunk.emit(OpCode::LoadAttr, idx);
-                    self.eat(TokenType::Dot);
-                    attr = self.advance_text();
-                }
-                let idx = self.chunk.push_name(&attr);
-                self.chunk.emit(OpCode::DelAttr, idx);
             } else {
                 let idx = self.push_ssa_name(&name, self.current_version(&name));
                 self.chunk.emit(OpCode::Del, idx);

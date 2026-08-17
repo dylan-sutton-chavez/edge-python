@@ -326,12 +326,21 @@ impl<'a> VM<'a> {
             v
         } else {
             let class_name = e.class_name();
+            let is_heap_err = matches!(e, VmErr::Heap);
             let msg_val = match self.heap.alloc(HeapObj::Str(e.message())) {
                 Ok(v) => v,
+                Err(_) if is_heap_err => match self.heap.alloc_emergency(HeapObj::Str(e.message())) {
+                    Ok(v) => v,
+                    Err(e2) => return CoroState::Errored(e2),
+                },
                 Err(alloc_e) => return CoroState::Errored(alloc_e),
             };
-            match self.heap.alloc(HeapObj::ExcInstance(class_name, alloc::vec![msg_val])) {
+            match self.heap.alloc(HeapObj::ExcInstance(class_name.clone(), alloc::vec![msg_val])) {
                 Ok(v) => v,
+                Err(_) if is_heap_err => match self.heap.alloc_emergency(HeapObj::ExcInstance(class_name, alloc::vec![msg_val])) {
+                    Ok(v) => v,
+                    Err(e2) => return CoroState::Errored(e2),
+                },
                 Err(alloc_e) => return CoroState::Errored(alloc_e),
             }
         };

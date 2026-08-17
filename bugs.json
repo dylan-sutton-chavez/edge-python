@@ -1,47 +1,5 @@
 {
-  "bugs": [
-    {
-      "id": "bug-009",
-      "file": "src/value/eq.rs",
-      "line": 72,
-      "title": "float/LongInt equality contradicts hashing: equal values, different hashes",
-      "description": "eq_vals_depth compares float vs LongInt via num_as_f64 (lossy f64 rounding), so 1e16 == 10**16+1 is True (Python: False — it converts the float exactly). But hash_depth hashes the integral float as i64(1e16) and the LongInt as i64(10^16+1): different hashes for 'equal' values. Dict/get and ValSet operations disagree: d={1e16:'x'}; d.get(10**16+1) misses while 10**16+1 in {1e16} is True (contains uses a linear eq scan) and {1e16} & {10**16+1} is empty (ValSet uses hashes).",
-      "repro": "d = {1e16: \"found\"}\nprint(1e16 == 10**16 + 1)\nprint(d.get(10**16 + 1, \"missing\"))\nprint(hash(1e16) == hash(10**16 + 1))",
-      "actual": "True / 'missing' / False",
-      "expected": "Python: False / 'missing' / False — i.e. Python says not-equal so the miss is consistent; here eq says equal but the dict still misses, which is an internal invariant violation either way"
-    },
-    {
-      "id": "bug-043",
-      "file": "src/vm/opcodes/arith.rs",
-      "line": 256,
-      "title": "Set -= rebinds instead of mutating in place",
-      "description": "There is no InPlaceSub opcode; only InPlaceBitOr/And/Xor are handled (dispatch.rs:628). `s -= x` rebinds s to a new set, so aliases keep the old value. |=, &=, ^= mutate correctly.",
-      "repro": "s = {1, 2, 3}\nt = s\ns -= {1}\nprint(sorted(t))",
-      "actual": "[1, 2, 3] (t unchanged, s was rebound)",
-      "expected": "[2, 3] (Python: set.difference_update mutates in place)"
-    },
-    {
-      "id": "bug-051",
-      "file": "src/vm/dispatch.rs",
-      "line": 236,
-      "title": "MemoryError from a full heap is uncatchable",
-      "description": "Entering an except handler allocates (the message string and the ExcInstance, via heap.alloc at dispatch.rs:236-241). When the heap is exhausted that allocation re-fails and the error propagates past the handler. A MemoryError raised by a pre-flight size check IS caught, confirming the mechanism.",
-      "repro": "try:\n  xs = []\n  while True:\n    xs.append([])\nexcept MemoryError:\n  pass\nprint(\"survived\")",
-      "actual": "MemoryError: heap limit, exit code 1 (handler never runs)",
-      "expected": "survived",
-      "notes": "Also misformatted on the way out: the uncaught MemoryError prints bare to stdout instead of the normal 'error: ... --> file:line' stderr format other uncaught errors use."
-    },
-    {
-      "id": "bug-053",
-      "file": "unknown (likely src/vm/opcodes/ or src/vm/dispatch.rs)",
-      "line": 0,
-      "title": "User-defined __delitem__ corrupts subsequent method dispatch on the instance",
-      "description": "After `del s[key]` runs a user __delitem__, any later method call or `in` check on the instance fails with AttributeError: 'object' object has no attribute '<attr>'. The deletion itself works. Plain del obj.attr and del list[i] are unaffected.",
-      "repro": "class Store:\n  def __init__(self):\n    self.data = {}\n  def __setitem__(self, key, value):\n    self.data[key] = value\n  def __delitem__(self, key):\n    del self.data[key]\n  def show(self):\n    return self.data\ns = Store()\ns[\"a\"] = 1\ndel s[\"a\"]\nprint(s.show())",
-      "actual": "AttributeError: 'object' object has no attribute 'data'",
-      "expected": "{}"
-    }
-  ],
+  "bugs": [],
   "outdated_comments": [
     {
       "file": "src/wasm/mod.rs",

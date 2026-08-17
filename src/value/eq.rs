@@ -1,4 +1,9 @@
-use super::{DictMap, HeapObj, HeapPool, Val, ValSet, as_i128};
+use core::cmp::Ordering;
+
+use super::{DictMap, HeapObj, HeapPool, Val, ValSet, as_i128, as_long_int};
+
+/* 2^127 exactly, the saturation guard for f64-to-i128 casts. */
+const TWO_POW_127: f64 = 170141183460469231731687303715884105728.0;
 
 pub(crate) fn eq_seq(a: &[Val], b: &[Val], eq: impl Fn(Val,Val)->bool) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x,y)| eq(*x,*y))
@@ -30,16 +35,16 @@ fn hash_depth(v: Val, heap: &HeapPool, depth: usize) -> u64 {
     if v.is_bool() { h.write_i64(v.as_bool() as i64); return h.finish(); }
     if v.is_float() {
         let f = v.as_float();
-        if f as i64 as f64 == f { h.write_i64(f as i64); } else { h.write_u64(f.to_bits()); }
+        // Integral floats hash exactly as the equal int or LongInt, so equal keys probe identically.
+        match float_exact_i128(f) {
+            Some(i) => write_i128(&mut h, i),
+            None => h.write_u64(f.to_bits()),
+        }
         return h.finish();
     }
     if !v.is_heap() || depth > EQ_DEPTH_MAX { h.write_u64(v.0); return h.finish(); }
     match heap.get(v) {
-        // i128 in i64 range hashes like the equal int/float, wider values hash their two halves.
-        HeapObj::LongInt(i) => match i64::try_from(*i) {
-            Ok(n) => h.write_i64(n),
-            Err(_) => { h.write_u64(*i as u64); h.write_u64((*i >> 64) as u64); }
-        },
+        HeapObj::LongInt(i) => write_i128(&mut h, *i),
         HeapObj::Str(s) => { h.write_u8(1); h.write(s.as_bytes()); }
         HeapObj::Bytes(b) => { h.write_u8(2); h.write(b); }
         HeapObj::Tuple(t) => { h.write_u8(3); h.write_usize(t.len()); for &e in t { h.write_u64(hash_depth(e, heap, depth + 1)); } }
@@ -48,6 +53,33 @@ fn hash_depth(v: Val, heap: &HeapPool, depth: usize) -> u64 {
         _ => h.write_u64(v.0),
     }
     h.finish()
+}
+
+/* i64-range values hash like the equal inline int, wider values hash their two halves. */
+fn write_i128(h: &mut crate::util::hash::FxHasher, i: i128) {
+    use core::hash::Hasher;
+    match i64::try_from(i) {
+        Ok(n) => h.write_i64(n),
+        Err(_) => { h.write_u64(i as u64); h.write_u64((i >> 64) as u64); }
+    }
+}
+
+/* Exact i128 view of an integral in-range f64, `as` saturates so the 2^127 bound is mandatory. */
+pub(crate) fn float_exact_i128(f: f64) -> Option<i128> {
+    if f.abs() < TWO_POW_127 && libm::trunc(f) == f { Some(f as i128) } else { None }
+}
+
+/* Exact float vs wide-int ordering, None on NaN. The float converts to i128 since the wide int would round in f64. */
+pub(crate) fn float_cmp_int(f: f64, i: i128) -> Option<Ordering> {
+    if f.is_nan() { return None; }
+    if let Some(fi) = float_exact_i128(f) { return Some(fi.cmp(&i)); }
+    // Out-of-range floats exceed any i128, fractional in-range floats break a truncation tie by sign.
+    if f.abs() >= TWO_POW_127 { return Some(if f > 0.0 { Ordering::Greater } else { Ordering::Less }); }
+    let t = libm::trunc(f) as i128;
+    Some(match t.cmp(&i) {
+        Ordering::Equal => if f > 0.0 { Ordering::Greater } else { Ordering::Less },
+        o => o,
+    })
 }
 
 /* f64 view of any numeric Val (int/bool/float/LongInt), None for non-numerics. */
@@ -68,7 +100,14 @@ fn eq_vals_depth(a: Val, b: Val, heap: &HeapPool, depth: usize) -> bool {
         return ai == bi;
     }
 
-    // One side is a float here (all-integer handled above), compare numerically so float unifies with int/bool/LongInt, e.g. `1.0 == True`, `1e16 == 10**16`.
+    if a.is_float() && let Some(bi) = as_long_int(b, heap) {
+        return float_cmp_int(a.as_float(), bi) == Some(Ordering::Equal);
+    }
+    if b.is_float() && let Some(ai) = as_long_int(a, heap) {
+        return float_cmp_int(b.as_float(), ai) == Some(Ordering::Equal);
+    }
+
+    // One side is a float here (all-integer handled above), compare numerically so float unifies with int/bool, e.g. `1.0 == True`.
     if let (Some(af), Some(bf)) = (num_as_f64(a, heap), num_as_f64(b, heap)) {
         return af == bf;
     }

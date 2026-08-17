@@ -248,7 +248,6 @@ impl<'a> VM<'a> {
                             self.pending.pos_delta = 0;
                             self.pending.kw_delta = 0;
                             self.pending.delta_save.truncate(delta_base);
-                            self.error_byte_pos = None;
                             // Drop partial traceback so a later error doesn't inherit stale frames.
                             self.call_stack.clear();
                             let msg = e.class_name();
@@ -256,9 +255,19 @@ impl<'a> VM<'a> {
                             let exc = if let Some(v) = self.pending.exc_val.take() {
                                 v
                             } else {
-                                let msg_val = self.heap.alloc(HeapObj::Str(e.message()))?;
-                                self.heap.alloc(HeapObj::ExcInstance(msg, alloc::vec![msg_val]))?
+                                let is_heap_err = matches!(e, VmErr::Heap);
+                                let msg_val = match self.heap.alloc(HeapObj::Str(e.message())) {
+                                    Ok(v) => v,
+                                    Err(_) if is_heap_err => self.heap.alloc_emergency(HeapObj::Str(e.message()))?,
+                                    Err(e2) => return Err(e2),
+                                };
+                                match self.heap.alloc(HeapObj::ExcInstance(msg.clone(), alloc::vec![msg_val])) {
+                                    Ok(v) => v,
+                                    Err(_) if is_heap_err => self.heap.alloc_emergency(HeapObj::ExcInstance(msg, alloc::vec![msg_val]))?,
+                                    Err(e2) => return Err(e2),
+                                }
                             };
+                            self.error_byte_pos = None;
                             // Drop reasons from finally bodies this exception unwinds past.
                             self.unwind_stack.truncate(frame.unwind_depth);
                             match frame.kind {
@@ -502,7 +511,7 @@ impl<'a> VM<'a> {
             | OpCode::Mod | OpCode::FloorDiv
             | OpCode::Eq | OpCode::Lt | OpCode::NotEq
             | OpCode::Gt | OpCode::LtEq | OpCode::GtEq
-            | OpCode::Div | OpCode::Pow | OpCode::Minus | OpCode::Pos | OpCode::InPlaceAdd => {
+            | OpCode::Div | OpCode::Pow | OpCode::Minus | OpCode::Pos | OpCode::InPlaceAdd | OpCode::InPlaceSub => {
                 self.exec_arith_or_compare(ins.opcode, rip, cache, chunk, slots)?;
             }
 

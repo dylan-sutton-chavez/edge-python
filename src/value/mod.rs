@@ -512,6 +512,35 @@ impl HeapPool {
         Ok(Val::heap(idx))
     }
 
+    /* Reserved for constructing the exception that reports the limit itself, skips the soft limit but not the hard slot cap. */
+    pub fn alloc_emergency(&mut self, obj: HeapObj) -> Result<Val, VmErr> {
+        if let Some(idx) = self.intern_lookup(&obj) { return Ok(Val::heap(idx)); }
+        if self.slots.len() >= (1 << 28) { return Err(VmErr::Heap); }
+
+        let idx = if let Some(i) = self.free_list.pop() {
+            self.slots[i as usize] = HeapSlot { obj: Some(obj), marked: false };
+            i
+        } else {
+            let i = self.slots.len() as u32;
+            self.slots.push(HeapSlot { obj: Some(obj), marked: false });
+            i
+        };
+
+        match self.slots[idx as usize].obj.as_ref().unwrap() {
+            HeapObj::Str(s) if s.len() <= 128 => { self.strings.insert(s.clone(), idx); }
+            HeapObj::Bytes(b) if b.len() <= 128 => { self.bytes_intern.insert(b.clone(), idx); }
+            HeapObj::LongInt(i) => { self.longints.insert(*i, idx); }
+            HeapObj::Type(name) => { self.types.insert(name.clone(), idx); }
+            HeapObj::Ellipsis => { self.ellipsis_idx = Some(idx); }
+            HeapObj::NotImplemented => { self.notimpl_idx = Some(idx); }
+            _ => {}
+        }
+
+        self.live += 1;
+        self.alloc_count += 1;
+        Ok(Val::heap(idx))
+    }
+
     pub fn mark(&mut self, v: Val) {
         if !v.is_heap() { return; }
         /* Split borrow, closure needs &mut mark_worklist while we read slots. */
@@ -704,4 +733,10 @@ pub fn as_i128(v: Val, heap: &HeapPool) -> Option<i128> {
         }
     }
     else { None }
+}
+
+/* Wide-int payload only, skips inline ints and bools unlike as_i128. */
+#[inline]
+pub fn as_long_int(v: Val, heap: &HeapPool) -> Option<i128> {
+    if v.is_heap() && let HeapObj::LongInt(i) = heap.get(v) { Some(*i) } else { None }
 }

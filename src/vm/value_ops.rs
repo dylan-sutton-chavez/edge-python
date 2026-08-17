@@ -5,6 +5,7 @@ use crate::parser::types::OpCode;
 
 use alloc::{string::{String, ToString}, vec::Vec, rc::Rc};
 use core::cell::RefCell;
+use core::cmp::Ordering;
 
 /* Cap on nested-container rendering depth, stops self-referential prints from overflowing the stack. */
 const RENDER_DEPTH_MAX: usize = 100;
@@ -138,8 +139,8 @@ impl<'a> VM<'a> {
         else { self.heap.alloc(HeapObj::Set(Rc::new(RefCell::new(s)))) }
     }
 
-    /* Set bitwise ops (|, &, ^) over set/frozenset, result frozen iff `a` is frozen. */
-    // Union/intersection/symmetric-diff items, content membership lets alloc dedup distinct-handle equals.
+    /* Set binops (|, &, ^, -) over set/frozenset, result frozen iff `a` is frozen. */
+    // Union/intersection/symmetric-diff/difference items, content membership lets alloc dedup distinct-handle equals.
     fn set_binop_items(&self, a: Val, b: Val, op: OpCode) -> Result<Vec<Val>, VmErr> {
         let (sa, sb) = match (self.clone_set_items(a), self.clone_set_items(b)) {
             (Some(x), Some(y)) => (x, y),
@@ -150,7 +151,8 @@ impl<'a> VM<'a> {
             OpCode::BitAnd => sa.iter().filter(|&&v| sb.contains(v, &self.heap)).copied().collect(),
             OpCode::BitXor => sa.iter().filter(|&&v| !sb.contains(v, &self.heap))
                 .chain(sb.iter().filter(|&&v| !sa.contains(v, &self.heap))).copied().collect(),
-            _ => return Err(cold_runtime("set_binop with non-bitwise opcode")),
+            OpCode::Sub => sa.iter().filter(|&&v| !sb.contains(v, &self.heap)).copied().collect(),
+            _ => return Err(cold_runtime("set_binop with unsupported opcode")),
         })
     }
 
@@ -161,7 +163,7 @@ impl<'a> VM<'a> {
         self.push(v); Ok(())
     }
 
-    // Augmented set bitwise rewrites the left set in place (identity preserved), frozenset rebinds.
+    // Augmented set ops rewrite the left set in place (identity preserved), frozenset rebinds.
     pub(crate) fn set_iop_and_push(&mut self, a: Val, b: Val, op: OpCode) -> Result<(), VmErr> {
         if !matches!(self.heap.get(a), HeapObj::Set(_)) {
             return self.set_binop_and_push(a, b, op);
@@ -348,6 +350,12 @@ impl<'a> VM<'a> {
         let a = if a.is_bool() { Val::int(a.as_bool() as i64) } else { a };
         let b = if b.is_bool() { Val::int(b.as_bool() as i64) } else { b };
         if a.is_int() && b.is_int() { return Ok(a.as_int() < b.as_int()); }
+        if a.is_float() && let Some(bi) = as_long_int(b, &self.heap) {
+            return Ok(float_cmp_int(a.as_float(), bi) == Some(Ordering::Less));
+        }
+        if b.is_float() && let Some(ai) = as_long_int(a, &self.heap) {
+            return Ok(float_cmp_int(b.as_float(), ai) == Some(Ordering::Greater));
+        }
         if let Some((af, bf)) = coerce_floats(a, b, &self.heap) { return Ok(af < bf); }
         // Wide-int compare in i128, falls through when either side isn't int-like.
         if let (Some(ai), Some(bi)) = (as_i128(a, &self.heap), as_i128(b, &self.heap)) { return Ok(ai < bi); }

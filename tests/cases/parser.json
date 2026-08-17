@@ -120,10 +120,10 @@
     "instructions": [["LoadConst",0], ["StoreName",0], ["LoadName",0], ["LoadConst",1], ["InPlaceAdd",0], ["StoreName",0], ["ReturnValue",0]]
   },
   {
-    "src": "x = 10\nx -= 3", 
-    "constants": ["10", "3"], 
-    "names": ["x_1", "x_2"], 
-    "instructions": [["LoadConst",0], ["StoreName",0], ["LoadName",0], ["LoadConst",1], ["Sub",0], ["StoreName",0], ["ReturnValue",0]]
+    "src": "x = 10\nx -= 3",
+    "constants": ["10", "3"],
+    "names": ["x_1", "x_2"],
+    "instructions": [["LoadConst",0], ["StoreName",0], ["LoadName",0], ["LoadConst",1], ["InPlaceSub",0], ["StoreName",0], ["ReturnValue",0]]
   },
   {
     "src": "x = 2\nx *= 5", 
@@ -358,7 +358,7 @@
     "src": "x = 10\nx += 1\nx -= 2\nx *= 3\nx /= 4",
     "constants": ["10", "1", "2", "3", "4"],
     "names": ["x_1", "x_2", "x_3", "x_4", "x_5"],
-    "instructions": [["LoadConst",0], ["StoreName",0], ["LoadName",0], ["LoadConst",1], ["InPlaceAdd",0], ["StoreName",0], ["LoadName",0], ["LoadConst",2], ["Sub",0], ["StoreName",0], ["LoadName",0], ["LoadConst",3], ["Mul",0], ["StoreName",0], ["LoadName",0], ["LoadConst",4], ["Div",0], ["StoreName",0], ["ReturnValue",0]]
+    "instructions": [["LoadConst",0], ["StoreName",0], ["LoadName",0], ["LoadConst",1], ["InPlaceAdd",0], ["StoreName",0], ["LoadName",0], ["LoadConst",2], ["InPlaceSub",0], ["StoreName",0], ["LoadName",0], ["LoadConst",3], ["Mul",0], ["StoreName",0], ["LoadName",0], ["LoadConst",4], ["Div",0], ["StoreName",0], ["ReturnValue",0]]
   },
   {
     "src": "x = 1\nif True:\n    x = 2\ny = x", 

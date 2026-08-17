@@ -42,6 +42,14 @@ impl<'a> VM<'a> {
             OpCode::Add
         } else { op };
 
+        // `name -= rhs` removes from a left set in place (alias-visible), every other type behaves as Sub.
+        let op = if op == OpCode::InPlaceSub {
+            if self.is_set_like(a) && self.is_set_like(b) {
+                return self.set_iop_and_push(a, b, OpCode::Sub);
+            }
+            OpCode::Sub
+        } else { op };
+
         // Root operands since the dunder runs user code that can GC, and we read a/b after it (record + fallback).
         let roots = self.temp_roots.len();
         self.temp_roots.push(a);

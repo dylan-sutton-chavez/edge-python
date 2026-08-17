@@ -4,6 +4,14 @@ use super::super::VM;
 use super::super::types::*;
 use super::matches_exc_class;
 
+/* CPython's int hash, identity in i64 range with -1 mapped to -2, wider values reduce mod 2^61-1. */
+fn py_int_hash(i: i128) -> i128 {
+    match i64::try_from(i) {
+        Ok(n) => (if n == -1 { -2 } else { n }) as i128,
+        Err(_) => i.rem_euclid((1i128 << 61) - 1),
+    }
+}
+
 impl<'a> VM<'a> {
 
     /* `property(fget)` / `property(fget, fset)`, captures the descriptor pair the class chain hands to `LoadAttr` / `StoreAttr`. The `@x.setter` decorator builds the second form via `PropertySetter`. */
@@ -112,13 +120,22 @@ impl<'a> VM<'a> {
         if o.is_int() { let n = o.as_int(); self.push(Val::int(if n == -1 { -2 } else { n })); return Ok(()); }
         if o.is_bool() { self.push(Val::int(o.as_bool() as i64)); return Ok(()); }
 
+        // Wide ints hash by value through the same rule, the i64 branch keeps hash(n)==n.
+        let wide = if o.is_heap() {
+            if let HeapObj::LongInt(i) = self.heap.get(o) { Some(*i) } else { None }
+        } else { None };
+        if let Some(i) = wide {
+            let v = self.int_to_val(Some(py_int_hash(i)))?;
+            self.push(v);
+            return Ok(());
+        }
+
         let mut h = crate::util::hash::FxHasher::default();
         if o.is_float() {
             let f = o.as_float();
-            // Integral floats hash as the equal int, same unification hash_depth uses for dict keys.
-            if f as i64 as f64 == f {
-                let n = f as i64;
-                let v = self.int_to_val(Some((if n == -1 { -2 } else { n }) as i128))?;
+            // Integral floats hash as the equal int or LongInt, same unification hash_depth uses for dict keys.
+            if let Some(i) = float_exact_i128(f) {
+                let v = self.int_to_val(Some(py_int_hash(i)))?;
                 self.push(v);
                 return Ok(());
             }

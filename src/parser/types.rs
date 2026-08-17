@@ -41,6 +41,8 @@ pub enum OpCode {
     MatchSeq,
     /* `name += rhs` extends list+list in place (so aliases observe it, matching Python's __iadd__), every other type behaves as Add. */
     InPlaceAdd,
+    /* `name -= rhs` removes from a left set in place (alias-visible), every other type behaves as Sub. */
+    InPlaceSub,
     /* Unary plus calls `__pos__`, coerces bool to int, else identity on numbers. */
     Pos,
     /* Pushes the value `yield from` produces, the exhausted subiterator's return / StopIteration value. */

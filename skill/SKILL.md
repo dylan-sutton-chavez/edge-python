@@ -129,7 +129,7 @@ NameError
 
 - No complex numbers. `1j` lexes as `1` followed by the name `j`.
 - No metaclasses, descriptors, `__slots__`, `__new__`, `__init_subclass__` or `__set_name__`. Some parse but are never dispatched.
-- No augmented assignment dunders. `a += b` desugars to `a = a + b` for user classes, except list `+=` and set `|=`, `&=`, `^=` which mutate in place.
+- No augmented assignment dunders. `a += b` desugars to `a = a + b` for user classes, except list `+=` and set `|=`, `&=`, `^=`, `-=` which mutate in place.
 - No `bytearray` and no `memoryview`.
 - No exception chaining. `raise X from Y` evaluates `Y` but the cause is discarded.
 - No `gen.send`, `gen.throw` or `gen.close`. Generators are one-way producers.
@@ -848,7 +848,7 @@ print(a is b)
 True
 ```
 
-List `+=` mutates in place and aliases see the change. Every other augmented assignment rebinds.
+List `+=` and set `|=`, `&=`, `^=`, `-=` mutate in place and aliases see the change. Every other augmented assignment rebinds.
 
 ```python
 a = [1]
