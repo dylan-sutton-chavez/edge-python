@@ -49,7 +49,7 @@ Bare `edge` prints help and exits 0. `edge -v` prints the version. `Ctrl+C` exit
 
 ### edge run
 
-`edge run [file]` executes a `.py` script, a packed `.edge` binary or a `.package` bundle, auto-detected by content. With no file it reads the script from stdin. A bare `edge run` in a terminal with no pipe errors.
+`edge run [file]` executes a `.py` script, a packed `.edge` binary or a `.package` bundle, auto-detected by content. With no file it reads the script from stdin. A bare `edge run` in a terminal with no pipe errors. `edge run -c 'print(1)'` runs inline code instead of a file or stdin, and piped stdin then feeds `input()`.
 
 Native-only flags, combining them with `--web` is an error.
 

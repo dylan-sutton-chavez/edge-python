@@ -18,7 +18,7 @@ The Edge Python developer CLI
 Usage  edge <command> [options]
 
 Commands
-  run <file|.edge>   Run a script, a .edge, or stdin
+  run <file|.edge>   Run a script, a .edge, stdin or -c <code>
   build              Pack a standalone .edge  (--bundle, --web)
   swarm <file>       Run a swarm from swarm.yml
   serve              Dev server with live reload
@@ -56,6 +56,9 @@ enum Cmd {
     Run {
         /// Script, packed .edge or .package, or stdin when omitted.
         file: Option<PathBuf>,
+        /// Run this code inline instead of a file or stdin.
+        #[arg(short = 'c', conflicts_with = "file")]
+        code: Option<String>,
         /// Feed each line of this file (or FIFO) into one receive() call. Native only.
         #[arg(long)]
         events: Option<PathBuf>,
@@ -160,12 +163,12 @@ fn main() -> Result<()> {
         Cmd::Add { pkgs } => cmd::pkg::add(&manifest_path, &pkgs),
         Cmd::Remove { pkgs } => cmd::pkg::remove(&manifest_path, &pkgs),
         Cmd::Serve { host, port, open } => cmd::serve::run(PathBuf::from("."), &host, port, open),
-        Cmd::Run { file, events, save_state, restore_state, preempt } => {
+        Cmd::Run { file, code, events, save_state, restore_state, preempt } => {
             if cli.web {
                 if events.is_some() || save_state.is_some() || restore_state.is_some() || preempt.is_some() {
                     Err(anyhow::anyhow!("--events, --save-state, --restore-state and --preempt are native-only; drop --web"))
                 } else {
-                    run_script(&manifest_path, file.as_deref())
+                    run_script(&manifest_path, file.as_deref(), code)
                 }
             } else {
                 let opts = compiler::native::RunOpts {
@@ -175,7 +178,7 @@ fn main() -> Result<()> {
                     save_state: save_state.map(|p| p.to_string_lossy().into_owned()),
                     restore_state: restore_state.map(|p| p.to_string_lossy().into_owned()),
                 };
-                engine::native::run(file.as_deref(), &opts).map(|code| {
+                engine::native::run(file.as_deref(), code.as_deref(), &opts).map(|code| {
                     if code != 0 { std::process::exit(code) }
                 })
             }
@@ -233,11 +236,12 @@ fn run_embedded(payload: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Read a script from `file` (or stdin when absent) and run it, a script that raises exits non-zero.
-fn run_script(manifest_path: &Path, file: Option<&Path>) -> Result<()> {
-    let src = match file {
-        Some(p) => std::fs::read_to_string(p).with_context(|| format!("reading {}", p.display()))?,
-        None => {
+/// Read a script from `code`, `file` or stdin (last resort) and run it, a script that raises exits non-zero.
+fn run_script(manifest_path: &Path, file: Option<&Path>, code: Option<String>) -> Result<()> {
+    let src = match (code, file) {
+        (Some(c), _) => c,
+        (None, Some(p)) => std::fs::read_to_string(p).with_context(|| format!("reading {}", p.display()))?,
+        (None, None) => {
             // A bare `edge run` from a terminal would block on stdin forever, force an explicit pipe or path.
             if std::io::stdin().is_terminal() {
                 bail!("no script given; pass a file path or pipe Python to stdin");

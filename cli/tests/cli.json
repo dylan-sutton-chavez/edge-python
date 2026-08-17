@@ -223,6 +223,27 @@
     "stdout": ["3"]
   },
   {
+    "engine": "both",
+    "run": ["run", "-c", "print('inline ok')"],
+    "stdout": ["inline ok"]
+  },
+  {
+    "engine": "both",
+    "run": ["run", "-c", "x = 1 / 0"],
+    "fails": ["ZeroDivisionError"]
+  },
+  {
+    "engine": "both",
+    "run": ["run", "-c", "s = input()\nprint(len(s))"],
+    "stdin": "hello\n",
+    "stdout": ["5"]
+  },
+  {
+    "given": { "f.py": "print(1)\n" },
+    "run": ["run", "-c", "print(2)", "f.py"],
+    "fails": ["cannot be used with"]
+  },
+  {
     "given": { "sub/main.py": "print('ok')\n", "packages.json": "{}\n" },
     "run": ["build", "--web"],
     "creates": ["dist/sub/main.py"],

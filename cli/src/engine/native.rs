@@ -59,7 +59,7 @@ impl Backend for NativeSession {
 }
 
 /// One-shot native run mirroring `engine::run`, returns the process exit code.
-pub fn run(file: Option<&Path>, opts: &RunOpts) -> Result<i32> {
+pub fn run(file: Option<&Path>, code: Option<&str>, opts: &RunOpts) -> Result<i32> {
     if let Some(state) = &opts.restore_state {
         return Ok(restore_and_run(state, opts));
     }
@@ -69,9 +69,10 @@ pub fn run(file: Option<&Path>, opts: &RunOpts) -> Result<i32> {
         return run_bundle(&payload, opts);
     }
     let mut stdin = std::io::stdin();
-    let (src, name) = match file {
-        Some(p) => (std::fs::read_to_string(p).map_err(|e| anyhow::anyhow!("reading {}: {e}", p.display()))?, path_spec(p)),
-        None => {
+    let (src, name) = match (code, file) {
+        (Some(c), _) => (c.to_string(), String::from("<eval>")),
+        (None, Some(p)) => (std::fs::read_to_string(p).map_err(|e| anyhow::anyhow!("reading {}: {e}", p.display()))?, path_spec(p)),
+        (None, None) => {
             // A bare `edge run` from a terminal would block on stdin forever, force a pipe or path.
             if stdin.is_terminal() {
                 anyhow::bail!("no script given; pass a file path or pipe Python to stdin");
@@ -90,8 +91,8 @@ pub fn run(file: Option<&Path>, opts: &RunOpts) -> Result<i32> {
         }
     };
     let mut vm = boot_vm(chunk, Limits::sandbox(), opts.preempt);
-    // With a file argument piped stdin feeds `input()`, one line per call with any CR dropped.
-    if file.is_some() && !stdin.is_terminal() {
+    // Unless the script itself came from stdin, piped stdin feeds `input()`, one line per call with any CR dropped.
+    if (file.is_some() || code.is_some()) && !stdin.is_terminal() {
         let mut buf = String::new();
         if stdin.read_to_string(&mut buf).is_ok() && !buf.is_empty() {
             vm.input_buffer = buf.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l).to_string()).collect();

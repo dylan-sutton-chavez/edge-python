@@ -48,7 +48,7 @@ error: ZeroDivisionError: division by zero
 
 `raise SystemExit(code)` with no argument or an integer exits cleanly with that code and no traceback. A string argument surfaces as a regular error and exits 1.
 
-With no path, `edge run` reads the script from piped stdin (`cat app.py | edge run`) and errors when stdin is a terminal. With a path, piped stdin instead feeds [`input()`](/reference/builtins) one line per call. A packed `.edge` or `.package` also runs here, `edge run app.edge` unpacks and runs it exactly as `./app.edge` would.
+With no path, `edge run` reads the script from piped stdin (`cat app.py | edge run`) and errors when stdin is a terminal. `-c <code>` runs inline code instead (`edge run -c 'print(1)'`). With a path or `-c`, piped stdin instead feeds [`input()`](/reference/builtins) one line per call. A packed `.edge` or `.package` also runs here, `edge run app.edge` unpacks and runs it exactly as `./app.edge` would.
 
 Flags: the [native-engine flags](/reference/modules#run-flags) `--events`, `--save-state`, `--restore-state`, and `--preempt`. They are native-only and combining any of them with `--web` is an error.
 
