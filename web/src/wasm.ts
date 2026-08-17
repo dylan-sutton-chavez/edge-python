@@ -9,6 +9,7 @@ export interface CompilerExports {
     register_native_module(spec_ptr: number, spec_len: number, names_ptr: number, names_len: number, base_id: number): void
     reset_modules(): void
     set_entry_dir?(len: number): void
+    set_input?(ptr: number, len: number): void
     extract_imports?(len: number): number
     repl_eval(len: number): number
     run_start(len: number): number

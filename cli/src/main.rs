@@ -238,6 +238,7 @@ fn run_embedded(payload: &[u8]) -> Result<()> {
 
 /// Read a script from `code`, `file` or stdin (last resort) and run it, a script that raises exits non-zero.
 fn run_script(manifest_path: &Path, file: Option<&Path>, code: Option<String>) -> Result<()> {
+    let from_pipe = code.is_none() && file.is_none();
     let src = match (code, file) {
         (Some(c), _) => c,
         (None, Some(p)) => std::fs::read_to_string(p).with_context(|| format!("reading {}", p.display()))?,
@@ -251,9 +252,16 @@ fn run_script(manifest_path: &Path, file: Option<&Path>, code: Option<String>) -
             s
         }
     };
+    // Unless the script itself came from stdin, piped stdin feeds `input()`.
+    let mut input = String::new();
+    let input = if !from_pipe && !std::io::stdin().is_terminal() && std::io::stdin().read_to_string(&mut input).is_ok() && !input.is_empty() {
+        Some(input)
+    } else {
+        None
+    };
     let manifest = Manifest::load(manifest_path)?;
     let base = file.and_then(engine::base_dir);
-    let code = engine::run(&src, &manifest, base.as_deref())?;
+    let code = engine::run(&src, &manifest, base.as_deref(), input.as_deref())?;
     if code != 0 {
         std::process::exit(code);
     }

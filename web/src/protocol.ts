@@ -22,6 +22,7 @@ export interface RunOpts {
     entryDir?: string
     baseUrl?: string | null
     incremental?: boolean
+    input?: string
 }
 
 export interface ExecResult {

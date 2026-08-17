@@ -70,8 +70,20 @@ fn take_input(vm: &mut VM) {
         inp
     });
     if !inp_text.is_empty() {
-        vm.input_buffer = inp_text.split('\n').map(alloc::string::String::from).collect();
+        // One line per `input()` call, any trailing CR dropped.
+        vm.input_buffer = inp_text.split('\n').map(|l| alloc::string::String::from(l.strip_suffix('\r').unwrap_or(l))).collect();
     }
+}
+
+/* Host-fed stdin for the next `take_input`. */
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn set_input(ptr: *const u8, len: u32) {
+    let bytes = unsafe { safe_bytes(ptr, len) };
+    let n = bytes.len().min(SZ);
+    with_runtime(|rt| {
+        rt.inp[..n].copy_from_slice(&bytes[..n]);
+        rt.inp_len = n;
+    });
 }
 
 #[unsafe(no_mangle)]

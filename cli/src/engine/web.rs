@@ -37,7 +37,7 @@ struct State {
 /// Result of one eval, streamed lines went out via the `on_line` callback and only the error and exit code survive.
 impl super::Backend for Session {
     fn eval(&mut self, src: &str, base: Option<&str>, on_line: &mut dyn FnMut(&str)) -> Result<Outcome> {
-        Session::eval(self, src, base, |line| on_line(line))
+        Session::eval(self, src, base, None, |line| on_line(line))
     }
 
     fn reset(&mut self) -> Result<()> {
@@ -69,10 +69,11 @@ impl Session {
     }
 
     /// Run one input, state persists in the worker's interpreter between evals. `base` repositions relative imports, None means the project root.
-    pub fn eval<F: FnMut(&str)>(&mut self, src: &str, base: Option<&str>, mut on_line: F) -> Result<Outcome> {
+    pub fn eval<F: FnMut(&str)>(&mut self, src: &str, base: Option<&str>, input: Option<&str>, mut on_line: F) -> Result<Outcome> {
         let literal = serde_json::to_string(src)?;
         let base = serde_json::to_string(&base)?;
-        let expr = format!("__edgeRun({literal}, {base})");
+        let input = serde_json::to_string(&input)?;
+        let expr = format!("__edgeRun({literal}, {base}, {input})");
         self.tab.evaluate(&expr, false).map_err(|e| anyhow!("starting eval: {e}"))?;
         drain(&self.tab, &mut |line| on_line(line))
     }
@@ -85,9 +86,9 @@ impl Session {
 }
 
 /// One-shot run, open a session, eval `src`, stream stdout, tear down. Returns the process exit code (0 clean, 1 on error, or the script's `SystemExit` code).
-pub fn run(src: &str, manifest: &Manifest, base: Option<&str>) -> Result<i32> {
+pub fn run(src: &str, manifest: &Manifest, base: Option<&str>, input: Option<&str>) -> Result<i32> {
     let mut session = Session::open(manifest)?;
-    let outcome = session.eval(src, base, super::emit_chunk)?;
+    let outcome = session.eval(src, base, input, super::emit_chunk)?;
     if let Some(err) = outcome.err {
         crate::ui::traceback(&err);
         return Ok(1);

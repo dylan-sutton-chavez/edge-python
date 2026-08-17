@@ -121,7 +121,7 @@ export async function run(opts: RunOpts, onLine?: (text: string) => void): Promi
 }
 
 /* Shared run/restore core, instance, host imports, prefetch, then drive `start`. */
-async function execute({ src, payload, start, entryDir = '', baseUrl = null, onLine, incremental = false }: ExecuteOpts): Promise<ExecResult> {
+async function execute({ src, payload, start, entryDir = '', baseUrl = null, onLine, incremental = false, input }: ExecuteOpts): Promise<ExecResult> {
     if (!wasmModule || !cache) throw new Error('engine.load() must be called first');
     entryDir = entryDir.replace(/^(\.\/)+/, ''); // specs never carry ./
 
@@ -179,6 +179,14 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
 
     // `wasm_alloc` during prefetch may have grown memory and detached our view.
     writePayload();
+
+    // Host-fed stdin, one input() call per line.
+    if (input && exports.set_input) {
+        const inputBytes = TE.encode(input);
+        const ptr = writeBytes(exports, inputBytes);
+        exports.set_input(ptr, inputBytes.length);
+        exports.wasm_free(ptr, Math.max(1, inputBytes.length));
+    }
 
     const t0 = performance.now();
     pendingHostCalls.clear(); // drop any stale captures from a prior run

@@ -40,7 +40,7 @@ const NO_REPLY: unique symbol = Symbol('no-reply');
 function dispatch(req: WorkerRequest): unknown {
     switch (req.type) {
         case 'load': return engine.load(req.opts, req.mainThreadManifests);
-        case 'run': return engine.run({ src: req.src, repl: req.repl, entryDir: req.entryDir, baseUrl: req.baseUrl, incremental: req.incremental }, onLine);
+        case 'run': return engine.run({ src: req.src, repl: req.repl, entryDir: req.entryDir, baseUrl: req.baseUrl, incremental: req.incremental, input: req.input }, onLine);
         case 'set-preempt-interval': return engine.setPreemptInterval(req.interval);
         case 'pause': return engine.pause();
         case 'resume': return engine.resume();
