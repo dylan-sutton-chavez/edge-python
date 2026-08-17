@@ -174,7 +174,7 @@ print(keys)
 
 ### Numbers are bounded
 
-Integers are 47-bit inline with automatic promotion to 128-bit. Past ±2^127 the run raises `OverflowError`.
+Integers are 48-bit inline with automatic promotion to 128-bit. Past ±2^127 the run raises `OverflowError`.
 
 ```python
 print(2**126)

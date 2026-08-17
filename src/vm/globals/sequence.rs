@@ -6,7 +6,7 @@ use super::super::VM;
 use super::super::types::*;
 use crate::parser::{OpCode, SSAChunk};
 
-/* A range element as a Val, promoting magnitudes beyond the 47-bit inline range to LongInt. */
+/* A range element as a Val, promoting magnitudes beyond the 48-bit inline range to LongInt. */
 pub(crate) fn range_int(heap: &mut HeapPool, i: i64) -> Result<Val, VmErr> {
     if (Val::INT_MIN..=Val::INT_MAX).contains(&i) { Ok(Val::int(i)) }
     else { heap.alloc(HeapObj::LongInt(i as i128)) }

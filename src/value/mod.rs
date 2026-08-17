@@ -39,7 +39,7 @@ impl core::fmt::Debug for ExternFn {
     }
 }
 
-/* NaN-boxed 8-byte value (47-bit int, float, bool, None, undef, heap idx), layout in `abi::nan_box`. */
+/* NaN-boxed 8-byte value (48-bit int, float, bool, None, undef, heap idx), layout in `abi::nan_box`. */
 use crate::abi::nan_box::{
     QNAN, SIGN, TAG_UNDEF, TAG_NONE, TAG_TRUE, TAG_FALSE, TAG_INT, TAG_HEAP,
     INT_PAYLOAD_MASK,
@@ -69,7 +69,7 @@ impl Eq for Val {}
 impl core::hash::Hash for Val {
     #[inline]
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        // Hash ints as i64 and integral floats as that same int so 1 and 1.0 share a key (47-bit ints fit f64 losslessly). Bit-hashing int-valued f64s clusters (zero low mantissa bits) and degrades int-keyed dict/set to O(n^2).
+        // Hash ints as i64 and integral floats as that same int so 1 and 1.0 share a key (48-bit ints fit f64 losslessly). Bit-hashing int-valued f64s clusters (zero low mantissa bits) and degrades int-keyed dict/set to O(n^2).
         if self.is_int() {
             state.write_i64(self.as_int());
         } else if self.is_bool() {
@@ -154,13 +154,13 @@ pub enum HeapObj {
     Type(String),
     // `NotImplemented` singleton, dunder return sentinel that triggers the reflected operator fallback.
     NotImplemented,
-    /* Wide-int slow path (i128), `int_to_val` canonicalises so 47-bit values stay inline. */
+    /* Wide-int slow path (i128), `int_to_val` canonicalises so 48-bit values stay inline. */
     LongInt(i128),
     /* Exception instance, type name + ctor args (exposed via `.args`). */
     ExcInstance(String, Vec<Val>),
     BoundMethod(Val, BuiltinMethodId),
     NativeFn(NativeFnId),
-    // `bases` lists direct parents in declared order, `resolve_attr` DFS-walks them on miss. Members are mutable so a decorator or `cls.attr = ...` can add or replace class attributes.
+    // `bases` lists direct parents in declared order, the VM walks a cached C3 linearization on miss. Members are mutable so a decorator or `cls.attr = ...` can add or replace class attributes.
     Class(String, Vec<Val>, Rc<RefCell<Vec<(String, Val)>>>),
     Instance(Val, Rc<RefCell<DictMap>>),
     // `(recv, func, class)`, `class` is where `func` was found so the called frame knows what `super()` should skip past.

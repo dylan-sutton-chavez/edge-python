@@ -385,7 +385,7 @@
     "manifests": {
       "./lib/": { "imports": { "other": "./other.py" } }
     },
-    "error": "alias 'utils' not declared in './lib/packages.json'"
+    "error": "no packages.json above './lib/' declares 'utils'"
   },
   {
     "src": "from .lib.a import run\nprint(run())",

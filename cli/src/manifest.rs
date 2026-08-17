@@ -29,7 +29,6 @@ impl Manifest {
     }
 }
 
-/* Official package registry. Mirrors the runtime's built-in default manifest. */
 pub enum Kind {
     Std,
     System,
@@ -37,7 +36,7 @@ pub enum Kind {
 
 use compiler::devkit::{STD_PACKAGES as STD, SYSTEM_PACKAGES as SYSTEM};
 
-/// Resolve a bare name against the official registry, user manifest overrides go through `resolve`.
+/// Official package registry. Mirrors the runtime's built-in default manifest, user overrides go through `resolve`.
 pub fn registry(name: &str) -> Option<(Kind, String)> {
     if STD.contains(&name) {
         Some((Kind::Std, std_url(name)))

@@ -73,7 +73,7 @@ impl<'a> VM<'a> {
         self.output_open = true;
     }
 
-    /* Returns empty string in sandbox, no stdin access in WASM. */
+    /* Pops a buffered host line, raises in strict mode and WASM, native non-strict reads stdin. */
     pub fn call_input(&mut self) -> Result<(), VmErr> {
         let s = if !self.input_buffer.is_empty() {
             self.input_buffer.remove(0)
@@ -90,7 +90,7 @@ impl<'a> VM<'a> {
             }
             #[cfg(target_arch = "wasm32")]
             { 
-                return Err(VmErr::Runtime("input() requires host data in WASM (use set_input)")); 
+                return Err(VmErr::Runtime("input() requires host data in WASM")); 
             }
         };
         let val = self.heap.alloc(HeapObj::Str(s))?;

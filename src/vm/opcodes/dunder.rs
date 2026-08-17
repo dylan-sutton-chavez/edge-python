@@ -20,15 +20,15 @@ pub(crate) fn binary_dunder_names(op: OpCode) -> Option<(&'static str, &'static 
     })
 }
 
-/* Same for comparisons, (forward, reflected, negate). `__eq__` reflects to itself. `__ne__` is negated `__eq__`. `<` reflects to `>` and vice-versa. */
-pub(crate) fn compare_dunder_names(op: OpCode) -> Option<(&'static str, &'static str, bool)> {
+/* Same for comparisons, (forward, reflected). `__eq__` reflects to itself. `<` reflects to `>` and vice-versa. */
+pub(crate) fn compare_dunder_names(op: OpCode) -> Option<(&'static str, &'static str)> {
     Some(match op {
-        OpCode::Eq => ("__eq__", "__eq__", false),
-        OpCode::NotEq => ("__ne__", "__ne__", false),
-        OpCode::Lt => ("__lt__", "__gt__", false),
-        OpCode::LtEq => ("__le__", "__ge__", false),
-        OpCode::Gt => ("__gt__", "__lt__", false),
-        OpCode::GtEq => ("__ge__", "__le__", false),
+        OpCode::Eq => ("__eq__", "__eq__"),
+        OpCode::NotEq => ("__ne__", "__ne__"),
+        OpCode::Lt => ("__lt__", "__gt__"),
+        OpCode::LtEq => ("__le__", "__ge__"),
+        OpCode::Gt => ("__gt__", "__lt__"),
+        OpCode::GtEq => ("__ge__", "__le__"),
         _ => return None,
     })
 }
@@ -94,7 +94,7 @@ impl<'a> VM<'a> {
     /* Comparison dunder dispatch. `__eq__` reflects to itself. `__ne__` falls back to `not __eq__`. `<` reflects to `>` and vice-versa. */
     pub(crate) fn try_compare_dunder(&mut self, op: OpCode, a: Val, b: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Option<Val>, VmErr> {
         if self.instance_class(a).is_none() && self.instance_class(b).is_none() { return Ok(None); }
-        let Some((lname, rname, negate)) = compare_dunder_names(op) else { return Ok(None); };
+        let Some((lname, rname)) = compare_dunder_names(op) else { return Ok(None); };
 
         let Some(r) = self.dispatch_reflected(a, b, lname, rname, chunk, slots)? else {
             // `!=` falls back to negated `__eq__` when `__ne__` is absent.
@@ -104,8 +104,7 @@ impl<'a> VM<'a> {
             }
             return Ok(None);
         };
-        // `!=` negates `__eq__`, other comparisons return the raw dunder result.
-        Ok(Some(if negate { Val::bool(!self.truthy(r)) } else { r }))
+        Ok(Some(r))
     }
 
     /* Python `bool()` semantics, try `__bool__`, then `__len__` (0 = False), else default True for instances. Pass-through for built-in types. */

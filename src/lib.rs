@@ -23,6 +23,7 @@ pub mod native;
 pub mod util {
     pub mod hash;
     pub mod fstr;
+    pub mod jesc;
     pub mod sha256;
     /* RFC 6455 codec, shared by the native websocket client and the test mock. */
     #[cfg(all(feature = "native", not(target_arch = "wasm32")))]

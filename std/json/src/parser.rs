@@ -142,7 +142,7 @@ fn parse_object_pairs(tk: &mut Tokenizer, ctx: &LoadCtx) -> Result<Handle> {
             }
         }
     }
-    // Materialise as `list[list[key, val]]`, Python hands `list[tuple]` but wasm-pdk has no `new_tuple` (the hook can `tuple(p) for p in pairs` if it needs them).
+    // Materialise as `list[list[key, val]]`, the hook can `tuple(p) for p in pairs` if it needs Python's `list[tuple]`.
     let list = Handle::new_list()?;
     for (k, v) in pairs {
         let pair = Handle::new_list()?;

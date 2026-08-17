@@ -52,7 +52,7 @@ def run() -> None:
             print(f"FAIL - {description} (AssertionError: {e})")
             failed += 1
         except Exception as e:  # unexpected error in the test
-            print(f"ERROR {description} ({type(e).__name__}: {e})")
+            print(f"ERROR - {description} ({type(e).__name__}: {e})")
             failed += 1
     print(f"{passed} passed, {failed} failed")
     raise SystemExit(1 if failed else 0)

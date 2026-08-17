@@ -10,7 +10,7 @@ fn binary_dunder_name(op: OpCode) -> Option<&'static str> {
 
 /* IC, same for comparison opcodes, reflected pairs collapse to the forward name. */
 fn compare_dunder_name(op: OpCode) -> Option<&'static str> {
-    super::dunder::compare_dunder_names(op).map(|(l, _, _)| l)
+    super::dunder::compare_dunder_names(op).map(|(l, _)| l)
 }
 
 impl<'a> VM<'a> {

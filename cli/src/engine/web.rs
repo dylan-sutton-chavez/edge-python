@@ -223,7 +223,7 @@ fn serve(packages: String) -> Result<u16> {
 
     thread::spawn(move || {
         for req in server.incoming_requests() {
-            let path = req.url().split('?').next().unwrap_or("/");
+            let path = req.url().split('?').next().unwrap();
             let resp = match path {
                 "/" => Response::from_string(harness_page()).with_header(ctype("text/html; charset=utf-8")),
                 "/packages.json" => Response::from_string(packages.clone()).with_header(ctype("application/json")),

@@ -164,7 +164,7 @@ pub enum EncodeRequest<'a> {
     Invalid,
 }
 
-// Inline range for Val::int (47-bit signed), values outside go to HeapObj::LongInt.
+// Inline range for Val::int (48-bit signed), values outside go to HeapObj::LongInt.
 const INLINE_INT_MIN: i128 = -0x0000_8000_0000_0000i64 as i128;
 const INLINE_INT_MAX: i128 =  0x0000_7FFF_FFFF_FFFFi64 as i128;
 
@@ -190,7 +190,7 @@ pub fn classify_encode(tag: u32, bytes: &[u8]) -> EncodeRequest<'_> {
             let mut buf = [0u8; 16];
             buf.copy_from_slice(bytes);
             let i = i128::from_le_bytes(buf);
-            // Fits in 47-bit inline range -> emit as Val::int directly, else heap-alloc LongInt.
+            // Fits in 48-bit inline range -> emit as Val::int directly, else heap-alloc LongInt.
             match inline_int_bits(i) {
                 Some(bits) => EncodeRequest::Direct(bits),
                 None => EncodeRequest::AllocLongInt(i),
@@ -242,7 +242,7 @@ pub fn classify_decode(val_bits: u64) -> DecodeBits {
             bytes: PrimitiveBytes::Eight(f64::from_bits(val_bits).to_le_bytes()),
         };
     }
-    // Int, QNAN|SIGN with payload. Sign-extend the 47-bit payload to i128 (wire width).
+    // Int, QNAN|SIGN with payload. Sign-extend the 48-bit payload to i128 (wire width).
     if (val_bits & (QNAN | SIGN)) == TAG_INT {
         let raw = (val_bits & INT_PAYLOAD_MASK) as i64;
         let sign_extended_i64 = (raw << 16) >> 16;

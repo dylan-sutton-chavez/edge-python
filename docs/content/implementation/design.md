@@ -19,7 +19,7 @@ Deep dives live in their own pages. Tokenization is in [Lexical](/implementation
 - **Per-instruction inline caching**: each binary op records operand type tags. After `QUICK_THRESH = 4` stable hits the cache stores a typed `FastOp` (`AddInt`, `AddFloat`, `AddStr`, `LtFloat`, `EqStr`, `ModInt`, and friends) as a speculative fast path. A type-guard miss invalidates the slot and falls back to the generic handler. Caching is per instruction, so monomorphic sites stabilise independently.
 - **Template memoisation**: pure user functions cache `(args) -> result` after `TPL_THRESH = 2` hits, capped at 256 entries per function. A table self-disables and frees after 256 consecutive lookup misses. Caching requires a call without keywords, immutable arguments (mutable containers disqualify), and a pure body. Static purity is computed at parse time (see [Parsing](/implementation/parsing#lambda-and-function-bodies)) and backed by a runtime check that propagates effects through calls, so a statically pure wrapper over an impure callee such as `apply(print, x)` is never cached. Hashing is an FNV fold over the raw `Val` bits with a value-equality verify.
 - **Call-time name propagation**: free names in a function body fill from the caller's frame at call time. The map is cached per `(caller chunk, callee)` pair as exact-name slot pairs plus bare-name version candidates. The fallback chain is caller SSA, then callee module attrs, then globals, then entry-module state.
-- **NaN-boxed values**: `Val` is a 64-bit union holding 47-bit signed ints inline, IEEE-754 floats, bools, None, an undef sentinel, and 28-bit heap indices. See the memory model below.
+- **NaN-boxed values**: `Val` is a 64-bit union holding 48-bit signed ints inline, IEEE-754 floats, bools, None, an undef sentinel, and 28-bit heap indices. See the memory model below.
 - **Mark-and-sweep GC**: single-colour, no reference counts, cycles reclaimed natively.
 
 ## Bytecode shape
@@ -41,7 +41,7 @@ For arith and compare opcodes the loop checks `cache.get_fast(ip)`. A present `F
 | Tag | Pattern | Notes |
 |-----------|-----------------------------------------|--------------------------------------|
 | Float | any non-canonical IEEE-754 | quiet NaNs remapped to `0x7FF8...` |
-| Int | `QNAN \| SIGN \| i48` | 47-bit signed inline, promotes to `HeapObj::LongInt` (i128) on overflow |
+| Int | `QNAN \| SIGN \| i48` | 48-bit signed inline, promotes to `HeapObj::LongInt` (i128) on overflow |
 | Undef | `QNAN` | unbound-local sentinel |
 | None | `QNAN \| 1` | |
 | True | `QNAN \| 2` | |

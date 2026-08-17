@@ -43,7 +43,7 @@ no newline!
 
 ### input
 
-`input()` pops one line from the host-provided input buffer and returns it as a string. There is no prompt argument. The CLI fills the buffer from piped stdin, one line per call. An empty buffer raises `RuntimeError`. In WASM the host writes the buffer through `set_input`.
+`input()` pops one line from the host-provided input buffer and returns it as a string. There is no prompt argument. The CLI fills the buffer from piped stdin, one line per call. An empty buffer raises `RuntimeError`. In WASM the host copies stdin bytes into the guest input buffer before running.
 
 ## Numeric
 

@@ -33,7 +33,7 @@ hit max depth
 
 Integers are two-tier:
 
-- **Inline (fast).** 47-bit signed, packed into the NaN-boxed value. Range `-140_737_488_355_328` to `140_737_488_355_327` (`-2^47` to `2^47 - 1`). One ALU op per arithmetic, no allocation.
+- **Inline (fast).** 48-bit signed, packed into the NaN-boxed value. Range `-140_737_488_355_328` to `140_737_488_355_327` (`-2^47` to `2^47 - 1`). One ALU op per arithmetic, no allocation.
 - **Wide (slow).** 128-bit, heap-allocated. Used automatically when a literal exceeds the inline range or inline arithmetic overflows.
 
 Promotion is automatic and invisible. Past ±2^127, arithmetic raises `OverflowError`. Integers are not unbounded: wider than 128 bits is out of scope by design.

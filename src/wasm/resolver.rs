@@ -93,8 +93,7 @@ impl WasmHostResolver {
                 search_dir = next;
                 continue;
             }
-            return Err(s!("alias '", str name, "' not declared in '", str &m_spec, "'\n", "help: declare it, add \"extends\": \"..\" to inherit, or use a relative import",
-            ));
+            return Err(s!("no packages.json above '", str start_dir, "' declares '", str name, "'"));
         }
     }
 
@@ -164,7 +163,7 @@ fn make_native_binding(name: String, id: u32) -> NativeBinding {
         argv.push(kwargs.map_or(0, put_val));
         let mut out_handle: u32 = 0;
 
-        // call_id is what call_extern will park with on defer, lets the host route the result back.
+        // 2. call_id is what call_extern will park with on defer, lets the host route the result back.
         let call_id = with_vm(|vm| vm.next_host_call_id as u32).unwrap_or(0);
         let status = unsafe {
             super::host_call_native(

@@ -6,5 +6,5 @@
   {"src": "@fixture\ndef n():\n    return 5\n@test('n is five', 'n')\ndef t(n):\n    assert n == 5\nrun()", "output": ["PASS - n is five", "1 passed, 0 failed"]},
   {"src": "@test('first')\ndef a():\n    assert True\n@test('second')\ndef b():\n    assert 1 + 1 == 2\nrun()", "output": ["PASS - first", "PASS - second", "2 passed, 0 failed"]},
   {"src": "@test('fails')\ndef t():\n    assert 1 == 2, 'nope'\nrun()", "output": ["FAIL - fails (AssertionError: nope)", "0 passed, 1 failed"]},
-  {"src": "@test('errors')\ndef t():\n    raise ValueError('boom')\nrun()", "output": ["ERROR errors (ValueError: boom)", "0 passed, 1 failed"]}
+  {"src": "@test('errors')\ndef t():\n    raise ValueError('boom')\nrun()", "output": ["ERROR - errors (ValueError: boom)", "0 passed, 1 failed"]}
 ]

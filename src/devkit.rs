@@ -42,17 +42,7 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
 
 pub fn escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\t' => out.push_str("\\t"),
-            '\r' => out.push_str("\\r"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            _ => out.push(c),
-        }
-    }
+    crate::util::jesc::escape(&mut out, s);
     out
 }
 

@@ -8,7 +8,7 @@ export interface FetchCtx {
     integrityActive: boolean
 }
 
-/* CAS-backed fetch keyed by lockfile hash, else fetch + hash + store. Null on 404 (opportunistic ok), throws on drift. */
+/* CAS-backed fetch keyed by lockfile hash, else fetch + hash + store. Null on fetch failure or non-ok status (opportunistic ok), throws on drift. */
 export async function fetchWithLockfile(spec: string, lockfile: Map<string, string>, ctx: FetchCtx): Promise<Uint8Array | null> {
     const { cache, baseUrl, knownMissing, integrityActive } = ctx;
 

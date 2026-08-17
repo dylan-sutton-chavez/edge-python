@@ -25,7 +25,7 @@ pub fn run(dir: PathBuf, host: &str, port: u16, open: bool) -> Result<()> {
     }
 
     for req in server.incoming_requests() {
-        let url = req.url().split('?').next().unwrap_or("/").to_string();
+        let url = req.url().split('?').next().unwrap().to_string();
         if url == "/__livereload" {
             let _ = req.respond(Response::from_string(version.load(Ordering::Relaxed).to_string()));
         } else {

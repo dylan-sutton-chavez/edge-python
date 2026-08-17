@@ -159,7 +159,7 @@ impl TestResolver {
                 search_dir = next;
                 continue;
             }
-            return Err(format!("alias '{}' not declared in '{}packages.json'\nhelp: declare it, add \"extends\": \"..\" to inherit, or use a relative import", name, dir));
+            return Err(format!("no packages.json above '{}' declares '{}'", start_dir, name));
         }
     }
 

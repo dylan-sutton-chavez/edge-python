@@ -100,7 +100,7 @@ The browser runtime additionally caches every fetched module in IndexedDB, in a 
 A bad import is a compile-time diagnostic with the statement's source position, never a catchable runtime exception:
 
 ```text
-error: alias 'utils' not declared in './packages.json'
+error: no packages.json above './' declares 'utils'
   --> main.py:1:6
    |
  1 | from utils import f

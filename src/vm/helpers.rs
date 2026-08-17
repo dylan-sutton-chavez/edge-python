@@ -70,7 +70,7 @@ impl<'a> VM<'a> {
                 if count > self.heap.limit() as u128 { return Err(VmErr::Heap); }
                 let mut out = Vec::new();
                 let mut i = s;
-                // range_int promotes past the 47-bit inline range, checked_add ends at the i64 edge.
+                // range_int promotes past the 48-bit inline range, checked_add ends at the i64 edge.
                 if st > 0 { while i < e { out.push(range_int(&mut self.heap, i)?); match i.checked_add(st) { Some(n) => i = n, None => break } } }
                 else { while i > e { out.push(range_int(&mut self.heap, i)?); match i.checked_add(st) { Some(n) => i = n, None => break } } }
                 out

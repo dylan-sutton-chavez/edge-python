@@ -172,7 +172,7 @@ pub static ALL_METHODS: &[MethodDesc] = methods! {
 pub(crate) fn dispatch_method(vm: &mut VM, id: BuiltinMethodId, recv: Val, pos: &[Val], kw: &[Val]) -> Result<(), VmErr> {
     let m = &ALL_METHODS[id.0 as usize];
     if !kw.is_empty() {
-        // `dict.update(**kwargs)` is the one builtin method taking keywords, pack them into a dict and append as a positional, which `dict::update` already merges.
+        // Only `dict.update(**kwargs)` reaches the dispatcher with keywords (`list.sort` keywords are intercepted before dispatch), pack them into a dict and append as a positional, which `dict::update` already merges.
         if m.ty == "dict" && m.name == "update" 
             && let Some(kwd) = VM::pack_kw_dict(&mut vm.heap, kw)? {
                 let mut p = alloc::vec::Vec::with_capacity(pos.len() + 1);

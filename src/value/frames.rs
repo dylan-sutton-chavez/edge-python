@@ -126,7 +126,7 @@ impl IterFrame {
                     let v = *cur;
                     // Clamp past the i64 edge so the next `done` check ends the range, never overflows.
                     *cur = cur.checked_add(*step).unwrap_or(if *step > 0 { i64::MAX } else { i64::MIN });
-                    // Promote magnitudes beyond the 47-bit inline range to LongInt.
+                    // Promote magnitudes beyond the 48-bit inline range to LongInt.
                     Ok(Some(crate::vm::globals::sequence::range_int(heap, v)?))
                 }
             }

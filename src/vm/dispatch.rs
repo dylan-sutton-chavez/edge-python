@@ -49,7 +49,7 @@ impl<'a> VM<'a> {
             FastOp::FloorDivInt if a.is_int() && b.is_int() => {
                 let bv = b.as_int();
                 if bv == 0 { return Ok(FastOutcome::Overflow); }
-                // floored division (toward -inf), not Euclidean. 47-bit operands can't overflow.
+                // floored division (toward -inf), not Euclidean. 48-bit operands can't overflow.
                 let av = a.as_int();
                 let q = av / bv;
                 let r = av - q * bv;

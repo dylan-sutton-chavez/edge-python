@@ -17,7 +17,7 @@ pub mod nan_box {
     pub const TAG_FALSE: u64 = QNAN | 3;
     pub const TAG_INT: u64 = QNAN | SIGN;
     pub const TAG_HEAP: u64 = QNAN | 4;
-    /* 47-bit signed payload, sign bit at bit 47. */
+    /* 48-bit signed payload, sign bit at bit 47. */
     pub const INT_PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
 }
 

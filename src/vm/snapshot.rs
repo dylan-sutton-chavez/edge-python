@@ -6,6 +6,7 @@ use core::hash::Hasher;
 
 use crate::parser::types::{ImportKind, SSAChunk};
 use crate::util::hash::{FxHashMap, FxHasher};
+use crate::util::jesc::escape as json_escape;
 use super::{Pending, VM};
 use super::types::*;
 
@@ -718,25 +719,6 @@ fn rehash(vm: &mut VM, fills: Vec<(u32, SetFill)>) -> Result<(), SnapErr> {
         }
     }
     Ok(())
-}
-
-fn json_escape(out: &mut String, s: &str) {
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => {
-                out.push_str("\\u00");
-                let b = c as u8;
-                out.push(char::from_digit((b >> 4) as u32, 16).unwrap());
-                out.push(char::from_digit((b & 0xF) as u32, 16).unwrap());
-            }
-            c => out.push(c),
-        }
-    }
 }
 
 /* Module bindings as a {name: repr} JSON object. */

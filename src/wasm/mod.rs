@@ -16,7 +16,7 @@ unsafe extern "C" {
     /* Host-cached bytes for `spec`. Non-null `hash_ptr` is a 32-byte expected sha-256. */
     pub(super) fn host_fetch_bytes(spec_ptr: *const u8, spec_len: u32, hash_ptr: *const u8, out_len: *mut u32) -> *mut u8;
 
-    /* Wall-clock in nanoseconds. WASM hosts wire to `Date.now() * 1_000_000`, native hosts to `Instant::now().as_nanos()`. Without this hook the VM falls back to `virtual_clock_ns` which advances deterministically for tests. */
+    /* Wall-clock in nanoseconds. WASM hosts wire to `Date.now() * 1_000_000`, native hosts to `SystemTime` since `UNIX_EPOCH`. Without this hook the VM falls back to `virtual_clock_ns` which advances deterministically for tests. */
     pub(super) fn host_now_ns() -> u64;
 }
 

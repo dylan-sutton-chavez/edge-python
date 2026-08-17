@@ -28,7 +28,7 @@ impl<'a> VM<'a> {
         self.push(v); Ok(())
     }
 
-    /* `int_from_bytes(b, byteorder)`, unsigned bytes -> int ("big"/"little"). Up to 8 bytes (u64), values above 47-bit Val auto-promote to LongInt. */
+    /* `int_from_bytes(b, byteorder)`, unsigned bytes -> int ("big"/"little"). Up to 8 bytes (u64), values above 48-bit Val auto-promote to LongInt. */
     pub fn call_int_from_bytes(&mut self) -> Result<(), VmErr> {
         let order = self.pop()?;
         let v = self.pop()?;
