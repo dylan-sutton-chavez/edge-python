@@ -1,0 +1,19 @@
+[package]
+name = "lang"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Embedding API over the Edge Python engine for building your own scripting language."
+
+[lib]
+name = "lang"
+crate-type = ["rlib"]
+doctest = false
+
+[[test]]
+name = "tests"
+path = "tests.rs"
+
+[dependencies]
+compiler = { package = "edge-python", path = ".." }

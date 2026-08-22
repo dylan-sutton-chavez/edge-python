@@ -6,5 +6,6 @@ export default {
   cli: 'CLI',
   workers: 'Workers',
   'abi': 'ABI',
+  'embedding': 'Embedding',
   'limits-and-errors': 'Limits and errors',
 }

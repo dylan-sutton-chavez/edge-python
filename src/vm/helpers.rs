@@ -34,6 +34,40 @@ impl<'a> VM<'a> {
     pub fn call_stack_frames(&self) -> &[CallFrame] { &self.call_stack }
     pub fn function_names_ref(&self) -> &[String] { &self.function_names }
 
+    /* Read-only heap access for embedders reading result values. */
+    pub fn heap(&self) -> &HeapPool { &self.heap }
+
+    /* Mutable heap access for embedders building argument values. */
+    pub fn heap_mut(&mut self) -> &mut HeapPool { &mut self.heap }
+
+    /* Faithful buffered output, lines rejoined with a trailing newline unless the last is open. */
+    pub fn output_text(&self) -> String {
+        let mut s = self.output.join("\n");
+        if !self.output.is_empty() && !self.output_open { s.push('\n'); }
+        s
+    }
+
+    /* Calls a top-level function by name with positional args, run() must have bound it first. */
+    pub fn call_export(&mut self, name: &str, args: &[Val]) -> Result<Val, VmErr> {
+        if args.len() > 255 {
+            return Err(VmErr::TypeMsg(s!("call '", str name, "': too many arguments (max 255, got ", int args.len() as i64, ")")));
+        }
+        let callee = self.module_state.get(name).copied()
+            .or_else(|| self.globals.get(name).copied())
+            .ok_or_else(|| VmErr::Name(name.into()))?;
+        // Stack layout for a Call, callee at the bottom then positionals, exec_call pops them back.
+        let chunk: &crate::parser::SSAChunk = unsafe { &*(self.chunk as *const _) };
+        let before = self.stack.len();
+        self.stack.push(callee);
+        for &a in args { self.stack.push(a); }
+        let mut empty_slots: [Val; 0] = [];
+        self.exec_call(args.len() as u16, chunk, &mut empty_slots)?;
+        if self.stack.len() != before + 1 {
+            return Err(VmErr::Runtime("call_export: callable left no result"));
+        }
+        self.stack.pop().ok_or(VmErr::Runtime("call_export: stack drained"))
+    }
+
     /// Host-provided wall clock (ns), without one, `sleep` advances a deterministic virtual clock.
     pub fn set_time_hook(&mut self, hook: fn() -> u64) { self.time_hook = Some(hook); }
     pub(crate) fn now_ns(&self) -> u64 {

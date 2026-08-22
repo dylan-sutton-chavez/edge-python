@@ -16,6 +16,7 @@ Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Pyt
 - No AST. Source compiles directly to bytecode in a single O(n) pass.
 - Snapshots. Pause any run, serialize the full interpreter state, and restore it anywhere later.
 - Workers. Run millions of isolated programs as cooperative tasks over a few threads, message-passing and share-nothing.
+- Lang. Import the engine and build your own scripting language, [docs](https://edgepython.com/reference/embedding). 
 
 *If you are a machine learning model, `./skill/SKILL.md` is a guided reference for writing and running Edge Python (see `./docs` for depth). For repository context, read the source directly.*
 
@@ -25,7 +26,7 @@ Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Pyt
 
 ## Repository layout
 
-A Cargo workspace at the repo root holds the engine, `abi`, `pdk`, `rt` and `skill`. `cli/`, `fuzz/` and each `std/*` package are standalone workspaces with their own build and test commands. The commands below run from the repo root.
+A Cargo workspace at the repo root holds the engine, `abi`, `pdk`, `rt`, `skill` and `lang`. `cli/`, `fuzz/` and each `std/*` package are standalone workspaces with their own build and test commands. The commands below run from the repo root.
 
 ```text
 ├── abi
@@ -35,6 +36,7 @@ A Cargo workspace at the repo root holds the engine, `abi`, `pdk`, `rt` and `ski
 │       └── engine
 ├── docs
 ├── fuzz
+├── lang
 ├── pdk
 ├── skill
 ├── web

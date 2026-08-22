@@ -132,7 +132,7 @@ runs:
     - name: Test
       if: inputs.mode == 'build'
       shell: bash
-      run: cargo test -p edge-python --no-default-features
+      run: cargo test -p edge-python -p lang --no-default-features
 
     - name: Upload wasm artifact
       if: inputs.mode == 'build'

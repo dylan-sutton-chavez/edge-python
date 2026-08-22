@@ -65,9 +65,9 @@ libloading = "0.9"
 proxy = { path = "proxy" }
 
 [workspace]
-members = ["abi", "pdk", "pdk/macros", "pdk/example", "rt", "skill", "proxy"]
+members = ["abi", "pdk", "pdk/macros", "pdk/example", "rt", "skill", "proxy", "lang"]
 # `pdk/example` is wasm-only: kept in `members` so it shares the lockfile and resolves path deps, but excluded from `default-members` so default workspace commands skip it. Build it explicitly with `-p slugify-mod --target wasm32-unknown-unknown`.
-default-members = [".", "abi", "pdk", "pdk/macros", "rt", "skill", "proxy"]
+default-members = [".", "abi", "pdk", "pdk/macros", "rt", "skill", "proxy", "lang"]
 resolver = "2"
 
 [workspace.package]
