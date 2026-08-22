@@ -397,7 +397,7 @@ impl<'a> VM<'a> {
     /* Pack a flat `[name, val, name, val, ...]` slice into a heap dict for the trailing kwargs slot. `None` when there are no kwargs so the FFI layer can serialize handle 0 on the wire. */
     pub(crate) fn pack_kw_dict(heap: &mut super::super::types::HeapPool, kw_flat: &[Val]) -> Result<Option<Val>, VmErr> {
         if kw_flat.is_empty() { return Ok(None); }
-        let dm = super::super::types::DictMap::from_pairs(kw_flat.chunks_exact(2).map(|p| (p[0], p[1])).collect(), heap);
+        let dm = super::super::types::DictMap::from_pairs(kw_flat.as_chunks::<2>().0.iter().map(|p| (p[0], p[1])).collect(), heap);
         Ok(Some(heap.alloc(super::super::types::HeapObj::Dict(Rc::new(RefCell::new(dm))))?))
     }
 
@@ -587,7 +587,7 @@ impl<'a> VM<'a> {
                 ParamKind::DoubleStar => {
                     // **kwargs gets only keys not bound to a named param.
                     let params = &self.functions[fi].0;
-                    let pairs: Vec<(Val, Val)> = kw_flat.chunks_exact(2)
+                    let pairs: Vec<(Val, Val)> = kw_flat.as_chunks::<2>().0.iter()
                         .filter(|p| match self.heap.try_get(p[0]) {
                             Some(HeapObj::Str(s)) => !params.iter().any(|pp| !pp.starts_with('*') && crate::parser::types::param_base_name(pp) == s.as_str()),
                             _ => true,
@@ -618,7 +618,7 @@ impl<'a> VM<'a> {
         if !kw_flat.is_empty() {
             let params = &self.functions[fi].0;
             let body_map = &self.body_maps[fi];
-            for pair in kw_flat.chunks_exact(2) {
+            for pair in kw_flat.as_chunks::<2>().0 {
                 // Malformed `**`/kwarg bytecode can leave a non-string in the name slot, so guard the heap access.
                 let key = match self.heap.try_get(pair[0]) {
                     Some(HeapObj::Str(s)) => s.clone(),

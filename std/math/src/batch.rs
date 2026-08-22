@@ -14,9 +14,11 @@ fn check_len(data: &[u8]) -> Result<()> {
 fn map(data: &[u8], f: impl Fn(f64) -> f64) -> Result<Vec<u8>> {
     check_len(data)?;
     let mut out = vec![0u8; data.len()];
-    for (src, dst) in data.chunks_exact(8).zip(out.chunks_exact_mut(8)) {
-        let x = f64::from_le_bytes(src.try_into().unwrap());
-        dst.copy_from_slice(&f(x).to_le_bytes());
+    let (src_chunks, _) = data.as_chunks::<8>();
+    let (dst_chunks, _) = out.as_chunks_mut::<8>();
+    for (src, dst) in src_chunks.iter().zip(dst_chunks) {
+        let x = f64::from_le_bytes(*src);
+        *dst = f(x).to_le_bytes();
     }
     Ok(out)
 }
@@ -45,8 +47,9 @@ fn fsum_all(data: Bytes) -> Result<f64> {
     check_len(&data)?;
     let mut sum = 0.0_f64;
     let mut c = 0.0_f64;
-    for src in data.chunks_exact(8) {
-        let x = f64::from_le_bytes(src.try_into().unwrap());
+    let (chunks, _) = data.as_chunks::<8>();
+    for src in chunks {
+        let x = f64::from_le_bytes(*src);
         let t = sum + x;
         if sum.abs() >= x.abs() { c += (sum - t) + x; } else { c += (x - t) + sum; }
         sum = t;
@@ -58,8 +61,9 @@ fn fsum_all(data: Bytes) -> Result<f64> {
 fn prod_all(data: Bytes) -> Result<f64> {
     check_len(&data)?;
     let mut acc = 1.0_f64;
-    for src in data.chunks_exact(8) {
-        acc *= f64::from_le_bytes(src.try_into().unwrap());
+    let (chunks, _) = data.as_chunks::<8>();
+    for src in chunks {
+        acc *= f64::from_le_bytes(*src);
     }
     Ok(acc)
 }
@@ -79,9 +83,11 @@ fn check_pair(a: &[u8], b: &[u8]) -> Result<()> {
 fn zip_map(a: &[u8], b: &[u8], f: impl Fn(f64, f64) -> f64) -> Result<Vec<u8>> {
     check_pair(a, b)?;
     let mut out = Vec::with_capacity(a.len());
-    for (x, y) in a.chunks_exact(8).zip(b.chunks_exact(8)) {
-        let xv = f64::from_le_bytes(x.try_into().unwrap());
-        let yv = f64::from_le_bytes(y.try_into().unwrap());
+    let (a_chunks, _) = a.as_chunks::<8>();
+    let (b_chunks, _) = b.as_chunks::<8>();
+    for (x, y) in a_chunks.iter().zip(b_chunks) {
+        let xv = f64::from_le_bytes(*x);
+        let yv = f64::from_le_bytes(*y);
         out.extend_from_slice(&f(xv, yv).to_le_bytes());
     }
     Ok(out)
@@ -110,8 +116,10 @@ fn dot_all(a: Bytes, b: Bytes) -> Result<f64> {
     check_pair(&a, &b)?;
     let mut sum = 0.0_f64;
     let mut c = 0.0_f64;
-    for (x, y) in a.chunks_exact(8).zip(b.chunks_exact(8)) {
-        let p = f64::from_le_bytes(x.try_into().unwrap()) * f64::from_le_bytes(y.try_into().unwrap());
+    let (a_chunks, _) = a.as_chunks::<8>();
+    let (b_chunks, _) = b.as_chunks::<8>();
+    for (x, y) in a_chunks.iter().zip(b_chunks) {
+        let p = f64::from_le_bytes(*x) * f64::from_le_bytes(*y);
         let t = sum + p;
         if sum.abs() >= p.abs() { c += (sum - t) + p; } else { c += (p - t) + sum; }
         sum = t;
@@ -131,12 +139,13 @@ fn matvec(m: Bytes, x: Bytes, cols: i64) -> Result<Bytes> {
     if !m.len().is_multiple_of(row_bytes) {
         return Err(Error::Value(String::from("matrix length must be a multiple of cols")));
     }
-    let xs: Vec<f64> = x.chunks_exact(8).map(|c| f64::from_le_bytes(c.try_into().unwrap())).collect();
+    let xs: Vec<f64> = x.as_chunks::<8>().0.iter().map(|c| f64::from_le_bytes(*c)).collect();
     let mut out = Vec::with_capacity(m.len() / (cols as usize));
     for row in m.chunks_exact(row_bytes) {
         let mut acc = 0.0_f64;
-        for (c, xv) in row.chunks_exact(8).zip(&xs) {
-            acc += f64::from_le_bytes(c.try_into().unwrap()) * xv;
+        let (row_chunks, _) = row.as_chunks::<8>();
+        for (c, xv) in row_chunks.iter().zip(&xs) {
+            acc += f64::from_le_bytes(*c) * xv;
         }
         out.extend_from_slice(&acc.to_le_bytes());
     }

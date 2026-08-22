@@ -10,7 +10,7 @@ impl<'a> VM<'a> {
         let (positional, kw_flat, _np, _nk) = self.parse_call_args(op)?;
         let mut sep = String::from(" ");
         let mut end = String::from("\n");
-        for pair in kw_flat.chunks_exact(2) {
+        for pair in kw_flat.as_chunks::<2>().0 {
             // Own the name so the heap borrow ends before the &mut self kwarg calls.
             let kname = String::from(self.kw_name(pair[0]).unwrap_or(""));
             match kname.as_str() {

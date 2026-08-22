@@ -97,7 +97,7 @@ pub fn sha1(input: &[u8]) -> [u8; 20] {
     let bit_len = (input.len() as u64).wrapping_mul(8);
     buf.extend_from_slice(&bit_len.to_be_bytes());
 
-    for block in buf.chunks_exact(64) {
+    for block in buf.as_chunks::<64>().0 {
         let mut w = [0u32; 80];
         for i in 0..16 {
             w[i] = u32::from_be_bytes([block[i * 4], block[i * 4 + 1], block[i * 4 + 2], block[i * 4 + 3]]);

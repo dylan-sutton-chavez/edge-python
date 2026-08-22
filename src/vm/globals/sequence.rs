@@ -252,7 +252,7 @@ impl<'a> VM<'a> {
         }
         // `start` is positional (`enumerate(xs, 5)`) or keyword (`enumerate(xs, start=5)`), default 0.
         let mut start = if positional.len() == 2 { positional[1] } else { Val::int(0) };
-        for pair in kw_flat.chunks_exact(2) {
+        for pair in kw_flat.as_chunks::<2>().0 {
             match self.kw_name(pair[0]) {
                 Some("start") => start = pair[1],
                 _ => return Err(cold_type("enumerate() got an unexpected keyword argument")),

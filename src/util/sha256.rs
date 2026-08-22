@@ -29,7 +29,7 @@ pub fn sha256(input: &[u8]) -> [u8; 32] {
     let bit_len = (input.len() as u64).wrapping_mul(8);
     buf.extend_from_slice(&bit_len.to_be_bytes());
 
-    for block in buf.chunks_exact(64) {
+    for block in buf.as_chunks::<64>().0 {
         let mut w = [0u32; 64];
         for i in 0..16 {
             w[i] = u32::from_be_bytes([

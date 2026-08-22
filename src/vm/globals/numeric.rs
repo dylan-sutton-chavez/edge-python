@@ -280,7 +280,7 @@ impl<'a> VM<'a> {
         // Optional `default=` (returned when a single iterable is empty) and `key=` (compare by key(x)).
         let mut default: Option<Val> = None;
         let mut key: Option<Val> = None;
-        for pair in kw_flat.chunks_exact(2) {
+        for pair in kw_flat.as_chunks::<2>().0 {
             match self.kw_name(pair[0]) {
                 Some("default") => default = Some(pair[1]),
                 Some("key") => { if !pair[1].is_none() { key = Some(pair[1]); } }
