@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Rewrites a native plugin's own syscall instructions to traps and aborts the call when one fires."
+description = "Two confinement layers for the native engine, a shallow guard that traps a plugin's own syscall instructions, and a seccomp allowlist that sandboxes untrusted eval threads."
 
 [lib]
 crate-type = ["rlib"]
@@ -16,6 +16,9 @@ path = "tests.rs"
 
 [dependencies]
 libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+seccompiler = "0.5"
 
 [dev-dependencies]
 libc = "0.2"

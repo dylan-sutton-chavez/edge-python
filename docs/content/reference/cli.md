@@ -1,21 +1,21 @@
 ---
 title: "Command line interface"
-description: "The edge CLI: run, serve, repl, test, init, package management, build, swarm, and uninstall."
+description: "The edge CLI: run, serve, repl, test, init, package management, build, actor, and uninstall."
 ---
 
 The `edge` CLI runs on macOS, Linux, and WSL. `run`, `repl`, and `test` execute in the built-in [native engine](/reference/modules#the-native-engine) by default, in-process with millisecond startup. The `--web` flag drives the browser runtime in headless Chromium instead, for scripts that need the browser (`dom`, `frame()`, sockets). Under `--web` the CLI is the loop around the browser: it launches Chromium, serves your code, and streams output back to the terminal.
 
 ```bash
-edge run app.py       # run a script, a .edge, or stdin
-edge build            # pack a standalone .edge (--bundle, --web)
-edge swarm swarm.yml  # run a swarm of cooperative nodes
-edge serve            # dev server with live reload
-edge repl             # interactive shell
-edge test             # run *_test.py files
-edge init my-app      # scaffold a project
-edge add network      # add a package to packages.json
-edge remove network   # remove a package from packages.json
-edge uninstall        # remove the binary, PATH entry, optionally the bundled browser
+edge run app.py        # run a script, a .edge, or stdin
+edge build             # pack a standalone .edge (--bundle, --web)
+edge actor actor.yml # run a pool of cooperative actors
+edge serve             # dev server with live reload
+edge repl              # interactive shell
+edge test              # run *_test.py files
+edge init my-app       # scaffold a project
+edge add network       # add a package to packages.json
+edge remove network    # remove a package from packages.json
+edge uninstall         # remove the binary, PATH entry, optionally the bundled browser
 ```
 
 ## Install
@@ -133,7 +133,7 @@ Packs the project and its imports into one artifact, in one of three modes for t
 | Command | Output | Runs on |
 |---------|--------|---------|
 | `edge build` | a standalone `.edge` binary | any host of the same OS, nothing installed |
-| `edge build --bundle` | a lightweight `.package` | a host that already has `edge`, or a swarm |
+| `edge build --bundle` | a lightweight `.package` | a host that already has `edge`, or a pool |
 | `edge build --web` | a self-contained `dist/` | any browser |
 
 The default `.edge` is this `edge` binary with the project appended, so `./app.edge` runs it directly and it honors the run flags `--save-state`, `--restore-state`, `--preempt`, and `--events`. The `.package` carries only the code and its custom imports, since the runtime is already present where it lands. `--web` vendors the browser runtime, `compiler.wasm`, and every package into `dist/`, rewriting `packages.json` to the vendored paths. Std packages resolve by name at run time, so an `.edge` or `.package` needs no network for them.
@@ -149,12 +149,12 @@ $ edge build
 
 Flags: `--out <path>` (mode-specific default), `--bundle`, `--web`.
 
-## `edge swarm`: worker pool
+## `edge actor`: actor pool
 
-Runs many edge-python programs as cooperative workers over a few threads, described by a `swarm.yml`. See [Workers](/reference/workers) for the manifest, groups, server, and untrusted code.
+Runs many edge-python programs as cooperative actors over a few threads, described by a `actor.yml`. See [Actors](/reference/actors) for the manifest, groups, server, and untrusted code.
 
 ```bash
-edge swarm swarm.yml
+edge actor actor.yml
 ```
 
 ## `edge uninstall`

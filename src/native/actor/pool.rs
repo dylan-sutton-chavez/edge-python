@@ -3,10 +3,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 
-use super::config::{Message, SwarmConfig};
+use super::config::{Message, ActorConfig};
 use super::scheduler::Scheduler;
 
-// Shared termination state, the swarm ends when every shard is idle with nothing in flight.
+// Shared termination state, the actor ends when every shard is idle with nothing in flight.
 pub struct Barrier {
     // Messages routed to a shard but not yet consumed.
     inflight: AtomicUsize,
@@ -63,7 +63,7 @@ impl Barrier {
         self.inflight.fetch_sub(1, Ordering::Release);
     }
 
-    /* Blocks an idle shard until work arrives or the swarm quiesces, true means shut down, the last shard to idle with an empty in-flight count flips shutdown and wakes everyone. */
+    /* Blocks an idle shard until work arrives or the actor quiesces, true means shut down, the last shard to idle with an empty in-flight count flips shutdown and wakes everyone. */
     pub fn park_until_work_or_done(&self) -> bool {
         let mut q = self.idle.lock().unwrap();
         q.idle += 1;
@@ -82,8 +82,8 @@ impl Barrier {
     }
 }
 
-// Runs the swarm across `threads` schedulers, groups sharded round robin over threads.
-pub fn run(config: SwarmConfig, threads: usize) -> i32 {
+// Runs the actor across `threads` schedulers, groups sharded round robin over threads.
+pub fn run(config: ActorConfig, threads: usize) -> i32 {
     let threads = threads.max(1);
     // One thread keeps the simple in-process path, no channels or router needed.
     if threads == 1 {
@@ -116,7 +116,7 @@ pub fn run(config: SwarmConfig, threads: usize) -> i32 {
     let mut handles = Vec::new();
     for (groups, rx) in shard_groups.into_iter().zip(receivers) {
         let router = router.clone();
-        let shard_config = SwarmConfig { groups, max_nodes: config.max_nodes };
+        let shard_config = ActorConfig { groups, max_actors: config.max_actors };
         handles.push(std::thread::spawn(move || match Scheduler::new(shard_config) {
             Ok(mut s) => s.run_sharded(router, rx),
             Err(e) => { eprintln!("error: {e}"); 1 }

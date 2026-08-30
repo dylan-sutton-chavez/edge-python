@@ -2,7 +2,7 @@
 runtime:
   listen: tcp://127.0.0.1:7787
   control: tcp://127.0.0.1:9787
-  durable: tmp/swarm/log
+  durable: tmp/actor/log
 
 groups:
   crasher:

@@ -8,14 +8,14 @@
 
 <br/>
 
-Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Python subset. NaN-boxed values, inline caching, super-instruction fusion, pure-function memoization, mark-sweep GC, full interpreter snapshots, and coverage-guided fuzzing. Runs in the browser as a WebAssembly module, or natively in the CLI as a single script, a standalone binary, or a pool of cooperative workers.
+Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Python subset. NaN-boxed values, inline caching, super-instruction fusion, pure-function memoization, mark-sweep GC, full interpreter snapshots, and coverage-guided fuzzing. Runs in the browser as a WebAssembly module, or natively in the CLI as a single script, a standalone binary, or a pool of cooperative actors.
 
 - Secure by default. No file, network, or environment access, unless explicitly enabled by a [system module](https://edgepython.com/reference/modules#system-libraries).
 - Around 200 KB footprint. The full compiler and runtime ship as a single WASM binary for the browser or a native engine in the CLI.
 - Compile-time imports. Every module resolves at parse time, no dynamic loading, no runtime surprises.
 - No AST. Source compiles directly to bytecode in a single O(n) pass.
 - Snapshots. Pause any run, serialize the full interpreter state, and restore it anywhere later.
-- Workers. Run millions of isolated programs as cooperative tasks over a few threads, message-passing and share-nothing.
+- Actors. Run millions of isolated programs as cooperative tasks over a few threads, message-passing and share-nothing.
 - Lang. Import the engine and build your own scripting language, [docs](https://edgepython.com/reference/embedding). 
 
 *If you are a machine learning model, `./skill/SKILL.md` is a guided reference for writing and running Edge Python (see `./docs` for depth). For repository context, read the source directly.*
@@ -45,7 +45,7 @@ A Cargo workspace at the repo root holds the engine, `abi`, `pdk`, `rt`, `skill`
 │   ├── native
 │   │   ├── builtins
 │   │   ├── io
-│   │   └── swarm
+│   │   └── actor
 │   ├── packages
 │   ├── parser
 │   ├── util
@@ -175,14 +175,14 @@ $ ./app.edge
 {"result":42}
 ```
 
-`edge swarm` runs many programs as cooperative workers over a few threads, message-passing and share-nothing ([workers](https://edgepython.com/reference/workers)):
+`edge actor` runs many programs as cooperative actors over a few threads, message-passing and share-nothing ([actors](https://edgepython.com/reference/actors)):
 
 ```yaml
-# swarm.yml
+# actor.yml
 groups:
-  worker:
+  actor:
     run: app
-    replicas: 100000   # ceiling, workers spawn on demand
+    replicas: 100000   # ceiling, actors spawn on demand
 ```
 
 ## What it is

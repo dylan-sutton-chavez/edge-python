@@ -87,3 +87,20 @@ fn loaded_library_text_can_be_reprotected() {
     let answer: unsafe extern "C" fn() -> i32 = unsafe { core::mem::transmute(sym) };
     assert_eq!(unsafe { answer() }, 42, "the reprotected function must still run");
 }
+
+// A thread locked to the eval allowlist can still compute, but a forbidden syscall fails.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_sandbox_blocks_a_forbidden_syscall() {
+    let joined = std::thread::spawn(|| {
+        proxy::lock_thread().expect("apply the seccomp allowlist");
+        // getpid stays on the allowlist so the interpreter keeps running.
+        assert!(unsafe { libc::getpid() } > 0, "an allowed syscall must still work");
+        // socket is off the allowlist, the kernel fails it with EPERM directly or through libc.
+        let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
+        assert_eq!(fd, -1, "the sandbox must block socket");
+        assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(libc::EPERM), "a blocked syscall reports EPERM");
+    })
+    .join();
+    assert!(joined.is_ok(), "the sandboxed thread panicked");
+}

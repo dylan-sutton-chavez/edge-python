@@ -27,14 +27,14 @@ pub fn standalone(manifest_path: &Path, out: PathBuf) -> Result<()> {
     Ok(())
 }
 
-/* Packs the project as a lightweight .package for a swarm that already has the runtime. */
+/* Packs the project as a lightweight .package for an actor that already has the runtime. */
 pub fn bundle(manifest_path: &Path, out: PathBuf) -> Result<()> {
     let bundle = collect_bundle(manifest_path)?;
     let payload = bundle.encode();
     fs::write(&out, &payload).with_context(|| format!("writing {}", out.display()))?;
     let run = out.display();
     crate::ui::packed(&out, bundle.files.len(), payload.len() as u64,
-        &format!("run  edge run {run}   or send it to a swarm eval group"));
+        &format!("run  edge run {run}   or send it to an actor eval group"));
     Ok(())
 }
 

@@ -242,7 +242,7 @@ Two modules are compiled into the binary. `time` carries the clocks and the cale
 
 ### Plugin confinement
 
-A native plugin shares the host process, so the engine confines it before the first call. It rewrites every syscall instruction in the plugin code to a trap and watches faults from that range, so a syscall the plugin reaches aborts the call as `standard packages can't make syscalls, move this to a system package`. This stops a plugin issuing syscalls from its own code, it does not yet stop one that calls a libc function by name, so put work that needs the kernel in a system package.
+A native plugin loaded through any `packages.json` shares the host process. Before the first call the engine rewrites every syscall instruction in the plugin code to a trap and watches faults from that range, so a syscall the plugin reaches aborts the call as `standard packages can't make syscalls, move this to a system package`. This is a shallow guard, not a sandbox. It catches a standard package that reaches for the kernel from its own code and points the author at a system package, but it cannot stop a plugin that calls a libc function by name or maps fresh code at runtime, because the plugin shares the address space and libc of the host. Treat a native plugin as trusted code. To run code you do not trust, hand it to an [untrusted actor](/reference/actors), which confines it with a seccomp allowlist.
 
 ### Run flags
 

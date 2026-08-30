@@ -5,7 +5,7 @@ description: "Sandbox limits, integer width, error types, and runtime guarantees
 
 ## Sandboxed execution
 
-Every execution is metered, there is no unmetered mode. Both shipped engines, the browser runtime and the CLI's native engine, run every script under these limits, and `edge swarm` groups can override them per field.
+Every execution is metered, there is no unmetered mode. Both shipped engines, the browser runtime and the CLI's native engine, run every script under these limits, and `edge actor` groups can override them per field.
 
 | Limit | Value | What hitting it raises |
 |---|---|---|

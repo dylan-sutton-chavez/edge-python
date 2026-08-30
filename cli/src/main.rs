@@ -20,7 +20,7 @@ Usage  edge <command> [options]
 Commands
   run <file|.edge>   Run a script, a .edge, stdin or -c <code>
   build              Pack a standalone .edge  (--bundle, --web)
-  swarm <file>       Run a swarm from swarm.yml
+  actor <file>      Run a actor from actor.yml
   serve              Dev server with live reload
   repl               Interactive shell
   test [path]        Run *_test.py files
@@ -109,7 +109,7 @@ enum Cmd {
         /// Package names to remove.
         pkgs: Vec<String>,
     },
-    /// Pack the app, a standalone binary by default, --bundle for a swarm, --web for the browser.
+    /// Pack the app, a standalone binary by default, --bundle for a actor, --web for the browser.
     Build {
         /// Output path, defaults to app.edge, app.package, or dist/ per mode.
         #[arg(long)]
@@ -117,15 +117,15 @@ enum Cmd {
         /// Vendor the browser runtime into dist/ instead of a native artifact.
         #[arg(long)]
         web: bool,
-        /// Emit a lightweight .package for a swarm that already ships the runtime.
+        /// Emit a lightweight .package for a actor that already ships the runtime.
         #[arg(long)]
         bundle: bool,
     },
     /// Remove the edge binary, its PATH entry, and optionally the bundled browser cache.
     Uninstall,
-    /// Run a swarm of nodes from a swarm.yml manifest.
-    Swarm {
-        /// Path to the swarm.yml manifest.
+    /// Run a pool of actors from a actor.yml manifest.
+    Actor {
+        /// Path to the actor.yml manifest.
         file: PathBuf,
     },
 }
@@ -194,7 +194,7 @@ fn main() -> Result<()> {
             }
         }
         Cmd::Uninstall => cmd::uninstall::run(),
-        Cmd::Swarm { file } => cmd::swarm::run(&file),
+        Cmd::Actor { file } => cmd::actor::run(&file),
         Cmd::Test { path } => cmd::test::run(&manifest_path, cli.packages.as_deref(), cli.web, path.as_deref()),
     };
 

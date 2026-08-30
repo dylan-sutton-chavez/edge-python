@@ -10,7 +10,7 @@ inputs:
     required: false
     default: ""
   suite:
-    description: "engine | network | workers (test mode)"
+    description: "engine | network | actors (test mode)"
     required: false
     default: ""
 
@@ -116,7 +116,7 @@ runs:
         path: std_local/std/
 
     # Drives a real Chromium, ubuntu-latest ships google-chrome-stable.
-    # engine runs the cli and native suites minus the network corpus, network runs only that corpus, workers runs the swarm suite, skill runs the SKILL.md cells.
+    # engine runs the cli and native suites minus the network corpus, network runs only that corpus, actors runs the actor suite, skill runs the SKILL.md cells.
     - name: Test
       if: inputs.mode == 'test'
       shell: bash
@@ -129,7 +129,7 @@ runs:
         case "${{ inputs.suite }}" in
           engine)  cargo test --test cli --test native -- --skip builtin_corpora_mirror_the_web_api ;;
           network) cargo test --test native builtin_corpora_mirror_the_web_api ;;
-          workers) cargo test --test swarm ;;
+          actors) cargo test --test actor ;;
           skill)   (cd ../skill && SKILL_EDGE="$GITHUB_WORKSPACE/cli/target/debug/edge" cargo test) ;;
           *)       cargo test ;;
         esac

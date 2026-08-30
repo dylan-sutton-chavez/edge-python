@@ -39,7 +39,7 @@ pkg/
 .env
 .env.*
 
-# Swarm durable message log and scratch
+# Actor durable message log and scratch
 tmp/
 
 # Fuzz

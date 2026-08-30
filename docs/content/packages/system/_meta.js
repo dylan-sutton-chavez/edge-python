@@ -2,6 +2,6 @@ export default {
     dom: 'dom (web)',
     network: 'network (web, native)',
     storage: 'storage (web)',
-    swarm: 'swarm (native)',
+    actor: 'actor (native)',
     time: 'time (web, native)'
 }

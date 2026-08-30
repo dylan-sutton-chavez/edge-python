@@ -32,7 +32,7 @@ pub(crate) fn with_bridge<R>(f: impl FnOnce(&mut BridgeState) -> R) -> R {
     unsafe { f(&mut *core::ptr::addr_of_mut!(BRIDGE)) }
 }
 
-// The swarm runs a scheduler per core, each thread owns its bridge so VMs never cross threads.
+// The actor runs a scheduler per core, each thread owns its bridge so VMs never cross threads.
 #[cfg(not(target_arch = "wasm32"))]
 thread_local! {
     static BRIDGE: RefCell<BridgeState> = const { RefCell::new(BridgeState::new()) };

@@ -5,7 +5,7 @@ description: Write, run, test and package Edge Python programs with the edge CLI
 
 # Edge Python
 
-This document is self-verifying and its examples follow the cells v1 grammar. A `python` or `yml` block followed immediately by a `text` block is a runnable cell, and the `skill` crate in this directory executes every cell through the edge CLI and compares it against the `text` block. The tag on the `text` block picks the engine, `Output` runs on both, `Native` on the native engine only, `Web` on the web runtime only, and `Error` expects a failing run whose stderr contains the given text. A `python` block tagged `skip` never runs on any engine and never pairs with a `text` block, and it always says why with one comment at the exact construct that is nondeterministic. A `yml` block tagged `swarm` runs a trusted worker pool through `edge swarm`, while one tagged `untrusted` runs eval groups. Any `python` block without a `text` pair is illustrative only. Verify the whole file from the repository root with `cargo run -p skill -- skill/SKILL.md --engine both`.
+This document is self-verifying and its examples follow the cells v1 grammar. A `python` or `yml` block followed immediately by a `text` block is a runnable cell, and the `skill` crate in this directory executes every cell through the edge CLI and compares it against the `text` block. The tag on the `text` block picks the engine, `Output` runs on both, `Native` on the native engine only, `Web` on the web runtime only, and `Error` expects a failing run whose stderr contains the given text. A `python` block tagged `skip` never runs on any engine and never pairs with a `text` block, and it always says why with one comment at the exact construct that is nondeterministic. A `yml` block tagged `actor` runs a trusted actor pool through `edge actor`, while one tagged `untrusted` runs eval groups. Any `python` block without a `text` pair is illustrative only. Verify the whole file from the repository root with `cargo run -p skill -- skill/SKILL.md --engine both`.
 
 Edge Python is a sandboxed Python subset compiled in a single pass to bytecode and executed by a stack VM. It runs in the browser as WebAssembly and in the `edge` CLI as an in-process native engine. There is no bundled stdlib, every module is an external package resolved at compile time. Programs are deterministic, there is no file, network or environment access unless a system module grants it.
 
@@ -85,14 +85,14 @@ Three mutually exclusive modes.
 | Mode | Default output | Artifact |
 |---|---|---|
 | `edge build` | `app.edge` | Standalone binary, runs anywhere with nothing installed |
-| `edge build --bundle` | `app.package` | Raw bundle for hosts and swarms that already have the runtime |
+| `edge build --bundle` | `app.package` | Raw bundle for hosts and pools that already have the runtime |
 | `edge build --web` | `dist/` | Browser distribution with vendored runtime and packages |
 
 `--out <path>` overrides the default. The bundle contains every `.py` under the project plus `packages.json`, and the entry is `main.py`, `app.py` or `index.py` when present. An `.edge` binary accepts only the snapshot flags `--save-state`, `--restore-state`, `--preempt` and `--events`.
 
-### edge swarm
+### edge actor
 
-`edge swarm <file>` runs a worker pool from a `swarm.yml` manifest. See the workers section for the schema and the two execution models.
+`edge actor <file>` runs a actor pool from a `actor.yml` manifest. See the actors section for the schema and the two execution models.
 
 ### edge uninstall
 
@@ -549,7 +549,7 @@ The primitives are builtins, no import needed.
 | `with_timeout(s, coro)` | Runs the coroutine and raises `TimeoutError` when it overruns |
 | `cancel(coro)` | Delivers `CancelledError` at the next tick, uncatchable, runs `finally` |
 | `frame()` | Suspends until the next browser render frame |
-| `receive()` | Parks until a host event or swarm message arrives |
+| `receive()` | Parks until a host event or actor message arrives |
 
 ```python
 async def slow():
@@ -697,7 +697,7 @@ PASS - division by zero raises
 
 ## System modules
 
-Four system libraries plus the swarm module. Availability differs by engine, and importing a web-only module natively is a compile-time error telling you to rerun with `--web`.
+Four system libraries plus the actor module. Availability differs by engine, and importing a web-only module natively is a compile-time error telling you to rerun with `--web`.
 
 | Module | Native CLI | Web runtime |
 |---|---|---|
@@ -705,7 +705,7 @@ Four system libraries plus the swarm module. Availability differs by engine, and
 | `network` | Built into the binary, no CORS | System JS module, CORS applies |
 | `storage` | Not available | System JS module |
 | `dom` | Not available | System JS module |
-| `swarm` | Built into the binary, see workers | Not available |
+| `actor` | Built into the binary, see actors | Not available |
 
 ### time
 
@@ -763,25 +763,25 @@ print(dom.tag_name(dom.body()))
 body
 ```
 
-## Workers
+## Actors
 
-`edge swarm` runs many isolated programs as cooperative workers over a few threads, share-nothing with message passing. There are two execution models and the manifest chooses per group.
+`edge actor` runs many isolated programs as cooperative actors over a few threads, share-nothing with message passing. There are two execution models and the manifest chooses per group.
 
 ```yaml
 runtime:
-  listen: tcp://127.0.0.1:7777   # optional, its presence makes the swarm a live server
-  durable: tmp/swarm/log         # WAL path, replays unprocessed messages on restart
+  listen: tcp://127.0.0.1:7777   # optional, its presence makes the actor a live server
+  durable: tmp/actor/log         # WAL path, replays unprocessed messages on restart
   schedulers: auto               # or a fixed number
-  max_nodes: 1000000
+  max_actors: 1000000
 
 groups:
-  worker:
+  actor:
     run: app                     # script path or project directory
-    replicas: 100                # ceiling, workers spawn on demand
+    replicas: 100                # ceiling, actors spawn on demand
     retry: 2                     # re-deliveries before a message is dropped dead
     seed: ["first message"]      # delivered before the pool starts
     out: stdout                  # stdout, null or file://path
-    limits:                      # per-worker sandbox overrides
+    limits:                      # per-actor sandbox overrides
       heap: 65536
       preempt: 500
 ```
@@ -790,11 +790,11 @@ Each group picks exactly one of `run`, `code` or `eval: true`. Without `listen:`
 
 ### The trusted model
 
-Workers keep state between messages, pick work up with the `receive()` builtin and forward with `send` from the `swarm` module, strings only, never blocking.
+Actors keep state between messages, pick work up with the `receive()` builtin and forward with `send` from the `actor` module, strings only, never blocking.
 
-```yml swarm
+```yml actor
 groups:
-  worker:
+  actor:
     code: |
       msg = receive()
       print(f"got {msg}")
@@ -808,7 +808,7 @@ got hello
 
 ### The untrusted model
 
-`eval: true` groups compile each message as its own program in a fresh interpreter. No state survives between messages and the `swarm` module is unavailable, so untrusted code cannot reach the pool's plumbing.
+`eval: true` groups compile each message as its own program in a fresh interpreter, on a thread locked to a seccomp allowlist. No state survives between messages, the `actor` module is unavailable, and neither the code nor a native plugin it loads can open a socket, run a process, or make any syscall outside pure computation. The allowlist needs Linux, so an `eval` group is refused elsewhere. A `code` or `run` group is trusted instead, it runs in the host process with no syscall isolation, so reach for `eval` when the code is not yours.
 
 ```yml untrusted
 groups:
@@ -821,7 +821,7 @@ groups:
 42
 ```
 
-With `listen:` the swarm accepts one `<group> <body>` line per TCP message and exposes an HTTP control endpoint, `GET /stats`, `POST /pub/<group>` and `POST /eval/<group>` for eval groups. Untrusted bundles arrive as base64 `.package` payloads behind an `EDGEPKG:` marker and run materialized in an isolated temp dir.
+With `listen:` the actor accepts one `<group> <body>` line per TCP message and exposes an HTTP control endpoint, `GET /stats`, `POST /pub/<group>` and `POST /eval/<group>` for eval groups. Untrusted bundles arrive as base64 `.package` payloads behind an `EDGEPKG:` marker and run materialized in an isolated temp dir.
 
 ## Semantics that surprise Python programmers
 

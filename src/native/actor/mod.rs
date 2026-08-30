@@ -1,22 +1,23 @@
 mod config;
-mod node;
+#[allow(clippy::module_inception)]
+mod actor;
 mod pool;
 mod scheduler;
 mod server;
 
-pub use config::{Group, Message, Out, SwarmConfig};
+pub use config::{Group, Message, Out, ActorConfig};
 pub use server::{Stats, Wal};
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-// Runs a swarm to quiescence across `threads` schedulers, one per core when auto-sized.
-pub fn run(config: SwarmConfig, threads: usize) -> i32 {
+// Runs a actor to quiescence across `threads` schedulers, one per core when auto-sized.
+pub fn run(config: ActorConfig, threads: usize) -> i32 {
     pool::run(config, threads)
 }
 
-// Runs the swarm as a live server, `on_ingress` receives the queue sender and wal for the caller.
-pub fn serve(config: SwarmConfig, addr: &str, wal_path: &Path, stats: Option<Arc<Stats>>, on_ingress: impl FnOnce(std::sync::mpsc::Sender<Message>, Arc<Mutex<Wal>>)) -> i32 {
+// Runs the actor as a live server, `on_ingress` receives the queue sender and wal for the caller.
+pub fn serve(config: ActorConfig, addr: &str, wal_path: &Path, stats: Option<Arc<Stats>>, on_ingress: impl FnOnce(std::sync::mpsc::Sender<Message>, Arc<Mutex<Wal>>)) -> i32 {
     let (wal, recovered) = match server::Wal::open(wal_path) {
         Ok(pair) => pair,
         Err(e) => { eprintln!("error: cannot open wal '{}': {e}", wal_path.display()); return 1; }

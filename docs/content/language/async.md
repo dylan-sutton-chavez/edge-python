@@ -297,4 +297,4 @@ run(main())
 
 The scheduler reads wall time from a host hook. WASM hosts wire it to `Date.now()` via the `host_now_ns` import. Native hosts use `std::time::Instant`. Without a hook, `sleep` advances a virtual clock so deterministic tests interleave correctly.
 
-To run many of these programs side by side as message-passing tasks, see [Workers](/reference/workers).
+To run many of these programs side by side as message-passing tasks, see [Actors](/reference/actors).

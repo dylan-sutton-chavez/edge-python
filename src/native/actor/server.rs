@@ -7,10 +7,10 @@ use std::sync::{Arc, Mutex};
 
 use super::config::Message;
 
-// Live swarm counters, the scheduler writes them and the control endpoint reads them.
+// Live actor counters, the scheduler writes them and the control endpoint reads them.
 #[derive(Default)]
 pub struct Stats {
-    nodes: AtomicUsize,
+    actors: AtomicUsize,
     active: AtomicUsize,
     idle: AtomicUsize,
     pending: AtomicUsize,
@@ -19,8 +19,8 @@ pub struct Stats {
 }
 
 impl Stats {
-    pub fn set(&self, nodes: usize, active: usize, idle: usize, pending: usize, crashes: usize) {
-        self.nodes.store(nodes, Ordering::Relaxed);
+    pub fn set(&self, actors: usize, active: usize, idle: usize, pending: usize, crashes: usize) {
+        self.actors.store(actors, Ordering::Relaxed);
         self.active.store(active, Ordering::Relaxed);
         self.idle.store(idle, Ordering::Relaxed);
         self.pending.store(pending, Ordering::Relaxed);
@@ -35,8 +35,8 @@ impl Stats {
     // Renders the counters as a flat JSON object for the /stats route.
     pub fn to_json(&self) -> String {
         format!(
-            "{{\"nodes\":{},\"active\":{},\"idle\":{},\"pending\":{},\"crashes\":{},\"dead\":{}}}",
-            self.nodes.load(Ordering::Relaxed),
+            "{{\"actors\":{},\"active\":{},\"idle\":{},\"pending\":{},\"crashes\":{},\"dead\":{}}}",
+            self.actors.load(Ordering::Relaxed),
             self.active.load(Ordering::Relaxed),
             self.idle.load(Ordering::Relaxed),
             self.pending.load(Ordering::Relaxed),

@@ -4,7 +4,7 @@ export default {
   methods: 'Methods',
   modules: 'Modules',
   cli: 'CLI',
-  workers: 'Workers',
+  actors: 'Actors',
   'abi': 'ABI',
   'embedding': 'Embedding',
   'limits-and-errors': 'Limits and errors',

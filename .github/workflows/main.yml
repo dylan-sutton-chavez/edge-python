@@ -167,7 +167,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [engine, network, workers, skill]
+        suite: [engine, network, actors, skill]
     steps:
       - uses: actions/checkout@v6
       - name: Download web/dist (JS build output)

@@ -13,7 +13,7 @@ pub struct Entry {
     pub bytes: Vec<u8>,
 }
 
-// A resolved project serialized as a flat length-prefixed archive, the shape edge build and the swarm ingress share, entry is the relative path of main.py. No zip so no zip-slip or zip-bomb, every path is validated relative on read.
+// A resolved project serialized as a flat length-prefixed archive, the shape edge build and the actor ingress share, entry is the relative path of main.py. No zip so no zip-slip or zip-bomb, every path is validated relative on read.
 pub struct Bundle {
     pub entry: String,
     pub files: Vec<Entry>,

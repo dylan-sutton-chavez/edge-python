@@ -39,10 +39,10 @@ struct Runtime {
     control: Option<String>,
 }
 
-// Runs every cli/tests/swarm/*.yml case, asserting the swarm's stdout matches its expect block.
+// Runs every cli/tests/actor/*.yml case, asserting the actor's stdout matches its expect block.
 #[test]
-fn swarm_cases_match_their_expected_output() {
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/swarm");
+fn actor_cases_match_their_expected_output() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/actor");
     let mut failures = Vec::new();
     let mut ran = 0;
     for entry in std::fs::read_dir(dir).unwrap() {
@@ -76,25 +76,25 @@ fn swarm_cases_match_their_expected_output() {
             }
         }
     }
-    assert!(ran > 0, "no swarm cases found");
-    assert!(failures.is_empty(), "{} swarm case(s) failed:\n{}", failures.len(), failures.join("\n"));
+    assert!(ran > 0, "no actor cases found");
+    assert!(failures.is_empty(), "{} actor case(s) failed:\n{}", failures.len(), failures.join("\n"));
 }
 
-// A batch swarm runs to completion, its stdout lines are the result.
+// A batch actor runs to completion, its stdout lines are the result.
 fn run_batch(path: &std::path::Path) -> Vec<String> {
-    let out = Command::new(BIN).args(["swarm", path.to_str().unwrap()]).output().unwrap();
+    let out = Command::new(BIN).args(["actor", path.to_str().unwrap()]).output().unwrap();
     String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect()
 }
 
-// A server swarm stays alive, publish feeds its ingress, then output, /stats and posts are read. The manifest is copied into a tempdir so its default wal lands there, never in the repo.
+// A server actor stays alive, publish feeds its ingress, then output, /stats and posts are read. The manifest is copied into a tempdir so its default wal lands there, never in the repo.
 fn run_server(path: &std::path::Path, listen: &str, publish: &[String], control: Option<&str>, posts: &[Post]) -> (Vec<String>, String, Vec<String>) {
     let addr = listen.strip_prefix("tcp://").unwrap_or(listen);
-    let scratch = std::env::temp_dir().join(format!("edge-swarm-{}", std::process::id()));
+    let scratch = std::env::temp_dir().join(format!("edge-actor-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&scratch);
-    let manifest = scratch.join("swarm.yml");
+    let manifest = scratch.join("actor.yml");
     std::fs::copy(path, &manifest).unwrap();
 
-    let mut child = Command::new(BIN).args(["swarm", manifest.to_str().unwrap()]).stdout(Stdio::piped()).spawn().unwrap();
+    let mut child = Command::new(BIN).args(["actor", manifest.to_str().unwrap()]).stdout(Stdio::piped()).spawn().unwrap();
     std::thread::sleep(Duration::from_millis(400));
     if let Ok(mut sock) = TcpStream::connect(addr) {
         for line in publish {
@@ -109,7 +109,7 @@ fn run_server(path: &std::path::Path, listen: &str, publish: &[String], control:
         Some(c) => posts.iter().map(|p| post_eval(c, &p.path, &p.body)).collect(),
         None => Vec::new(),
     };
-    // A /send is accepted once queued, give the workers a beat to print before the kill.
+    // A /send is accepted once queued, give the actors a beat to print before the kill.
     std::thread::sleep(Duration::from_millis(400));
     let _ = child.kill();
     let out = child.wait_with_output().unwrap();
@@ -142,13 +142,13 @@ fn eval_group_runs_a_bundled_project_over_the_wire() {
     };
     let line = format!("runners EDGEPKG:{}", compiler::util::ws::base64_encode(&bundle.encode()));
 
-    let scratch = std::env::temp_dir().join(format!("edge-swarm-bundle-{}", std::process::id()));
+    let scratch = std::env::temp_dir().join(format!("edge-actor-bundle-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&scratch);
-    let manifest = scratch.join("swarm.yml");
+    let manifest = scratch.join("actor.yml");
     std::fs::write(&manifest, "runtime:\n  listen: tcp://127.0.0.1:7811\ngroups:\n  runners:\n    eval: true\n").unwrap();
 
-    let mut child = Command::new(BIN).args(["swarm", manifest.to_str().unwrap()]).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-    // Retry the connect until the ingress binds, the swarm boots slower under a loaded test run.
+    let mut child = Command::new(BIN).args(["actor", manifest.to_str().unwrap()]).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    // Retry the connect until the ingress binds, the actor boots slower under a loaded test run.
     let mut sock = None;
     for _ in 0..40 {
         if let Ok(s) = TcpStream::connect("127.0.0.1:7811") { sock = Some(s); break; }

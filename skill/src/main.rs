@@ -6,7 +6,7 @@ use cell::{Cell, Engine, Kind, Verdict};
 use std::time::Duration;
 
 const NATIVE_TIMEOUT: Duration = Duration::from_secs(30);
-const SWARM_TIMEOUT: Duration = Duration::from_secs(30);
+const ACTOR_TIMEOUT: Duration = Duration::from_secs(30);
 const WEB_TIMEOUT: Duration = Duration::from_secs(150);
 
 struct Opts {
@@ -64,7 +64,7 @@ fn run_cell(opts: &Opts, c: &Cell) -> Vec<Result<(), String>> {
     if native {
         let outcome = match c.kind {
             Kind::Python => runner::run_native(&opts.edge, &c.body, NATIVE_TIMEOUT),
-            Kind::Swarm | Kind::Untrusted => runner::run_swarm(&opts.edge, &c.body, SWARM_TIMEOUT),
+            Kind::Actor | Kind::Untrusted => runner::run_actor(&opts.edge, &c.body, ACTOR_TIMEOUT),
             Kind::PythonSkip => unreachable!("skip cells never become cells"),
         };
         results.push(outcome.and_then(|o| {

@@ -2,7 +2,7 @@
 runtime:
   listen: tcp://127.0.0.1:7789
   control: tcp://127.0.0.1:9789
-  durable: tmp/swarm/log
+  durable: tmp/actor/log
 
 groups:
   runners:
@@ -12,17 +12,20 @@ groups:
 publish:
   - "runners print('two plus three is', 2 + 3)"
   - "runners print('hello from a snippet')"
+  # Building a list and a string exercises the allocator under the seccomp allowlist.
+  - "runners print(''.join(str(i) for i in range(5)))"
 
 expect:
   - "two plus three is 5"
   - "hello from a snippet"
+  - "01234"
 
 # A POST to /eval/<group> runs the body on the eval group and replies with what it printed.
 post:
   - path: "/eval/runners"
     body: "print('answered over http')"
     expect: "{\"ok\":true,\"stdout\":\"answered over http\\n\"}"
-  # Untrusted code cannot orchestrate, importing swarm fails the run with a clear message.
+  # Untrusted code cannot orchestrate, importing actor fails the run with a clear message.
   - path: "/eval/runners"
-    body: "from swarm import send"
-    expect: "\"ok\":false,\"error\":\"error: module 'swarm' is not available to untrusted eval runs"
+    body: "from actor import send"
+    expect: "\"ok\":false,\"error\":\"error: module 'actor' is not available to untrusted eval runs"

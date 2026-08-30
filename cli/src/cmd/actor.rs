@@ -1,10 +1,10 @@
 use anyhow::{anyhow, Context, Result};
-use compiler::native::swarm::{Group, Message, Out, SwarmConfig};
+use compiler::native::actor::{Group, Message, Out, ActorConfig};
 use compiler::vm::Limits;
 use serde::Deserialize;
 use std::path::Path;
 
-// The swarm.yml shape, groups keyed by name with per-group overrides.
+// The actor.yml shape, groups keyed by name with per-group overrides.
 #[derive(Deserialize)]
 struct Manifest {
     #[serde(default)]
@@ -16,11 +16,11 @@ struct Manifest {
 #[derive(Deserialize, Default)]
 struct Runtime {
     #[serde(default)]
-    max_nodes: Option<usize>,
+    max_actors: Option<usize>,
     // "auto" for one scheduler per core, or a fixed thread count.
     #[serde(default)]
     schedulers: Option<serde_yaml_ng::Value>,
-    // Host:port for the live ingress, its presence turns the swarm into a server.
+    // Host:port for the live ingress, its presence turns the actor into a server.
     #[serde(default)]
     listen: Option<String>,
     // Path to the durable log that survives restarts, defaults beside the manifest.
@@ -43,14 +43,14 @@ struct GroupSpec {
     // Untrusted mode, each message is compiled as its own program with no send access.
     #[serde(default)]
     eval: bool,
-    // Times a crashing message is retried on another node before it is dropped.
+    // Times a crashing message is retried on another actor before it is dropped.
     #[serde(default)]
     retry: usize,
     #[serde(default)]
     limits: LimitSpec,
     #[serde(default)]
     out: Option<String>,
-    // Seed messages, the entry point that kicks a swarm run.
+    // Seed messages, the entry point that kicks a actor run.
     #[serde(default)]
     seed: Vec<String>,
 }
@@ -63,7 +63,7 @@ struct LimitSpec {
     preempt: Option<usize>,
 }
 
-// Loads swarm.yml, boots the described swarm, returns its exit code.
+// Loads actor.yml, boots the described actor, returns its exit code.
 pub fn run(path: &Path) -> Result<()> {
     let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let manifest: Manifest = serde_yaml_ng::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
@@ -78,6 +78,10 @@ pub fn run(path: &Path) -> Result<()> {
             (None, None, true) => (String::new(), dir.clone()),
             (None, None, false) => return Err(anyhow!("group '{name}' needs run, code or eval")),
         };
+        // The untrusted sandbox is enforced by a seccomp allowlist, available only on Linux.
+        if spec.eval && !cfg!(target_os = "linux") {
+            return Err(anyhow!("group '{name}' uses eval, untrusted mode needs Linux for the seccomp sandbox"));
+        }
         let sandbox = Limits::sandbox();
         let limits = Limits {
             heap: spec.limits.heap.unwrap_or(sandbox.heap),
@@ -99,34 +103,34 @@ pub fn run(path: &Path) -> Result<()> {
         });
     }
     if groups.is_empty() {
-        return Err(anyhow!("swarm has no groups"));
+        return Err(anyhow!("actor has no groups"));
     }
 
-    let config = SwarmConfig { groups, max_nodes: manifest.runtime.max_nodes.unwrap_or(usize::MAX) };
-    // A listen address turns the swarm into a live server, else it processes to quiescence.
+    let config = ActorConfig { groups, max_actors: manifest.runtime.max_actors.unwrap_or(usize::MAX) };
+    // A listen address turns the actor into a live server, else it processes to quiescence.
     let code = match &manifest.runtime.listen {
         Some(listen) => {
             let addr = listen.strip_prefix("tcp://").unwrap_or(listen);
-            // A relative durable path sits beside the manifest, the default is swarm.wal there.
+            // A relative durable path sits beside the manifest, the default is actor.wal there.
             let wal = match &manifest.runtime.durable {
                 Some(d) => Path::new(&dir).join(d),
-                None => Path::new(&dir).join("swarm.wal"),
+                None => Path::new(&dir).join("actor.wal"),
             };
             // A control address serves healthz, stats and eval replies on its own thread.
             let control = manifest.runtime.control.as_deref().map(|c| {
-                (c.strip_prefix("tcp://").unwrap_or(c).to_string(), std::sync::Arc::new(compiler::native::swarm::Stats::default()))
+                (c.strip_prefix("tcp://").unwrap_or(c).to_string(), std::sync::Arc::new(compiler::native::actor::Stats::default()))
             });
             let stats = control.as_ref().map(|(_, s)| s.clone());
             // The groups the control endpoint answers, captured before config moves into serve.
             let eval: Vec<String> = config.groups.iter().filter(|g| g.eval).map(|g| g.name.clone()).collect();
             let names: Vec<String> = config.groups.iter().map(|g| g.name.clone()).collect();
-            compiler::native::swarm::serve(config, addr, &wal, stats, move |tx, wal| {
+            compiler::native::actor::serve(config, addr, &wal, stats, move |tx, wal| {
                 if let Some((addr, stats)) = control {
                     spawn_control(&addr, tx, wal, names, eval, stats);
                 }
             })
         }
-        None => compiler::native::swarm::run(config, resolve_schedulers(manifest.runtime.schedulers.as_ref())),
+        None => compiler::native::actor::run(config, resolve_schedulers(manifest.runtime.schedulers.as_ref())),
     };
     if code != 0 {
         std::process::exit(code);
@@ -163,7 +167,7 @@ const MAX_BODY: u64 = 16 << 20;
 type HttpResp = tiny_http::Response<std::io::Cursor<Vec<u8>>>;
 
 // Serves counters at /stats, publishing at /pub/<group> and eval replies at /eval/<group>.
-fn spawn_control(addr: &str, tx: std::sync::mpsc::Sender<Message>, wal: std::sync::Arc<std::sync::Mutex<compiler::native::swarm::Wal>>, groups: Vec<String>, eval: Vec<String>, stats: std::sync::Arc<compiler::native::swarm::Stats>) {
+fn spawn_control(addr: &str, tx: std::sync::mpsc::Sender<Message>, wal: std::sync::Arc<std::sync::Mutex<compiler::native::actor::Wal>>, groups: Vec<String>, eval: Vec<String>, stats: std::sync::Arc<compiler::native::actor::Stats>) {
     let Ok(server) = tiny_http::Server::http(addr) else {
         eprintln!("warning: cannot bind control endpoint '{addr}'");
         return;
@@ -187,14 +191,14 @@ fn spawn_control(addr: &str, tx: std::sync::mpsc::Sender<Message>, wal: std::syn
 }
 
 // Queues a message for a group, appended to the wal first like the tcp ingress does.
-fn publish(group: &str, body: String, tx: &std::sync::mpsc::Sender<Message>, wal: &std::sync::Arc<std::sync::Mutex<compiler::native::swarm::Wal>>, groups: &[String]) -> HttpResp {
+fn publish(group: &str, body: String, tx: &std::sync::mpsc::Sender<Message>, wal: &std::sync::Arc<std::sync::Mutex<compiler::native::actor::Wal>>, groups: &[String]) -> HttpResp {
     if !groups.iter().any(|g| g == group) {
         return not_found();
     }
     let msg = Message { group: group.to_string(), body, attempts: 0, reply: None };
     wal.lock().unwrap().append(&msg);
     if tx.send(msg).is_err() {
-        return tiny_http::Response::from_string("swarm is down").with_status_code(503);
+        return tiny_http::Response::from_string("actor is down").with_status_code(503);
     }
     json("{\"ok\":true}".to_string()).with_status_code(202)
 }
@@ -211,7 +215,7 @@ fn run_eval(group: &str, req: &mut tiny_http::Request, tx: &std::sync::mpsc::Sen
     let (reply, result) = std::sync::mpsc::channel();
     let msg = Message { group: group.to_string(), body, attempts: 0, reply: Some(reply) };
     if tx.send(msg).is_err() {
-        return tiny_http::Response::from_string("swarm is down").with_status_code(503);
+        return tiny_http::Response::from_string("actor is down").with_status_code(503);
     }
     match result.recv_timeout(std::time::Duration::from_secs(30)) {
         Ok(Ok(stdout)) => json(format!("{{\"ok\":true,\"stdout\":{}}}", json_str(&stdout))),

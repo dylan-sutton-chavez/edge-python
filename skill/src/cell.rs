@@ -17,7 +17,7 @@ pub enum Verdict {
 pub enum Kind {
     Python,
     PythonSkip,
-    Swarm,
+    Actor,
     Untrusted,
 }
 
@@ -53,7 +53,7 @@ pub fn collect(blocks: &[Block]) -> Result<Vec<Cell>, String> {
         let kind = match (b.lang.as_str(), b.meta.as_str()) {
             ("python", "") => Kind::Python,
             ("python", "skip") => Kind::PythonSkip,
-            ("yml", "swarm") => Kind::Swarm,
+            ("yml", "actor") => Kind::Actor,
             ("yml", "untrusted") => Kind::Untrusted,
             ("python" | "yml", meta) => {
                 return Err(format!("line {}: unknown {} meta '{meta}'", b.line, b.lang));
@@ -95,15 +95,15 @@ pub fn collect(blocks: &[Block]) -> Result<Vec<Cell>, String> {
         };
         let (engine, verdict) = parse_text_meta(&text.meta, text.line)?;
 
-        if matches!(kind, Kind::Swarm | Kind::Untrusted) && engine == Engine::Web {
+        if matches!(kind, Kind::Actor | Kind::Untrusted) && engine == Engine::Web {
             return Err(format!(
-                "line {}: swarm cells are native only and cannot pair with Web",
+                "line {}: actor cells are native only and cannot pair with Web",
                 text.line
             ));
         }
-        if kind == Kind::Swarm && b.body.contains("eval: true") {
+        if kind == Kind::Actor && b.body.contains("eval: true") {
             return Err(format!(
-                "line {}: yml swarm group uses eval, label it yml untrusted",
+                "line {}: yml actor group uses eval, label it yml untrusted",
                 b.line
             ));
         }

@@ -5,36 +5,36 @@ use slab::Slab;
 use crate::parser::SSAChunk;
 use crate::vm::Limits;
 
-use super::config::{Group, Message, Out, SwarmConfig};
-use super::node::{Node, Step};
+use super::config::{Group, Message, Out, ActorConfig};
+use super::actor::{Actor, Step};
 use super::pool::Router;
 
-// A parsed group ready to boot nodes from, chunk shared across every replica.
+// A parsed group ready to boot actors from, chunk shared across every replica.
 struct GroupState {
     source: String,
     // Fixed groups share one parsed chunk, eval groups compile each message so it is None.
     chunk: Option<&'static SSAChunk>,
     dir: String,
     retry: usize,
-    // Node ceiling, nodes spawn lazily up to this instead of all at boot.
+    // Actor ceiling, actors spawn lazily up to this instead of all at boot.
     max: usize,
     limits: Limits,
     preempt: usize,
     out: Out,
     // Stable keys survive removal, so the work queues below never dangle.
-    nodes: Slab<Node>,
-    // Keys with work to run, drained each tick instead of scanning every node.
+    actors: Slab<Actor>,
+    // Keys with work to run, drained each tick instead of scanning every actor.
     ready: VecDeque<usize>,
-    // Keys parked in receive(), popped first when a message needs a node.
+    // Keys parked in receive(), popped first when a message needs a actor.
     idle_free: Vec<usize>,
 }
 
-// The single-threaded cooperative loop, one instance owns every node in the swarm.
+// The single-threaded cooperative loop, one instance owns every actor in the actor.
 pub struct Scheduler {
     groups: Vec<GroupState>,
     by_name: HashMap<String, usize>,
     pending: Vec<Message>,
-    // Tracebacks of nodes that raised uncaught and were retired.
+    // Tracebacks of actors that raised uncaught and were retired.
     crashes: Vec<String>,
     // Set in sharded mode, routes sends whose group lives on another thread.
     router: Option<Router>,
@@ -43,14 +43,14 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
-    pub fn new(config: SwarmConfig) -> Result<Self, String> {
+    pub fn new(config: ActorConfig) -> Result<Self, String> {
         let mut groups = Vec::new();
         let mut by_name = HashMap::new();
         let mut pending = Vec::new();
         for g in config.groups {
             by_name.insert(g.name.clone(), groups.len());
             pending.extend(g.inbox.iter().map(|m| Message { group: m.group.clone(), body: m.body.clone(), attempts: 0, reply: None }));
-            groups.push(GroupState::boot(g, config.max_nodes)?);
+            groups.push(GroupState::boot(g, config.max_actors)?);
         }
         Ok(Scheduler { groups, by_name, pending, crashes: Vec::new(), router: None, stats: None })
     }
@@ -60,7 +60,7 @@ impl Scheduler {
         self.stats = stats;
     }
 
-    // Pumps messages and runs nodes until nothing is left to deliver or run.
+    // Pumps messages and runs actors until nothing is left to deliver or run.
     pub fn run(&mut self) -> i32 {
         self.spawn_seed();
         loop {
@@ -95,7 +95,7 @@ impl Scheduler {
         self.report()
     }
 
-    // Boots one node per group so producers run, the pool then grows lazily on demand.
+    // Boots one actor per group so producers run, the pool then grows lazily on demand.
     fn spawn_seed(&mut self) {
         for g in &mut self.groups {
             if g.max > 0 {
@@ -119,7 +119,7 @@ impl Scheduler {
             if self.tick() || !self.pending.is_empty() {
                 continue;
             }
-            // No local work, block until another shard sends some or the whole swarm quiesces.
+            // No local work, block until another shard sends some or the whole actor quiesces.
             if barrier.park_until_work_or_done() {
                 break;
             }
@@ -137,45 +137,45 @@ impl Scheduler {
     // Writes the live counts to the shared stats so the control endpoint can read them.
     fn publish_stats(&self) {
         let Some(stats) = &self.stats else { return };
-        let mut nodes = 0;
+        let mut actors = 0;
         let mut idle = 0;
         for g in &self.groups {
-            for (_, n) in &g.nodes {
-                nodes += 1;
+            for (_, n) in &g.actors {
+                actors += 1;
                 if n.idle {
                     idle += 1;
                 }
             }
         }
-        stats.set(nodes, nodes - idle, idle, self.pending.len(), self.crashes.len());
+        stats.set(actors, actors - idle, idle, self.pending.len(), self.crashes.len());
     }
 
-    // Delivers each queued message to a node of its target group, spawning on demand.
+    // Delivers each queued message to a actor of its target group, spawning on demand.
     fn route_pending(&mut self) {
         let msgs = core::mem::take(&mut self.pending);
         for m in msgs {
             let Some(&gi) = self.by_name.get(&m.group) else { continue };
             let g = &mut self.groups[gi];
             if let Some(key) = g.pick() {
-                g.nodes[key].deliver(m);
+                g.actors[key].deliver(m);
                 g.ready.push_back(key);
             }
         }
     }
 
-    // Runs each queued node once, collecting what they send, false when none progressed.
+    // Runs each queued actor once, collecting what they send, false when none progressed.
     fn tick(&mut self) -> bool {
         let mut progressed = false;
         for gi in 0..self.groups.len() {
             for _ in 0..self.groups[gi].ready.len() {
                 let Some(key) = self.groups[gi].ready.pop_front() else { break };
-                let Some(node) = self.groups[gi].nodes.get(key) else { continue };
-                if node.done || (node.mailbox.is_empty() && node.ran) {
+                let Some(actor) = self.groups[gi].actors.get(key) else { continue };
+                if actor.done || (actor.mailbox.is_empty() && actor.ran) {
                     continue;
                 }
                 progressed = true;
                 let src = self.groups[gi].source.clone();
-                let step = self.groups[gi].nodes[key].step(&src);
+                let step = self.groups[gi].actors[key].step(&src);
                 self.collect_sends();
                 self.settle(gi, key, step);
             }
@@ -184,22 +184,22 @@ impl Scheduler {
         progressed
     }
 
-    // Re-queues a node by its step outcome, retiring it from the slab on a crash.
+    // Re-queues a actor by its step outcome, retiring it from the slab on a crash.
     fn settle(&mut self, gi: usize, key: usize, step: Step) {
         let g = &mut self.groups[gi];
         match step {
             Step::Failed(tb, msg) => {
-                g.nodes.remove(key);
+                g.actors.remove(key);
                 self.crashes.push(tb);
                 self.handle_crash(gi, msg);
             }
-            _ if g.nodes[key].done => { g.nodes.remove(key); }
-            _ if g.nodes[key].idle => g.idle_free.push(key),
+            _ if g.actors[key].done => { g.actors.remove(key); }
+            _ if g.actors[key].idle => g.idle_free.push(key),
             _ => g.ready.push_back(key),
         }
     }
 
-    // Retries a crashed message on another node up to the group's retry count, else drops it dead.
+    // Retries a crashed message on another actor up to the group's retry count, else drops it dead.
     fn handle_crash(&mut self, gi: usize, msg: Option<Message>) {
         let Some(mut msg) = msg else { return };
         if msg.attempts < self.groups[gi].retry {
@@ -210,9 +210,9 @@ impl Scheduler {
         }
     }
 
-    // Drains what the nodes just sent, routing cross-shard groups out and keeping local ones.
+    // Drains what the actors just sent, routing cross-shard groups out and keeping local ones.
     fn collect_sends(&mut self) {
-        for out in crate::native::builtins::swarm::drain_outbox() {
+        for out in crate::native::builtins::actor::drain_outbox() {
             let msg = Message { group: out.group, body: out.body, attempts: 0, reply: None };
             match &self.router {
                 Some(r) if !self.by_name.contains_key(&msg.group) => r.route(msg),
@@ -223,7 +223,7 @@ impl Scheduler {
 }
 
 impl GroupState {
-    fn boot(g: Group, max_nodes: usize) -> Result<Self, String> {
+    fn boot(g: Group, max_actors: usize) -> Result<Self, String> {
         // A fixed group parses its program once and shares it, an eval group compiles per message.
         let chunk = if g.eval {
             None
@@ -235,48 +235,48 @@ impl GroupState {
             chunk,
             dir: g.dir,
             retry: g.retry,
-            max: g.replicas.min(max_nodes),
+            max: g.replicas.min(max_actors),
             limits: g.limits,
             preempt: g.preempt,
             out: g.out,
-            nodes: Slab::new(),
+            actors: Slab::new(),
             ready: VecDeque::new(),
             idle_free: Vec::new(),
         })
     }
 
-    // Boots a fresh node, fixed nodes share the group chunk, eval nodes start empty and untrusted.
+    // Boots a fresh actor, fixed actors share the group chunk, eval actors start empty and untrusted.
     fn spawn(&mut self) -> usize {
-        let node = match self.chunk {
+        let actor = match self.chunk {
             Some(chunk) => {
                 let mut vm = crate::vm::VM::with_limits(chunk, self.limits);
                 vm.set_time_hook(crate::native::now_ns);
                 vm.set_preempt_interval(self.preempt);
                 wire_output(&mut vm, &self.out);
-                Node::fixed(vm)
+                Actor::fixed(vm)
             }
-            None => Node::eval(self.dir.clone(), self.limits, self.preempt),
+            None => Actor::eval(self.dir.clone(), self.limits, self.preempt),
         };
-        let key = self.nodes.insert(node);
+        let key = self.actors.insert(actor);
         self.ready.push_back(key);
         key
     }
 
-    /* Picks a node for a message, an idle one first, else a fresh spawn under the ceiling, else the least-loaded live node when the group is saturated. */
+    /* Picks a actor for a message, an idle one first, else a fresh spawn under the ceiling, else the least-loaded live actor when the group is saturated. */
     fn pick(&mut self) -> Option<usize> {
         while let Some(key) = self.idle_free.pop() {
-            if self.nodes.get(key).is_some_and(|n| n.idle && !n.done) {
+            if self.actors.get(key).is_some_and(|n| n.idle && !n.done) {
                 return Some(key);
             }
         }
-        if self.nodes.len() < self.max {
+        if self.actors.len() < self.max {
             return Some(self.spawn());
         }
-        self.nodes.iter().filter(|(_, n)| !n.done).min_by_key(|(_, n)| n.mailbox.len()).map(|(k, _)| k)
+        self.actors.iter().filter(|(_, n)| !n.done).min_by_key(|(_, n)| n.mailbox.len()).map(|(k, _)| k)
     }
 }
 
-// Points a node's print output at stdout or nowhere.
+// Points a actor's print output at stdout or nowhere.
 fn wire_output(vm: &mut crate::vm::VM<'static>, out: &Out) {
     match out {
         // A per-file sink needs a closure hook, deferred until print_hook takes one.

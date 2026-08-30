@@ -1,10 +1,13 @@
+use std::sync::OnceLock;
+use std::sync::mpsc::{channel, Sender};
+
 use crate::bridge::VmGuard;
 use crate::vm::types::{SchedulerStatus, VmErr};
 use crate::vm::{Limits, VM};
 
 use super::config::Message;
 
-// How a node runs, a fixed program looping over receive(), or an untrusted per-message evaluator.
+// How a actor runs, a fixed program looping over receive(), or an untrusted per-message evaluator.
 enum Mode {
     // A persistent VM sharing the group chunk, driven by push_event into receive().
     Fixed(Box<VM<'static>>),
@@ -12,13 +15,13 @@ enum Mode {
     Eval { dir: String, limits: Limits, preempt: usize },
 }
 
-// One live node plus the mailbox its work drains from.
-pub struct Node {
+// One live actor plus the mailbox its work drains from.
+pub struct Actor {
     mode: Mode,
     // A deque so draining the oldest message is O(1) instead of shifting the whole buffer.
     pub mailbox: std::collections::VecDeque<Message>,
     pub done: bool,
-    // False until the first step, a fresh fixed node runs once to reach its first receive().
+    // False until the first step, a fresh fixed actor runs once to reach its first receive().
     pub ran: bool,
     // True when parked in receive() with an empty mailbox, the load balancer's free signal.
     pub idle: bool,
@@ -26,9 +29,9 @@ pub struct Node {
     in_flight: Option<Message>,
 }
 
-// What a run step left the node waiting on.
+// What a run step left the actor waiting on.
 pub enum Step {
-    // Ran to completion, the node can be retired.
+    // Ran to completion, the actor can be retired.
     Done,
     // Parked in receive(), feed it a message to wake it.
     Waiting,
@@ -36,18 +39,18 @@ pub enum Step {
     Failed(String, Option<Message>),
 }
 
-impl Node {
-    // A fixed node wraps a booted VM sharing the group chunk.
+impl Actor {
+    // A fixed actor wraps a booted VM sharing the group chunk.
     pub fn fixed(vm: VM<'static>) -> Self {
-        Node { mode: Mode::Fixed(Box::new(vm)), mailbox: std::collections::VecDeque::new(), done: false, ran: false, idle: false, in_flight: None }
+        Actor { mode: Mode::Fixed(Box::new(vm)), mailbox: std::collections::VecDeque::new(), done: false, ran: false, idle: false, in_flight: None }
     }
 
-    // An eval node holds only the settings to boot a fresh VM per snippet.
+    // An eval actor holds only the settings to boot a fresh VM per snippet.
     pub fn eval(dir: String, limits: Limits, preempt: usize) -> Self {
-        Node { mode: Mode::Eval { dir, limits, preempt }, mailbox: std::collections::VecDeque::new(), done: false, ran: false, idle: false, in_flight: None }
+        Actor { mode: Mode::Eval { dir, limits, preempt }, mailbox: std::collections::VecDeque::new(), done: false, ran: false, idle: false, in_flight: None }
     }
 
-    // Delivers a message to the mailbox, waking the node from its idle wait.
+    // Delivers a message to the mailbox, waking the actor from its idle wait.
     pub fn deliver(&mut self, msg: Message) {
         self.mailbox.push_back(msg);
         self.idle = false;
@@ -97,48 +100,19 @@ impl Node {
         }
     }
 
-    /* Runs each queued message as its own fresh program, the chunk drops with the VM so nothing leaks and no state crosses between snippets, an eval node never sends so it cannot orchestrate. */
+    /* Runs each queued message through the persistent locked executor, the seccomp allowlist confines every syscall it or a plugin it loads attempts, an eval actor keeps no state and never sends so it cannot orchestrate. */
     fn step_eval(&mut self) -> Step {
         let Mode::Eval { dir, limits, preempt } = &self.mode else { unreachable!() };
         let (dir, limits, preempt) = (dir.clone(), *limits, *preempt);
         while let Some(msg) = self.mailbox.pop_front() {
-            if msg.reply.is_some() {
-                super::scheduler::capture_begin();
-            }
-            let mut failed = None;
-            // A bundled project rides base64 behind a marker, unpacked to an isolated temp dir.
+            // A bundled project rides base64 behind a marker, unpacked on this trusted thread so the locked run only reads it.
             let (source, base, _hold) = match unbundle(&msg.body) {
                 // The resolver walks up from `{base}packages.json`, so the temp dir base needs a trailing slash.
                 Some((src, tmp)) => { let p = format!("{}/", tmp.path().to_string_lossy()); (src, p, Some(tmp)) }
                 None => (msg.body.clone(), dir.clone(), None),
             };
-            match crate::native::parse_eval(&source, &base, None) {
-                Err(e) => failed = Some(e),
-                Ok(chunk) => {
-                    let chunk: Box<crate::parser::SSAChunk> = Box::new(chunk);
-                    // SAFETY the chunk outlives the vm here, both are dropped at the end of this block.
-                    let chunk_ref: &'static crate::parser::SSAChunk = unsafe { &*(chunk.as_ref() as *const _) };
-                    let mut vm = VM::with_limits(chunk_ref, limits);
-                    vm.set_time_hook(crate::native::now_ns);
-                    vm.set_preempt_interval(preempt);
-                    vm.print_hook = Some(super::scheduler::print_stdout);
-                    loop {
-                        let result = { let _guard = VmGuard::new(&mut vm); vm.run() };
-                        match result {
-                            Err(VmErr::HostYield(SchedulerStatus::Preempted)) => continue,
-                            Err(VmErr::HostYield(_)) | Ok(_) => break,
-                            Err(e) => {
-                                failed = Some(e.render_traceback(&source, vm.error_pos(), None, vm.call_stack_frames(), vm.function_names_ref()));
-                                break;
-                            }
-                        }
-                    }
-                    // vm dropped before chunk, then chunk dropped, no leak.
-                    drop(vm);
-                }
-            }
+            let (failed, out) = run_sandboxed(source, base, limits, preempt, msg.reply.is_some());
             if let Some(reply) = msg.reply {
-                let out = super::scheduler::capture_take();
                 let _ = reply.send(match failed {
                     Some(e) => Err(e),
                     None => Ok(out),
@@ -148,6 +122,81 @@ impl Node {
         self.idle = true;
         Step::Waiting
     }
+}
+
+/* Hands one untrusted program to the persistent locked executor and waits for its result, the traceback or, when a caller waits, its captured print output. */
+fn run_sandboxed(source: String, base: String, limits: Limits, preempt: usize, capture: bool) -> (Option<String>, String) {
+    let (tx, rx) = channel();
+    let job = Job { source, base, limits, preempt, capture, reply: tx };
+    if executor().send(job).is_err() {
+        return (Some("sandbox executor is down".to_string()), String::new());
+    }
+    rx.recv().unwrap_or_else(|_| (Some("sandbox executor stopped".to_string()), String::new()))
+}
+
+// One untrusted run submitted to the executor, its reply carries the traceback or captured output.
+struct Job {
+    source: String,
+    base: String,
+    limits: Limits,
+    preempt: usize,
+    capture: bool,
+    reply: Sender<(Option<String>, String)>,
+}
+
+/* The one thread every untrusted run executes on, locked to the seccomp allowlist once then reused, so eval actors multiplex over a single confined thread with no per-run spawn. */
+fn executor() -> &'static Sender<Job> {
+    static EXEC: OnceLock<Sender<Job>> = OnceLock::new();
+    EXEC.get_or_init(|| {
+        let (tx, rx) = channel::<Job>();
+        std::thread::spawn(move || {
+            #[cfg(target_os = "linux")]
+            let lock = proxy::lock_thread();
+            for job in rx {
+                #[cfg(target_os = "linux")]
+                if let Err(e) = &lock {
+                    let _ = job.reply.send((Some(format!("sandbox error: {e}")), String::new()));
+                    continue;
+                }
+                let _ = job.reply.send(execute(&job));
+            }
+        });
+        tx
+    })
+}
+
+// Compiles and runs one untrusted program on the calling thread, which the executor keeps locked.
+fn execute(job: &Job) -> (Option<String>, String) {
+    if job.capture {
+        super::scheduler::capture_begin();
+    }
+    let mut failed = None;
+    match crate::native::parse_eval(&job.source, &job.base, None) {
+        Err(e) => failed = Some(e),
+        Ok(chunk) => {
+            let chunk: Box<crate::parser::SSAChunk> = Box::new(chunk);
+            // SAFETY the chunk outlives the vm here, both drop at the end of this block.
+            let chunk_ref: &'static crate::parser::SSAChunk = unsafe { &*(chunk.as_ref() as *const _) };
+            let mut vm = VM::with_limits(chunk_ref, job.limits);
+            vm.set_time_hook(crate::native::now_ns);
+            vm.set_preempt_interval(job.preempt);
+            vm.print_hook = Some(super::scheduler::print_stdout);
+            loop {
+                let result = { let _guard = VmGuard::new(&mut vm); vm.run() };
+                match result {
+                    Err(VmErr::HostYield(SchedulerStatus::Preempted)) => continue,
+                    Err(VmErr::HostYield(_)) | Ok(_) => break,
+                    Err(e) => {
+                        failed = Some(e.render_traceback(&job.source, vm.error_pos(), None, vm.call_stack_frames(), vm.function_names_ref()));
+                        break;
+                    }
+                }
+            }
+            drop(vm);
+        }
+    }
+    let out = if job.capture { super::scheduler::capture_take() } else { String::new() };
+    (failed, out)
 }
 
 // Marks an eval body that carries a base64 project bundle rather than a raw snippet.

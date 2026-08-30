@@ -9,7 +9,7 @@ mod io;
 mod loader;
 pub mod pack;
 mod resolver;
-pub mod swarm;
+pub mod actor;
 
 pub use driver::{drive, drive_session, restore_and_run, Step};
 
@@ -43,7 +43,7 @@ pub fn parse_source(src: &str, dir: &str, packages: Option<&str>) -> Result<SSAC
     parse(src, dir, packages, false)
 }
 
-/* Parses untrusted eval code, the resolver withholds the swarm module from it. */
+/* Parses untrusted eval code, the resolver withholds the actor module from it. */
 pub fn parse_eval(src: &str, dir: &str, packages: Option<&str>) -> Result<SSAChunk, String> {
     parse(src, dir, packages, true)
 }

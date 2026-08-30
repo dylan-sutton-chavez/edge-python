@@ -2,7 +2,7 @@ use crate::packages::Resolved;
 use crate::vm::types::{HeapObj, HeapPool, Val, VmErr};
 
 mod network;
-pub(crate) mod swarm;
+pub(crate) mod actor;
 mod time;
 
 /* Built-in system modules, resolved after the manifest so user entries always win. */
@@ -10,7 +10,7 @@ pub(crate) fn resolve(name: &str) -> Option<Resolved> {
     let bindings = match name {
         "time" => time::bindings(),
         "network" => network::bindings(),
-        "swarm" => swarm::bindings(),
+        "actor" => actor::bindings(),
         _ => return None,
     };
     Some(Resolved::Native { bindings, classes: Vec::new(), consts: Vec::new(), canonical: format!("native:{name}") })

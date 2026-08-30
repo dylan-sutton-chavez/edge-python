@@ -2,7 +2,7 @@
 runtime:
   listen: tcp://127.0.0.1:7788
   control: tcp://127.0.0.1:9788
-  durable: tmp/swarm/log
+  durable: tmp/actor/log
 
 groups:
   echoer:
@@ -21,8 +21,8 @@ expect:
   - "got: beta"
   - "got: gamma"
 
-# Substring the /stats body must contain once the swarm has settled.
-expect_status: "\"nodes\":1"
+# Substring the /stats body must contain once the actor has settled.
+expect_status: "\"actors\":1"
 
 # A POST to /pub/<group> queues a message over HTTP, the echoer prints it like a tcp one.
 post:

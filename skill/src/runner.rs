@@ -56,7 +56,7 @@ pub fn run_web(edge: &str, src: &str, timeout: Duration) -> Result<Outcome, Stri
     spawn(cmd, src, timeout)
 }
 
-pub fn run_swarm(edge: &str, yml: &str, timeout: Duration) -> Result<Outcome, String> {
+pub fn run_actor(edge: &str, yml: &str, timeout: Duration) -> Result<Outcome, String> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let dir = std::env::temp_dir().join(format!(
@@ -65,10 +65,10 @@ pub fn run_swarm(edge: &str, yml: &str, timeout: Duration) -> Result<Outcome, St
         SEQ.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::create_dir_all(&dir).map_err(|e| format!("tempdir failed: {e}"))?;
-    let path = dir.join("swarm.yml");
-    std::fs::write(&path, yml).map_err(|e| format!("write swarm.yml failed: {e}"))?;
+    let path = dir.join("actor.yml");
+    std::fs::write(&path, yml).map_err(|e| format!("write actor.yml failed: {e}"))?;
     let mut cmd = Command::new(edge);
-    cmd.arg("swarm").arg(&path);
+    cmd.arg("actor").arg(&path);
     let outcome = spawn(cmd, "", timeout);
     let _ = std::fs::remove_dir_all(&dir);
     outcome

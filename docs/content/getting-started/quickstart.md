@@ -70,5 +70,5 @@ To record the dependency in your project, run `edge add json`. It writes the pac
 ## Next steps
 
 - [Syntax](/language/syntax) walks through the language.
-- [Command line interface](/reference/cli) covers `serve`, `repl`, `test`, `build`, and `swarm`.
-- [Workers](/reference/workers) runs many programs as cooperative tasks.
+- [Command line interface](/reference/cli) covers `serve`, `repl`, `test`, `build`, and `actor`.
+- [Actors](/reference/actors) runs many programs as cooperative tasks.

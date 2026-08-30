@@ -6,7 +6,7 @@ groups:
   a:
     replicas: 1
     code: |
-      from swarm import send
+      from actor import send
       msg = receive()
       send("b", msg + "-a")
     seed:
@@ -14,7 +14,7 @@ groups:
   b:
     replicas: 1
     code: |
-      from swarm import send
+      from actor import send
       msg = receive()
       send("c", msg + "-b")
   c:
