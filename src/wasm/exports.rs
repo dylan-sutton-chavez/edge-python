@@ -274,11 +274,7 @@ pub unsafe extern "C" fn repl_eval(len: usize) -> u32 {
             vm.reset_budget(Limits::sandbox().ops);
             vm
         }
-        None => {
-            let mut vm = boot_vm(chunk, Limits::sandbox());
-            vm.strict_input = true;
-            vm
-        }
+        None => boot_vm(chunk, Limits::sandbox()),
     };
     // Named native imports live only in the chunk's extern table, mirror them so later inputs resolve them.
     if let Err(e) = vm.bind_chunk_externs() {
@@ -303,7 +299,6 @@ pub unsafe extern "C" fn run_start(len: usize) -> u32 {
         Err(rendered) => return err_status(&rendered),
     };
     let mut vm = boot_vm(chunk, Limits::sandbox());
-    vm.strict_input = true;
     take_input(&mut vm);
     step_vm(vm, &src, None)
 }
@@ -474,7 +469,6 @@ pub unsafe extern "C" fn run(len: usize) -> usize {
             let mut vm = VM::with_limits(&chunk, Limits::sandbox());
             vm.print_hook = Some(stream_print);
             vm.set_time_hook(now_ns_host);
-            vm.strict_input = true;
             take_input(&mut vm);
 
             // Publish VM for re-entrant host_edge_op via RAII guard so a panic or early return cannot leave a stale pointer in the runtime.

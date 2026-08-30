@@ -531,6 +531,7 @@
   {"src": "x = input()\nprint(x.upper())", "output": ["HELLO"], "input": ["hello"]},
   {"src": "a = input()\nb = input()\nprint(a + b)", "output": ["foobar"], "input": ["foo", "bar"]},
   {"src": "x = int(input())\nprint(x * 2)", "output": ["84"], "input": ["42"]},
+  {"src": "print(input())", "output": [], "error": "input() has no host data"},
   {"src": "x = input()\nprint(len(x))", "output": ["0"], "input": [""]},
   {"src": "def a():\n    print('a1')\n    yield None\n    print('a2')\ndef b():\n    print('b1')\n    yield None\n    print('b2')\nta = a()\ntb = b()\nta()\ntb()\nta()\ntb()", "output": ["a1", "b1", "a2", "b2"]},
   {"src": "def g():\n    print('before')\n    yield 1\n    print('after')\nc = g()\nprint(c())\nprint(c())", "output": ["before", "1", "after", "None"]},

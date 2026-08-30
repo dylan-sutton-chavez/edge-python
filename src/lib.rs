@@ -1,4 +1,4 @@
-#![cfg_attr(target_arch = "wasm32", no_std)]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
 
@@ -12,7 +12,7 @@ pub mod bridge;
 pub mod wasm;
 
 /* Dev-tooling constants and helpers shared by the edge CLI and the native engine. */
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "std")]
 pub mod devkit;
 
 /* The native engine, resolver, plugin loader, system modules and drive loop shared by every native front end. */

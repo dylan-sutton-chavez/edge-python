@@ -75,7 +75,6 @@ fn parse(src: &str, dir: &str, packages: Option<&str>, untrusted: bool) -> Resul
 pub fn boot_vm(chunk: SSAChunk, limits: Limits, preempt: usize) -> VM<'static> {
     let chunk_static: &'static SSAChunk = Box::leak(Box::new(chunk));
     let mut vm = VM::with_limits(chunk_static, limits);
-    vm.strict_input = true;
     vm.print_hook = Some(stream_stdout);
     vm.set_time_hook(now_ns);
     vm.set_preempt_interval(preempt);

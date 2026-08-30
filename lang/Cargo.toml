@@ -9,11 +9,16 @@ description = "Embedding API over the Edge Python engine for building your own s
 [lib]
 name = "lang"
 crate-type = ["rlib"]
+test = false
 doctest = false
 
 [[test]]
 name = "tests"
 path = "tests.rs"
 
+[features]
+default = ["std"]
+std = ["compiler/std"]
+
 [dependencies]
-compiler = { package = "edge-python", path = ".." }
+compiler = { package = "edge-python", path = "..", default-features = false }

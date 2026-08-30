@@ -144,7 +144,6 @@ mod test {
             compiler::vm::optimizer::constant_fold(&mut chunk);
 
             let mut vm = VM::with_limits(&chunk, Limits::sandbox());
-            vm.strict_input = true;
             vm.input_buffer = case.input.clone();
             for evt in &case.events { vm.push_event(evt).expect("push_event"); }
             let expects_input_error = case.input.is_empty() && (case.src.contains("input(") || case.src.contains("input ("));

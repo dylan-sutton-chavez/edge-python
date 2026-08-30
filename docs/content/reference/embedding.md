@@ -3,7 +3,7 @@ title: "Embedding"
 description: "Build your own scripting language by embedding the Edge Python engine through the lang crate."
 ---
 
-The `lang` crate is a small, clean embedding API over the Edge Python engine. Use it to build your own lightweight scripting language: compile source to a program, expose Rust functions to scripts, rewrite syntax into your own dialect, and run everything under the same metered sandbox the CLI uses. It wraps the compiler and VM behind six symbols and leaks none of the internals.
+The `lang` crate is a small, clean embedding API over the Edge Python engine. Use it to build your own lightweight scripting language, compiling source to a program, exposing Rust functions to scripts, rewriting syntax into your own dialect, and running everything under the same metered sandbox the CLI uses. It wraps the compiler and VM behind a handful of types and leaks none of the internals.
 
 ## Add the dependency
 
@@ -14,11 +14,11 @@ The `lang` crate is a small, clean embedding API over the Edge Python engine. Us
 lang = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.1.0" }
 ```
 
-The crate is `no_std` (it needs `alloc`), so it drops into embedded and wasm hosts as-is.
+`lang` is `no_std` and needs only `alloc`. The default `std` feature links the host standard library, and `default-features = false` drops it for wasm and bare-metal targets.
 
 ## Compile and run
 
-The whole surface is `Engine`, `Program`, `Value`, `Output`, `Error`, and `Limits`. An engine is built once and reused across many compiles.
+The whole surface is `Engine`, `Program`, `Instance`, `Value`, `Output`, `Error`, and `Limits`. An engine is built once and reused across many compiles.
 
 ```rust
 use lang::Engine;
@@ -35,7 +35,7 @@ assert_eq!(out.text(), "hello\n");
 
 ## Call a function
 
-Compile once, then invoke a named top-level function many times with different arguments. Each call runs from a clean state, so nothing leaks between invocations, which suits a rule the host applies over many inputs.
+Compile once, then invoke a named top-level function many times with different arguments. `call` runs each invocation on a fresh instance, so nothing leaks between them.
 
 ```rust
 use lang::{Engine, Value};
@@ -48,17 +48,26 @@ assert_eq!(*program.call("check", &[Value::Int(21)])?.value(), Value::Bool(true)
 assert_eq!(*program.call("check", &[Value::Int(3)])?.value(), Value::Bool(false));
 ```
 
-`call` runs the module body first to bind its definitions, then invokes the function. It returns the same `Output` as `run`, so `.value()` is the return and `.text()` is anything printed during the call. An unknown name or a raise surfaces as `Error::Run`. Arguments are `Value`, so scalars and strings pass directly.
+That rebuilds the VM and reruns the module body every time. `start` pays for it once and hands back an `Instance` the calls share, which is the shape a rule applied over many inputs wants.
+
+```rust
+let mut inst = program.start()?;
+
+assert_eq!(*inst.call("check", &[Value::Int(21)])?.value(), Value::Bool(true));
+assert_eq!(*inst.call("check", &[Value::Int(3)])?.value(), Value::Bool(false));
+```
+
+Both return the same `Output` as `run`, so `.value()` is the return and `.text()` is what that call printed, never the module body. An unknown name or a raise surfaces as `Error::Run`.
 
 ## Expose Rust functions
 
-`define` publishes a Rust closure to scripts under the `host` module. Arguments arrive as `Value`, and the return crosses back the same way.
+`define` publishes a Rust closure under `host`, the only module that resolves. Every binding shares that one flat namespace, there are no others to author. Arguments arrive as `Value`, and the return crosses back the same way.
 
 ```rust
 use lang::{Engine, Value};
 
 let engine = Engine::builder()
-    .define("double", |args| Ok(Value::Int(args[0].as_int().unwrap_or(0) * 2)))
+    .define("double", |args| Ok(Value::Int(args.first().and_then(Value::as_int).unwrap_or(0) * 2)))
     .build();
 
 let out = engine
@@ -68,7 +77,9 @@ let out = engine
 assert_eq!(out.text(), "42\n");
 ```
 
-A closure returning `Err(String)` raises in the script, caught by `try` or surfaced as an `Error::Run` traceback.
+Natives are positional only and take scalars or `str`. A keyword argument, or a list, dict or instance, raises a `TypeError` in the script instead of reaching the closure. Read `args` defensively, since the call site decides how many arrive, and keep a native under 16 arguments.
+
+A closure returning `Err(String)` raises in the script. The text before the first colon names the exception class, so `Err("ValueError: bad input".into())` is catchable with `except ValueError`, while a bare `Err("nope".into())` raises a class called `nope`.
 
 A native closure is `Fn + Send + Sync + 'static`. State it mutates across calls rides behind an `Arc<Mutex<_>>` it captures, updated before each call.
 
@@ -85,23 +96,13 @@ A native closure is `Fn + Send + Sync + 'static`. State it mutates across calls 
 | `Str` | `str` |
 | `Object` | any list, dict, instance, rendered |
 
-Scalars convert through the standard traits, so a native reads and writes plain Rust types.
-
-```rust
-use lang::Value;
-
-let v = Value::from(21i64);
-let n: i64 = v.try_into().unwrap();
-assert_eq!(n, 21);
-```
-
-`as_int`, `as_float`, `as_str`, and `as_bool` are the borrowing accessors, and `Display` prints a value the way the language would.
+`Object` only ever comes back out of a result, never into a native. Scalars convert in through `From`, and `as_int`, `as_float`, `as_str` and `as_bool` read them back, with the two numeric accessors taking the whole `bool` to `int` to `float` tower. `Display` prints a value the way the language would.
 
 ## Custom syntax
 
 Your dialect is a rewrite of source into valid Edge Python, applied before lexing. Two builder hooks cover it, and both are no-ops when unused.
 
-`keyword` renames a single construct, whole-word so it never rewrites a substring of a longer name.
+`keyword` renames a single construct wherever it stands as its own word. It walks the token stream, so a longer identifier never matches and the same word inside a string or a comment is left untouched.
 
 ```rust
 use lang::Engine;
@@ -118,7 +119,7 @@ let out = engine
 assert_eq!(out.text(), "hola\n");
 ```
 
-`transform` is the general hook: any `Fn(&str) -> String`, for sugar, macros, or a mini-DSL you translate down to Edge Python. Transforms chain, each fed the previous output.
+`transform` is the general hook, any `Fn(&str) -> String`, for sugar, macros, or a mini-DSL you translate down to Edge Python. Transforms chain, each fed the previous output.
 
 ```rust
 use lang::Engine;
@@ -134,7 +135,7 @@ let out = engine
 assert_eq!(out.text(), "positive\n");
 ```
 
-Whatever a transform emits must be valid Edge Python. Rewrites change the surface, never the semantics: you can rename `and`, not change that it binds looser than `==`, and diagnostics point at the rewritten source. New language semantics belong in the engine, not a transform.
+Whatever a transform emits must be valid Edge Python. Rewrites change the surface, never the semantics, so you can rename `and` but not change that it binds looser than `==`, and diagnostics point at the rewritten source that `Program::source` returns. New language semantics belong in the engine, not a transform.
 
 ## Limits
 
@@ -148,31 +149,13 @@ let engine = Engine::builder()
     .build();
 ```
 
-A script that exceeds a cap fails with an `Error::Run` traceback (`RecursionError`, `MemoryError`, or a budget `RuntimeError`) rather than hanging. The sandbox is the security boundary, so the caps are part of the contract, not an add-on.
+A script that exceeds a cap fails with an `Error::Run` traceback (`RecursionError`, `MemoryError`, or a budget `RuntimeError`) rather than hanging. The sandbox is the security boundary, so the caps are part of the contract, not an add-on. A script reaches nothing the embedder did not define, and `input()` raises instead of reading the host stdin.
 
 ## Concurrency
 
-Within a run, `async`/`await` and cooperative tasks run on one thread, like an event loop. Across threads, `Program` is not `Send`: you scale share-nothing, one `Engine` and `Program` per thread, never shared.
-
-```rust
-use std::thread;
-use lang::Engine;
-
-let src = "def rule(n):\n  return n > 10";
-thread::scope(|s| {
-    for batch in inputs.chunks(chunk_size) {
-        s.spawn(move || {
-            let program = Engine::builder().build().compile(src).unwrap();
-            for &v in batch {
-                program.call("rule", &[v.into()]).unwrap();
-            }
-        });
-    }
-});
-```
+Within a run, `async`/`await` and cooperative tasks run on one thread, like an event loop, and `sleep` advances a deterministic virtual clock rather than a wall clock, so a run reproduces exactly. Across threads `Program` is not `Send`, so you scale share-nothing, one `Engine` and `Program` per thread, never shared.
 
 ## Where to go next
 
-- [ABI](/reference/abi) is the lower-level plugin contract, for shipping native modules over the CDN or `dlopen`.
-- [Modules](/reference/modules) covers the resolver and how imports reach the engine.
 - [Limits and errors](/reference/limits-and-errors) details each cap and the errors they raise.
+- [Modules](/reference/modules) covers the resolver and how imports reach the engine.

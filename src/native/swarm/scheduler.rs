@@ -250,7 +250,6 @@ impl GroupState {
         let node = match self.chunk {
             Some(chunk) => {
                 let mut vm = crate::vm::VM::with_limits(chunk, self.limits);
-                vm.strict_input = true;
                 vm.set_time_hook(crate::native::now_ns);
                 vm.set_preempt_interval(self.preempt);
                 wire_output(&mut vm, &self.out);

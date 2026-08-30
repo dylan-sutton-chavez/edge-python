@@ -115,7 +115,7 @@ Runtime errors raise as typed exceptions, catchable with `try` / `except`.
 | `SystemExit` | `raise SystemExit(code)`. Uncaught, the host exits with that code |
 | `RecursionError` | Past the call-depth limit |
 | `MemoryError` | Past the live-object limit |
-| `RuntimeError` | Past the op limit, an import cycle, or an internal invariant |
+| `RuntimeError` | Past the op limit, an import cycle, `input()` without host data, or an internal invariant |
 
 Every entry in the table fires from ordinary code:
 

@@ -1,6 +1,6 @@
 # `cargo wasm` build edge-python release WebAssembly artifact.
 [alias]
-wasm = "build --release --target wasm32-unknown-unknown -p edge-python"
+wasm = "build --release --target wasm32-unknown-unknown -p edge-python --no-default-features"
 
 # `--profile native` speed-first build of the native port binaries.
 [profile.native]

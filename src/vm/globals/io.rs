@@ -79,18 +79,18 @@ impl<'a> VM<'a> {
             self.input_buffer.remove(0)
         } else if self.strict_input {
             // Host-driven mode, no blocking stdin read (also keeps headless/fuzz runs from hanging).
-            return Err(VmErr::Runtime("input() requires host-provided data"));
+            return Err(VmErr::Runtime("input() has no host data"));
         } else {
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(feature = "std")]
             {
                 let mut line = String::new();
                 let _ = std::io::stdin().read_line(&mut line);
                 while line.ends_with('\n') || line.ends_with('\r') { line.pop(); }
                 line
             }
-            #[cfg(target_arch = "wasm32")]
-            { 
-                return Err(VmErr::Runtime("input() requires host data in WASM")); 
+            #[cfg(not(feature = "std"))]
+            {
+                return Err(VmErr::Runtime("input() has no host data"));
             }
         };
         let val = self.heap.alloc(HeapObj::Str(s))?;

@@ -33,11 +33,10 @@ runs:
       shell: bash
       run: cargo shear
 
-    # --no-default-features skips the prebuilt wasm download in build.rs.
     - name: Clippy (host)
       if: inputs.mode == 'check'
       shell: bash
-      run: cargo clippy --all-targets --no-default-features -- -D warnings
+      run: cargo clippy --all-targets -- -D warnings
 
     # The native engine module only compiles under this feature, e2e coverage lives in cli/tests.
     - name: Clippy (native engine)
@@ -53,7 +52,7 @@ runs:
     - name: Clippy (wasm)
       if: inputs.mode == 'check'
       shell: bash
-      run: cargo clippy --lib --target wasm32-unknown-unknown -p edge-python -p slugify-mod -- -D warnings
+      run: cargo clippy --lib --no-default-features --target wasm32-unknown-unknown -p edge-python -p slugify-mod -- -D warnings
 
     # build-std needs nightly plus rust-src.
     - name: Toolchain (nightly)
@@ -86,6 +85,7 @@ runs:
           --lib \
           --release \
           -p edge-python \
+          --no-default-features \
           -Z build-std=std,panic_abort \
           -Z build-std-features=optimize_for_size
 
@@ -132,7 +132,7 @@ runs:
     - name: Test
       if: inputs.mode == 'build'
       shell: bash
-      run: cargo test -p edge-python -p lang --no-default-features
+      run: cargo test -p edge-python -p lang
 
     - name: Upload wasm artifact
       if: inputs.mode == 'build'

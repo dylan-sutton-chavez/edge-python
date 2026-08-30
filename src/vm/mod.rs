@@ -243,7 +243,7 @@ impl<'a> VM<'a> {
             yielded: false,
             yield_from_value: Val::none(),
             resume_ip: 0,
-            strict_input: false,
+            strict_input: true,
             output: Vec::new(),
             output_open: false,
             print_hook: None,

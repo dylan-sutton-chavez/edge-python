@@ -20,8 +20,10 @@ name = "tests"
 path = "tests/main.rs"
 
 [features]
+default = ["std"]
+std = []
 # Gates the native engine module (resolver, dlopen loader, system modules) out of wasm and plain lib builds.
-native = ["dep:libloading", "dep:ureq", "dep:rt", "dep:polling", "dep:slab", "dep:rustls", "dep:webpki-roots", "dep:httparse", "dep:tempfile", "dep:findshlibs", "dep:proxy"]
+native = ["std", "dep:libloading", "dep:ureq", "dep:rt", "dep:polling", "dep:slab", "dep:rustls", "dep:webpki-roots", "dep:httparse", "dep:tempfile", "dep:findshlibs", "dep:proxy"]
 
 [dependencies]
 wasm-abi = { workspace = true }

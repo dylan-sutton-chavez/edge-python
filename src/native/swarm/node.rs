@@ -119,7 +119,6 @@ impl Node {
                     // SAFETY the chunk outlives the vm here, both are dropped at the end of this block.
                     let chunk_ref: &'static crate::parser::SSAChunk = unsafe { &*(chunk.as_ref() as *const _) };
                     let mut vm = VM::with_limits(chunk_ref, limits);
-                    vm.strict_input = true;
                     vm.set_time_hook(crate::native::now_ns);
                     vm.set_preempt_interval(preempt);
                     vm.print_hook = Some(super::scheduler::print_stdout);

@@ -27,8 +27,6 @@ fn main() {
         // Bounded budget turns runaway loops and allocations into VmErr, not hangs. Tight `ops` so bounded loops finish within AFL's hang timeout. Library default `sandbox()` is far larger.
         let limits = Limits { ops: 100_000, ..Limits::sandbox() };
         let mut vm = VM::with_limits(&chunk, limits);
-        // Host-driven input, never block on real stdin (AFL feeds the program via shmem).
-        vm.strict_input = true;
         vm.set_preempt_interval(PREEMPT_EVERY);
 
         // Drive every park kind, snapshot the first.
@@ -48,7 +46,6 @@ fn main() {
                 hopped = true;
                 let blob = snapshot::save(&vm, src);
                 let mut fresh = VM::with_limits(&chunk, Limits { ops: 100_000, ..Limits::sandbox() });
-                fresh.strict_input = true;
                 fresh.set_preempt_interval(PREEMPT_EVERY);
                 if snapshot::restore(&mut fresh, &blob).is_ok() {
                     vm = fresh;

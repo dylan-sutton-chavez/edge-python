@@ -4,8 +4,8 @@ extern crate alloc;
 
 use alloc::{boxed::Box, format, string::{String, ToString}, sync::Arc, vec::Vec};
 
-use compiler::lexer::lex;
-use compiler::packages::{partition_bindings, NativeBinding, Resolved, Resolver};
+use compiler::lexer::{lex, TokenType};
+use compiler::packages::{NativeBinding, Resolved, Resolver};
 use compiler::parser::{Diagnostic, Parser, SSAChunk};
 use compiler::value::{HeapObj, HeapPool, Val, VmErr};
 use compiler::vm::VM;
@@ -61,10 +61,21 @@ impl Value {
         else if v.is_heap() {
             match heap.get(v) {
                 HeapObj::Str(s) => Value::Str(s.clone()),
-                HeapObj::LongInt(i) => Value::Object(i.to_string()),
+                HeapObj::LongInt(i) => match i64::try_from(*i) {
+                    Ok(n) => Value::Int(n),
+                    Err(_) => Value::Object(i.to_string()),
+                },
                 _ => Value::Object(render(v)),
             }
         } else { Value::None }
+    }
+
+    /* Reads a native argument. A composite has no owned form here, so it is refused rather than handed over blank. */
+    fn read_arg(v: Val, heap: &HeapPool) -> Result<Value, VmErr> {
+        if v.is_heap() && !matches!(heap.get(v), HeapObj::Str(_) | HeapObj::LongInt(_)) {
+            return Err(VmErr::TypeMsg(String::from("host function argument must be a scalar or a str")));
+        }
+        Ok(Self::read(v, heap, |_| String::new()))
     }
 
     /* Allocates this value on the engine heap for return from a native. */
@@ -94,40 +105,20 @@ impl core::fmt::Display for Value {
     }
 }
 
-/* From<T> for Value and its TryFrom inverse, one line per scalar type. */
-macro_rules! convert {
-    ( $( $ty:ty => $var:ident, $acc:ident );* $(;)? ) => {
-        $(
-            impl From<$ty> for Value {
-                fn from(v: $ty) -> Self { Value::$var(v) }
-            }
-            impl TryFrom<Value> for $ty {
-                type Error = Value;
-                fn try_from(v: Value) -> Result<Self, Value> {
-                    v.$acc().ok_or(v)
-                }
-            }
-        )*
-    };
+impl From<bool> for Value {
+    fn from(v: bool) -> Self { Value::Bool(v) }
 }
-
-convert! {
-    bool => Bool, as_bool;
-    i64 => Int, as_int;
-    f64 => Float, as_float;
+impl From<i64> for Value {
+    fn from(v: i64) -> Self { Value::Int(v) }
 }
-
+impl From<f64> for Value {
+    fn from(v: f64) -> Self { Value::Float(v) }
+}
 impl From<&str> for Value {
     fn from(s: &str) -> Self { Value::Str(s.to_string()) }
 }
 impl From<String> for Value {
     fn from(s: String) -> Self { Value::Str(s) }
-}
-impl TryFrom<Value> for String {
-    type Error = Value;
-    fn try_from(v: Value) -> Result<Self, Value> {
-        if let Value::Str(s) = v { Ok(s) } else { Err(v) }
-    }
 }
 
 /* A compile or run failure, two levels. `Compile` carries a rustc-style diagnostic, `Run` a traceback. */
@@ -237,23 +228,29 @@ impl Builder {
         self
     }
 
-    /* Renames one keyword or name, whole-word so it never touches a longer identifier. */
+    /* Renames one keyword or name wherever it stands as its own word, so a longer identifier never matches. */
     pub fn keyword(self, from: impl Into<String>, to: impl Into<String>) -> Self {
         let (from, to) = (from.into(), to.into());
-        self.transform(move |src| replace_word(src, &from, &to))
+        self.transform(move |src| rename_word(src, &from, &to))
     }
 
     /* Exposes a Rust fn to scripts under `from host import <name>`, impure so results never memoize. */
     pub fn define<F>(mut self, name: impl Into<String>, f: F) -> Self
     where F: Fn(&[Value]) -> Result<Value, String> + Send + Sync + 'static
     {
+        let name = name.into();
+        let reported = name.clone();
         let f = Arc::new(f);
         self.natives.push(NativeBinding {
-            name: name.into(),
-            func: Arc::new(move |heap, argv, _kwargs| {
-                let args: Vec<Value> = argv.iter()
-                    .map(|&v| Value::read(v, heap, |_| String::new()))
-                    .collect();
+            name,
+            func: Arc::new(move |heap, argv, kwargs| {
+                if kwargs.is_some() {
+                    return Err(VmErr::TypeMsg(format!("'{reported}' takes no keyword arguments")));
+                }
+                let mut args = Vec::with_capacity(argv.len());
+                for &v in argv {
+                    args.push(Value::read_arg(v, heap)?);
+                }
                 f(&args).map_err(VmErr::Raised).and_then(|out| out.write(heap))
             }),
             pure: false,
@@ -278,51 +275,51 @@ pub struct Program {
 }
 
 impl Program {
-    /* Builds a VM, binds natives, and runs the module body so top-level defs are bound. */
-    fn boot(&self) -> Result<VM<'static>, Error> {
-        // Storage-only 'static, the VM never outlives the caller's use of it.
-        let chunk_static: &'static SSAChunk = unsafe { core::mem::transmute::<&SSAChunk, &'static SSAChunk>(&self.chunk) };
-        let mut vm = VM::with_limits(chunk_static, self.limits);
+    /* Builds a VM and binds the natives the chunk resolved at compile time. */
+    fn boot(&self) -> Result<VM<'_>, Error> {
+        let mut vm = VM::with_limits(&self.chunk, self.limits);
         vm.bind_chunk_externs().map_err(|e| Error::Run(e.render()))?;
         Ok(vm)
     }
 
     /* Renders a VM error as a traceback tied to this program's source. */
-    fn trace(&self, vm: &VM<'static>, e: VmErr) -> Error {
+    fn trace(&self, vm: &VM<'_>, e: VmErr) -> Error {
         Error::Run(e.render_traceback(
             &self.source, vm.error_pos(), None,
             vm.call_stack_frames(), vm.function_names_ref(),
         ))
     }
 
+    /* Pairs a result value with the output written past `from`, which skips whatever was reported already. */
+    fn outcome(&self, vm: &VM<'_>, v: Val, from: usize) -> Output {
+        let value = Value::read(v, vm.heap(), |v| vm.display(v));
+        let full = vm.output_text();
+        let text = full.get(from..).unwrap_or("").into();
+        Output { value, text }
+    }
+
     /* Runs to completion under the engine limits. Err renders a traceback. */
     pub fn run(&self) -> Result<Output, Error> {
         let mut vm = self.boot()?;
         match vm.run() {
-            Ok(v) => {
-                let value = Value::read(v, vm.heap(), |v| vm.display(v));
-                Ok(Output { value, text: vm.output_text() })
-            }
+            Ok(v) => Ok(self.outcome(&vm, v, 0)),
             Err(e) => Err(self.trace(&vm, e)),
         }
     }
 
-    /* Calls a top-level function by name with the given arguments and returns its result. */
-    pub fn call(&self, name: &str, args: &[Value]) -> Result<Output, Error> {
+    /* Boots once and runs the module body so its defs are bound, then holds the VM open for repeated calls. */
+    pub fn start(&self) -> Result<Instance<'_>, Error> {
         let mut vm = self.boot()?;
-        // Run the module body first so its `def`s are bound before the call.
-        vm.run().map_err(|e| self.trace(&vm, e))?;
-        let argv: Vec<Val> = args.iter()
-            .map(|a| a.write(vm.heap_mut()))
-            .collect::<Result<_, _>>()
-            .map_err(|e| self.trace(&vm, e))?;
-        match vm.call_export(name, &argv) {
-            Ok(v) => {
-                let value = Value::read(v, vm.heap(), |v| vm.display(v));
-                Ok(Output { value, text: vm.output_text() })
-            }
-            Err(e) => Err(self.trace(&vm, e)),
+        if let Err(e) = vm.run() {
+            return Err(self.trace(&vm, e));
         }
+        let emitted = vm.output_text().len();
+        Ok(Instance { program: self, vm, emitted })
+    }
+
+    /* Calls a top-level function on a fresh instance, so nothing leaks between invocations. */
+    pub fn call(&self, name: &str, args: &[Value]) -> Result<Output, Error> {
+        self.start()?.call(name, args)
     }
 
     pub fn source(&self) -> &str { &self.source }
@@ -331,6 +328,38 @@ impl Program {
 impl core::fmt::Debug for Program {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Program").field("source", &self.source).finish_non_exhaustive()
+    }
+}
+
+/* A booted program whose module body has already run. Calls share one VM, drop it to reset. */
+pub struct Instance<'a> {
+    program: &'a Program,
+    vm: VM<'a>,
+    emitted: usize,
+}
+
+impl Instance<'_> {
+    /* Calls a top-level function by name. The `Output` carries its return and only what this call printed. */
+    pub fn call(&mut self, name: &str, args: &[Value]) -> Result<Output, Error> {
+        let mut argv = Vec::with_capacity(args.len());
+        for a in args {
+            match a.write(self.vm.heap_mut()) {
+                Ok(v) => argv.push(v),
+                Err(e) => return Err(self.program.trace(&self.vm, e)),
+            }
+        }
+        let out = match self.vm.call_export(name, &argv) {
+            Ok(v) => self.program.outcome(&self.vm, v, self.emitted),
+            Err(e) => return Err(self.program.trace(&self.vm, e)),
+        };
+        self.emitted += out.text.len();
+        Ok(out)
+    }
+}
+
+impl core::fmt::Debug for Instance<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Instance").finish_non_exhaustive()
     }
 }
 
@@ -344,31 +373,31 @@ impl Resolver for HostResolver {
         if spec != "host" {
             return Err(format!("module '{spec}' not found (only 'host' is available)"));
         }
-        let (bindings, classes, consts) = partition_bindings((*self.natives).clone());
-        Ok(Resolved::Native { bindings, classes, consts, canonical: "host".to_string() })
+        // Plain functions only, the engine's export-name conventions stay out of this API.
+        Ok(Resolved::Native {
+            bindings: (*self.natives).clone(),
+            classes: Vec::new(),
+            consts: Vec::new(),
+            canonical: "host".to_string(),
+        })
     }
 }
 
-/* Replaces `from` with `to` only where it stands as a whole word. */
-fn replace_word(src: &str, from: &str, to: &str) -> String {
+/* Rewrites each word token equal to `from`, leaving strings, f-string text and comments untouched. */
+fn rename_word(src: &str, from: &str, to: &str) -> String {
     if from.is_empty() { return src.to_string(); }
-    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    let (tokens, _) = lex(src);
     let mut out = String::with_capacity(src.len());
-    let mut i = 0;
-    while i < src.len() {
-        if src[i..].starts_with(from) {
-            let before_ok = i == 0 || !src[..i].chars().next_back().is_some_and(is_word);
-            let after = i + from.len();
-            let after_ok = after >= src.len() || !src[after..].chars().next().is_some_and(is_word);
-            if before_ok && after_ok {
-                out.push_str(to);
-                i = after;
-                continue;
-            }
-        }
-        let ch = src[i..].chars().next().unwrap();
-        out.push(ch);
-        i += ch.len_utf8();
+    let mut last = 0;
+    for t in tokens {
+        let literal = matches!(t.kind,
+            TokenType::String | TokenType::Bytes | TokenType::Comment
+            | TokenType::FstringStart | TokenType::FstringMiddle | TokenType::FstringEnd);
+        if literal || t.start < last || src.get(t.start..t.end) != Some(from) { continue; }
+        out.push_str(&src[last..t.start]);
+        out.push_str(to);
+        last = t.end;
     }
+    out.push_str(&src[last..]);
     out
 }

@@ -60,6 +60,52 @@ fn native_error() {
     assert!(err.message().contains("nope"));
 }
 
+/* A native error naming a class ahead of the message is catchable as that class. */
+#[test]
+fn native_error_class() {
+    let engine = Engine::builder()
+        .define("boom", |_| Err("ValueError: bad input".to_string()))
+        .build();
+    let program = engine
+        .compile("from host import boom\ntry:\n  boom()\nexcept ValueError:\n  print('caught')")
+        .unwrap();
+    assert_eq!(program.run().unwrap().text(), "caught\n");
+}
+
+/* A composite argument has no owned form, so the native refuses it instead of seeing a blank. */
+#[test]
+fn native_rejects_composite() {
+    let engine = Engine::builder()
+        .define("take", |args| Ok(Value::Int(args.len() as i64)))
+        .build();
+    let program = engine.compile("from host import take\ntake([1, 2])").unwrap();
+    let err = program.run().unwrap_err();
+    assert!(err.message().contains("scalar"));
+}
+
+/* Natives are positional only, a keyword argument is a TypeError rather than a silent drop. */
+#[test]
+fn native_rejects_kwargs() {
+    let engine = Engine::builder()
+        .define("double", |args| Ok(Value::Int(args[0].as_int().unwrap_or(0) * 2)))
+        .build();
+    let program = engine.compile("from host import double\ndouble(n=21)").unwrap();
+    let err = program.run().unwrap_err();
+    assert!(err.message().contains("keyword"));
+}
+
+/* An int past the NaN-box range crosses as a wide int and narrows back to Int. */
+#[test]
+fn native_wide_int_roundtrip() {
+    let engine = Engine::builder()
+        .define("big", |_| Ok(Value::Int(9_000_000_000_000_000)))
+        .build();
+    let program = engine
+        .compile("from host import big\ndef get():\n  return big()")
+        .unwrap();
+    assert_eq!(*program.call("get", &[]).unwrap().value(), Value::Int(9_000_000_000_000_000));
+}
+
 /* A tightened op budget trips the sandbox instead of hanging. */
 #[test]
 fn limits_enforced() {
@@ -70,23 +116,17 @@ fn limits_enforced() {
     assert!(matches!(err, Error::Run(_)));
 }
 
-/* Value conversions follow From and TryFrom. */
+/* Scalars convert into Value through From. */
 #[test]
 fn value_conversions() {
     assert_eq!(Value::from(7i64), Value::Int(7));
     assert_eq!(Value::from(true), Value::Bool(true));
     assert_eq!(Value::from("x"), Value::Str("x".to_string()));
 
-    assert_eq!(i64::try_from(Value::Int(7)), Ok(7));
-    assert_eq!(bool::try_from(Value::Bool(false)), Ok(false));
-    assert_eq!(String::try_from(Value::Str("y".to_string())), Ok("y".to_string()));
-
     // Scalar accessors mirror the variants.
     assert_eq!(Value::Bool(true).as_bool(), Some(true));
     assert_eq!(Value::Int(5).as_bool(), None);
-
-    // A mismatched TryFrom returns the original value.
-    assert_eq!(i64::try_from(Value::Str("z".to_string())), Err(Value::Str("z".to_string())));
+    assert_eq!(Value::Int(5).as_float(), Some(5.0));
 }
 
 /* Display renders values the way the language prints them. */
@@ -119,6 +159,14 @@ fn keyword_whole_word() {
     assert_eq!(program.run().unwrap().text(), "3\n");
 }
 
+/* A keyword alias reads tokens, so the same word inside a literal or a comment is left alone. */
+#[test]
+fn keyword_skips_literals() {
+    let engine = Engine::builder().keyword("imprime", "print").build();
+    let program = engine.compile("imprime('imprime')  # imprime\n").unwrap();
+    assert_eq!(program.run().unwrap().text(), "imprime\n");
+}
+
 /* Transforms chain, each fed the previous output. */
 #[test]
 fn transform_chain() {
@@ -141,13 +189,33 @@ fn call_function() {
     assert_eq!(*program.call("check", &[Value::Int(3)]).unwrap().value(), Value::Bool(false));
 }
 
-/* Each call re-runs from a clean state, so calls never leak between invocations. */
+/* Program::call runs on a fresh instance each time, so calls never leak between invocations. */
 #[test]
 fn call_is_isolated() {
     let engine = Engine::builder().build();
-    let program = engine.compile("def echo(s):\n  return s").unwrap();
-    assert_eq!(*program.call("echo", &[Value::from("a")]).unwrap().value(), Value::Str("a".to_string()));
-    assert_eq!(*program.call("echo", &[Value::from("b")]).unwrap().value(), Value::Str("b".to_string()));
+    let program = engine.compile("seen = []\ndef add(x):\n  seen.append(x)\n  return len(seen)").unwrap();
+    assert_eq!(*program.call("add", &[Value::Int(1)]).unwrap().value(), Value::Int(1));
+    assert_eq!(*program.call("add", &[Value::Int(2)]).unwrap().value(), Value::Int(1));
+}
+
+/* An instance keeps the module state alive, so successive calls build on each other. */
+#[test]
+fn instance_shares_state() {
+    let engine = Engine::builder().build();
+    let program = engine.compile("seen = []\ndef add(x):\n  seen.append(x)\n  return len(seen)").unwrap();
+    let mut inst = program.start().unwrap();
+    assert_eq!(*inst.call("add", &[Value::Int(1)]).unwrap().value(), Value::Int(1));
+    assert_eq!(*inst.call("add", &[Value::Int(2)]).unwrap().value(), Value::Int(2));
+}
+
+/* The module body runs once at start, so its output is never replayed onto a later call. */
+#[test]
+fn instance_runs_body_once() {
+    let engine = Engine::builder().build();
+    let program = engine.compile("print('boot')\ndef go():\n  print('call')\n  return 1").unwrap();
+    let mut inst = program.start().unwrap();
+    assert_eq!(inst.call("go", &[]).unwrap().text(), "call\n");
+    assert_eq!(inst.call("go", &[]).unwrap().text(), "call\n");
 }
 
 /* A call captures output printed during the call alongside the return value. */
@@ -167,4 +235,5 @@ fn call_unknown() {
     let program = engine.compile("x = 1").unwrap();
     assert!(matches!(program.call("missing", &[]), Err(Error::Run(_))));
 }
+
 
