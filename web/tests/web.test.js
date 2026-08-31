@@ -26,6 +26,27 @@ async function buildDist() {
     distBuilt = true;
 }
 
+/* Minimal wasm-pdk module built by hand, `__edge_abi_version` reports `abi` and `boom` traps when called. */
+function pdkModule(abi) {
+    const enc = new TextEncoder();
+    const leb = (n) => { const out = []; do { let b = n & 0x7f; n >>>= 7; if (n !== 0) b |= 0x80; out.push(b); } while (n !== 0); return out; };
+    const vec = (items) => [...leb(items.length), ...items.flat()];
+    const name = (s) => vec([...enc.encode(s)].map((b) => [b]));
+    const section = (id, body) => [id, ...leb(body.length), ...body];
+    const body = (code) => { const b = [0x00, ...code, 0x0b]; return [...leb(b.length), ...b]; };
+    const types = section(1, vec([[0x60, 0x00, 0x01, 0x7f], [0x60, 0x01, 0x7f, 0x01, 0x7f], [0x60, 0x03, 0x7f, 0x7f, 0x7f, 0x01, 0x7f]]));
+    const funcs = section(3, vec([[0], [1], [2]]));
+    const memory = section(5, vec([[0x00, 0x01]]));
+    const exports = section(7, vec([
+        [...name("memory"), 0x02, 0x00],
+        [...name("__edge_abi_version"), 0x00, 0x00],
+        [...name("__edge_alloc"), 0x00, 0x01],
+        [...name("boom"), 0x00, 0x02],
+    ]));
+    const code = section(10, vec([body([0x41, ...leb(abi)]), body([0x41, 0x00]), body([0x00])]));
+    return new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, ...types, ...funcs, ...memory, ...exports, ...code]);
+}
+
 /* Drives <edge-python> through index.html, boots one tag, then feeds every web.json case to its worker via run(), comparing #app for output cases and the run trace for error cases. Run with deno test --allow-all web/tests/web.test.js. */
 Deno.test("runtime: <edge-python> runs the corpus through index.html", async () => {
     await buildDist();
@@ -63,6 +84,8 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
             catch { return r.continue(); } // no local build, use the deployed wasm
         }
         if (u.host !== "localhost") return r.continue(); // any other CDN asset (compiler.wasm, runtime) passes through
+        if (u.pathname.endsWith("/app/trap.wasm")) return r.fulfill({ contentType: "application/wasm", body: pdkModule(1) });
+        if (u.pathname.endsWith("/app/abi2.wasm")) return r.fulfill({ contentType: "application/wasm", body: pdkModule(2) });
         const ext = u.pathname.slice(u.pathname.lastIndexOf("."));
         try { return r.fulfill({ contentType: TYPES[ext] ?? "application/octet-stream", body: readFileSync(REPO + u.pathname.slice(1)) }); }
         catch { return r.fulfill({ status: 404 }); }

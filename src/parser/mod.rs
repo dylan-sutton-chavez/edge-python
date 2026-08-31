@@ -83,26 +83,19 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.ssa_versions.get(name).copied().unwrap_or(0)
     }
 
-    pub(super) fn ssa_name<'a>(name: &str, ver: u32, buf: &'a mut [u8; 128]) -> &'a str {
-        let name_bytes = name.as_bytes();
-        let cap = buf.len();
-        let mut n = name_bytes.len().min(cap);
-        // Identifiers are utf8, so back off to a codepoint boundary before truncating.
-        while n > 0 && n < name_bytes.len() && (name_bytes[n] & 0xC0) == 0x80 {
-            n -= 1;
-        }
-        buf[..n].copy_from_slice(&name_bytes[..n]);
-        if n < cap {
-            buf[n] = b'_';
-            n += 1;
-        }
+    /* Allocates only when `name_ver` overflows `buf`. */
+    pub(super) fn ssa_name<'a>(name: &'a str, ver: u32, buf: &'a mut [u8; 128]) -> alloc::borrow::Cow<'a, str> {
         let mut tmp = itoa::Buffer::new();
-        let s = tmp.format(ver).as_bytes();
-        let take = s.len().min(cap - n);
-        buf[n..n + take].copy_from_slice(&s[..take]);
-        n += take;
-        // SAFETY holds because the name prefix ends on a codepoint boundary and the suffix is ascii.
-        unsafe { core::str::from_utf8_unchecked(&buf[..n]) }
+        let digits = tmp.format(ver);
+        let n = name.len() + 1 + digits.len();
+        if n > buf.len() {
+            return alloc::borrow::Cow::Owned(s!(str name, "_", str digits));
+        }
+        buf[..name.len()].copy_from_slice(name.as_bytes());
+        buf[name.len()] = b'_';
+        buf[name.len() + 1..n].copy_from_slice(digits.as_bytes());
+        // SAFETY holds because the name is copied whole and the suffix is ascii.
+        alloc::borrow::Cow::Borrowed(unsafe { core::str::from_utf8_unchecked(&buf[..n]) })
     }
 
     pub(super) fn increment_version(&mut self, name: &str) -> u32 {
@@ -114,7 +107,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
     pub(super) fn push_ssa_name(&mut self, name: &str, ver: u32) -> u16 {
         let mut buf = [0u8; 128];
-        self.chunk.push_name(Self::ssa_name(name, ver, &mut buf))
+        self.chunk.push_name(&Self::ssa_name(name, ver, &mut buf))
     }
 
     pub(super) fn emit_load_ssa(&mut self, name: String) {
@@ -263,10 +256,10 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             let mut ba = [0u8; 128];
             let mut bb = [0u8; 128];
             let mut bx = [0u8; 128];
-            let ia = self.chunk.push_name(Self::ssa_name(name, va, &mut ba));
-            let ib = self.chunk.push_name(Self::ssa_name(name, vb, &mut bb));
+            let ia = self.chunk.push_name(&Self::ssa_name(name, va, &mut ba));
+            let ib = self.chunk.push_name(&Self::ssa_name(name, vb, &mut bb));
             let v = self.increment_version(name);
-            let ix = self.chunk.push_name(Self::ssa_name(name, v, &mut bx));
+            let ix = self.chunk.push_name(&Self::ssa_name(name, v, &mut bx));
 
             self.chunk.phi_sources.push((ia, ib));
             self.chunk.emit(OpCode::Phi, ix);
@@ -549,7 +542,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             let n = self.source.len();
             self.errors.push(Diagnostic {
                 start: n, end: n,
-                msg: "program too large: exceeded maximum instruction limit".to_string(),
+                msg: "program too large: exceeded the 65535 instruction, name, or constant limit".to_string(),
             });
         }
 

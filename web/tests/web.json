@@ -9,6 +9,8 @@
     { "script": "render(str(echo([2**70, 7])))", "expect": "[1180591620717411303424, 7]" },
     { "script": "render(f'{2 ** 10}')", "expect": "1024" },
     { "script": "render(str(10 // 0))", "error": "ZeroDivisionError" },
+    { "script": "from trap import boom\nrender(str(boom()))", "error": "native module trapped" },
+    { "script": "from abi2 import boom\nrender('loaded')", "error": "speaks ABI v2" },
     { "script": "import calc\nrender(str(calc.add(2, 3)))", "expect": "5" },
     { "script": "from json import dumps\nrender(dumps(True))", "expect": "true" },
     { "script": "from time import strftime, gmtime\nrender(strftime('%Y-%m-%d', gmtime(0)))", "expect": "1970-01-01" },

@@ -94,7 +94,7 @@ runs:
       shell: bash
       run: ls -lh target/wasm32-unknown-unknown/release/compiler.wasm
 
-    # Three passes: -Oz with traps-never-happen, reflatten for a fresh CFG, then a final converge sweep.
+    # Three passes, -Oz, reflatten for a fresh CFG, then a final converge sweep. Traps stay in, they guard bounds.
     - name: Optimize
       if: inputs.mode == 'build'
       shell: bash
@@ -107,7 +107,6 @@ runs:
           --enable-bulk-memory-opt \
           --enable-nontrapping-float-to-int \
           --enable-sign-ext \
-          -tnh \
           -o /tmp/wasm_stage1.wasm "$INPUT"
 
         wasm-opt --flatten --rereloop -Oz -Oz \

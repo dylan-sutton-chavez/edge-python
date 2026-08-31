@@ -131,7 +131,7 @@ enum Cmd {
 }
 
 fn main() -> Result<()> {
-    ctrlc::set_handler(|| std::process::exit(130)).ok();
+    ctrlc::set_handler(|| { engine::web::kill_browser(); std::process::exit(130); }).ok();
 
     // A standalone .edge carries its project, run that instead of parsing subcommands.
     if let Some(payload) = cmd::build::embedded_payload() {

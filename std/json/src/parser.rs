@@ -12,22 +12,24 @@ pub struct LoadCtx {
     pub parse_constant: Option<Handle>,
 }
 
+const MAX_DEPTH: usize = 1000;
+
 // Recursive-descent parser, composites via `Handle::new_dict`/`new_list`/`set_item`/`list.append`, primitives via `encode`.
 pub fn parse(src: &str, ctx: &LoadCtx) -> Result<Handle> {
     let mut tk = Tokenizer::new(src);
-    let value = parse_value(&mut tk, ctx)?;
+    let value = parse_value(&mut tk, ctx, 0)?;
     match tk.next_token().map_err(to_pdk_err)? {
         Token::Eof => Ok(value),
         _ => Err(value_err(tk.pos(), "trailing data after JSON value")),
     }
 }
 
-fn parse_value(tk: &mut Tokenizer, ctx: &LoadCtx) -> Result<Handle> {
+fn parse_value(tk: &mut Tokenizer, ctx: &LoadCtx, depth: usize) -> Result<Handle> {
     let t = tk.next_token().map_err(to_pdk_err)?;
-    parse_value_with(tk, t, ctx)
+    parse_value_with(tk, t, ctx, depth)
 }
 
-fn parse_value_with(tk: &mut Tokenizer, t: Token, ctx: &LoadCtx) -> Result<Handle> {
+fn parse_value_with(tk: &mut Tokenizer, t: Token, ctx: &LoadCtx, depth: usize) -> Result<Handle> {
     match t {
         Token::Null => encode(Value::None),
         Token::True => encode(Value::Bool(true)),
@@ -62,8 +64,11 @@ fn parse_value_with(tk: &mut Tokenizer, t: Token, ctx: &LoadCtx) -> Result<Handl
             }
         }
         Token::Str(s) => encode(Value::Bytes(s.into_bytes())),
-        Token::LBracket => parse_array(tk, ctx),
-        Token::LBrace => parse_object(tk, ctx),
+        Token::LBracket | Token::LBrace if depth >= MAX_DEPTH => {
+            Err(Error::Runtime(format!("maximum JSON nesting depth ({}) exceeded at byte {}", MAX_DEPTH, tk.pos())))
+        }
+        Token::LBracket => parse_array(tk, ctx, depth + 1),
+        Token::LBrace => parse_object(tk, ctx, depth + 1),
         Token::RBracket | Token::RBrace | Token::Comma | Token::Colon => {
             Err(value_err(tk.pos(), "unexpected token"))
         }
@@ -71,13 +76,13 @@ fn parse_value_with(tk: &mut Tokenizer, t: Token, ctx: &LoadCtx) -> Result<Handl
     }
 }
 
-fn parse_array(tk: &mut Tokenizer, ctx: &LoadCtx) -> Result<Handle> {
+fn parse_array(tk: &mut Tokenizer, ctx: &LoadCtx, depth: usize) -> Result<Handle> {
     let list = Handle::new_list()?;
     let first = tk.next_token().map_err(to_pdk_err)?;
     if matches!(first, Token::RBracket) { return Ok(list); }
     let mut current = first;
     loop {
-        let item = parse_value_with(tk, current, ctx)?;
+        let item = parse_value_with(tk, current, ctx, depth)?;
         let _ = list.call("append", &[item.raw()])?;
         match tk.next_token().map_err(to_pdk_err)? {
             Token::Comma => current = tk.next_token().map_err(to_pdk_err)?,
@@ -87,10 +92,10 @@ fn parse_array(tk: &mut Tokenizer, ctx: &LoadCtx) -> Result<Handle> {
     }
 }
 
-fn parse_object(tk: &mut Tokenizer, ctx: &LoadCtx) -> Result<Handle> {
+fn parse_object(tk: &mut Tokenizer, ctx: &LoadCtx, depth: usize) -> Result<Handle> {
     // `object_pairs_hook` wins over `object_hook` per Python spec, so gather (key, value) pairs and call the hook on them, skipping dict build.
     if ctx.object_pairs_hook.is_some() {
-        return parse_object_pairs(tk, ctx);
+        return parse_object_pairs(tk, ctx, depth);
     }
     let dict = Handle::new_dict()?;
     let first = tk.next_token().map_err(to_pdk_err)?;
@@ -108,7 +113,7 @@ fn parse_object(tk: &mut Tokenizer, ctx: &LoadCtx) -> Result<Handle> {
             Token::Colon => {}
             _ => return Err(value_err(tk.pos(), "expected ':' after object key")),
         }
-        let value = parse_value(tk, ctx)?;
+        let value = parse_value(tk, ctx, depth)?;
         dict.set_item(&key, &value)?;
         match tk.next_token().map_err(to_pdk_err)? {
             Token::Comma => current = tk.next_token().map_err(to_pdk_err)?,
@@ -118,7 +123,7 @@ fn parse_object(tk: &mut Tokenizer, ctx: &LoadCtx) -> Result<Handle> {
     }
 }
 
-fn parse_object_pairs(tk: &mut Tokenizer, ctx: &LoadCtx) -> Result<Handle> {
+fn parse_object_pairs(tk: &mut Tokenizer, ctx: &LoadCtx, depth: usize) -> Result<Handle> {
     let mut pairs: Vec<(Handle, Handle)> = Vec::new();
     let first = tk.next_token().map_err(to_pdk_err)?;
     if !matches!(first, Token::RBrace) {
@@ -133,7 +138,7 @@ fn parse_object_pairs(tk: &mut Tokenizer, ctx: &LoadCtx) -> Result<Handle> {
                 Token::Colon => {}
                 _ => return Err(value_err(tk.pos(), "expected ':' after object key")),
             }
-            let value = parse_value(tk, ctx)?;
+            let value = parse_value(tk, ctx, depth)?;
             pairs.push((key, value));
             match tk.next_token().map_err(to_pdk_err)? {
                 Token::Comma => current = tk.next_token().map_err(to_pdk_err)?,

@@ -205,7 +205,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 let head = self.advance_text();
                 let mut targets = vec![s!("*", str &head)];
                 while self.eat_if(TokenType::Comma) {
-                    if !matches!(self.peek(), Some(TokenType::Name)) { break; }
+                    if !matches!(self.peek(), Some(TokenType::Name | TokenType::Underscore)) { break; }
                     targets.push(self.advance_text());
                 }
                 self.eat(TokenType::Equal);
@@ -226,7 +226,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 self.chunk.emit(OpCode::ReturnValue, 0);
                 false
             }
-            Some(TokenType::Name) => {
+            Some(TokenType::Name | TokenType::Underscore) => {
                 let t = self.advance();
                 self.name_stmt(t)
             }
@@ -348,13 +348,10 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
     /* Annotation discards tokens up to `=`, Edge Python is dynamically typed. Returns true when an assignment follows. */
     fn skip_annotation(&mut self) -> bool {
-        while !matches!(
-            self.peek(),
-            Some(TokenType::Equal | TokenType::Dedent | TokenType::Endmarker) | None
-        ) {
+        while !matches!(self.peek_same_line(), Some(TokenType::Equal) | None) {
             self.advance();
         }
-        matches!(self.peek(), Some(TokenType::Equal))
+        matches!(self.peek_same_line(), Some(TokenType::Equal))
     }
 
     /* Per-opcode stack effect for target segmentation, None = shape unknown, caller bails. */
@@ -487,7 +484,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 elems.push(TupleElem::Named(nm, false));
                 continue;
             }
-            if matches!(self.peek(), Some(TokenType::Name)) {
+            if matches!(self.peek(), Some(TokenType::Name | TokenType::Underscore)) {
                 let t = self.advance();
                 let nm = self.lexeme(&t).to_string();
                 if matches!(self.peek(), Some(TokenType::Comma | TokenType::Equal | TokenType::Newline | TokenType::Endmarker) | None) {
@@ -499,7 +496,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 self.flush_named(&mut elems);
                 let lo = self.chunk.instructions.len();
                 self.emit_load_ssa(nm);
-                self.expr_tails();
+                self.expr_tails(lo);
                 elems.push(TupleElem::Range(lo, self.chunk.instructions.len()));
                 continue;
             }
@@ -547,6 +544,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     pub(super) fn name_stmt(&mut self, t: Token) -> bool {
         let name = self.lexeme(&t).to_string();
         let start = self.chunk.instructions.len();
+        self.saw_newline = false;
 
     if self.eat_if(TokenType::Colon) && !self.skip_annotation() {
         return false;
@@ -587,7 +585,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                         return false;
                     }
                     self.chunk.emit(OpCode::GetItem, 0);
-                    self.expr_tails();
+                    self.expr_tails(start);
                     if matches!(self.peek(), Some(TokenType::Comma)) {
                         return self.unpack_or_tuple(start, None);
                     }
@@ -603,7 +601,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     false
                 } else {
                     self.chunk.emit(OpCode::GetItem, 0);
-                    self.expr_tails();
+                    self.expr_tails(start);
                     if matches!(self.peek(), Some(TokenType::Comma)) {
                         return self.unpack_or_tuple(start, None);
                     }
@@ -668,7 +666,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                             self.chunk.emit(OpCode::GetItem, 0);
                         }
                     }
-                    self.expr_tails();
+                    self.expr_tails(start);
                     if matches!(self.peek(), Some(TokenType::Comma)) {
                         return self.unpack_or_tuple(start, None);
                     }
@@ -682,7 +680,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 // `name(...)` at statement level, allow postfix chains like `super().__init__(x)`.
                 let leaves = self.call(name);
                 if leaves {
-                    self.expr_tails();
+                    self.expr_tails(start);
                     if matches!(self.peek(), Some(TokenType::Comma)) {
                         return self.unpack_or_tuple(start, None);
                     }
@@ -691,7 +689,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             }
             _ => {
                 self.emit_load_ssa(name);
-                self.expr_tails();
+                self.expr_tails(start);
                 self.diag_stray_colon();
                 true
             }

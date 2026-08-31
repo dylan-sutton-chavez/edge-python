@@ -183,9 +183,9 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             if old_ver == new_ver { continue; }
             let mut ob = [0u8; 128];
             let old_name = Self::ssa_name(var, old_ver, &mut ob);
-            let Some(&old_slot) = self.chunk.name_index.get(old_name) else { continue };
+            let Some(&old_slot) = self.chunk.name_index.get(&*old_name) else { continue };
             let mut nb = [0u8; 128];
-            let new_slot = self.chunk.push_name(Self::ssa_name(var, new_ver, &mut nb));
+            let new_slot = self.chunk.push_name(&Self::ssa_name(var, new_ver, &mut nb));
             var_map.push((old_slot, new_slot));
         }
         (loop_starts, for_iters, var_map)
@@ -391,6 +391,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         // Imported natives shadow builtins, matching Python `from x import *` rebinding.
         if let Some(&extern_idx) = self.chunk.extern_index.get(&name) {
             let (pos, kw) = self.parse_args();
+            if pos > 0xF || kw > 0xF { self.error("native calls take at most 15 positional and 15 keyword arguments"); }
             // Operand packs extern_idx<<8 | kw<<4 | pos, same layout as Call.
             let encoded = (extern_idx << 8) | ((kw & 0xF) << 4) | (pos & 0xF);
             self.chunk.emit(OpCode::CallExtern, encoded);
@@ -528,6 +529,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         });
         self.eat(TokenType::Rpar);
         self.expr_depth -= 1;
+        if pos > 0xFF || kw > 0xFF { self.error("too many arguments in call (max 255 positional and 255 keyword)"); }
         (pos, kw)
     }
 

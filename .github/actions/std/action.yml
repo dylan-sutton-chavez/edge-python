@@ -98,7 +98,7 @@ runs:
       shell: bash
       run: ls -lh "std/${{ inputs.package }}/target/wasm32-unknown-unknown/release/${{ inputs.package }}.wasm"
 
-    # Two passes, -Oz traps-never-happen, then reflatten for a fresh CFG.
+    # Two passes, -Oz then reflatten for a fresh CFG. Traps stay in, they guard bounds.
     - name: Optimize
       if: inputs.package != 'test'
       shell: bash
@@ -111,7 +111,6 @@ runs:
           --enable-bulk-memory-opt \
           --enable-nontrapping-float-to-int \
           --enable-sign-ext \
-          -tnh \
           -o /tmp/wasm_stage1.wasm "$WASM"
 
         wasm-opt --flatten --rereloop -Oz -Oz \

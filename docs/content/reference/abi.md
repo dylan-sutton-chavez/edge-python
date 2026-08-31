@@ -42,7 +42,7 @@ pub extern "C" fn __edge_abi_version() -> u32;
 
 Guests SHOULD also export `__edge_free(ptr: *mut u8, size: u32)` so the host can release that staging after each call. The host treats it as optional, and without it staging accumulates for the instance's lifetime.
 
-`__edge_abi_version` returns the wire-format version (currently `1`). The CLI's native loader reads it and refuses a mismatch. The browser shim does not read it yet, because every loader targets version 1. The check becomes load-bearing when v2 ships.
+`__edge_abi_version` returns the wire-format version (currently `1`). Both the CLI's native loader and the browser shim read it and refuse a mismatch, so a v2 module never decodes garbage on a v1 host.
 
 The reference `wasm-pdk` crate emits all three symbols automatically. `EDGE_ABI_VERSION` lives in the shared `wasm-abi` crate (no_std, zero deps) so the host and every PDK read the same value.
 

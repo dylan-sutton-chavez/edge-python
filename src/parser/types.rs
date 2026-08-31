@@ -205,6 +205,7 @@ impl SSAChunk {
 
     pub(super) fn push_const(&mut self, v: Value) -> u16 {
         if self.constants.len() >= u16::MAX as usize {
+            self.overflow = true;
             return 0;
         }
         self.constants.push(v);
@@ -214,6 +215,7 @@ impl SSAChunk {
     pub(super) fn push_name(&mut self, n: &str) -> u16 {
         if let Some(&i) = self.name_index.get(n) { return i; }
         if self.names.len() >= u16::MAX as usize {
+            self.overflow = true;
             return 0;
         }
         let i = self.names.len() as u16;

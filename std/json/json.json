@@ -92,6 +92,14 @@
     "error": "unterminated string"
   },
   {
+    "src": "print(len(loads('[' * 100 + ']' * 100)))",
+    "output": ["1"]
+  },
+  {
+    "src": "loads('[' * 1001)",
+    "error": "maximum JSON nesting depth (1000) exceeded"
+  },
+  {
     "src": "loads('1 2')",
     "error": "trailing data"
   },

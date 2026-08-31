@@ -62,9 +62,10 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    pub(super) fn expr_tails(&mut self) {
+    pub(super) fn expr_tails(&mut self, start: usize) {
         self.postfix_tail();
         self.infix_bp(0);
+        self.ternary_tail(start);
     }
 
     /* Pratt parser, unary prefix then infix loop via `binding_power` table. Bounds every recursive descent (prefix `-`/`+`/`~`/`await`/`not`, right-associative `**`, infix right operands) so deep chains raise instead of overflowing the native/WASM stack. */
@@ -204,7 +205,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         let errs_before = self.errors.len();
         let t = self.advance();
         match t.kind {
-            TokenType::Name => self.name(t),
+            TokenType::Name | TokenType::Underscore => self.name(t),
             TokenType::String | TokenType::FstringStart => self.string_group(t),
             TokenType::Bytes => {
                 // Adjacent bytes literals concat, mixing with str surfaces a diagnostic.

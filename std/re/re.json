@@ -100,6 +100,18 @@
     "error": "lookbehind requires fixed width"
   },
   {
+    "src": "print(len(fullmatch(r'(ab)+', 'ab' * 150)))",
+    "output": ["300"]
+  },
+  {
+    "src": "fullmatch(r'(ab)+', 'ab' * 3000)",
+    "error": "catastrophic backtracking"
+  },
+  {
+    "src": "findall(r'(a+)+$', 'a' * 40 + 'b')",
+    "error": "catastrophic backtracking"
+  },
+  {
     "src": "search('(a+)+$', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!')",
     "error": "catastrophic backtracking"
   },

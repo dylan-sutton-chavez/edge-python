@@ -67,7 +67,9 @@ Source must be under 10 MiB. Larger input is rejected at lex time. The remaining
 | Indent depth | 100 | `indentation depth exceeds maximum (100)` |
 | F-string nesting depth | 200 | `f-string nesting depth exceeds maximum (200)` |
 | Expression nesting depth | 200 | `expression too deeply nested` |
-| Instructions per chunk | 65,535 | `program too large: exceeded maximum instruction limit` |
+| Instructions, names, or constants per chunk | 65,535 | `program too large: exceeded the 65535 instruction, name, or constant limit` |
+| Call arguments | 255 positional, 255 keyword | `too many arguments in call (max 255 positional and 255 keyword)` |
+| Native imports per module | 256 | `too many native imports (max 256 per module)` |
 
 Separately, `repr` output is truncated with a trailing `, ...` past 1,000,000 characters, so printing a huge structure cannot exhaust memory.
 
@@ -90,7 +92,7 @@ Syntax and resolution errors are reported as diagnostics with byte offsets into 
 | `'break' outside loop` / `'continue' outside loop` | Misplaced control keyword |
 | `default 'except:' must be last` | Bare `except` not at the end |
 | `expression too deeply nested` | Past the expression depth cap |
-| `program too large: exceeded maximum instruction limit` | Past the instruction cap |
+| `program too large: exceeded the 65535 instruction, name, or constant limit` | Past the chunk cap |
 
 Import failures are compile-time diagnostics too, including modules Edge Python does not ship (`os`, `sys`, `asyncio`). See [Modules](/reference/modules#resolution-errors) for those message formats.
 

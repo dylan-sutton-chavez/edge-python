@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use headless_chrome::{Browser, LaunchOptions};
+use std::sync::atomic::{AtomicU32, Ordering};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -96,6 +97,18 @@ pub fn run(src: &str, manifest: &Manifest, base: Option<&str>, input: Option<&st
     Ok(outcome.exit_code.unwrap_or(0))
 }
 
+/// Pid of the launched Chromium, reaped when process::exit skips Browser's Drop.
+static BROWSER_PID: AtomicU32 = AtomicU32::new(0);
+
+pub fn kill_browser() {
+    let pid = BROWSER_PID.swap(0, Ordering::SeqCst);
+    if pid == 0 { return; }
+    #[cfg(unix)]
+    { let _ = std::process::Command::new("kill").arg(pid.to_string()).status(); }
+    #[cfg(windows)]
+    { let _ = std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).status(); }
+}
+
 /// Launch headless Chromium against a system-installed browser. install.sh provisions it.
 fn launch() -> Result<Browser> {
     let mut builder = LaunchOptions::default_builder();
@@ -104,7 +117,9 @@ fn launch() -> Result<Browser> {
     builder.idle_browser_timeout(Duration::from_secs(60 * 60 * 24));
     builder.path(Some(resolve_chrome()?));
     let options = builder.build().map_err(|e| anyhow!("building launch options: {e}"))?;
-    Browser::new(options).map_err(|e| anyhow!("{e}"))
+    let browser = Browser::new(options).map_err(|e| anyhow!("{e}"))?;
+    BROWSER_PID.store(browser.get_process_id().unwrap_or(0), Ordering::SeqCst);
+    Ok(browser)
 }
 
 /// Env override, bundled shell, system Chrome, Playwright.

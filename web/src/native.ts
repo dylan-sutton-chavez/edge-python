@@ -40,6 +40,8 @@ export interface NativeLoadCtx {
 }
 
 /* `nativeTable` is indexed by `baseId` from `register_native_module`, entries are wasmpdk fns or JS handlers, dispatched by `host_call_native`. */
+const ABI_VERSION = 1;
+
 export const nativeTable: NativeFn[] = [];
 
 export function resetNativeTable(): void {
@@ -136,6 +138,10 @@ async function builtinWasmPdkLoader(module: WebAssembly.Module, ctx: NativeLoadC
             `native module missing '__edge_alloc(size: u32) -> *mut u8';` +
             ` see /reference/abi for the contract`
         );
+    }
+    if (typeof instance.exports.__edge_abi_version === 'function') {
+        const v = (instance.exports.__edge_abi_version as () => number)();
+        if (v !== ABI_VERSION) throw new Error(`native module speaks ABI v${v}, this runtime speaks v${ABI_VERSION}`);
     }
 
     const names: string[] = [];

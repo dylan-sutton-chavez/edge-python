@@ -224,6 +224,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                         continue;
                     };
                     let idx = self.chunk.extern_table.len() as u16;
+                    if idx > 0xFF { self.error_at(span.0, span.1, "too many native imports (max 256 per module)"); continue; }
                     self.chunk.extern_table.push(binding_to_extern(b));
                     self.chunk.extern_index.insert(alias.clone(), idx);
                 }
@@ -274,6 +275,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             Resolved::Native { bindings, classes, consts, canonical } => {
                 for b in &bindings {
                     let idx = self.chunk.extern_table.len() as u16;
+                    if idx > 0xFF { self.error_at(span.0, span.1, "too many native imports (max 256 per module)"); break; }
                     self.chunk.extern_table.push(binding_to_extern(b));
                     self.chunk.extern_index.insert(b.name.clone(), idx);
                 }

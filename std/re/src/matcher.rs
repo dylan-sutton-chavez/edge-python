@@ -13,23 +13,29 @@ struct Rep<'a> {
     greedy: bool,
 }
 
+/* Stack allowance per call, Chromium overflows near 3x this. */
+const MAX_STACK: usize = if cfg!(target_arch = "wasm32") { 64 * 1024 } else { 512 * 1024 };
+
 /* Backtracking matcher over codepoints, so offsets are Unicode aware. */
 pub struct Matcher<'a> {
     input: &'a [char],
     flags: Flags,
-    steps: Cell<u64>, // backtracking work counter for the current attempt
+    steps: Cell<u64>, // backtracking work counter, cumulative per API call
     budget: u64, // abort once the counter passes this
+    stack_base: usize, // caller frame address
+    too_deep: Cell<bool>, // a frame crossed MAX_STACK
 }
 
 impl<'a> Matcher<'a> {
     pub fn new(input: &'a [char], flags: Flags) -> Self {
         // Linear allowance, legitimate matches stay under it, blowups race past it.
         let budget = 100_000 + 2_000 * input.len() as u64;
-        Self { input, flags, steps: Cell::new(0), budget }
+        let base = 0u8;
+        Self { input, flags, steps: Cell::new(0), budget, stack_base: &base as *const u8 as usize, too_deep: Cell::new(false) }
     }
 
-    /* True when the last attempt exhausted its step budget. */
-    pub fn exceeded(&self) -> bool { self.steps.get() > self.budget }
+    /* Budget or stack exhausted over the whole call. */
+    pub fn exceeded(&self) -> bool { self.steps.get() > self.budget || self.too_deep.get() }
 
     /* Leftmost search from the beginning. */
     pub fn search(&self, root: &Node, ngroups: usize) -> Option<Caps> {
@@ -38,7 +44,6 @@ impl<'a> Matcher<'a> {
 
     /* Leftmost search starting no earlier than `from`. */
     pub fn search_from(&self, root: &Node, ngroups: usize, from: usize) -> Option<Caps> {
-        self.steps.set(0);
         for start in from..=self.input.len() {
             if self.exceeded() { break; } // stop scanning once the budget is gone
             let mut caps: Caps = empty_caps(ngroups);
@@ -54,7 +59,6 @@ impl<'a> Matcher<'a> {
 
     /* Anchored match at position zero, optionally requiring full consumption. */
     pub fn match_at(&self, root: &Node, ngroups: usize, full: bool) -> Option<Caps> {
-        self.steps.set(0);
         let mut caps = empty_caps(ngroups);
         let mut found: Option<usize> = None;
         let len = self.input.len();
@@ -71,6 +75,8 @@ impl<'a> Matcher<'a> {
         let n = self.steps.get() + 1;
         self.steps.set(n);
         if n > self.budget { return false; } // budget gone, unwind every branch
+        let here = 0u8;
+        if self.stack_base.abs_diff(&here as *const u8 as usize) > MAX_STACK { self.too_deep.set(true); return false; }
         match node {
             Node::Empty => k(pos, caps),
             Node::Char(_) | Node::AnyChar | Node::Class { .. } => {

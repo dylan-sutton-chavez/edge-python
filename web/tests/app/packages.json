@@ -1,6 +1,8 @@
 {
     "imports": {
-        "calc": "./calculator.py"
+        "calc": "./calculator.py",
+        "trap": "./trap.wasm",
+        "abi2": "./abi2.wasm"
     },
     "system": {
         "ui": "./ui.js"

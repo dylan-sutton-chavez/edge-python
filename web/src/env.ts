@@ -86,7 +86,13 @@ export function makeCompilerEnv({ getExports, onLine, fetchedSources, lockfile, 
                 guestView().setUint32(g_argv + i * 4, compView().getUint32(argv_ptr + i * 4, true), true);
             }
 
-            const status = fn(g_argv, argc, g_out) as number;
+            let status: number;
+            try {
+                status = fn(g_argv, argc, g_out) as number;
+            } catch (e) {
+                stashError(exports, `native module trapped: ${errMsg(e)}`);
+                return 1;
+            }
             if (status === 0) {
                 compView().setUint32(out_ptr, guestView().getUint32(g_out, true), true);
             }
