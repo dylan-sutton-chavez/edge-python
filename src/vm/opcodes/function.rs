@@ -293,7 +293,8 @@ impl<'a> VM<'a> {
 
         // Pure-call memoisation. Disabled under impure outer frames (stale-view risk) or kwargs (cache key only spans positionals).
         let outer_impure = self.observed_impure.last().copied().unwrap_or(false);
-        if num_kw == 0 && !outer_impure
+        let memo_ok = self.memo_ok.get(fi).copied().unwrap_or(false);
+        if num_kw == 0 && !outer_impure && memo_ok
             && let Some(cached) = self.templates.lookup(fi, &positional, &self.heap) {
                 self.push(cached);
                 return Ok(());
@@ -364,7 +365,7 @@ impl<'a> VM<'a> {
             let val = self.heap.alloc(HeapObj::List(Rc::new(RefCell::new(fn_yields))))?;
             self.push(val);
         } else {
-            if num_kw == 0 && body.is_pure && !callee_impure {
+            if num_kw == 0 && memo_ok && body.is_pure && !callee_impure {
                 self.templates.record(fi, &positional, result, &self.heap);
             }
             self.push(result);

@@ -20,9 +20,9 @@ impl<'a> VM<'a> {
         let mut bind: Option<(Val, Val)> = None;
         if obj.is_heap() && let HeapObj::Instance(cls_val, attrs) = self.heap.get(obj) {
             let cls_val = *cls_val;
-            let found = attrs.borrow().entries.iter()
+            let found = attrs.borrow().iter()
                 .find(|(k, _)| k.is_heap() && matches!(self.heap.get(*k), HeapObj::Str(s) if s.as_str() == name))
-                .map(|(_, v)| *v);
+                .map(|(_, v)| v);
             if let Some(v) = found { self.push(v); return Ok(()); }
             if let Some((mv, defining)) = self.lookup_class_member(cls_val, &name) {
                 if mv.is_heap() && matches!(self.heap.get(mv), HeapObj::Func(..)) { bind = Some((mv, defining)); }
@@ -82,8 +82,8 @@ impl<'a> VM<'a> {
         // Instance attribute, instance dict or the user class chain.
         if obj.is_heap() && let HeapObj::Instance(cls_val, attrs) = self.heap.get(obj) {
             let cls_val = *cls_val;
-            let in_dict = attrs.borrow().entries.iter()
-                .any(|(k, _)| k.is_heap() && matches!(self.heap.get(*k), HeapObj::Str(s) if s.as_str() == name));
+            let in_dict = attrs.borrow().iter()
+                .any(|(k, _)| k.is_heap() && matches!(self.heap.get(k), HeapObj::Str(s) if s.as_str() == name));
             if in_dict || self.lookup_class_member(cls_val, &name).is_some() {
                 self.push(Val::bool(true)); return Ok(());
             }
@@ -170,8 +170,8 @@ impl<'a> VM<'a> {
         // Strings <=128 bytes are interned, so re-alloc'ing yields the same Val key StoreAttr used.
         let key = self.heap.alloc(HeapObj::Str(name.to_string()))?;
         let existed = if let HeapObj::Instance(_, attrs) = self.heap.get(obj) {
-            let had = attrs.borrow().entries.iter()
-                .any(|(k, _)| k.is_heap() && matches!(self.heap.get(*k), HeapObj::Str(s) if s.as_str() == name));
+            let had = attrs.borrow().iter()
+                .any(|(k, _)| k.is_heap() && matches!(self.heap.get(k), HeapObj::Str(s) if s.as_str() == name));
             if had { attrs.borrow_mut().remove(&key, &self.heap); }
             had
         } else { false };
@@ -205,7 +205,7 @@ impl<'a> VM<'a> {
         // Two passes, drop the heap borrow before `alloc()`. Modules materialise names as `Vec<String>` first.
         enum Source { Instance(Vec<(Val, Val)>), Module(Vec<(String, Val)>) }
         let src = match self.heap.get(obj) {
-            HeapObj::Instance(_, attrs) => Source::Instance(attrs.borrow().entries.clone()),
+            HeapObj::Instance(_, attrs) => Source::Instance(attrs.borrow().iter().collect()),
             HeapObj::Module(_, attrs) => Source::Module(attrs.clone()),
             _ => return Err(cold_type("vars() requires an instance or module")),
         };

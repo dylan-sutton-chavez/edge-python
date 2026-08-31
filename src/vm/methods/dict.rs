@@ -41,7 +41,7 @@ pub fn clear(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
 // `dict.popitem()`, pop the last (k, v), KeyError on empty dict.
 pub fn popitem(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
     let pair = dict_mut(vm, recv, "popitem: receiver is not a dict", |dict, heap| {
-        let (k, v) = dict.entries.last().copied().ok_or(cold_key("popitem(): dictionary is empty"))?;
+        let (k, v) = dict.last().ok_or(cold_key("popitem(): dictionary is empty"))?;
         dict.remove(&k, heap);
         Ok((k, v))
     })?;
@@ -71,7 +71,7 @@ pub fn update(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
     let mut pairs: Vec<(Val, Val)> = Vec::new();
     for &src in pos {
         if let Some(HeapObj::Dict(rc)) = vm.heap.try_get(src) {
-            pairs.extend(rc.borrow().entries.iter().copied());
+            pairs.extend(rc.borrow().iter());
         } else {
             for it in vm.extract_iter(src, true)? {
                 let pair = match vm.heap.try_get(it) {

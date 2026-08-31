@@ -266,43 +266,51 @@ impl ValSet {
     }
 }
 
-/* Insertion-ordered dict, Vec for ordering, content-hashed HashTable<usize> index for O(1) get. */
+/* Insertion-ordered dict, Vec for ordering, content-hashed HashTable<usize> index for O(1) get, removed entries become undef tombstones. */
 #[derive(Clone, Debug)]
 pub struct DictMap {
-    pub entries: Vec<(Val, Val)>,
+    entries: Vec<(Val, Val)>,
     index: hashbrown::HashTable<usize>,
+    live: usize,
 }
 
 impl DictMap {
-    /* Entries only, `rebuild_index` once the heap lives. */
-    pub(crate) fn from_entries(entries: Vec<(Val, Val)>) -> Self {
-        Self { entries, index: hashbrown::HashTable::new() }
+    pub fn new() -> Self { Self::with_capacity(0) }
+
+    pub fn with_capacity(cap: usize) -> Self {
+        Self { entries: Vec::with_capacity(cap), index: hashbrown::HashTable::with_capacity(cap), live: 0 }
     }
 
-    /* Rehash after restore, hashing reads the heap. */
+    /* Entries only, `rebuild_index` once the heap lives. */
+    pub(crate) fn from_entries(entries: Vec<(Val, Val)>) -> Self {
+        let live = entries.len();
+        Self { entries, index: hashbrown::HashTable::new(), live }
+    }
+
+    /* Rehash after restore or compaction, hashing reads the heap. */
     pub(crate) fn rebuild_index(&mut self, heap: &HeapPool) {
         self.index.clear();
         let e = &self.entries;
         for i in 0..e.len() {
+            if e[i].0.is_undef() { continue; }
             let h = hash_val_with_heap(e[i].0, heap);
             self.index.insert_unique(h, i, |&j| hash_val_with_heap(e[j].0, heap));
         }
     }
 
-    pub fn with_capacity(cap: usize) -> Self {
-        Self { entries: Vec::with_capacity(cap), index: hashbrown::HashTable::with_capacity(cap) }
+    #[inline]
+    fn find(&self, key: Val, heap: &HeapPool) -> Option<usize> {
+        let e = &self.entries;
+        let h = hash_val_with_heap(key, heap);
+        self.index.find(h, |&i| eq_vals_with_heap(e[i].0, key, heap)).copied()
     }
 
     pub fn get(&self, key: &Val, heap: &HeapPool) -> Option<&Val> {
-        let e = &self.entries;
-        let h = hash_val_with_heap(*key, heap);
-        self.index.find(h, |&i| eq_vals_with_heap(e[i].0, *key, heap)).map(|&i| &self.entries[i].1)
+        self.find(*key, heap).map(|i| &self.entries[i].1)
     }
 
     pub fn contains_key(&self, key: &Val, heap: &HeapPool) -> bool {
-        let e = &self.entries;
-        let h = hash_val_with_heap(*key, heap);
-        self.index.find(h, |&i| eq_vals_with_heap(e[i].0, *key, heap)).is_some()
+        self.find(*key, heap).is_some()
     }
 
     pub fn insert(&mut self, key: Val, value: Val, heap: &HeapPool) {
@@ -310,44 +318,59 @@ impl DictMap {
         let e = &self.entries;
         if let Some(&i) = self.index.find(h, |&i| eq_vals_with_heap(e[i].0, key, heap)) {
             self.entries[i].1 = value;
-        } else {
-            let i = self.entries.len();
-            self.entries.push((key, value));
-            let e = &self.entries;
-            self.index.insert_unique(h, i, |&j| hash_val_with_heap(e[j].0, heap));
+            return;
         }
+        let i = self.entries.len();
+        self.entries.push((key, value));
+        self.live += 1;
+        let e = &self.entries;
+        self.index.insert_unique(h, i, |&j| hash_val_with_heap(e[j].0, heap));
     }
 
-    pub fn len(&self) -> usize { self.entries.len() }
-    pub fn is_empty(&self) -> bool { self.entries.is_empty() }
+    pub fn remove(&mut self, key: &Val, heap: &HeapPool) -> Option<Val> {
+        let h = hash_val_with_heap(*key, heap);
+        let e = &self.entries;
+        let i = match self.index.find_entry(h, |&i| eq_vals_with_heap(e[i].0, *key, heap)) {
+            Ok(entry) => entry.remove().0,
+            Err(_) => return None,
+        };
+        let val = self.entries[i].1;
+        self.entries[i] = (Val::undef(), Val::undef());
+        self.live -= 1;
+        // Compact once tombstones outnumber live entries.
+        if self.entries.len() > 32 && self.entries.len() > 2 * self.live {
+            self.entries.retain(|(k, _)| !k.is_undef());
+            self.rebuild_index(heap);
+        }
+        Some(val)
+    }
+
+    pub fn len(&self) -> usize { self.live }
+    pub fn is_empty(&self) -> bool { self.live == 0 }
 
     pub fn clear(&mut self) {
         self.entries.clear();
         self.index.clear();
+        self.live = 0;
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (Val, Val)> + '_ {
-        self.entries.iter().map(|&(k, v)| (k, v))
+        self.entries.iter().filter(|(k, _)| !k.is_undef()).map(|&(k, v)| (k, v))
     }
 
     pub fn keys(&self) -> impl Iterator<Item = Val> + '_ {
-        self.entries.iter().map(|&(k, _)| k)
+        self.iter().map(|(k, _)| k)
+    }
+
+    /* Last live entry. */
+    pub fn last(&self) -> Option<(Val, Val)> {
+        self.entries.iter().rev().find(|(k, _)| !k.is_undef()).copied()
     }
 
     pub fn from_pairs(pairs: Vec<(Val, Val)>, heap: &HeapPool) -> Self {
         let mut dm = Self::with_capacity(pairs.len());
         for (k, v) in pairs { dm.insert(k, v, heap); }
         dm
-    }
-
-    /* Vec shift after remove invalidates stored positions, rebuild the whole index. */
-    fn reindex(&mut self, heap: &HeapPool) {
-        self.index.clear();
-        for i in 0..self.entries.len() {
-            let e = &self.entries;
-            let h = hash_val_with_heap(e[i].0, heap);
-            self.index.insert_unique(h, i, |&j| hash_val_with_heap(e[j].0, heap));
-        }
     }
 }
 
@@ -361,20 +384,6 @@ pub(crate) fn set_member(members: &Rc<RefCell<Vec<(String, Val)>>>, name: &str, 
     match m.iter_mut().find(|(n, _)| n == name) {
         Some(slot) => slot.1 = value,
         None => m.push((String::from(name), value)),
-    }
-}
-
-impl DictMap {
-    pub fn new() -> Self { Self { entries: Vec::new(), index: hashbrown::HashTable::new() } }
-
-    pub fn remove(&mut self, key: &Val, heap: &HeapPool) -> Option<Val> {
-        let e = &self.entries;
-        let h = hash_val_with_heap(*key, heap);
-        let idx = *self.index.find(h, |&i| eq_vals_with_heap(e[i].0, *key, heap))?;
-        let val = self.entries[idx].1;
-        self.entries.remove(idx);
-        self.reindex(heap);
-        Some(val)
     }
 }
 
@@ -426,6 +435,12 @@ pub(crate) fn for_each_val(obj: &HeapObj, mut f: impl FnMut(Val)) {
 struct HeapSlot {
     obj: Option<HeapObj>,
     marked: bool,
+    /* ASCII-only Str, 0 unknown, 1 yes, 2 no, classified on first use. */
+    ascii: u8,
+}
+
+impl HeapSlot {
+    fn new(obj: Option<HeapObj>) -> Self { Self { obj, marked: false, ascii: 0 } }
 }
 
 pub struct HeapPool {
@@ -446,6 +461,12 @@ pub struct HeapPool {
     ellipsis_idx: Option<u32>,
     // Same singleton invariant as `ellipsis_idx`, but for `NotImplemented`.
     notimpl_idx: Option<u32>,
+    /* Interns bound methods per receiver and method so repeated `obj.m()` share one slot. */
+    bound_methods: HashMap<(u64, BuiltinMethodId), u32>,
+    bound_user_methods: HashMap<(u64, u64, u64), u32>,
+    /* Vals visited by the last mark, sizes the next collection. */
+    marked_vals: usize,
+    alloc_limit: usize,
     /* Reused across mark() calls, cleared not freed, so GC never re-allocates under pressure. */
     mark_worklist: Vec<u32>,
 }
@@ -465,6 +486,10 @@ impl HeapPool {
             types: HashMap::default(),
             ellipsis_idx: None,
             notimpl_idx: None,
+            bound_methods: HashMap::default(),
+            bound_user_methods: HashMap::default(),
+            marked_vals: 0,
+            alloc_limit: 4096,
             mark_worklist: Vec::with_capacity(64),
         }
     }
@@ -479,7 +504,51 @@ impl HeapPool {
             HeapObj::Type(name) => self.types.get(name).copied(),
             HeapObj::Ellipsis => self.ellipsis_idx,
             HeapObj::NotImplemented => self.notimpl_idx,
+            HeapObj::BoundMethod(recv, id) => self.bound_methods.get(&(recv.0, *id)).copied(),
+            HeapObj::BoundUserMethod(r, f, c) => self.bound_user_methods.get(&(r.0, f.0, c.0)).copied(),
             _ => None,
+        }
+    }
+
+    /* Register `idx` in the intern and singleton tables its object belongs to. */
+    fn intern_insert(&mut self, idx: u32) {
+        match self.slots[idx as usize].obj.as_ref() {
+            Some(HeapObj::Str(s)) if s.len() <= 128 => { self.strings.insert(s.clone(), idx); }
+            Some(HeapObj::Bytes(b)) if b.len() <= 128 => { self.bytes_intern.insert(b.clone(), idx); }
+            Some(HeapObj::LongInt(i)) => { self.longints.insert(*i, idx); }
+            Some(HeapObj::Type(name)) => { self.types.insert(name.clone(), idx); }
+            Some(HeapObj::Ellipsis) => { self.ellipsis_idx = Some(idx); }
+            Some(HeapObj::NotImplemented) => { self.notimpl_idx = Some(idx); }
+            Some(HeapObj::BoundMethod(recv, id)) => { self.bound_methods.insert((recv.0, *id), idx); }
+            Some(HeapObj::BoundUserMethod(r, f, c)) => { self.bound_user_methods.insert((r.0, f.0, c.0), idx); }
+            _ => {}
+        }
+    }
+
+    /* Drop `idx` from the tables `intern_insert` filled. */
+    fn intern_remove(&mut self, idx: u32) {
+        match self.slots[idx as usize].obj.as_ref() {
+            Some(HeapObj::Str(s)) => { self.strings.remove(s); }
+            Some(HeapObj::Bytes(b)) => { self.bytes_intern.remove(b); }
+            Some(HeapObj::LongInt(i)) => { self.longints.remove(i); }
+            Some(HeapObj::Type(name)) => { self.types.remove(name); }
+            Some(HeapObj::Ellipsis) if self.ellipsis_idx == Some(idx) => { self.ellipsis_idx = None; }
+            Some(HeapObj::NotImplemented) if self.notimpl_idx == Some(idx) => { self.notimpl_idx = None; }
+            Some(HeapObj::BoundMethod(recv, id)) => { self.bound_methods.remove(&(recv.0, *id)); }
+            Some(HeapObj::BoundUserMethod(r, f, c)) => { self.bound_user_methods.remove(&(r.0, f.0, c.0)); }
+            _ => {}
+        }
+    }
+
+    /* Take a free slot or grow the arena. */
+    fn place(&mut self, obj: HeapObj) -> u32 {
+        if let Some(i) = self.free_list.pop() {
+            self.slots[i as usize] = HeapSlot::new(Some(obj));
+            i
+        } else {
+            let i = self.slots.len() as u32;
+            self.slots.push(HeapSlot::new(Some(obj)));
+            i
         }
     }
 
@@ -488,25 +557,8 @@ impl HeapPool {
         if self.live >= self.limit { return Err(cold_heap()); }
         if self.slots.len() >= (1 << 28) { return Err(VmErr::Heap); }
 
-        let idx = if let Some(i) = self.free_list.pop() {
-            self.slots[i as usize] = HeapSlot { obj: Some(obj), marked: false };
-            i
-        } else {
-            let i = self.slots.len() as u32;
-            self.slots.push(HeapSlot { obj: Some(obj), marked: false });
-            i
-        };
-
-        match self.slots[idx as usize].obj.as_ref().unwrap() {
-            HeapObj::Str(s) if s.len() <= 128 => { self.strings.insert(s.clone(), idx); }
-            HeapObj::Bytes(b) if b.len() <= 128 => { self.bytes_intern.insert(b.clone(), idx); }
-            HeapObj::LongInt(i) => { self.longints.insert(*i, idx); }
-            HeapObj::Type(name) => { self.types.insert(name.clone(), idx); }
-            HeapObj::Ellipsis => { self.ellipsis_idx = Some(idx); }
-            HeapObj::NotImplemented => { self.notimpl_idx = Some(idx); }
-            _ => {}
-        }
-
+        let idx = self.place(obj);
+        self.intern_insert(idx);
         self.live += 1;
         self.alloc_count += 1;
         Ok(Val::heap(idx))
@@ -517,25 +569,8 @@ impl HeapPool {
         if let Some(idx) = self.intern_lookup(&obj) { return Ok(Val::heap(idx)); }
         if self.slots.len() >= (1 << 28) { return Err(VmErr::Heap); }
 
-        let idx = if let Some(i) = self.free_list.pop() {
-            self.slots[i as usize] = HeapSlot { obj: Some(obj), marked: false };
-            i
-        } else {
-            let i = self.slots.len() as u32;
-            self.slots.push(HeapSlot { obj: Some(obj), marked: false });
-            i
-        };
-
-        match self.slots[idx as usize].obj.as_ref().unwrap() {
-            HeapObj::Str(s) if s.len() <= 128 => { self.strings.insert(s.clone(), idx); }
-            HeapObj::Bytes(b) if b.len() <= 128 => { self.bytes_intern.insert(b.clone(), idx); }
-            HeapObj::LongInt(i) => { self.longints.insert(*i, idx); }
-            HeapObj::Type(name) => { self.types.insert(name.clone(), idx); }
-            HeapObj::Ellipsis => { self.ellipsis_idx = Some(idx); }
-            HeapObj::NotImplemented => { self.notimpl_idx = Some(idx); }
-            _ => {}
-        }
-
+        let idx = self.place(obj);
+        self.intern_insert(idx);
         self.live += 1;
         self.alloc_count += 1;
         Ok(Val::heap(idx))
@@ -544,14 +579,15 @@ impl HeapPool {
     pub fn mark(&mut self, v: Val) {
         if !v.is_heap() { return; }
         /* Split borrow, closure needs &mut mark_worklist while we read slots. */
-        let HeapPool { slots, mark_worklist, .. } = self;
+        let HeapPool { slots, mark_worklist, marked_vals, .. } = self;
         mark_worklist.push(v.as_heap());
         while let Some(idx) = mark_worklist.pop() {
             let idx = idx as usize;
             if slots[idx].marked { continue; }
             slots[idx].marked = true;
+            *marked_vals += 1;
             if let Some(obj) = &slots[idx].obj {
-                for_each_val(obj, |val| { if val.is_heap() { mark_worklist.push(val.as_heap()); } });
+                for_each_val(obj, |val| { *marked_vals += 1; if val.is_heap() { mark_worklist.push(val.as_heap()); } });
             }
         }
     }
@@ -559,29 +595,18 @@ impl HeapPool {
     pub fn sweep(&mut self) {
         for idx in 0..self.slots.len() {
             let slot = &mut self.slots[idx];
-            match &slot.obj {
-                None => {}
-                Some(_) if slot.marked => { slot.marked = false; }
-                Some(obj) => {
-                    // Evict any intern-table entry, then free the slot.
-                    match obj {
-                        HeapObj::Str(s) => { self.strings.remove(s); }
-                        HeapObj::Bytes(b) => { self.bytes_intern.remove(b); }
-                        HeapObj::LongInt(i) => { self.longints.remove(i); }
-                        HeapObj::Type(name) => { self.types.remove(name); }
-                        // Cached singleton index becomes stale when its slot is freed.
-                        HeapObj::Ellipsis if self.ellipsis_idx == Some(idx as u32) => { self.ellipsis_idx = None; }
-                        HeapObj::NotImplemented if self.notimpl_idx == Some(idx as u32) => { self.notimpl_idx = None; }
-                        _ => {}
-                    }
-                    slot.obj = None;
-                    self.free_list.push(idx as u32);
-                    self.live -= 1;
-                }
-            }
+            if slot.obj.is_none() { continue; }
+            if slot.marked { slot.marked = false; continue; }
+            self.intern_remove(idx as u32);
+            self.slots[idx].obj = None;
+            self.free_list.push(idx as u32);
+            self.live -= 1;
         }
 
-        self.gc_threshold = (self.live * 2).max(512);
+        // Both triggers scale with the volume the last mark walked.
+        self.gc_threshold = (self.live * 2).max(512).max(self.marked_vals / 4);
+        self.alloc_limit = (self.marked_vals / 4).max(4096);
+        self.marked_vals = 0;
         self.alloc_count = 0;
 
         // Cap free list at 512K slots, sort to prefer low indices and reduce fragmentation.
@@ -598,7 +623,7 @@ impl HeapPool {
 
     /* Replace the pool, rebuild free and intern tables. */
     pub(crate) fn restore_objs(&mut self, objs: Vec<Option<HeapObj>>) {
-        self.slots = objs.into_iter().map(|obj| HeapSlot { obj, marked: false }).collect();
+        self.slots = objs.into_iter().map(HeapSlot::new).collect();
         self.free_list.clear();
         self.strings.clear();
         self.bytes_intern.clear();
@@ -606,37 +631,39 @@ impl HeapPool {
         self.types.clear();
         self.ellipsis_idx = None;
         self.notimpl_idx = None;
+        self.bound_methods.clear();
+        self.bound_user_methods.clear();
         self.live = 0;
         for idx in 0..self.slots.len() {
-            match &self.slots[idx].obj {
-                None => self.free_list.push(idx as u32),
-                Some(obj) => {
-                    self.live += 1;
-                    let idx = idx as u32;
-                    match obj {
-                        HeapObj::Str(s) if s.len() <= 128 => { self.strings.insert(s.clone(), idx); }
-                        HeapObj::Bytes(b) if b.len() <= 128 => { self.bytes_intern.insert(b.clone(), idx); }
-                        HeapObj::LongInt(i) => { self.longints.insert(*i, idx); }
-                        HeapObj::Type(name) => { self.types.insert(name.clone(), idx); }
-                        HeapObj::Ellipsis => { self.ellipsis_idx = Some(idx); }
-                        HeapObj::NotImplemented => { self.notimpl_idx = Some(idx); }
-                        _ => {}
-                    }
-                }
-            }
+            if self.slots[idx].obj.is_none() { self.free_list.push(idx as u32); continue; }
+            self.live += 1;
+            self.intern_insert(idx as u32);
         }
         self.gc_threshold = (self.live * 2).max(512);
+        self.alloc_limit = 4096;
+        self.marked_vals = 0;
         self.alloc_count = 0;
     }
 
     /* Swap a live slot's object during restore. */
     pub(crate) fn replace_obj(&mut self, idx: u32, obj: HeapObj) {
-        self.slots[idx as usize].obj = Some(obj);
+        self.slots[idx as usize] = HeapSlot::new(Some(obj));
     }
 
     pub fn needs_gc(&self) -> bool {
-        let alloc_limit = (self.live / 4).max(4096);
+        let alloc_limit = (self.live / 4).max(self.alloc_limit);
         self.live >= self.gc_threshold || self.alloc_count >= alloc_limit
+    }
+
+    /* ASCII-only Str, scanned once per slot. */
+    #[inline]
+    pub fn str_is_ascii(&mut self, v: Val) -> bool {
+        if !v.is_heap() { return false; }
+        let slot = &mut self.slots[v.as_heap() as usize];
+        if slot.ascii == 0 {
+            slot.ascii = match &slot.obj { Some(HeapObj::Str(s)) if s.is_ascii() => 1, _ => 2 };
+        }
+        slot.ascii == 1
     }
 
     pub fn usage(&self) -> usize { self.live }

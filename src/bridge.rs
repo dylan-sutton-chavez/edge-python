@@ -242,7 +242,7 @@ fn dispatch_get_attr(recv_h: u32, name: &str) -> Result<Val, VmErr> {
         // Instance attribute.
         if recv.is_heap() && let HeapObj::Instance(_cls, attrs) = vm.heap.get(recv)
         {
-            let entries = attrs.borrow().entries.clone();
+            let entries: Vec<(Val, Val)> = attrs.borrow().iter().collect();
             for (k, v) in &entries {
                 if k.is_heap()
                     && let HeapObj::Str(s) = vm.heap.get(*k)
@@ -317,7 +317,7 @@ fn dispatch_len(recv_h: u32) -> Result<Val, VmErr> {
             HeapObj::Str(s) => s.chars().count() as i64,
             HeapObj::Bytes(b) => b.len() as i64,
             HeapObj::List(rc) => rc.borrow().len() as i64,
-            HeapObj::Dict(rc) => rc.borrow().entries.len() as i64,
+            HeapObj::Dict(rc) => rc.borrow().len() as i64,
             HeapObj::Set(rc) => rc.borrow().len() as i64,
             HeapObj::Tuple(t) => t.len() as i64,
             _ => return Err(VmErr::TypeMsg(s!("object of type '", str vm.type_name(recv), "' has no len()"))),
@@ -478,12 +478,12 @@ fn val_to_wire(vm: &crate::vm::VM, v: Val, depth: u32, seen: &mut Vec<u64>) -> O
                 HeapObj::Dict(rc) => {
                     seen.push(v.0);
                     let mut pairs = Vec::new();
-                    for (k, val) in rc.borrow().entries.iter() {
-                        let key = match val_to_wire(vm, *k, depth + 1, seen)? {
+                    for (k, val) in rc.borrow().iter() {
+                        let key = match val_to_wire(vm, k, depth + 1, seen)? {
                             key @ WireValue::Bytes(_) => key,
                             _ => return None,
                         };
-                        pairs.push((key, val_to_wire(vm, *val, depth + 1, seen)?));
+                        pairs.push((key, val_to_wire(vm, val, depth + 1, seen)?));
                     }
                     seen.pop();
                     Some(WireValue::Dict(pairs))

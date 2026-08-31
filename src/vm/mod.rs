@@ -135,6 +135,8 @@ pub struct VM<'a> {
     /* Recycled fn_slots buffers, popped in exec_call, pushed back on normal return. Never a GC root (entries are cleared before reuse). */
     pub(crate) slot_pool: Vec<Vec<Val>>,
     pub(crate) needs_caller_slots: Vec<bool>,
+    /* Free loads limited to builtins and the function itself, safe to memoise. */
+    pub(crate) memo_ok: Vec<bool>,
     /* Bitmap of slots bound to a formal parameter, protected from caller-slot propagation. */
     pub(crate) is_param_slot: Vec<Vec<bool>>,
     /* Free-variable body slots (bare_name, slot, referenced version), used for caller-chunk base-name fallback. */
@@ -274,6 +276,7 @@ impl<'a> VM<'a> {
             nonlocal_tables: Vec::new(),
             slot_pool: Vec::new(),
             needs_caller_slots: Vec::new(),
+            memo_ok: Vec::new(),
             is_param_slot: Vec::new(),
             body_free_loads: Vec::new(),
             chunk_local_binds: HashMap::default(),
@@ -440,6 +443,14 @@ impl<'a> VM<'a> {
         }).collect();
         self.slot_templates.truncate(start);
         self.slot_templates.extend(new);
+        // A free load of a user binding could be rebound between calls and serve a stale result.
+        let new: Vec<bool> = (start..self.functions.len()).map(|fi| {
+            self.body_free_loads[fi].iter().all(|(bare, _, _)| {
+                self.globals.contains_key(bare.as_str()) || self.function_names.get(fi).is_some_and(|n| n == bare)
+            })
+        }).collect();
+        self.memo_ok.truncate(start);
+        self.memo_ok.extend(new);
         let mut seen: crate::util::hash::FxHashSet<u64> = crate::util::hash::FxHashSet::default();
         self.template_roots = self.slot_templates.iter().flatten()
             .filter(|v| !v.is_undef() && seen.insert(v.0))

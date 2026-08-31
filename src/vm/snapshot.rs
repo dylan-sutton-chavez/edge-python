@@ -170,12 +170,25 @@ codec!(enum BlockKind, put_block_kind, get_block_kind { 0 Except, 1 Finally });
 
 codec!(enum BodyRef, put_body_ref, get_body_ref { 0 Fn(fi: usz), 1 Module });
 
-codec!(enum IterFrame, put_iter_frame, get_iter_frame {
-    0 Seq { items: vals, idx: usz },
-    1 Range { cur: i64, end: i64, step: i64 },
-    2 Coroutine(v: val),
-    3 UserDefined(v: val),
-});
+/* A live list frame is stored as its current items, the view ends with the snapshot. */
+fn put_iter_frame(w: &mut W, x: &IterFrame) {
+    match x {
+        IterFrame::Seq { items, idx } => { w.u8(0); w.vals(items); w.usz(*idx); }
+        IterFrame::List { rc, idx } => { w.u8(0); w.vals(&rc.borrow()); w.usz(*idx); }
+        IterFrame::Range { cur, end, step } => { w.u8(1); w.i64(*cur); w.i64(*end); w.i64(*step); }
+        IterFrame::Coroutine(v) => { w.u8(2); w.val(*v); }
+        IterFrame::UserDefined(v) => { w.u8(3); w.val(*v); }
+    }
+}
+fn get_iter_frame(r: &mut R) -> Result<IterFrame, SnapErr> {
+    Ok(match r.u8()? {
+        0 => IterFrame::Seq { items: r.vals()?, idx: r.usz()? },
+        1 => IterFrame::Range { cur: r.i64()?, end: r.i64()?, step: r.i64()? },
+        2 => IterFrame::Coroutine(r.val()?),
+        3 => IterFrame::UserDefined(r.val()?),
+        t => return Err(s_err("unknown tag", itoa::Buffer::new().format(t))),
+    })
+}
 
 codec!(struct ExceptionFrame, put_exc_frame, get_exc_frame {
     kind: (put_block_kind, get_block_kind),
@@ -290,7 +303,7 @@ codec!(struct Pending, put_pending, get_pending {
     preempt_request: default,
 });
 
-fn put_dict(w: &mut W, d: &DictMap) { w.seq(&d.entries, put_val_pair); }
+fn put_dict(w: &mut W, d: &DictMap) { let live: Vec<(Val, Val)> = d.iter().collect(); w.seq(&live, put_val_pair); }
 
 fn get_dict(r: &mut R) -> Result<DictMap, SnapErr> {
     Ok(DictMap::from_entries(r.seq(get_val_pair)?))

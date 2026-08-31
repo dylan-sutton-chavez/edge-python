@@ -8,19 +8,6 @@ fn normalize_index(i: i64, len: usize) -> usize {
     (if i < 0 { len as i64 + i } else { i }) as usize
 }
 
-enum SliceSource { List(Vec<Val>), Tuple(Vec<Val>), Str(Vec<char>), Bytes(Vec<u8>) }
-
-impl SliceSource {
-    fn len(&self) -> i64 {
-        match self {
-            Self::List(v) => v.len() as i64,
-            Self::Tuple(v) => v.len() as i64,
-            Self::Str(v) => v.len() as i64,
-            Self::Bytes(v) => v.len() as i64,
-        }
-    }
-}
-
 impl<'a> VM<'a> {
 
     pub fn get_item(&mut self, ip: usize, chunk: &crate::parser::SSAChunk, slots: &mut [Val], cache: &mut crate::vm::cache::OpcodeCache) -> Result<bool, VmErr> {
@@ -74,13 +61,19 @@ impl<'a> VM<'a> {
                 return Ok(true);
         }
 
+        let ascii = idx.is_int() && self.heap.str_is_ascii(obj);
         if obj.is_heap() && idx.is_int()
             && let HeapObj::Str(s) = self.heap.get(obj) {
-                let chars: Vec<char> = s.chars().collect();
                 let i = idx.as_int();
-                let ui = normalize_index(i, chars.len());
-                let c = chars.get(ui).copied().ok_or(cold_index("string index out of range"))?;
-                let val = self.heap.alloc(HeapObj::Str(c.to_string()))?;
+                let one: String = if ascii {
+                    let b = s.as_bytes();
+                    let c = *b.get(normalize_index(i, b.len())).ok_or(cold_index("string index out of range"))?;
+                    (c as char).to_string()
+                } else {
+                    let ui = normalize_index(i, s.chars().count());
+                    s.chars().nth(ui).ok_or(cold_index("string index out of range"))?.to_string()
+                };
+                let val = self.heap.alloc(HeapObj::Str(one))?;
                 self.push(val);
                 return Ok(true);
         }
@@ -123,15 +116,15 @@ impl<'a> VM<'a> {
         };
         if st == 0 { return Err(cold_value("slice step cannot be zero")); }
 
-        let source = match self.heap.get(obj) {
-            HeapObj::List(v) => SliceSource::List(v.borrow().clone()),
-            HeapObj::Tuple(v) => SliceSource::Tuple(v.clone()),
-            HeapObj::Str(s) => SliceSource::Str(s.chars().collect()),
-            HeapObj::Bytes(b) => SliceSource::Bytes(b.clone()),
+        // Item count without materialising the source.
+        let ascii = self.heap.str_is_ascii(obj);
+        let len: i64 = match self.heap.get(obj) {
+            HeapObj::List(v) => v.borrow().len() as i64,
+            HeapObj::Tuple(v) => v.len() as i64,
+            HeapObj::Str(s) => if ascii { s.len() as i64 } else { s.chars().count() as i64 },
+            HeapObj::Bytes(b) => b.len() as i64,
             _ => return Err(cold_type("object is not sliceable")),
         };
-
-        let len = source.len();
 
         let clamp = |v: Val, def: i64| -> i64 {
             if v.is_none() { def }
@@ -151,26 +144,43 @@ impl<'a> VM<'a> {
             (clamp_neg(start, len - 1), clamp_neg(stop, -1))
         };
 
+        // Step 1 copies one contiguous range.
+        let contiguous = st == 1;
+        let (lo, hi) = (s.max(0) as usize, e.max(s).max(0) as usize);
         let mut indices = Vec::new();
-        let mut cur = s;
-        if st > 0 { while cur < e { indices.push(cur as usize); cur += st; } }
-        else { while cur > e { indices.push(cur as usize); cur += st; } }
-
+        if !contiguous {
+            let mut cur = s;
+            if st > 0 { while cur < e { indices.push(cur as usize); cur += st; } }
+            else { while cur > e { indices.push(cur as usize); cur += st; } }
+        }
         let pick = |v: &[Val]| -> Vec<Val> {
+            if contiguous { return v[lo.min(v.len())..hi.min(v.len())].to_vec(); }
             indices.iter().filter_map(|&i| v.get(i).copied()).collect()
         };
+        let pick_bytes = |b: &[u8]| -> Vec<u8> {
+            if contiguous { return b[lo.min(b.len())..hi.min(b.len())].to_vec(); }
+            indices.iter().filter_map(|&i| b.get(i).copied()).collect()
+        };
 
-        match source {
-            SliceSource::List(v) => self.heap.alloc(HeapObj::List(Rc::new(RefCell::new(pick(&v))))),
-            SliceSource::Tuple(v) => self.heap.alloc(HeapObj::Tuple(pick(&v))),
-            SliceSource::Str(chars) => {
-                let sliced: String = indices.iter().filter_map(|&i| chars.get(i)).collect();
-                self.heap.alloc(HeapObj::Str(sliced))
+        // Pick while borrowing the source, allocate after.
+        enum Out { List(Vec<Val>), Tuple(Vec<Val>), Str(String), Bytes(Vec<u8>) }
+        let out = match self.heap.get(obj) {
+            HeapObj::List(v) => Out::List(pick(&v.borrow())),
+            HeapObj::Tuple(v) => Out::Tuple(pick(v)),
+            HeapObj::Str(text) if ascii => Out::Str(String::from_utf8(pick_bytes(text.as_bytes())).unwrap_or_default()),
+            HeapObj::Str(text) => {
+                let chars: Vec<char> = text.chars().collect();
+                Out::Str(if contiguous { chars[lo.min(chars.len())..hi.min(chars.len())].iter().collect() }
+                    else { indices.iter().filter_map(|&i| chars.get(i)).collect() })
             }
-            SliceSource::Bytes(buf) => {
-                let sliced: Vec<u8> = indices.iter().filter_map(|&i| buf.get(i).copied()).collect();
-                self.heap.alloc(HeapObj::Bytes(sliced))
-            }
+            HeapObj::Bytes(buf) => Out::Bytes(pick_bytes(buf)),
+            _ => return Err(cold_type("object is not sliceable")),
+        };
+        match out {
+            Out::List(v) => self.heap.alloc(HeapObj::List(Rc::new(RefCell::new(v)))),
+            Out::Tuple(v) => self.heap.alloc(HeapObj::Tuple(v)),
+            Out::Str(s) => self.heap.alloc(HeapObj::Str(s)),
+            Out::Bytes(b) => self.heap.alloc(HeapObj::Bytes(b)),
         }
     }
 

@@ -168,7 +168,7 @@ impl<'a> VM<'a> {
         }
         Ok(match self.heap.get(obj) {
             HeapObj::Range(s, e, st) => IterFrame::Range { cur: *s, end: *e, step: *st },
-            HeapObj::List(v) => IterFrame::Seq { items: v.borrow().clone(), idx: 0 },
+            HeapObj::List(v) => IterFrame::List { rc: v.clone(), idx: 0 },
             HeapObj::Tuple(v) => IterFrame::Seq { items: v.clone(), idx: 0 },
             HeapObj::Dict(p) => IterFrame::Seq { items: p.borrow().keys().collect(), idx: 0 },
             HeapObj::Set(s) => {

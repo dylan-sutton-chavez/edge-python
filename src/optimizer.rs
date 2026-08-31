@@ -117,8 +117,8 @@ fn compact_with_jump_remap(chunk: &mut SSAChunk, dead: &[bool]) {
         if let Ok(v) = u16::try_from(new_target) { ins.operand = v; }
     }
 
-    // Remap stmt_pos ips through `remap[]` to follow compaction shifts.
-    for (ip_at, _) in chunk.stmt_pos.iter_mut() {
+    // Remap recorded ips through `remap[]` to follow compaction shifts.
+    for (ip_at, _) in chunk.stmt_pos.iter_mut().chain(chunk.call_byte_pos.iter_mut()) {
         let old = *ip_at as usize;
         if old < remap.len() { *ip_at = remap[old] as u32; }
     }

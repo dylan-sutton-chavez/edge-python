@@ -299,8 +299,8 @@ impl<'a> VM<'a> {
             && matches!(self.heap.get(a), HeapObj::Dict(_))
             && matches!(self.heap.get(b), HeapObj::Dict(_)) {
             let mut merged = DictMap::with_capacity(0);
-            if let HeapObj::Dict(d) = self.heap.get(a) { for (k, v) in d.borrow().entries.iter() { merged.insert(*k, *v, &self.heap); } }
-            if let HeapObj::Dict(d) = self.heap.get(b) { for (k, v) in d.borrow().entries.iter() { merged.insert(*k, *v, &self.heap); } }
+            if let HeapObj::Dict(d) = self.heap.get(a) { for (k, v) in d.borrow().iter() { merged.insert(k, v, &self.heap); } }
+            if let HeapObj::Dict(d) = self.heap.get(b) { for (k, v) in d.borrow().iter() { merged.insert(k, v, &self.heap); } }
             return self.alloc_and_push_dict(merged);
         }
         let result = match op {

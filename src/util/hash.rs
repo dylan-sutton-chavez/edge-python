@@ -23,7 +23,8 @@ impl Hasher for FxHasher {
     #[inline(always)] fn write_u32(&mut self, i: u32) { self.write_u64(i as u64); }
     #[inline(always)] fn write_u64(&mut self, i: u64) { self.0 = (self.0.rotate_left(5) ^ i).wrapping_mul(K); }
     #[inline(always)] fn write_usize(&mut self, i: usize) { self.write_u64(i as u64); }
-    #[inline(always)] fn finish(&self) -> u64 { self.0 }
+    /* Rotate the well mixed high bits down, hashbrown buckets by the low ones. */
+    #[inline(always)] fn finish(&self) -> u64 { self.0.rotate_left(26) }
 }
 
 #[derive(Clone)]

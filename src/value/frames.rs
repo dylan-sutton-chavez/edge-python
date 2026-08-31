@@ -106,6 +106,8 @@ pub struct CallFrame {
 #[derive(Clone, Debug)]
 pub enum IterFrame {
     Seq { items: Vec<Val>, idx: usize },
+    // Live list view, items appended during the loop are visited.
+    List { rc: alloc::rc::Rc<core::cell::RefCell<Vec<Val>>>, idx: usize },
     Range { cur: i64, end: i64, step: i64 },
     Coroutine(Val),
     // User-defined iterator, holds the value returned by `__iter__`, each step calls its `__next__`.
@@ -118,6 +120,10 @@ impl IterFrame {
         match self {
             Self::Coroutine(_) | Self::UserDefined(_) => Ok(None),
             Self::Seq { items, idx } => {
+                if *idx < items.len() { let v = items[*idx]; *idx += 1; Ok(Some(v)) } else { Ok(None) }
+            }
+            Self::List { rc, idx } => {
+                let items = rc.borrow();
                 if *idx < items.len() { let v = items[*idx]; *idx += 1; Ok(Some(v)) } else { Ok(None) }
             }
             Self::Range { cur, end, step } => {
@@ -137,6 +143,7 @@ impl IterFrame {
     pub(crate) fn for_each_val(&self, f: &mut impl FnMut(Val)) {
         match self {
             IterFrame::Seq { items, .. } => for &v in items { f(v); },
+            IterFrame::List { rc, .. } => for &v in rc.borrow().iter() { f(v); },
             Self::Coroutine(v) | Self::UserDefined(v) => f(*v),
             IterFrame::Range { .. } => {}
         }

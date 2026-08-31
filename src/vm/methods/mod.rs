@@ -23,7 +23,7 @@ pub struct MethodDesc {
     pub max_args: u8, // 255 = unbounded (variadic).
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BuiltinMethodId(u8);
 
 impl BuiltinMethodId {

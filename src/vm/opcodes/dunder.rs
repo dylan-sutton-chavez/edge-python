@@ -317,7 +317,7 @@ impl<'a> VM<'a> {
                 Ok(out)
             }
             HeapObj::Dict(d) => {
-                let entries = d.borrow().entries.clone();
+                let entries: Vec<(Val, Val)> = d.borrow().iter().collect();
                 let mut out = String::from("{");
                 for (i, (k, val)) in entries.iter().enumerate() {
                     if i > 0 { out.push_str(", "); }

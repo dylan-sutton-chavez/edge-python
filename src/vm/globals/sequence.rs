@@ -85,8 +85,9 @@ impl<'a> VM<'a> {
             self.push(v);
             return Ok(());
         }
+        let ascii = self.heap.str_is_ascii(o);
         let n: i64 = if o.is_heap() { match self.heap.get(o) {
-            HeapObj::Str(s) => s.chars().count() as i64,
+            HeapObj::Str(s) => if ascii { s.len() as i64 } else { s.chars().count() as i64 },
             HeapObj::Bytes(b) => b.len() as i64,
             HeapObj::List(v) => v.borrow().len() as i64,
             HeapObj::Tuple(v) => v.len() as i64,

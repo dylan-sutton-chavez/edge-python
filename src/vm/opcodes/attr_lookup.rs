@@ -196,9 +196,9 @@ impl<'a> VM<'a> {
         if obj.is_heap()
             && let HeapObj::Instance(cls_val, attrs) = self.heap.get(obj) {
                 let cls_val = *cls_val;
-                let found = attrs.borrow().entries.iter()
+                let found = attrs.borrow().iter()
                     .find(|(k, _)| k.is_heap() && matches!(self.heap.get(*k), HeapObj::Str(s) if s == name))
-                    .map(|(_, v)| *v);
+                    .map(|(_, v)| v);
                 if let Some(v) = found { return Ok(AttrLookup::InstanceField(v)); }
                 if let Some((mv, defining)) = self.lookup_class_member(cls_val, bare) {
                     return Ok(self.bind_member(mv, obj, defining));

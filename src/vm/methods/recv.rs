@@ -39,7 +39,7 @@ pub(super) fn list_clone(vm: &VM, recv: Val) -> Result<Vec<Val>, VmErr> {
 #[inline]
 pub(super) fn dict_entries(vm: &VM, recv: Val) -> Result<Vec<(Val, Val)>, VmErr> {
     match vm.heap.try_get(recv) {
-        Some(HeapObj::Dict(rc)) => Ok(rc.borrow().entries.clone()),
+        Some(HeapObj::Dict(rc)) => Ok(rc.borrow().iter().collect()),
         _ => Err(cold_type("method requires a dict receiver")),
     }
 }
