@@ -1,6 +1,7 @@
 // deno-lint-ignore no-import-prefix
 import { chromium } from "npm:playwright@latest";
 import { readFileSync } from "node:fs";
+import { Buffer } from "node:buffer";
 import { DEFAULT_IMPORTS } from "../src/defaults.ts";
 
 // One CDN host now serves every family under a path prefix (/std, /system, /runtime), derive it from the manifest.
@@ -9,8 +10,10 @@ const CDN_HOST = new URL(Object.values(DEFAULT_IMPORTS)[0]).host;
 const REPO = new URL("../../", import.meta.url).pathname; // edge-python/ repo root
 const cases = JSON.parse(readFileSync(new URL("./web.json", import.meta.url)));
 const PKG = JSON.parse(readFileSync(new URL("./app/packages.json", import.meta.url)));
+// Negative fixtures, only their own cases import them, abi2 fails to load by design.
+const FIXTURES = new Set(["trap", "abi2"]);
 // star-import every module key, recursing through the imports/system category containers
-const star = (m) => Object.entries(m).flatMap(([k, v]) => (k === "imports" || k === "system" ? star(v) : `from ${k} import *`));
+const star = (m) => Object.entries(m).flatMap(([k, v]) => (k === "imports" || k === "system" ? star(v) : FIXTURES.has(k) ? [] : `from ${k} import *`));
 const PRELUDE = star(PKG).join("\n") + "\n";
 const TYPES = {
     ".js": "text/javascript", ".wasm": "application/wasm", ".html": "text/html",
@@ -44,7 +47,8 @@ function pdkModule(abi) {
         [...name("boom"), 0x00, 0x02],
     ]));
     const code = section(10, vec([body([0x41, ...leb(abi)]), body([0x41, 0x00]), body([0x00])]));
-    return new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, ...types, ...funcs, ...memory, ...exports, ...code]);
+    // Buffer, not Uint8Array, route.fulfill never delivers a plain typed array body.
+    return Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, ...types, ...funcs, ...memory, ...exports, ...code]);
 }
 
 /* Drives <edge-python> through index.html, boots one tag, then feeds every web.json case to its worker via run(), comparing #app for output cases and the run trace for error cases. Run with deno test --allow-all web/tests/web.test.js. */
@@ -116,8 +120,13 @@ Deno.test("runtime: <edge-python> runs the corpus through index.html", async () 
             const got = await page.evaluate(async (src) => {
                 const app = document.querySelector("#app");
                 app.textContent = "";
-                const { out } = await globalThis.el.worker.run(src);
-                return { app: app.textContent, out };
+                // A module that fails to load rejects run(), surface it as out for error cases.
+                try {
+                    const { out } = await globalThis.el.worker.run(src);
+                    return { app: app.textContent, out };
+                } catch (e) {
+                    return { app: app.textContent, out: String((e && e.message) || e) };
+                }
             }, PRELUDE + c.script);
 
             if (c.error) {
