@@ -169,7 +169,7 @@ export function createEditor({ ed, defaultCode, onRun, highlight }) {
             const extra = /[:\[({][ \t]*$/.test(before) ? ' '.repeat(TAB_SIZE) : '';
             const pad = indent + extra;
             const opener = before.replace(/[ \t]+$/, '').slice(-1);
-            const splitBracket = '[({'.includes(opener) && PAIRS[opener] === text[caret];
+            const splitBracket = ['[', '(', '{'].includes(opener) && PAIRS[opener] === text[caret];
             const tail = splitBracket ? `\n${pad}\n${indent}` : `\n${pad}`;
             return { text: text.slice(0, caret) + tail + text.slice(caret), caret: caret + 1 + pad.length };
         },
@@ -222,7 +222,7 @@ export function createEditor({ ed, defaultCode, onRun, highlight }) {
     // CodeJar wiring
 
     const jar = CodeJar(ed,
-        (node) => { node.innerHTML = highlight(node.textContent); },
+        (node) => { const code = node.textContent; node.innerHTML = highlight(code) + (code.endsWith('\n') ? '<br>' : ''); },
         { spellcheck: false, addClosing: false, catchTab: false, preserveIdent: false }
     );
 
