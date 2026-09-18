@@ -10,7 +10,7 @@ pub mod engine;
 pub mod matcher;
 pub mod parser;
 
-/* Exports build for wasm and native alike so the CLI can dlopen this package. Class exports follow the `__class_<Name>_<method>` ABI convention, not snake case. */
+/* Class exports follow the `__class_<Name>_<method>` ABI convention, not snake case. */
 #[allow(non_snake_case)]
 mod wasm_api {
     use alloc::string::String;
@@ -97,7 +97,7 @@ mod wasm_api {
         do_find(&pattern, &string, Mode::Full)
     }
 
-    /* findall returns a list of matches, group shaped like Python for zero or one group. One boundary crossing per call via the LIST transit. */
+    /* findall returns a list of matches shaped like Python, one boundary crossing per call via LIST transit. */
     #[plugin_fn]
     fn findall(pattern: String, string: String) -> Result<Vec<Value>> {
         do_findall(&pattern, &string)
@@ -125,7 +125,7 @@ mod wasm_api {
         if ngroups == 1 { f.groups[0].clone().unwrap_or_default() } else { f.text.clone() }
     }
 
-    /* `re.compile(p)` is a native class named `compile`, so instantiation is the constructor call. Instances carry the source pattern, the compiled program lives in the cache. */
+    /* `re.compile(p)` is a native class named `compile`, instances carry the pattern and the cache holds the program. */
     #[plugin_fn]
     fn __class_compile___init__(self_h: Handle, pattern: String) -> Result<()> {
         // Bad patterns raise here, at compile time, like Python.

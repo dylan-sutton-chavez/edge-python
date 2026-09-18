@@ -16,7 +16,6 @@ Run the following commands before sending a pull request to ensure code quality:
 - `cargo test --release` Run the compiler test suite.
 - `cargo clippy --all-targets -- -D warnings` Lint the Rust code.
 - `cargo clippy --lib --no-default-features --target wasm32-unknown-unknown -p edge-python -p slugify-mod -- -D warnings` Lint the wasm build.
-- `cargo clippy --lib --features native -- -D warnings` Lint the native engine module.
 - `cargo shear` Detect unused dependencies.
 - For significant changes, execute the [fuzzer](https://edgepython.com/implementation/fuzzing/) to check for new crashes or performance regressions.
 
@@ -24,11 +23,14 @@ The test suite (`tests/`, fixtures in `tests/cases/vm.json`) runs every case und
 
 *Other packages have their own build and test setup. See the repository layout section of the root README for the per-package commands.*
 
-`cli/` tests hit the CDN runtime by default; `EDGE_RUNTIME_DIR` and `EDGE_COMPILER_WASM` swap in local copies for end-to-end validation before a deploy:
+`cli/` embeds `compiler.wasm` and the std `.wasm` files at build time, so build them first or point `EDGE_COMPILER_WASM` and `EDGE_STD_DIR` at copies. Only the `edge build --web` cases reach the CDN, and `EDGE_JS_DIR` plus `EDGE_COMPILER_WASM` swap in local copies of the JS host for end-to-end validation before a deploy:
 
 ```bash
-cargo wasm && cd cli
-EDGE_RUNTIME_DIR=../web EDGE_COMPILER_WASM=../target/wasm32-unknown-unknown/release/compiler.wasm cargo test
+cargo wasm
+for p in json re math struct
+do (cd std/$p && cargo build --release --target wasm32-unknown-unknown)
+done
+cd cli && EDGE_JS_DIR=$PWD/../js EDGE_COMPILER_WASM=$PWD/../target/wasm32-unknown-unknown/release/compiler.wasm cargo test
 ```
 
 A CI job will be run by the maintainer after the PR has been created.

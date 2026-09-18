@@ -1,9 +1,9 @@
 ---
-title: "dom (web)"
+title: "dom (browser)"
 description: "The browser DOM, from element queries to observers and animations."
 ---
 
-`dom` wraps the browser DOM. It is a JavaScript module on the browser's main thread, where `document` and `window` live. Import it by bare name or declare it in the `system` field of `packages.json`. The native engine rejects `import dom` at compile time, see [the native engine](/reference/modules#the-native-engine).
+`dom` wraps the browser DOM. It is a JavaScript module that needs a browser, it runs on the main thread where `document` and `window` live. Declare it with `edge add dom`, an `imports` entry pointing at the facade `https://cdn.edgepython.com/js/builtins/dom/entry.py`, and import it by bare name. The CLI rejects it at compile time with `module 'dom' requires a browser`, see [The CLI](/reference/modules#the-cli). A JavaScript runtime without a page loads it and fails at the first call with `module 'dom' needs 'document', missing in this runtime`, raised in the calling coroutine.
 
 The engine runs in a Web Worker, so each call crosses over `postMessage` and the script sees a synchronous call. Handlers that return a Promise suspend the calling coroutine and compose with `gather`, see [Async](/language/async).
 

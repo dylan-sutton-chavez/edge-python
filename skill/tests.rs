@@ -1,34 +1,28 @@
+use std::path::Path;
 use std::process::Command;
 
-// First working candidate wins, a local cli build beats a stale installed edge.
-fn edge_binary() -> Option<String> {
-    let manifest = env!("CARGO_MANIFEST_DIR");
-    let mut candidates = Vec::new();
+/* SKILL_EDGE wins, then the local cli build, then PATH, a missing binary fails the suite. */
+fn edge_binary() -> String {
     if let Ok(p) = std::env::var("SKILL_EDGE") {
-        candidates.push(p);
+        assert!(Path::new(&p).is_file(), "SKILL_EDGE points at a missing file, {p}");
+        return p;
     }
-    candidates.push(format!("{manifest}/../cli/target/release/edge"));
-    candidates.push(format!("{manifest}/../cli/target/debug/edge"));
-    candidates.push("edge".to_string());
-    candidates.into_iter().find(|c| {
-        Command::new(c)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    })
+    let local = concat!(env!("CARGO_MANIFEST_DIR"), "/../cli/target/debug/edge");
+    if Path::new(local).is_file() {
+        return local.to_string();
+    }
+    let on_path = Command::new("edge").arg("--version").output().is_ok_and(|o| o.status.success());
+    assert!(on_path, "no edge binary found, run cd cli && cargo build or set SKILL_EDGE");
+    "edge".to_string()
 }
 
 #[test]
-fn skill_md_native() {
-    let Some(edge) = edge_binary() else {
-        eprintln!("skipping, no edge binary found (set SKILL_EDGE or build cli/)");
-        return;
-    };
+fn skill_md() {
+    let edge = edge_binary();
     let doc = concat!(env!("CARGO_MANIFEST_DIR"), "/SKILL.md");
     let out = Command::new(env!("CARGO_BIN_EXE_skill"))
         .arg(doc)
-        .args(["--engine", "native", "--edge", &edge])
+        .args(["--edge", &edge])
         .output()
         .unwrap();
     assert!(

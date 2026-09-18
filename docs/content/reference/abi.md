@@ -3,9 +3,9 @@ title: "ABI"
 description: "The wire contract a plugin module must follow to be importable by Edge Python."
 ---
 
-> **Sealed contract, plugin ABI v1.** Every signature, op code, tag, and error kind here is the public contract for plugin modules, shipped as `.wasm` over CDN or loaded natively via `dlopen`. New system packages arrive as new `Op` values, never new imports. A future wire-level break would ship as `env_v2.*` without removing v1. This contract is distinct from the `compiler<->host` interface embedders declare for [system capabilities](/reference/modules#system-capability), which are not bound by the 6-import limit here.
+> **Sealed contract, plugin ABI v1.** Every signature, op code, tag, and error kind here is the public contract for plugin modules, shipped as `.wasm` over CDN and loaded by the JS host or the CLI. New system packages arrive as new `Op` values, never new imports. A future wire-level break would ship as `env_v2.*` without removing v1. This contract is distinct from the `compiler<->host` interface embedders declare for [system capabilities](/reference/modules#system-capability), which are not bound by the 6-import limit here.
 
-A plugin module imported via `from "<url>" import <names>` follows the contract below, compiled to `.wasm` for the CDN or to a native library for the CLI. The API is handle-based: the host owns all values, the guest sees only opaque `u32` handles, and one dispatch primitive (`edge_op`) covers every operation. New types, methods, and language features reach existing modules with no ABI change.
+A plugin module imported via `from "<url>" import <names>` follows the contract below, compiled to `.wasm` for the CDN, which the JS host and the CLI both load. The API is handle-based: the host owns all values, the guest sees only opaque `u32` handles, and one dispatch primitive (`edge_op`) covers every operation. New types, methods, and language features reach existing modules with no ABI change.
 
 ## Guest export shape
 
@@ -42,7 +42,7 @@ pub extern "C" fn __edge_abi_version() -> u32;
 
 Guests SHOULD also export `__edge_free(ptr: *mut u8, size: u32)` so the host can release that staging after each call. The host treats it as optional, and without it staging accumulates for the instance's lifetime.
 
-`__edge_abi_version` returns the wire-format version (currently `1`). Both the CLI's native loader and the browser shim read it and refuse a mismatch, so a v2 module never decodes garbage on a v1 host.
+`__edge_abi_version` returns the wire-format version (currently `1`). Both hosts read it and refuse a mismatch, so a v2 module never decodes garbage on a v1 host.
 
 The reference `wasm-pdk` crate emits all three symbols automatically. `EDGE_ABI_VERSION` lives in the shared `wasm-abi` crate (no_std, zero deps) so the host and every PDK read the same value.
 
@@ -368,7 +368,7 @@ For `from <name> import <names>` where the manifest maps `<name>` to a `.wasm` U
 4. Marshals args as handles.
 5. Propagates results.
 
-The reference browser shim is `web/src/native.ts` in the repo. The CLI's [native engine](/reference/modules#the-native-engine) implements the same six imports over `dlopen`. WASI hosts and Rust embedders mirror the shape.
+The reference bridge is `js/src/native.ts` in the repo, and the [CLI](/reference/modules#the-cli) implements the same six imports in Rust over wasmtime, bridging the plugin instance and the compiler instance the same way. Rust embedders mirror the shape.
 
 ## Constraints and caveats
 
@@ -401,12 +401,16 @@ The macro emits the worked-example boilerplate. Writing it manually costs about 
 
 Community PDKs (uncoordinated releases, each tracking this sealed spec): Zig (`wasm-pdk-zig`), AssemblyScript (`wasm-pdk-as`), C (`wasm-pdk.h`).
 
-## Snapshot exports
+<a id="snapshot-exports"></a>
 
-Distinct from the sealed plugin imports above, these are exports on `compiler.wasm` itself, part of the host-driver surface an embedder calls to freeze and revive a paused run. The host-facing feature is [Snapshots](/language/snapshots). They reuse the linear-memory buffers and the packed status word of the run lifecycle (`run_start` / `run_resume` / `run_push_event`).
+## Driver exports
+
+Distinct from the sealed plugin imports above, these are exports on `compiler.wasm` itself, part of the host-driver surface an embedder calls to shape a run and to freeze and revive a paused one. The host-facing feature is [Snapshots](/language/snapshots). They reuse the linear-memory buffers and the packed status word of the run lifecycle (`run_start` / `run_resume` / `run_push_event`).
 
 | Export | Signature | Meaning |
 |---|---|---|
+| `set_limits` | `(heap: u64, ops: u64, calls: u64)` | Caps for the next `run_start` or `repl_eval`. A zero field keeps the sandbox value. `restore_state` keeps the limits embedded in the blob. |
+| `set_source_name` | `(len: usize)` | Name the entry frame in tracebacks, read from the source buffer. An empty name renders `<input>`. |
 | `save_state` | `() -> i64` | Serialise the parked run into an internal buffer. Returns the blob length, or `-1` when nothing is parked. |
 | `snapshot_ptr` | `() -> *const u8` | Pointer to the blob left by the last `save_state`. |
 | `restore_state` | `(len: usize) -> u32` | Boot a VM from a blob staged in the source buffer and overlay its state. Returns the same packed status word as `run_start`. |
@@ -414,7 +418,7 @@ Distinct from the sealed plugin imports above, these are exports on `compiler.wa
 | `state_stack` | `() -> usize` | Write the parked run's coroutines as JSON into the out buffer. Returns its byte length. |
 | `set_preempt_interval` | `(n: u32)` | Yield `PREEMPTED` every `n` loop back-edges so a program with no suspension point stays snapshottable. Defaults to `0`, disabled. Applies to the next `run_start` / `restore_state`. |
 
-Buffers are the run lifecycle's: `src_ptr()` (1 MiB input), `out_ptr()` (1 MiB output), and `snapshot_ptr()` for the blob.
+`set_limits` and `set_source_name` are read at boot, so a host calls them before `run_start`, the same way it writes the entry dir. The CLI passes each group's `limits` and the script path through them. Buffers are the run lifecycle's: `src_ptr()` (1 MiB input), `out_ptr()` (1 MiB output), and `snapshot_ptr()` for the blob.
 
 - **Save.** Drive to a pause (`run_start`, then `run_resume` until a `PENDING_*` status), call `save_state()`, and read that many bytes at `snapshot_ptr()` when the result is non-negative.
 - **Preempt.** With a non-zero `set_preempt_interval`, `run_start` / `run_resume` also return kind `7` (`PREEMPTED`). The run is parked and snapshottable, and needs no host action. Call `run_resume` to continue, or `save_state()` first to freeze a program that never suspends on its own.
@@ -438,7 +442,7 @@ Little-endian, self-contained, versioned.
 
 ## Consuming the release from a Rust crate
 
-The `edge-python` crate builds as a `cdylib`. A Rust host can instantiate `compiler.wasm` and call the exports above directly, the same `.wasm` that ships to browsers, with the host owning I/O. The crate builds no wasm of its own and fetches nothing at build time, so `cargo build` stays offline and reproducible. Take the artifact from the tagged GitHub Release, or from `https://cdn.edgepython.com/compiler.wasm` for the current `main`.
+The `edge-python` crate builds as a `cdylib`. A Rust host can instantiate `compiler.wasm` and call the exports above directly, the same `.wasm` the JS host loads, with the host owning I/O. The crate builds no wasm of its own and fetches nothing at build time, so `cargo build` stays offline and reproducible. Take the artifact from the tagged GitHub Release, or from `https://cdn.edgepython.com/compiler.wasm` for the current `main`. The `edge` CLI is that host, it embeds the `.wasm` precompiled by wasmtime and implements the imports in `cli/src/host`.
 
 ```toml
 # Downstream Cargo.toml
@@ -446,7 +450,7 @@ The `edge-python` crate builds as a `cdylib`. A Rust host can instantiate `compi
 edge-python = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.1.0" }
 ```
 
-Vendor the matching `compiler.wasm` next to your own sources and pin it by checksum, the same way the CLI pins native plugins it downloads. A release asset is immutable and the CDN path is not, so a checksum is the only thing that ties a build to a known engine.
+Vendor the matching `compiler.wasm` next to your own sources and pin it by checksum, the same way the CLI pins the modules it downloads. A release asset is immutable and the CDN path is not, so a checksum is the only thing that ties a build to a known engine.
 
 To add native modules from a Rust host, implement the `Resolver` trait. See [Modules](/reference/modules).
 

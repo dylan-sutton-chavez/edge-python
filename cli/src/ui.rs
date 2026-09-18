@@ -41,17 +41,17 @@ pub fn serve_banner(port: u16, dir: &Path, lan: Option<&str>) {
     println!("  watching {}", dir.display());
 }
 
-/// Print a script's traceback to stderr, verbatim from the runtime.
+/// Print a script's traceback to stderr, verbatim from the engine.
 pub fn traceback(msg: &str) {
     eprintln!("{msg}");
 }
 
-/// Summary printed by `edge build` after vendoring runtime + packages + scripts into dist/.
-pub fn build_report(dir: &std::path::Path, runtime_files: usize, packages: usize, scripts: usize, size: u64, elapsed: std::time::Duration) {
+/// Summary printed by `edge build` after vendoring the JS host + packages + scripts into dist/.
+pub fn build_report(dir: &std::path::Path, js_files: usize, packages: usize, scripts: usize, size: u64, elapsed: std::time::Duration) {
     println!();
     println!("  bundled to {}/", dir.display());
     println!();
-    println!("  {runtime_files} runtime files + compiler.wasm");
+    println!("  {js_files} js host files + compiler.wasm");
     println!("  {packages} packages");
     println!("  {scripts} scripts");
     println!();

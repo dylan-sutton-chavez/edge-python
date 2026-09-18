@@ -184,7 +184,7 @@ print(gather(status("https://api.github.com/zen"), status("https://nope.invalid/
 ['ok', 'failed']
 ```
 
-In a browser host, `fetch_text` runs the browser's `fetch()` inside a Web Worker and is subject to CORS. The native engine multiplexes the same calls on its own reactor, so `gather` overlaps them there too, with no CORS. See [network](/packages/system/network).
+In the JS host, `fetch_text` runs the platform `fetch()` inside a Web Worker, and a browser subjects it to CORS. The CLI runs the same calls on host threads, so `gather` overlaps them there too, with no CORS. See [network](/packages/system/network).
 
 ## with_timeout
 
@@ -222,7 +222,7 @@ For deadline-driven cancellation use `with_timeout`.
 
 ## frame
 
-`frame()` parks the coroutine until the host's next render frame. Browser embedders hook `requestAnimationFrame`. Use it for animation loops at display refresh rate. It needs a web host. The native CLI has no render frame to wait for.
+`frame()` parks the coroutine until the host's next render frame. Browser embedders hook `requestAnimationFrame`. Use it for animation loops at display refresh rate. It needs a browser. The CLI has no render frame to wait for, and neither does a JavaScript runtime without a page.
 
 ```python
 from dom import set_attribute
@@ -295,6 +295,6 @@ run(main())
 
 ## Time
 
-The scheduler reads wall time from a host hook. WASM hosts wire it to `Date.now()` via the `host_now_ns` import. Native hosts use `std::time::Instant`. Without a hook, `sleep` advances a virtual clock so deterministic tests interleave correctly.
+The scheduler reads wall time from a host hook. The JS host wires it to `Date.now()` via the `host_now_ns` import and the CLI to the system clock. Without a hook, `sleep` advances a virtual clock so deterministic tests interleave correctly.
 
 To run many of these programs side by side as message-passing tasks, see [Actors](/reference/actors).

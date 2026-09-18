@@ -41,11 +41,27 @@ Run it from your terminal:
 edge run hello.py
 ```
 
-There is no build step. The CLI compiles the file and runs it in its native engine.
+There is no build step. The CLI compiles the file and runs it.
 
 ## Import your first package
 
-Edge Python ships no standard library. The official packages resolve by bare name, with no configuration. Create `app.py`:
+Edge Python ships no standard library, and nothing resolves until you declare it. Declare `json` first:
+
+```bash
+edge add json
+```
+
+That writes `packages.json` beside your script:
+
+```json
+{
+  "imports": {
+    "json": "https://cdn.edgepython.com/std/json.wasm"
+  }
+}
+```
+
+Now create `app.py`:
 
 ```python
 import json
@@ -65,7 +81,7 @@ Run it:
 edge run app.py
 ```
 
-To record the dependency in your project, run `edge add json`. It writes the package to `packages.json`. The package catalog lives in [Modules](/reference/modules#standard-packages) and the manifest format in [packages.json](/reference/modules#packagesjson).
+The CLI keeps the official packages inside the binary, so the entry needs no network there. The package catalog lives in [Modules](/reference/modules#standard-packages) and the manifest format in [packages.json](/reference/modules#packagesjson).
 
 ## Next steps
 

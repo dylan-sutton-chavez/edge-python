@@ -10,7 +10,7 @@ Include a minimal reproducing script with the command used to run it, the expect
 
 ## Scope
 
-Everything in this repository is in scope. The compiler, the VM, the CLI, the ABI, native plugins, the standard library, and snapshot handling all count, whether the issue is a sandbox escape, memory corruption, or a budget bypass under `Limits::sandbox()`.
+Everything in this repository is in scope. The compiler, the VM, the JS host, the CLI and its wasmtime configuration, the ABI, the standard library, and snapshot handling all count, whether the issue is a sandbox escape, memory corruption, or a budget bypass under `Limits::sandbox()`.
 
 The only exception is the CDN, and the documentation website, which are served infrastructure rather than shipped code.
 

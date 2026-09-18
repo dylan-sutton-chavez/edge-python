@@ -52,7 +52,7 @@ Here `items` and `total` live in the VM heap, and the only freeze point is the `
 The round trip runs from the host through `createWorker`.
 
 ```js
-import { createWorker } from "https://cdn.edgepython.com/web/src/index.js";
+import { createWorker } from "https://cdn.edgepython.com/js/src/index.js";
 
 // Wait until the VM is parked on an event so saveState() can capture it.
 async function untilParked(worker) {
@@ -128,7 +128,7 @@ The `<edge-python>` element spins up the worker and exposes it on `el.worker`. E
 <edge-python></edge-python>
 
 <script type="module">
-  import "https://cdn.edgepython.com/web/src/element.js";
+  import "https://cdn.edgepython.com/js/src/element.js";
 
   const el = document.querySelector("edge-python");
   const store = await caches.open("edge-python");
@@ -184,7 +184,7 @@ await fetch("/saves/cart", { method: "PUT", body: await worker.saveState() }); /
 
 ## The same blob from the CLI
 
-The [CLI](/reference/cli) works with snapshots as plain files, no JS involved. `edge run --save-state cart.bin` writes the blob when the script parks on a wait the CLI cannot serve, and `edge run --restore-state cart.bin` boots from it and keeps running. `--preempt <n>` is `setPreemptInterval(n)` as a flag, and `--events <f>` feeds `receive()` line by line. The blob layout is the same one `saveState` produces in the browser.
+The [CLI](/reference/cli) works with snapshots as plain files, no JS involved. `edge run --save-state cart.bin` writes the blob when the script parks on a wait the CLI cannot serve, and `edge run --restore-state cart.bin` boots from it and keeps running. `--preempt <n>` is `setPreemptInterval(n)` as a flag, and `--events <f>` feeds `receive()` line by line. The CLI and the JS host run the identical `compiler.wasm`, so a blob saved in one host restores in the other.
 
 ## Restore if present, else start fresh
 
@@ -222,4 +222,4 @@ Script-only state restores identically, including queued but unconsumed events. 
 
 - [Design](/implementation/design) for the serializer internals.
 - [ABI](/reference/abi#snapshot-exports) for the `compiler.wasm` exports and blob layout.
-- [CLI](/reference/cli) for the native snapshot flags.
+- [CLI](/reference/cli) for the snapshot flags.

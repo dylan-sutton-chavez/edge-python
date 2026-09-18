@@ -77,7 +77,7 @@ impl WasmHostResolver {
                 }
             }
             let Some((dir, target, ext)) = hit else {
-                return Err(s!("no packages.json above '", str start_dir, "' declares '", str name, "'"));
+                return Err(s!("module '", str name, "' is not provided by this host and no packages.json declares it"));
             };
             if let Some(target) = target {
                 let canonical = join_relative(&dir, &target);
@@ -93,7 +93,7 @@ impl WasmHostResolver {
                 search_dir = next;
                 continue;
             }
-            return Err(s!("no packages.json above '", str start_dir, "' declares '", str name, "'"));
+            return Err(s!("module '", str name, "' is not provided by this host and no packages.json declares it"));
         }
     }
 

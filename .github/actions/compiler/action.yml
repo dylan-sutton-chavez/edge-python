@@ -38,12 +38,6 @@ runs:
       shell: bash
       run: cargo clippy --all-targets -- -D warnings
 
-    # The native engine module only compiles under this feature, e2e coverage lives in cli/tests.
-    - name: Clippy (native engine)
-      if: inputs.mode == 'check'
-      shell: bash
-      run: cargo clippy --lib --no-default-features --features native -- -D warnings
-
     - name: Install wasm target (check)
       if: inputs.mode == 'check'
       shell: bash
@@ -94,7 +88,7 @@ runs:
       shell: bash
       run: ls -lh target/wasm32-unknown-unknown/release/compiler.wasm
 
-    # Three passes, -Oz, reflatten for a fresh CFG, then a final converge sweep. Traps stay in, they guard bounds.
+    # Three passes, -Oz, reflatten for a fresh CFG, then a converge sweep. Traps stay, they guard bounds.
     - name: Optimize
       if: inputs.mode == 'build'
       shell: bash

@@ -18,11 +18,11 @@ runs:
         name: compiler_wasm
         path: /tmp/compiler/
 
-    - name: Download web/dist
+    - name: Download js/dist
       uses: actions/download-artifact@v8
       with:
-        name: web_dist
-        path: /tmp/web-dist/
+        name: js_dist
+        path: /tmp/js-dist/
 
     - name: Download std artifacts
       uses: actions/download-artifact@v8
@@ -38,13 +38,6 @@ runs:
         path: /tmp/cli/
         merge-multiple: true
 
-    - name: Download native artifacts
-      uses: actions/download-artifact@v8
-      with:
-        pattern: native-*
-        path: /tmp/native/
-        merge-multiple: true
-
     - name: Install brotli
       shell: bash
       run: command -v brotli >/dev/null || (sudo apt-get update && sudo apt-get install -y brotli)
@@ -52,40 +45,34 @@ runs:
     - name: Stage site
       shell: bash
       run: |
-        mkdir -p _site/web _site/std _site/cli
+        mkdir -p _site/js _site/std _site/cli
 
-        # compiler: served at /compiler.wasm as brotli-11; _headers tags the encoding.
+        # The compiler is served at /compiler.wasm as brotli-11 and _headers tags the encoding.
         brotli -q 11 -c /tmp/compiler/compiler.wasm > _site/compiler.wasm
         printf '/compiler.wasm\n  Content-Type: application/wasm\n  Content-Encoding: br\n  Cache-Control: public, max-age=0, must-revalidate\n' > _site/_headers
 
-        # web package served under /web/ (public embed URLs); tests/ not shipped.
-        cp -r /tmp/web-dist/. _site/web/src
+        # The JS host lands under /js/ as the public embed URLs, tests/ is not shipped.
+        cp -r /tmp/js-dist/. _site/js/src
 
-        # std: <pkg>.wasm / <pkg>.py.
+        # Std packages land as <pkg>.wasm or <pkg>.py.
         cp -r /tmp/std/. _site/std/
 
-        # system: flatten each capability src into _site/web/builtins/<cap>.
-        for dir in web/builtins/*/src; do
+        # Each capability src is flattened into _site/js/builtins/<cap>.
+        for dir in js/builtins/*/src; do
           cap="$(basename "$(dirname "$dir")")"
-          mkdir -p "_site/web/builtins/$cap"
-          cp -r "$dir"/. "_site/web/builtins/$cap/"
+          mkdir -p "_site/js/builtins/$cap"
+          cp -r "$dir"/. "_site/js/builtins/$cap/"
           # entry.py resolves `_<cap>` via this manifest.
           if [ -f "$dir/entry.py" ]; then
-            printf '{ "system": { "_%s": "./index.js" } }\n' "$cap" > "_site/web/builtins/$cap/packages.json"
+            printf '{ "system": { "_%s": "./index.js" } }\n' "$cap" > "_site/js/builtins/$cap/packages.json"
           fi
         done
 
-        # cli: release tarballs + the install/uninstall scripts, served under cdn.edgepython.com/cli/.
+        # Release tarballs plus the install and uninstall scripts, served under cdn.edgepython.com/cli/.
         cp -r /tmp/cli/. _site/cli/
         cp cli/setup/install.sh cli/setup/uninstall.sh _site/cli/
 
-        # native assets, the std plugin .so files, under /native/<contract>/ matching the resolver's URL.
-        contract="$(sed -n 's/^pub const RUNTIME_CONTRACT: &str = "\(.*\)";$/\1/p' src/devkit.rs)"
-        test -n "$contract"
-        mkdir -p "_site/native/$contract"
-        cp -r /tmp/native/. "_site/native/$contract/"
-
-    # A notice survives on the run page; the summary is one of 38 jobs' and gets buried.
+    # A notice survives on the run page, a job summary would be buried among the other jobs.
     - name: Report served size
       shell: bash
       run: |

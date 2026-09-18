@@ -11,7 +11,7 @@ autotests = false
 name = "skill"
 path = "src/main.rs"
 
-# Single integration test at the crate root, runs every native cell of SKILL.md.
+# Single integration test at the crate root, runs every cell of SKILL.md.
 [[test]]
 name = "tests"
 path = "tests.rs"

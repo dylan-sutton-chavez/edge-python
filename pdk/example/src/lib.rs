@@ -5,7 +5,7 @@ extern crate alloc;
 use alloc::{string::{String, ToString}, vec::Vec};
 use wasm_pdk::*;
 
-// Native builds link std for the .so plugin path, wasm stays no_std with its own allocator.
+// Host builds link std for the workspace checks, wasm stays no_std with its own allocator.
 #[cfg(target_arch = "wasm32")]
 #[global_allocator]
 static A: lol_alloc::LeakingPageAllocator = lol_alloc::LeakingPageAllocator;

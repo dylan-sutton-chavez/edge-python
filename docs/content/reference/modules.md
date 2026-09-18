@@ -1,21 +1,21 @@
 ---
 title: "Modules"
-description: "The compile-time import system, packages.json, the four ways to ship your own module, and the native engine."
+description: "The compile-time import system, packages.json, the three ways to ship your own module, and the CLI."
 ---
 
-Every import is resolved at compile time. The compiler asks the host for each module, flattens it into the bytecode, and the VM never fetches anything at run time. The host (the browser runtime, the CLI, or your own embedder) decides what each name means.
+Every import is resolved at compile time. The compiler asks the host for each module, flattens it into the bytecode, and the VM never fetches anything at run time. The host (the JS host, the CLI, or your own embedder) decides what each name means.
 
 A module is one of two flavors. Both use the same import syntax, and the host's resolver picks the flavor per spec.
 
 | Flavor | What it is |
 |---|---|
 | Code module | A `.py` file. Its top level runs once at startup, and its exports live on a module object shared by every importer. |
-| Native module | A `.wasm` plugin over the [ABI](/reference/abi), a native `.so` plugin loaded by the CLI, or bindings a host registers through the `Resolver` trait. |
+| Native module | A `.wasm` plugin over the [ABI](/reference/abi), or bindings a host registers through the `Resolver` trait. |
 
 ## Syntax
 
 ```python
-from json import dumps, loads                  # bare name, resolved through packages.json or the defaults
+from json import dumps, loads                  # bare name, declared in packages.json
 from .lib.helpers import slugify               # relative to the importing file (./lib/helpers.py)
 from ..shared.util import chunks               # one dir up per extra dot (../shared/util.py)
 from lib.helpers import slugify as sl          # absolute from the nearest packages.json dir
@@ -25,7 +25,7 @@ from utils import *                            # every export becomes a flat nam
 
 Name lists can span lines inside parentheses, with an optional trailing comma.
 
-Dots map to directories and the `.py` suffix is implicit. A leading dot anchors the spec at the importing file, a dotted name anchors at the nearest `packages.json` directory, and a plain name must be declared in `packages.json` or be one of the [official defaults](#defaults). Two forms do not work: `from . import x` (Edge has no packages, so a bare dot names nothing) and dynamic imports (no `__import__`, no `importlib`, and the module set is fixed per compilation).
+Dots map to directories and the `.py` suffix is implicit. A leading dot anchors the spec at the importing file, a dotted name anchors at the nearest `packages.json` directory, and a plain name must be declared in `packages.json`. That includes the official packages, nothing resolves without a manifest entry, and `edge add <name>` writes the entry for each official name. The CLI keeps embedded copies of the standard packages, so their entries need no network there. Two forms do not work: `from . import x` (Edge has no packages, so a bare dot names nothing) and dynamic imports (no `__import__`, no `importlib`, and the module set is fixed per compilation).
 
 ## Module semantics
 
@@ -61,7 +61,7 @@ Bare names resolve through `packages.json`, the only manifest name. All fields a
 
 - `imports`: bare name to spec (path or URL).
 - `extends`: a directory whose `packages.json` is consulted when a name is not declared locally. Use it for monorepo sub-packages that share the parent's dependencies. Omit it for hermetic libraries. Cycles in the chain fail at compile time.
-- `system`: name to JS module URL, for [system libraries](#system-libraries) that run on the browser's main thread. The compiler folds each name into the import table as a main-thread spec. Loading the JS is the runtime's job.
+- `system`: name to JS module URL, for [system libraries](#system-libraries) that run on the JS host's main thread, outside the worker. The compiler folds each name into the import table as a main-thread spec. Loading the JS is the JS host's job.
 - Unknown keys are ignored. Values must be strings or objects of strings. Numbers, arrays, and booleans are rejected. Supported string escapes are `\"`, `\\`, `\/`, `\n`, `\t`, `\r`. `\uXXXX` is not supported, so paste UTF-8 literally.
 
 Resolution follows four rules.
@@ -83,7 +83,7 @@ Append `#sha256-<64 hex chars>` to a spec in `packages.json` to pin its content:
 from utils import normalize
 ```
 
-The runtime fetches the raw bytes, hashes them, and refuses to run on a mismatch. The diagnostic shows both digests:
+The JS host fetches the raw bytes, hashes them, and refuses to run on a mismatch. The diagnostic shows both digests:
 
 ```text
 error: integrity check failed for 'https://example.com/utils.py'
@@ -91,16 +91,16 @@ error: integrity check failed for 'https://example.com/utils.py'
  got sha256-36e4838513e46116f258c86b494eaa826d64fa0a9abdf36e8720a31b3d2862e2
 ```
 
-Only `sha256` is supported. Other prefixes fail with `unrecognized integrity fragment`. Both runtimes enforce the pin the same way, the browser in its fetch layer and the CLI in its native resolver.
+Only `sha256` is supported. Other prefixes fail with `unrecognized integrity fragment`. Both hosts enforce the pin the same way, the JS host in its fetch layer and the CLI in its module fetcher.
 
-The browser runtime additionally caches every fetched module in IndexedDB, in a `cas` store (hash to bytes) and a `lockfile` store (spec to hash). Repeat runs make no network requests. If a locked URL later serves different bytes, the run fails with an `integrity drift` error showing both digests. `clearCache()` on the worker wipes both stores. The CLI's native engine does the same on disk, see [the native engine](#the-native-engine).
+In a browser the JS host additionally caches every fetched module in IndexedDB, in a `cas` store (hash to bytes) and a `lockfile` store (spec to hash). Repeat runs make no network requests. If a locked URL later serves different bytes, the run fails with an `integrity drift` error showing both digests. `clearCache()` on the worker wipes both stores. Without IndexedDB, as in Deno, fetched modules stay in memory for the worker's lifetime and no lockfile is kept. The CLI does the same on disk, see [The CLI](#the-cli).
 
 ## Resolution errors
 
 A bad import is a compile-time diagnostic with the statement's source position, never a catchable runtime exception:
 
 ```text
-error: no packages.json above './' declares 'utils'
+error: module 'utils' is not provided by this host and no packages.json declares it
   --> main.py:1:6
    |
  1 | from utils import f
@@ -110,7 +110,7 @@ error: module 'json' has no export 'badname'
   --> main.py:2:6
 ```
 
-This also covers modules Edge Python does not ship, like `os` or `sys`. They parse for syntactic compatibility and are then rejected here, before any code runs.
+The first diagnostic is the same for a typo, for an official package you forgot to declare, and for a module the other host provides, such as `actor` in the JS host. It also covers modules Edge Python does not ship, like `os` or `sys`. They parse for syntactic compatibility and are then rejected here, before any code runs.
 
 ## Standard packages and system libraries
 
@@ -123,47 +123,47 @@ The official libraries each have their own page. Standard packages:
 
 System libraries:
 
-- [dom](/packages/system/dom), [network](/packages/system/network), [storage](/packages/system/storage), [time](/packages/system/time)
+- [dom](/packages/system/dom), [network](/packages/system/network), [storage](/packages/system/storage), [time](/packages/system/time), [actor](/packages/system/actor)
 
-## Defaults
+None of them resolves on its own. A project declares each one it uses, and `edge add` writes the entry. Standard packages go to `imports` as `https://cdn.edgepython.com/std/<name>.wasm` (`test` ships as `test.py`, `dom` as a facade at `https://cdn.edgepython.com/js/builtins/dom/entry.py`), the other system libraries go to `system` as `https://cdn.edgepython.com/js/builtins/<name>/index.js`. The JS host fetches those URLs and caches them. The CLI resolves the standard package URLs to the copies embedded in the binary and the `system` names `time`, `network`, and `actor` to its Rust implementations, so the same manifest serves both hosts and needs no network in the CLI. A page that drives `createWorker` directly passes the same entries through `imports` and `systemModules`, or a `mainThreadModules` object for an in-page module.
 
-The browser runtime and the CLI both resolve the official names by bare name with no `packages.json` at all: the standard packages `json`, `re`, `math`, `struct`, `test` and the system libraries `dom`, `network`, `storage`, `time`. Three rules:
+```json
+{
+  "imports": { "json": "https://cdn.edgepython.com/std/json.wasm" },
+  "system": { "network": "https://cdn.edgepython.com/js/builtins/network/index.js" }
+}
+```
 
-- **Lazy.** A default is fetched only when a run actually imports it.
-- **Overridable.** Your `packages.json`, `imports`, or `systemModules` entry wins for the same name, so you can pin a version or URL.
-- **Opt-out.** Pass `defaults: false` to `createWorker` to disable the defaults entirely.
-
-Defaults are a feature of these two runtimes, not of the compiler. `compiler.wasm` stays hermetic and resolves bare names only through the manifest the host provides. The prebuilt assets live at `https://cdn.edgepython.com/std/<name>.wasm` (`test` ships as `test.py`, `dom` as a facade at `web/builtins/dom/entry.py`) and `https://cdn.edgepython.com/web/builtins/<name>/index.js`.
+Modules load lazily, an entry a run never imports is never fetched, and an entry that points at a different URL pins that version.
 
 ## The `<edge-python>` element
 
 The declarative alternative to `createWorker`. Include the script, drop a tag, and a `.py` file runs.
 
 ```html
-<script type="module" src="https://cdn.edgepython.com/web/src/element.js"></script>
+<script type="module" src="https://cdn.edgepython.com/js/src/element.js"></script>
 <edge-python entry="./app/main.py" packages="./app/packages.json"></edge-python>
 ```
 
-Importing `element.js` auto-registers the tag. On connect the element reads its attributes and the manifest, spawns the worker, runs `entry` if present, then fires a `ready` event. After `ready` it publishes the worker on `el.worker`, so the full programmatic API drives the same VM. Modules load lazily, only what a run actually imports is fetched.
+Importing `element.js` auto-registers the tag. On connect the element reads its attributes and the manifest, spawns the worker, runs `entry` if present, then fires a `ready` event. After `ready` it publishes the worker on `el.worker`, so the full programmatic API drives the same VM. Modules load lazily, only what a run actually imports is fetched. Without `packages` the element runs with no modules at all, every import fails.
 
 | Attribute | Description |
 |---|---|
 | `entry` | Optional URL of a `.py` file to run on connect, resolved against the document. Omit it to drive the worker with `el.worker.run()`. |
-| `packages` | Optional `packages.json` URL. One manifest drives both directions, `system` for main-thread libraries and `imports` for worker-side modules. |
+| `packages` | The `packages.json` URL, required for any import. One manifest drives both directions, `system` for main-thread libraries and `imports` for worker-side modules. |
 | `wasm` | Optional absolute `compiler.wasm` URL, for self-hosting or pinning a build. Defaults to the CDN. |
 
-Where `customElements` is absent (Node, Deno, SSR), append `?setElement=false` to the script URL and register manually with the exported `defineElement(tag)`. When the runtime is served cross-origin, the worker spawns from a same-origin Blob URL that imports the cross-origin module, because Chromium rejects `new Worker()` on a cross-origin URL.
+The element needs a browser. Where `customElements` is absent (Node, Deno, SSR), append `?setElement=false` to the script URL and register manually with the exported `defineElement(tag)`. When the JS host is served cross-origin, the worker spawns from a same-origin Blob URL that imports the cross-origin module, because Chromium rejects `new Worker()` on a cross-origin URL.
 
 ## Writing your own modules
 
-Four delivery paths, by decreasing reach:
+Three delivery paths, by decreasing reach:
 
 | Path | Distribution | Binding language | What it can see |
 |---|---|---|---|
-| CDN wasm | Publish a `.wasm`, any host loads it by URL | Rust with `wasm-pdk`, or Zig, C, AssemblyScript | Transit values only |
-| Native plugin | A `.so` or `.dylib` the CLI loads in-process | Rust, the same crate as the wasm build | Transit values only |
-| System capability | A custom `compiler.wasm` plus a matching host runtime | Rust, or any wasm32 target, inside the embedder | Transit values plus host services (DOM, FS, crypto) |
-| JS system module | Plain ESM on the browser main thread | JavaScript | Transit values plus `window` and `document` |
+| CDN wasm | Publish a `.wasm`, the JS host loads it by URL | Rust with `wasm-pdk`, or Zig, C, AssemblyScript | Transit values only |
+| System capability | A custom `compiler.wasm` plus a matching host | Rust, or any wasm32 target, inside the embedder | Transit values plus host services (DOM, FS, crypto) |
+| JS system module | Plain ESM on the JS host's main thread | JavaScript | Transit values plus the host globals, `window` and `document` in a browser |
 
 Transit values are `None`, `bool`, `int` (128-bit), `float`, `str`, `bytes`, and nested `list` / `dict`. The exact wire tags are in the [ABI](/reference/abi).
 
@@ -180,21 +180,15 @@ from slugify_mod import slugify
 print(slugify("Hello World"))
 ```
 
-One source gives two builds. The same crate compiles to `.wasm` for CDN distribution and to a native plugin for the CLI.
-
-### Native plugin
-
-The CLI's native engine loads `.so` (Linux) and `.dylib` (macOS) plugins with `dlopen`. A plugin exports the same ABI surface as the wasm build and leaves the six `env` imports undefined. The CLI supplies them itself, re-exporting its `edge_*` bridge symbols through `-rdynamic` so `dlopen` binds the plugin straight to the engine. The loader reads `__edge_abi_version` and refuses a version mismatch, a check the browser shim skips because every loader currently targets version 1. The engine is single-threaded by contract: the bridge keeps its handles and the live VM pointer in process-wide statics, so the VM and every `edge_*` call must stay on one thread.
-
-Build any std package as a native plugin with `cargo build --profile native`. The profile inherits `release` and raises `opt-level` to 3.
+The official std packages are these same `.wasm` files, embedded in the CLI at build time.
 
 ### System capability
 
-Some work cannot live in a CDN module because it happens outside the WASM sandbox. A `.wasm` plugin sees only the six sealed `env` imports and has no channel to the host. A system library closes that gap: you ship a custom `compiler.wasm` that declares additional `env` imports, plus a host runtime that implements them. The scripts import the capability as an ordinary native module.
+Some work cannot live in a CDN module because it happens outside the WASM sandbox. A `.wasm` plugin sees only the six sealed `env` imports and has no channel to the host. A system library closes that gap: you ship a custom `compiler.wasm` that declares additional `env` imports, plus a host that implements them. The scripts import the capability as an ordinary native module.
 
 This is the pattern `print` and `input` already use: `print` calls the embedder's `host_print` import. A browser distribution can register a `dom` module whose operations bridge to JS through its private imports. A WASI distribution can register `fs` against `wasi_snapshot_preview1`.
 
-It is a distribution pattern, not a third module flavor. Scripts still see code modules and native modules. The public language surface and the plugin ABI stay untouched, and vanilla `compiler.wasm` keeps working for everyone who does not load your runtime.
+It is a distribution pattern, not a third module flavor. Scripts still see code modules and native modules. The public language surface and the plugin ABI stay untouched, and vanilla `compiler.wasm` keeps working for everyone who does not load your host.
 
 ### JS system module
 
@@ -217,7 +211,7 @@ export const dom = ({ pushEvent }) => {
 
 ```html
 <script type="module">
-  import { createWorker } from "https://cdn.edgepython.com/web/src/index.js";
+  import { createWorker } from "https://cdn.edgepython.com/js/src/index.js";
   import { dom } from "./dom.js";
 
   const worker = await createWorker({
@@ -228,21 +222,21 @@ export const dom = ({ pushEvent }) => {
 </script>
 ```
 
-Handlers take decoded JS values and return plain JS values. Opaque objects like DOM nodes model as integer IDs into a registry the handlers own, the `alloc` pattern above. The per-call cost is a `postMessage` round trip, invisible at UI rate. The official [system libraries](#system-libraries) are reference implementations.
+Handlers take decoded JS values and return plain JS values. Opaque objects like DOM nodes model as integer IDs into a registry the handlers own, the `alloc` pattern above. The per-call cost is a `postMessage` round trip, invisible at UI rate. The official [system libraries](#system-libraries) are reference implementations. `mainThreadModules` registers an object the page already holds, `systemModules` maps a name to an ESM URL the host imports on first use, and a `system` entry in `packages.json` is the same thing declared in the manifest.
 
-## The native engine
+A module that reaches a browser global loads anywhere and fails where the global is missing. In a JavaScript runtime without a page, the first `dom` call raises `module 'dom' needs 'document', missing in this runtime` in the calling coroutine, the runtime's own error surfaced by the host, and the same shape covers any module and any missing global. `frame()` there rejects the run with `frame() needs requestAnimationFrame, missing in this runtime`, and `createWorker` without Web Workers throws `createWorker needs Worker, missing in this runtime`.
 
-`edge run`, `edge repl`, and `edge test` execute in-process by default. No browser, no server, millisecond startup. The `--web` flag hosts the browser runtime in headless Chromium for scripts that need it. Browser-only modules fail fast: `import dom` and `import storage` are compile-time errors reading `module 'dom' requires the web runtime (run with --web)`, and a parked `frame()` reports the same at run time. Everything runs under the [sandbox limits](/reference/limits-and-errors) with a real wall clock, so `sleep()` and timeouts wait in real time.
+## The CLI
+
+`edge run`, `edge repl`, `edge test`, and `edge actor` run the same `compiler.wasm` the JS host loads, precompiled for the host machine and executed under wasmtime. No browser, no server, millisecond startup. Modules that need a browser fail fast, a declared `dom` or `storage` is a compile-time error reading `module 'dom' requires a browser`, and a parked `frame()` reports the same at run time. Everything runs under the [sandbox limits](/reference/limits-and-errors) with a real wall clock, so `sleep()` and timeouts wait in real time.
 
 ### Module resolution
 
-Relative imports load from disk relative to the importing file, dotted imports from the nearest `packages.json` dir. Bare names go through the `packages.json` walk-up. Manifest URLs download once into `~/.cache/edge-native` (`$XDG_CACHE_HOME` is honored) with a 64 MB cap. A downloaded file is pinned by a `.lock` sidecar holding its SHA-256, and later runs refuse on drift until you remove the cache entry. A `.so` or `.dylib` target loads as a native plugin. The official std `.wasm` specs that `edge add` writes swap transparently to their `.so` twins, so one manifest serves both engines. With no manifest entry, `json`, `re`, `math`, and `struct` default to the CDN `.so` for the host architecture and `test` to the CDN `test.py`. Set `EDGE_STD_DIR` to a local checkout to serve these from disk instead.
+Relative imports load from disk relative to the importing file, dotted imports from the nearest `packages.json` dir. Bare names go through the `packages.json` walk-up, nothing resolves without an entry. Manifest URLs download once into `~/.cache/edge/modules` (`$XDG_CACHE_HOME` is honored) with a 64 MB cap. A downloaded file is pinned by a `.lock` sidecar holding its SHA-256, and later runs refuse on drift until you remove the cache entry.
 
-Two modules are compiled into the binary. `time` carries the clocks and the calendar functions, always UTC (there is no timezone database, so `tzname()` is `"UTC"`). `network` exposes a blocking `fetch(url, options_json?)` returning `{id, ok, status, headers, body}`, plus `fetch_text` and `fetch_json`. A manifest entry with the same name always wins over a built-in.
+The standard packages are built into the binary. The official CDN URLs that `edge add` writes (`https://cdn.edgepython.com/std/<name>.wasm`, `test.py` for `test`) resolve to the embedded copies with no network, so one manifest serves both hosts. Any other `.wasm` target fails at compile time with `requires the JS host`, and a `.so` or `.dylib` target with `is not supported, ship a .wasm`, the CLI loads no plugin from disk or over the network.
 
-### Plugin confinement
-
-A native plugin loaded through any `packages.json` shares the host process. Before the first call the engine rewrites every syscall instruction in the plugin code to a trap and watches faults from that range, so a syscall the plugin reaches aborts the call as `standard packages can't make syscalls, move this to a system package`. This is a shallow guard, not a sandbox. It catches a standard package that reaches for the kernel from its own code and points the author at a system package, but it cannot stop a plugin that calls a libc function by name or maps fresh code at runtime, because the plugin shares the address space and libc of the host. Treat a native plugin as trusted code. To run code you do not trust, hand it to an [untrusted actor](/reference/actors), which confines it with a seccomp allowlist.
+A `system` entry resolves by name, the URL only matters to the JS host. `time` carries the clocks and the calendar functions, always UTC (there is no timezone database, so `tzname()` is `"UTC"`). `network` exposes `fetch(url, options_json?)` returning `{id, ok, status, headers, body}`, plus `fetch_text` and `fetch_json`, each suspending the coroutine until the response lands. The WebSocket and Server-Sent Events names are not exported, importing them fails at compile time. `actor` is the message passing of an [actor pool](/reference/actors). `dom` and `storage` declared in `system` fail at compile time with `module 'dom' requires a browser`.
 
 ### Run flags
 
@@ -253,22 +247,24 @@ A native plugin loaded through any `packages.json` shares the host process. Befo
 | `--restore-state <f>` | Boot from a snapshot instead of a script and keep running. An unreadable file exits 2. |
 | `--preempt <n>` | Yield every `n` loop back-edges and resume, so a program with no suspension point stays snapshottable. |
 
-These flags are native-only and reject `--web`. Without `--save-state`, a script parked on a wait the engine cannot serve prints an error and exits 1.
+Without `--save-state`, a script parked on a wait the engine cannot serve prints an error and exits 1.
 
-### std packages as native libraries
+### Untrusted code
 
-Each tagged release attaches the std packages as native plugins for aarch64 and x86_64 (`json-x86_64.so`, `json-aarch64.dylib`, and so on), and the CDN serves the same assets under `https://cdn.edgepython.com/native/<contract>/`, where `<contract>` is the runtime contract version (`0.1.0` today). They are the same crates shipped as `.wasm` plugins, compiled for the host platform with a glibc 2.17 floor on Linux. That floor is why Linux ships one build instead of a static fallback: a fully static binary links musl's stub `dlopen`, which always fails. The installer checks your glibc and points at `cargo install --path cli` when the host is too old.
+Code you do not trust goes to an [eval group](/reference/actors#untrusted-code), where each message runs in a fresh wasm instance with a memory cap and a ten second CPU deadline, on every operating system. A snippet imports nothing, a bundle imports only what its own `packages.json` declares.
 
 ### Building from source
 
 ```bash
-cargo clippy --lib --features native    # lint the engine module
-cd cli && cargo build --release         # the CLI embeds the native engine
-cd std/json && cargo build --profile native   # any std package as a native plugin
+cargo wasm                                                              # compiler.wasm
+(cd std/json && cargo build --release --target wasm32-unknown-unknown)  # and re, math, struct
+cd cli && cargo build --release                                         # embeds them precompiled
 ```
+
+`cli/build.rs` reads the artifacts from those paths, or from `EDGE_COMPILER_WASM` and `EDGE_STD_DIR`, and fetches nothing.
 
 ## See also
 
-- [ABI](/reference/abi): the wire contract behind `.wasm` and native plugins.
+- [ABI](/reference/abi): the wire contract behind `.wasm` plugins.
 - [CLI](/reference/cli): `edge add` writes manifest entries, `edge build` vendors packages for offline use.
-- [Limits and errors](/reference/limits-and-errors): the sandbox profile both engines run under.
+- [Limits and errors](/reference/limits-and-errors): the sandbox profile both hosts run under.

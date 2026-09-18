@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Python subset. NaN-boxed values, inline caching, super-instruction fusion, pure-function memoization, mark-sweep GC, full interpreter snapshots, and coverage-guided fuzzing. Runs in the browser as a WebAssembly module, or natively in the CLI as a single script, a standalone binary, or a pool of cooperative actors."
+description = "Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Python subset. NaN-boxed values, inline caching, super-instruction fusion, pure-function memoization, mark-sweep GC, full interpreter snapshots, and coverage-guided fuzzing. Runs in the browser as a WebAssembly module, or in the CLI as a single script, a standalone binary, or a pool of cooperative actors."
 readme = "README.md"
 autotests = false
 autobins = false
@@ -12,7 +12,6 @@ autobins = false
 [lib]
 name = "compiler"
 crate-type = ["cdylib", "rlib"]
-test = false
 doctest = false
 
 [[test]]
@@ -22,8 +21,6 @@ path = "tests/main.rs"
 [features]
 default = ["std"]
 std = []
-# Gates the native engine module (resolver, dlopen loader, system modules) out of wasm and plain lib builds.
-native = ["std", "dep:libloading", "dep:ureq", "dep:rt", "dep:polling", "dep:slab", "dep:rustls", "dep:webpki-roots", "dep:httparse", "dep:tempfile", "dep:findshlibs", "dep:proxy"]
 
 [dependencies]
 wasm-abi = { workspace = true }
@@ -31,30 +28,7 @@ hashbrown = { workspace = true }
 itoa = { workspace = true }
 libm = { workspace = true }
 
-# Native-engine only, dlopen for std plugins and blocking https for URL imports.
-libloading = { version = "0.9", optional = true }
-ureq = { version = "3.3.0", optional = true }
-
-# Native async reactor, the rt executor drives polling on the VM thread.
-rt = { path = "rt", optional = true }
-polling = { version = "3", optional = true }
-slab = { version = "0.4", optional = true }
-
-# Native async fetch, sans-io TLS and HTTP over the reactor sockets.
-rustls = { version = "0.23", optional = true, default-features = false, features = ["ring", "std", "tls12"] }
-webpki-roots = { version = "1", optional = true }
-httparse = { version = "1", optional = true }
-
-# Isolated temp dir for an untrusted bundle sent to an eval group.
-tempfile = { version = "3", optional = true }
-
-# Portable dl_iterate_phdr and dyld query, marks the code range of a loaded plugin.
-findshlibs = { version = "0.10.2", optional = true }
-
-# Rewrites an untrusted plugin's own syscall instructions to traps and aborts the call when one fires.
-proxy = { path = "proxy", optional = true }
-
-# WASM-only global allocator. Pulled into wasm32 builds automatically; absent on host builds (where std's allocator is fine and `compiler.wasm` is just a library artifact, not the runtime target).
+# WASM-only global allocator, host builds use std's and treat compiler.wasm as a library artifact.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dlmalloc = { version = "0.2", default-features = false, features = ["global"] }
 
@@ -63,22 +37,20 @@ dlmalloc = { version = "0.2", default-features = false, features = ["global"] }
 hashbrown = { workspace = true, features = ["serde"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-libloading = "0.9"
-proxy = { path = "proxy" }
 
 [workspace]
-members = ["abi", "pdk", "pdk/macros", "pdk/example", "rt", "skill", "proxy", "lang"]
-# `pdk/example` is wasm-only: kept in `members` so it shares the lockfile and resolves path deps, but excluded from `default-members` so default workspace commands skip it. Build it explicitly with `-p slugify-mod --target wasm32-unknown-unknown`.
-default-members = [".", "abi", "pdk", "pdk/macros", "rt", "skill", "proxy", "lang"]
+members = ["abi", "pdk", "pdk/macros", "pdk/example", "skill", "lang"]
+# `pdk/example` is wasm-only, in `members` for the lockfile but out of `default-members`, build it with `-p slugify-mod`.
+default-members = [".", "abi", "pdk", "pdk/macros", "skill", "lang"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/dylan-sutton-chavez/edge-python/"
 
-# Single source for third-party versions. Members opt in with `dep = { workspace = true }` so a bump touches one line workspace-wide and the lockfile cannot grow accidental version splits.
+# One source for dependency versions, a bump touches one line and the lockfile never splits versions.
 [workspace.dependencies]
 wasm-abi = { path = "abi" }
 hashbrown = { version = "0.17", default-features = false }

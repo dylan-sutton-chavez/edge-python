@@ -1,11 +1,11 @@
 use anyhow::{anyhow, Context, Result};
-use compiler::native::pack::{Bundle, Entry};
-use std::collections::{BTreeMap, BTreeSet};
+use crate::pack::{Bundle, Entry};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use crate::manifest::{Kind, Manifest};
+use crate::manifest::Manifest;
 
 // Marks a standalone binary, its trailer holds the payload length before it.
 const STANDALONE_MAGIC: &[u8] = b"EDGESFX\x01";
@@ -27,7 +27,7 @@ pub fn standalone(manifest_path: &Path, out: PathBuf) -> Result<()> {
     Ok(())
 }
 
-/* Packs the project as a lightweight .package for an actor that already has the runtime. */
+/* Packs the project as a lightweight .package for a pool that already has the CLI. */
 pub fn bundle(manifest_path: &Path, out: PathBuf) -> Result<()> {
     let bundle = collect_bundle(manifest_path)?;
     let payload = bundle.encode();
@@ -72,7 +72,7 @@ fn make_executable(_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/* Trailer of a standalone binary, `Some(payload)` when this exe carries a bundle. Reads only the tail so a plain `edge` invocation never loads the whole binary. */
+/* The bundle in this exe's trailer, only the tail is read so plain runs stay cheap. */
 pub fn embedded_payload() -> Option<Vec<u8>> {
     trailer_payload(&std::env::current_exe().ok()?)
 }
@@ -82,7 +82,7 @@ pub fn file_payload(path: &Path) -> Option<Vec<u8>> {
     let mut head = [0u8; 8];
     if let Ok(mut f) = fs::File::open(path) {
         use std::io::Read;
-        if f.read_exact(&mut head).is_ok() && head.starts_with(compiler::native::pack::MAGIC) {
+        if f.read_exact(&mut head).is_ok() && head.starts_with(crate::pack::MAGIC) {
             return fs::read(path).ok();
         }
     }
@@ -112,10 +112,10 @@ fn trailer_payload(path: &Path) -> Option<Vec<u8>> {
     Some(payload)
 }
 
-// Production layout we mirror into dist/web/ and dist/.
-const RUNTIME_BASE: &str = "https://cdn.edgepython.com/web/";
+// Production layout we mirror into dist/js/ and dist/.
+const JS_BASE: &str = "https://cdn.edgepython.com/js/";
 const COMPILER_WASM: &str = "https://cdn.edgepython.com/compiler.wasm";
-const RUNTIME_FILES: &[&str] = &[
+const JS_FILES: &[&str] = &[
     "src/index.js",
     "src/element.js",
     "src/env.js",
@@ -124,7 +124,6 @@ const RUNTIME_FILES: &[&str] = &[
     "src/prefetch.js",
     "src/rt.js",
     "src/specs.js",
-    "src/defaults.js",
     "src/cache/idb.js",
     "src/cache/memory.js",
     "src/worker/worker.js",
@@ -133,7 +132,7 @@ const RUNTIME_FILES: &[&str] = &[
 
 const INDEX_HTML: &str = include_str!("../templates/dist.html");
 
-/// Pack the project as a browser dist/, vendoring the runtime, compiler and packages.
+/// Pack the project as a browser dist/, vendoring the JS host, compiler and packages.
 pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
     let t0 = Instant::now();
     let manifest = Manifest::load(manifest_path)?;
@@ -145,10 +144,10 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
 
     fs::create_dir_all(&out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
 
-    let sp = crate::ui::spinner("vendoring runtime");
-    match vendor_runtime(&out_dir) {
-        Ok(()) => sp.done("vendored runtime"),
-        Err(e) => { sp.fail("failed to vendor runtime"); return Err(e); }
+    let sp = crate::ui::spinner("vendoring the JS host");
+    match vendor_js(&out_dir) {
+        Ok(()) => sp.done("vendored the JS host"),
+        Err(e) => { sp.fail("failed to vendor the JS host"); return Err(e); }
     }
 
     let sp = crate::ui::spinner("fetching compiler.wasm");
@@ -165,9 +164,8 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
     sp.done("fetched compiler.wasm");
 
     let scripts = collect_scripts(&project, &out_dir);
-    let imports = crawl_imports(&scripts);
     let sp = crate::ui::spinner("vendoring packages");
-    let (vendored_imports, vendored_system) = match vendor_packages(&manifest, &imports, &out_dir) {
+    let (vendored_imports, vendored_system) = match vendor_packages(&manifest, &out_dir) {
         Ok(v) => v,
         Err(e) => { sp.fail("failed to vendor packages"); return Err(e); }
     };
@@ -183,7 +181,7 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
 
     crate::ui::build_report(
         &out_dir,
-        RUNTIME_FILES.len(),
+        JS_FILES.len(),
         vendored_imports.len() + vendored_system.len(),
         script_count,
         dir_size(&out_dir)?,
@@ -192,22 +190,22 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
     Ok(())
 }
 
-/// Fetch the runtime JS modules into `dist/web/` mirroring their CDN layout.
-fn vendor_runtime(out_dir: &Path) -> Result<()> {
-    // Test hook, a local runtime instead of the CDN.
-    let local = std::env::var("EDGE_RUNTIME_DIR").ok();
-    for rel in RUNTIME_FILES {
+/// Fetch the JS host modules into `dist/js/` mirroring their CDN layout.
+fn vendor_js(out_dir: &Path) -> Result<()> {
+    // Test hook, a local JS host instead of the CDN.
+    let local = std::env::var("EDGE_JS_DIR").ok();
+    for rel in JS_FILES {
         let bytes = match &local {
             Some(dir) => {
                 let path = Path::new(dir).join(rel.replacen("src/", "dist/", 1));
                 fs::read(&path).with_context(|| format!("reading {}", path.display()))?
             }
             None => {
-                let url = format!("{RUNTIME_BASE}{rel}");
+                let url = format!("{JS_BASE}{rel}");
                 fetch(&url).with_context(|| format!("fetching {url}"))?
             }
         };
-        let path = out_dir.join("web").join(rel);
+        let path = out_dir.join("js").join(rel);
         if let Some(p) = path.parent() {
             fs::create_dir_all(p)?;
         }
@@ -245,55 +243,24 @@ fn walk(dir: &Path, out_dir: &Path, found: &mut Vec<PathBuf>) {
     }
 }
 
-/// Cheap import scanner, regex-free, picks up `import X, Y` and `from X import …` at the top level of a line.
-fn crawl_imports(scripts: &[PathBuf]) -> BTreeSet<String> {
-    let mut imports = BTreeSet::new();
-    for path in scripts {
-        let Ok(text) = fs::read_to_string(path) else { continue };
-        for line in text.lines() {
-            let line = line.trim();
-            if let Some(rest) = line.strip_prefix("from ") {
-                // Only the module before `import` counts, not the imported names.
-                if let Some(name) = rest.split(|c: char| c == '.' || c.is_whitespace()).next()
-                    && !name.is_empty() {
-                        imports.insert(name.to_string());
-                    }
-            } else if let Some(rest) = line.strip_prefix("import ") {
-                for tok in rest.split(',') {
-                    let name = tok.trim().split(|c: char| c == '.' || c.is_whitespace()).next().unwrap_or("");
-                    if !name.is_empty() { imports.insert(name.to_string()); }
-                }
-            }
-        }
-    }
-    imports
-}
-
-/// For each imported name, resolve via the shared registry, fetch, and stash under dist/vendor/.
-fn vendor_packages(
-    manifest: &Manifest,
-    imports: &BTreeSet<String>,
-    out_dir: &Path,
-) -> Result<(BTreeMap<String, String>, BTreeMap<String, String>)> {
-    let mut std_local = BTreeMap::new();
+/// Every url the manifest declares is fetched under dist/vendor/, relative entries are project files.
+fn vendor_packages(manifest: &Manifest, out_dir: &Path) -> Result<(BTreeMap<String, String>, BTreeMap<String, String>)> {
+    let mut imports_local = BTreeMap::new();
     let mut system_local = BTreeMap::new();
-
-    for name in imports {
-        // Unknown names are project-local .py modules, let the runtime resolve them at run time.
-        let Some((kind, url)) = crate::manifest::resolve(name, manifest) else { continue };
-        let bytes = fetch(&url).with_context(|| format!("fetching {url}"))?;
-        let local = match kind {
-            // std packages are .wasm, except pure-Python ones (test) served as .py, preserve the real extension.
-            Kind::Std => format!("vendor/{name}.{}", if url.ends_with(".py") { "py" } else { "wasm" }),
-            Kind::System => format!("vendor/{name}/index.js"),
-        };
+    for (name, url) in manifest.imports.iter().filter(|(_, url)| url.contains("://")) {
+        let bytes = fetch(url).with_context(|| format!("fetching {url}"))?;
+        // The real extension is kept, std packages are .wasm and script-only ones .py.
+        let local = format!("vendor/{name}.{}", if url.ends_with(".py") { "py" } else { "wasm" });
         write_under(out_dir, &local, &bytes)?;
-        match kind {
-            Kind::Std => { std_local.insert(name.clone(), local); }
-            Kind::System => { system_local.insert(name.clone(), local); }
-        }
+        imports_local.insert(name.clone(), local);
     }
-    Ok((std_local, system_local))
+    for (name, url) in manifest.system.iter().filter(|(_, url)| url.contains("://")) {
+        let bytes = fetch(url).with_context(|| format!("fetching {url}"))?;
+        let local = format!("vendor/{name}/index.js");
+        write_under(out_dir, &local, &bytes)?;
+        system_local.insert(name.clone(), local);
+    }
+    Ok((imports_local, system_local))
 }
 
 fn write_under(root: &Path, rel: &str, bytes: &[u8]) -> Result<()> {
@@ -374,45 +341,6 @@ fn fetch(url: &str) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn imports_of(src: &str) -> BTreeSet<String> {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("main.py");
-        fs::write(&path, src).unwrap();
-        crawl_imports(&[path])
-    }
-
-    fn set(names: &[&str]) -> BTreeSet<String> {
-        names.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn import_comma_list_vendors_every_module() {
-        assert_eq!(imports_of("import a, b\n"), set(&["a", "b"]));
-    }
-
-    #[test]
-    fn import_list_strips_dots_and_aliases() {
-        assert_eq!(imports_of("import a.b, c as d\n"), set(&["a", "c"]));
-    }
-
-    #[test]
-    fn from_import_keeps_only_the_module() {
-        assert_eq!(imports_of("from x import a, b\n"), set(&["x"]));
-        assert_eq!(imports_of("from x.y import z\n"), set(&["x"]));
-    }
-
-    #[test]
-    fn import_lines_mix_and_indent() {
-        let src = "import a\nfrom b.c import d\n  import e ,f\n";
-        assert_eq!(imports_of(src), set(&["a", "b", "e", "f"]));
-    }
-
-    #[test]
-    fn non_import_lines_and_relative_imports_add_nothing() {
-        let src = "x = 1\nprint('import a')\nfrom . import b\n";
-        assert_eq!(imports_of(src), set(&[]));
-    }
 
     fn paths(dirs: &[&str]) -> Vec<PathBuf> {
         dirs.iter().map(PathBuf::from).collect()

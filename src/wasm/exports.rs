@@ -51,6 +51,16 @@ fn parse_source(src: &str) -> Result<SSAChunk, String> {
     Ok(chunk)
 }
 
+/* The caps a fresh boot runs under, the host's `set_limits` or the sandbox profile. */
+fn limits() -> Limits {
+    with_runtime(|rt| rt.limits).unwrap_or_else(Limits::sandbox)
+}
+
+/* The entry frame name for tracebacks, None until the host names the source. */
+fn source_name() -> Option<String> {
+    with_runtime(|rt| (!rt.source_name.is_empty()).then(|| rt.source_name.clone()))
+}
+
 /* Leak the chunk so it survives `run_resume`, then boot with host hooks. */
 fn boot_vm(chunk: SSAChunk, limits: Limits) -> VM<'static> {
     let chunk_static: &'static SSAChunk = Box::leak(Box::new(chunk));
@@ -102,7 +112,7 @@ pub unsafe extern "C" fn wasm_alloc(size: u32) -> *mut u8 {
     Box::into_raw(v.into_boxed_slice()) as *mut u8
 }
 
-/* Frees a `wasm_alloc` buffer. Host must pass the exact `size` it requested, a mismatched length rebuilds the wrong Box layout. Null or zero is a no-op. */
+/* Frees a `wasm_alloc` buffer, the host passes the exact requested `size`, null or zero is a no-op. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn wasm_free(ptr: *mut u8, size: u32) {
     if ptr.is_null() || size == 0 { return; }
@@ -146,7 +156,7 @@ pub unsafe extern "C" fn reset_modules() {
     bridge::reset();
 }
 
-/* Copies up to SZ bytes from the host SRC buffer into an owned `String` so the caller can drop the runtime borrow before parsing. */
+/* Copies up to SZ bytes of SRC into a `String` so the runtime borrow ends before parsing. */
 fn read_src(len: usize) -> Result<String, core::str::Utf8Error> {
     with_runtime(|rt| {
         let len = len.min(SZ);
@@ -159,6 +169,22 @@ fn read_src(len: usize) -> Result<String, core::str::Utf8Error> {
 pub unsafe extern "C" fn set_entry_dir(len: usize) {
     let dir = read_src(len).unwrap_or_default();
     with_runtime(|rt| rt.entry_dir = dir);
+}
+
+/* Entry frame name for the next boot, host writes it into SRC, empty restores `<input>`. */
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn set_source_name(len: usize) {
+    let name = read_src(len).unwrap_or_default();
+    with_runtime(|rt| rt.source_name = name);
+}
+
+/* Caps for the next `run_start` or `repl_eval`, a zero field keeps the sandbox value. */
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn set_limits(heap: u64, ops: u64, calls: u64) {
+    let sandbox = Limits::sandbox();
+    let pick = |v: u64, fallback: usize| if v == 0 { fallback } else { usize::try_from(v).unwrap_or(usize::MAX) };
+    let limits = Limits { heap: pick(heap, sandbox.heap), ops: pick(ops, sandbox.ops), calls: pick(calls, sandbox.calls) };
+    with_runtime(|rt| rt.limits = Some(limits));
 }
 
 /* Pre-fetch feed, each import as `b<TAB>name` (bare, resolve via manifest), `r<TAB>path` (importer-relative) or `R<TAB>path` (manifest-root-relative), one per line. */
@@ -216,7 +242,7 @@ fn step_vm(mut vm: VM<'static>, src: &str, prev_paused: Option<Box<PausedRun>>) 
                     last_yield_deadline_ns: deadline,
                 }),
             };
-            // Re-publish `current_vm` to the boxed VM so embedder calls like `host_edge_encode` (run between this yield and the next `run_resume`) can still allocate into the heap. The Box's address is stable across the move into rt.
+            // Re-publish `current_vm` to the boxed VM so embedder calls between yields still allocate, its address is stable.
             let vm_ptr = paused.vm.as_mut().map(|v| NonNull::from(v).cast::<VM<'static>>());
             with_runtime(|rt| rt.paused_run = Some(paused));
             bridge::set_current_vm(vm_ptr);
@@ -229,8 +255,9 @@ fn step_vm(mut vm: VM<'static>, src: &str, prev_paused: Option<Box<PausedRun>>) 
                 drop(prev_paused);
                 return STATUS_EXIT | ((code as u32) & 0xFF);
             }
+            let name = source_name();
             let traceback = e.render_traceback(
-                src, vm.error_pos(), None,
+                src, vm.error_pos(), name.as_deref(),
                 vm.call_stack_frames(), vm.function_names_ref(),
             );
             // A failed input keeps its partial effects.
@@ -251,7 +278,7 @@ fn park_repl_or_drop(mut vm: VM<'static>) {
     }
 }
 
-/* REPL entry, first call boots the interpreter, later calls adopt each input as a new entry chunk on the SAME interpreter, so history never re-executes. */
+/* REPL entry, first call boots the interpreter and later inputs adopt a new entry chunk on it. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn repl_eval(len: usize) -> u32 {
     let src = match read_src(len) {
@@ -271,14 +298,15 @@ pub unsafe extern "C" fn repl_eval(len: usize) -> u32 {
         Some(boxed) => {
             let mut vm = *boxed;
             vm.adopt_entry_chunk(Box::leak(Box::new(chunk)));
-            vm.reset_budget(Limits::sandbox().ops);
+            vm.reset_budget(limits().ops);
             vm
         }
-        None => boot_vm(chunk, Limits::sandbox()),
+        None => boot_vm(chunk, limits()),
     };
     // Named native imports live only in the chunk's extern table, mirror them so later inputs resolve them.
     if let Err(e) = vm.bind_chunk_externs() {
-        let traceback = e.render_traceback(&src, vm.error_pos(), None, vm.call_stack_frames(), vm.function_names_ref());
+        let name = source_name();
+        let traceback = e.render_traceback(&src, vm.error_pos(), name.as_deref(), vm.call_stack_frames(), vm.function_names_ref());
         park_repl_or_drop(vm);
         return err_status(&traceback);
     }
@@ -298,7 +326,7 @@ pub unsafe extern "C" fn run_start(len: usize) -> u32 {
         Ok(c) => c,
         Err(rendered) => return err_status(&rendered),
     };
-    let mut vm = boot_vm(chunk, Limits::sandbox());
+    let mut vm = boot_vm(chunk, limits());
     take_input(&mut vm);
     step_vm(vm, &src, None)
 }
@@ -334,7 +362,7 @@ pub unsafe extern "C" fn run_push_event(ptr: *const u8, len: u32) -> i32 {
     })
 }
 
-/* `set_host_*` prologue, take `handle`'s Val (1 = stale) and run `f` on the paused VM (3 = no paused run). */
+/* Shared `set_host_*` prologue, 1 means a stale handle and 3 means no paused run. */
 fn with_paused_vm(handle: u32, f: impl FnOnce(&mut VM<'static>, crate::vm::types::Val) -> i32) -> i32 {
     let Some(val) = bridge::get_val(handle) else { return 1; };
     bridge::release_handles(&[handle]);
@@ -345,19 +373,19 @@ fn with_paused_vm(handle: u32, f: impl FnOnce(&mut VM<'static>, crate::vm::types
     })
 }
 
-/* Wake a `WaitingHostCall` coro, inject `handle`'s Val into its saved-stack top. 0 ok / 1 stale / 2 no waiter / 3 no paused run. */
+/* Wakes a `WaitingHostCall` coro with `handle`'s Val, 0 ok, 1 stale, 2 no waiter, 3 no run. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_host_result(handle: u32) -> i32 {
     with_paused_vm(handle, |vm, val| if vm.inject_host_result(val) { 0 } else { 2 })
 }
 
-/* Wake the `WaitingHostCall(id)` coro with `handle`'s Val, lets the host resolve concurrent calls out of order. Same return codes as `set_host_result`. */
+/* Wakes the `WaitingHostCall(id)` coro so the host can resolve concurrent calls out of order, same codes. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_host_result_by_id(id: u32, handle: u32) -> i32 {
     with_paused_vm(handle, |vm, val| if vm.inject_host_result_by_id(id as u64, val) { 0 } else { 2 })
 }
 
-/* Raise an error into the `WaitingHostCall(id)` coro so its try/except can catch it, one failed host call affects only its coro. `msg_handle` is a string Val (via `encodeAny`). Same return codes as `set_host_result`. */
+/* Raises an error into the `WaitingHostCall(id)` coro so its try/except can catch it, `msg_handle` is a str. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_host_error_by_id(id: u32, kind: u32, msg_handle: u32) -> i32 {
     with_paused_vm(msg_handle, |vm, val| {
@@ -471,7 +499,7 @@ pub unsafe extern "C" fn run(len: usize) -> usize {
             vm.set_time_hook(now_ns_host);
             take_input(&mut vm);
 
-            // Publish VM for re-entrant host_edge_op via RAII guard so a panic or early return cannot leave a stale pointer in the runtime.
+            // Publish the VM through the RAII guard, a panic or early return never leaves a stale pointer.
             let _guard = VmGuard::new(&mut vm);
             let result = vm.run();
 

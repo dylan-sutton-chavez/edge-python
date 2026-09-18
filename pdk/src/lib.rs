@@ -43,11 +43,11 @@ macro_rules! module {
     };
 }
 
-// Hidden re-export so `module_fixed_pool!` resolves linked_list_allocator on every target.
+// Hidden re-export so `module_fixed_pool!` resolves linked_list_allocator without the author wiring it.
 #[doc(hidden)]
 pub use linked_list_allocator as __lla;
 
-/// Like `module!` but with a free-list allocator on a static `.bss` pool (default 4 MiB). Never calls `memory.grow`, so host-side pre-captured `DataView(memory.buffer)`s stay attached, and `dealloc` reclaims chunks across repeated calls. Single-threaded wasm32 makes the `UnsafeCell`s safe.
+/// Like `module!` on a fixed 4 MiB pool, never calls `memory.grow`, emits nothing off wasm32.
 #[macro_export]
 macro_rules! module_fixed_pool {
     () => { $crate::module_fixed_pool!(4 * 1024 * 1024); };
@@ -103,76 +103,6 @@ macro_rules! module_fixed_pool {
         #[panic_handler]
         fn __wasm_pdk_panic(_: &core::panic::PanicInfo) -> ! {
             core::arch::wasm32::unreachable()
-        }
-
-        // Native confined pages cannot call mmap, so the same static pool backs the heap, spinlock guarded.
-        #[cfg(all(not(target_arch = "wasm32"), not(test)))]
-        mod __edge_pdk_allocator {
-            use core::alloc::{GlobalAlloc, Layout};
-            use core::cell::UnsafeCell;
-            use core::ptr::NonNull;
-            use core::sync::atomic::{AtomicBool, Ordering};
-            use $crate::__lla::Heap;
-
-            const POOL_SIZE: usize = $pool;
-
-            #[repr(align(16))]
-            struct Pool(UnsafeCell<[u8; POOL_SIZE]>);
-            unsafe impl Sync for Pool {}
-
-            static POOL: Pool = Pool(UnsafeCell::new([0; POOL_SIZE]));
-
-            struct HeapCell(UnsafeCell<Heap>);
-            unsafe impl Sync for HeapCell {}
-
-            static HEAP: HeapCell = HeapCell(UnsafeCell::new(Heap::empty()));
-            static LOCK: AtomicBool = AtomicBool::new(false);
-            static INIT: AtomicBool = AtomicBool::new(false);
-
-            fn lock() {
-                while LOCK.swap(true, Ordering::Acquire) {
-                    core::hint::spin_loop();
-                }
-            }
-
-            pub struct PoolAlloc;
-
-            unsafe impl GlobalAlloc for PoolAlloc {
-                unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-                    lock();
-                    if !INIT.load(Ordering::Relaxed) {
-                        unsafe { (*HEAP.0.get()).init(POOL.0.get() as *mut u8, POOL_SIZE); }
-                        INIT.store(true, Ordering::Relaxed);
-                    }
-                    let p = unsafe {
-                        (*HEAP.0.get())
-                            .allocate_first_fit(layout)
-                            .map_or(core::ptr::null_mut(), |p| p.as_ptr())
-                    };
-                    LOCK.store(false, Ordering::Release);
-                    p
-                }
-
-                unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-                    lock();
-                    unsafe { (*HEAP.0.get()).deallocate(NonNull::new_unchecked(ptr), layout); }
-                    LOCK.store(false, Ordering::Release);
-                }
-            }
-        }
-
-        #[cfg(all(not(target_arch = "wasm32"), not(test)))]
-        #[global_allocator]
-        static __EDGE_PDK_ALLOC: __edge_pdk_allocator::PoolAlloc = __edge_pdk_allocator::PoolAlloc;
-
-        // A panic in confined code traps instead of calling libc abort, so the host guard reports it.
-        #[cfg(all(not(target_arch = "wasm32"), not(test)))]
-        #[panic_handler]
-        fn __edge_pdk_panic(_: &core::panic::PanicInfo) -> ! {
-            #[cfg(target_arch = "x86_64")]
-            unsafe { core::arch::asm!("ud2", options(noreturn, nostack)) }
-            #[cfg(target_arch = "aarch64")]
-            unsafe { core::arch::asm!("brk #0", options(noreturn, nostack)) }
         }
     };
 }
@@ -341,7 +271,7 @@ impl IntoValue for Handle {
 pub struct Kwargs(Option<Handle>);
 
 impl Kwargs {
-    /// Decode `name` from kwargs as primitive `T`. Returns `Ok(None)` if absent or kwargs slot empty, `Ok(Some(_))` on hit, `Err` on decode failure. Use `get_handle` for non-primitive values (callables, tuples, lists).
+    /// Decodes `name` from kwargs as primitive `T`, `Ok(None)` when absent, `get_handle` covers the rest.
     pub fn get<T: FromValue>(&self, name: &str) -> Result<Option<T>> {
         match self.get_handle(name)? {
             None => Ok(None),
@@ -349,7 +279,7 @@ impl Kwargs {
         }
     }
 
-    /// Borrow the value for `name` as a raw `Handle`. Returns `Ok(None)` if absent. Use for callables, tuples, lists, dicts, anything `get::<T>` can't decode.
+    /// Borrows the value for `name` as a raw `Handle`, `Ok(None)` when absent, for anything `get` cannot decode.
     pub fn get_handle(&self, name: &str) -> Result<Option<Handle>> {
         let Some(dict) = self.0.as_ref() else { return Ok(None); };
         let key = encode(Value::Bytes(name.as_bytes().to_vec()))?;
@@ -609,7 +539,7 @@ impl Handle {
         Self::raw_op(op::GET_ATTR, self.raw, name, &[]).map(Handle::from_raw)
     }
 
-    /// `recv[key]`. The key is passed as a handle (encode an int for list indexing, str for dict lookup).
+    /// `recv[key]`, the key is a handle, an int for list indexing or a str for dict lookup.
     pub fn get_item(&self, key: &Handle) -> Result<Handle> {
         Self::raw_op(op::GET_ITEM, self.raw, "", &[key.raw]).map(Handle::from_raw)
     }

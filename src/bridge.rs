@@ -24,23 +24,10 @@ impl BridgeState {
 }
 
 // WASM is single-threaded, one process-wide bridge, re-entry routes through `with_vm`.
-#[cfg(target_arch = "wasm32")]
 static mut BRIDGE: BridgeState = BridgeState::new();
 
-#[cfg(target_arch = "wasm32")]
 pub(crate) fn with_bridge<R>(f: impl FnOnce(&mut BridgeState) -> R) -> R {
     unsafe { f(&mut *core::ptr::addr_of_mut!(BRIDGE)) }
-}
-
-// The actor runs a scheduler per core, each thread owns its bridge so VMs never cross threads.
-#[cfg(not(target_arch = "wasm32"))]
-thread_local! {
-    static BRIDGE: RefCell<BridgeState> = const { RefCell::new(BridgeState::new()) };
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn with_bridge<R>(f: impl FnOnce(&mut BridgeState) -> R) -> R {
-    BRIDGE.with(|b| f(&mut b.borrow_mut()))
 }
 
 pub fn put_val(v: Val) -> u32 { with_bridge(|b| b.handles.put(v.0)) }
@@ -52,7 +39,6 @@ pub fn release_handles(handles: &[u32]) {
 }
 
 /* Drops handles, stash and VM pointer together, a paused run holding stale handles must go with them. */
-#[cfg(target_arch = "wasm32")]
 pub(crate) fn reset() {
     with_bridge(|b| {
         b.handles.clear();
@@ -61,12 +47,11 @@ pub(crate) fn reset() {
     });
 }
 
-#[cfg(target_arch = "wasm32")]
 pub(crate) fn set_current_vm(ptr: Option<NonNull<VM<'static>>>) {
     with_bridge(|b| b.current_vm = ptr);
 }
 
-/* RAII publisher for the live VM pointer. Holding the guard across `run()` ensures a panic or early return cannot leave a stale pointer for later `host_edge_op` calls. */
+/* RAII publisher for the live VM pointer, a panic or early return never leaves a stale one. */
 pub struct VmGuard;
 
 impl VmGuard {
@@ -141,7 +126,6 @@ pub(crate) fn stash_error(e: VmErr) {
 }
 
 /* Message-only stash for contexts without a `VmErr`, e.g. the WASM panic handler. */
-#[cfg(target_arch = "wasm32")]
 pub(crate) fn stash_raw_error(kind: u32, msg: String) {
     with_bridge(|b| b.error_stash.set(kind, msg));
 }
@@ -196,13 +180,13 @@ pub unsafe extern "C" fn host_edge_op(op: u32, recv: u32, name_ptr: *const u8, n
 
 fn dispatch_call(recv_h: u32, name: &str, args: &[Val]) -> Result<Val, VmErr> {
     with_recv("edge_op call: invalid receiver handle", recv_h, |vm, recv| {
-        // `__call__` means "invoke `recv` as a callable", letting plugins forward arbitrary Python hooks (lambdas, builtins, classes) through `Handle::call("__call__", args)`. Pushes args + callee then drives `exec_call` so every callable kind (`Extern`, `NativeFn`, `Func`, `BoundMethod`, `Class`, ...) routes through the same dispatch path the VM uses normally. Empty caller-slots are fine because lambdas/hooks that escape a plugin call cannot reference caller-frame locals, they can still capture their own defining scope through the regular Func captures vector.
+        // `__call__` invokes `recv` itself through `exec_call`, so any callable a plugin holds takes the normal dispatch path.
         if name == "__call__" {
-            // The Call operand packs argc in one byte, past 255 positional args it wraps into the kw field.
+            // The Call operand packs argc in one byte, past 255 positional args it wraps into kw.
             if args.len() > 255 {
                 return Err(VmErr::TypeMsg(s!("edge_op call(__call__): too many arguments (max 255, got ", int args.len() as i64, ")")));
             }
-            // Stack layout for `Call`, callee at the bottom, then positional args (top is the rightmost). `parse_call_args` pops args first, then `exec_call` pops the callee.
+            // Callee at the bottom then positional args, `parse_call_args` pops args first and `exec_call` the callee.
             let stack_before = vm.stack.len();
             vm.stack.push(recv);
             for a in args { vm.stack.push(*a); }
@@ -222,7 +206,7 @@ fn dispatch_call(recv_h: u32, name: &str, args: &[Val]) -> Result<Val, VmErr> {
         if vm.stack.len() != stack_before + 1 {
             return Err(VmErr::Runtime("edge_op call: method left no result"));
         }
-        // The length check above guarantees a value is present, `ok_or` keeps the FFI boundary panic-free if a future change drops the invariant.
+        // The length check guarantees a value, `ok_or` keeps the FFI boundary panic-free if that ever changes.
         vm.stack.pop().ok_or(VmErr::Runtime("edge_op call: stack drained mid-dispatch"))
     })
 }
@@ -574,7 +558,7 @@ pub unsafe extern "C" fn host_edge_take_error(out_kind: *mut u32, dst: *mut u8, 
         None => return -1,
     };
     if len > dst_max as usize { return -(len as i32); }
-    // Buffer fits, drain and copy. None on `take()` means a lost peek/take race, return no-pending-error instead of panicking across FFI.
+    // Buffer fits, drain and copy, a None from `take()` is a lost peek race, never a panic.
     let Some((_, msg)) = with_bridge(|b| b.error_stash.take()) else { return -1; };
     let bytes = msg.as_bytes();
     unsafe {

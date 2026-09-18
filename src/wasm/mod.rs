@@ -1,8 +1,8 @@
-use crate::vm::VM;
+use crate::vm::{Limits, VM};
 use crate::packages::Manifest;
 use alloc::{boxed::Box, string::String, vec::Vec};
 
-// Wires parser/VM to the host via the handle ABI, the wire contract lives in `crate::abi`, extend there, never here.
+// Wires parser and VM to the host via the handle ABI, the wire contract lives in `crate::abi`.
 mod exports;
 mod resolver;
 
@@ -10,13 +10,13 @@ mod resolver;
 unsafe extern "C" {
     pub(super) fn host_print(ptr: *const u8, len: usize);
 
-    /* CallExtern dispatch for register_native_module. Host owns argv, guest writes return into out. `call_id` correlates a deferred result back to its coro via `set_host_result_by_id`. */
+    /* CallExtern dispatch for register_native_module, `call_id` correlates a deferred result back to its coro. */
     pub(super) fn host_call_native(id: u32, call_id: u32, argv_ptr: *const u32, argc: u32, out: *mut u32) -> i32;
 
     /* Host-cached bytes for `spec`. Non-null `hash_ptr` is a 32-byte expected sha-256. */
     pub(super) fn host_fetch_bytes(spec_ptr: *const u8, spec_len: u32, hash_ptr: *const u8, out_len: *mut u32) -> *mut u8;
 
-    /* Wall-clock in nanoseconds. WASM hosts wire to `Date.now() * 1_000_000`, native hosts to `SystemTime` since `UNIX_EPOCH`. Without this hook the VM falls back to `virtual_clock_ns` which advances deterministically for tests. */
+    /* Wall clock in nanoseconds, without it the VM falls back to a deterministic virtual clock for tests. */
     pub(super) fn host_now_ns() -> u64;
 }
 
@@ -24,16 +24,16 @@ pub(super) fn stream_print(s: &str) {
     unsafe { host_print(s.as_ptr(), s.len()); }
 }
 
-/* `set_time_hook` wants a `fn() -> u64`. The host import itself is `unsafe extern "C"` so we wrap it in a safe pointer here, the same pattern as `stream_print`. */
+/* `set_time_hook` wants a `fn() -> u64`, so the unsafe import is wrapped like `stream_print`. */
 pub(super) fn now_ns_host() -> u64 {
     unsafe { host_now_ns() }
 }
 
-/* dlmalloc, binned O(1) alloc/free, so cost stays flat as live Rust blocks grow. The old free-list allocator degraded linearly per op on large live heaps. */
+/* dlmalloc keeps alloc and free O(1), the old free-list allocator degraded linearly on large live heaps. */
 #[global_allocator]
 static A: dlmalloc::GlobalDlmalloc = dlmalloc::GlobalDlmalloc;
 
-/* Best-effort panic-to-stash so the host gets a typed message instead of an opaque trap. Re-entry during the format alloc falls through to unreachable(), same trap as before. */
+/* Best-effort panic-to-stash so the host gets a typed message, re-entry during the format still traps. */
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     let msg = alloc::format!("internal panic: {}", info.message());
@@ -75,6 +75,10 @@ pub(super) struct WasmRuntime {
     pub repl_mode: bool,
     /* Back-edges between preempt yields, 0 disables. */
     pub preempt_every: usize,
+    /* Caps for the next boot, the sandbox profile until the host sets its own. */
+    pub limits: Option<Limits>,
+    /* Entry frame name in tracebacks, empty renders the anonymous marker. */
+    pub source_name: String,
 }
 
 impl WasmRuntime {
@@ -92,6 +96,8 @@ impl WasmRuntime {
             repl_vm: None,
             repl_mode: false,
             preempt_every: 0,
+            limits: None,
+            source_name: String::new(),
         }
     }
 }

@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Context, Result};
-use compiler::native::actor::{Group, Message, Out, ActorConfig};
+use crate::actor::{Group, Message, Out, ActorConfig};
 use compiler::vm::Limits;
 use serde::Deserialize;
 use std::path::Path;
@@ -20,13 +20,13 @@ struct Runtime {
     // "auto" for one scheduler per core, or a fixed thread count.
     #[serde(default)]
     schedulers: Option<serde_yaml_ng::Value>,
-    // Host:port for the live ingress, its presence turns the actor into a server.
+    // Host and port for the live ingress, its presence turns the actor into a server.
     #[serde(default)]
     listen: Option<String>,
     // Path to the durable log that survives restarts, defaults beside the manifest.
     #[serde(default)]
     durable: Option<String>,
-    // Host:port for the metrics endpoint, healthz and stats for orchestrators.
+    // Host and port for the metrics endpoint, healthz and stats for orchestrators.
     #[serde(default)]
     control: Option<String>,
 }
@@ -63,25 +63,26 @@ struct LimitSpec {
     preempt: Option<usize>,
 }
 
-// Loads actor.yml, boots the described actor, returns its exit code.
-pub fn run(path: &Path) -> Result<()> {
+// Loads actor.yml, boots the described pool, `packages` overrides every group's manifest walk-up.
+pub fn run(path: &Path, packages: Option<&Path>) -> Result<()> {
     let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let manifest: Manifest = serde_yaml_ng::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
-    let dir = path.parent().and_then(|p| p.to_str()).unwrap_or(".").to_string();
+    let mut dir = path.parent().and_then(|p| p.to_str()).unwrap_or(".").replace('\\', "/");
+    // The manifest walk-up probes `{dir}packages.json`, so a named directory needs its slash.
+    if !dir.is_empty() && !dir.ends_with('/') {
+        dir.push('/');
+    }
+    let packages = packages.map(|p| p.to_string_lossy().replace('\\', "/"));
 
     let mut groups = Vec::new();
     for (name, spec) in manifest.groups {
-        // A run target may be a whole project directory, then the entry and base dir move into it.
+        // A directory target runs its main.py with the project as base dir.
         let (source, group_dir) = match (&spec.code, &spec.run, spec.eval) {
             (Some(code), _, _) => (code.clone(), dir.clone()),
             (None, Some(run), _) => load_run(&dir, run).with_context(|| format!("loading '{run}' for group '{name}'"))?,
             (None, None, true) => (String::new(), dir.clone()),
             (None, None, false) => return Err(anyhow!("group '{name}' needs run, code or eval")),
         };
-        // The untrusted sandbox is enforced by a seccomp allowlist, available only on Linux.
-        if spec.eval && !cfg!(target_os = "linux") {
-            return Err(anyhow!("group '{name}' uses eval, untrusted mode needs Linux for the seccomp sandbox"));
-        }
         let sandbox = Limits::sandbox();
         let limits = Limits {
             heap: spec.limits.heap.unwrap_or(sandbox.heap),
@@ -93,6 +94,7 @@ pub fn run(path: &Path) -> Result<()> {
             name,
             source,
             dir: group_dir,
+            packages: packages.clone(),
             replicas: spec.replicas.unwrap_or(1),
             eval: spec.eval,
             retry: spec.retry,
@@ -118,19 +120,19 @@ pub fn run(path: &Path) -> Result<()> {
             };
             // A control address serves healthz, stats and eval replies on its own thread.
             let control = manifest.runtime.control.as_deref().map(|c| {
-                (c.strip_prefix("tcp://").unwrap_or(c).to_string(), std::sync::Arc::new(compiler::native::actor::Stats::default()))
+                (c.strip_prefix("tcp://").unwrap_or(c).to_string(), std::sync::Arc::new(crate::actor::Stats::default()))
             });
             let stats = control.as_ref().map(|(_, s)| s.clone());
             // The groups the control endpoint answers, captured before config moves into serve.
             let eval: Vec<String> = config.groups.iter().filter(|g| g.eval).map(|g| g.name.clone()).collect();
             let names: Vec<String> = config.groups.iter().map(|g| g.name.clone()).collect();
-            compiler::native::actor::serve(config, addr, &wal, stats, move |tx, wal| {
+            crate::actor::serve(config, addr, &wal, stats, move |tx, wal| {
                 if let Some((addr, stats)) = control {
                     spawn_control(&addr, tx, wal, names, eval, stats);
                 }
             })
         }
-        None => compiler::native::actor::run(config, resolve_schedulers(manifest.runtime.schedulers.as_ref())),
+        None => crate::actor::run(config, resolve_schedulers(manifest.runtime.schedulers.as_ref())),
     };
     if code != 0 {
         std::process::exit(code);
@@ -138,7 +140,7 @@ pub fn run(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/* Loads a run target, returning its source and the base dir imports resolve against. A directory runs its main.py and resolves packages.json inside it, a file uses the manifest dir. */
+/* Loads a run target as source plus base dir, a directory runs its main.py from inside it. */
 fn load_run(dir: &str, run: &str) -> Result<(String, String)> {
     let path = Path::new(dir).join(run);
     if path.is_dir() {
@@ -167,7 +169,7 @@ const MAX_BODY: u64 = 16 << 20;
 type HttpResp = tiny_http::Response<std::io::Cursor<Vec<u8>>>;
 
 // Serves counters at /stats, publishing at /pub/<group> and eval replies at /eval/<group>.
-fn spawn_control(addr: &str, tx: std::sync::mpsc::Sender<Message>, wal: std::sync::Arc<std::sync::Mutex<compiler::native::actor::Wal>>, groups: Vec<String>, eval: Vec<String>, stats: std::sync::Arc<compiler::native::actor::Stats>) {
+fn spawn_control(addr: &str, tx: std::sync::mpsc::Sender<Message>, wal: std::sync::Arc<std::sync::Mutex<crate::actor::Wal>>, groups: Vec<String>, eval: Vec<String>, stats: std::sync::Arc<crate::actor::Stats>) {
     let Ok(server) = tiny_http::Server::http(addr) else {
         eprintln!("warning: cannot bind control endpoint '{addr}'");
         return;
@@ -191,7 +193,7 @@ fn spawn_control(addr: &str, tx: std::sync::mpsc::Sender<Message>, wal: std::syn
 }
 
 // Queues a message for a group, appended to the wal first like the tcp ingress does.
-fn publish(group: &str, body: String, tx: &std::sync::mpsc::Sender<Message>, wal: &std::sync::Arc<std::sync::Mutex<compiler::native::actor::Wal>>, groups: &[String]) -> HttpResp {
+fn publish(group: &str, body: String, tx: &std::sync::mpsc::Sender<Message>, wal: &std::sync::Arc<std::sync::Mutex<crate::actor::Wal>>, groups: &[String]) -> HttpResp {
     if !groups.iter().any(|g| g == group) {
         return not_found();
     }
@@ -203,7 +205,7 @@ fn publish(group: &str, body: String, tx: &std::sync::mpsc::Sender<Message>, wal
     json("{\"ok\":true}".to_string()).with_status_code(202)
 }
 
-// Answers an eval run, the request body is a snippet or an EDGEPKG bundle and the reply its print.
+// Answers an eval run, the body is a snippet or an EDGEPKG bundle, the reply its print.
 fn run_eval(group: &str, req: &mut tiny_http::Request, tx: &std::sync::mpsc::Sender<Message>, eval: &[String]) -> HttpResp {
     if !eval.iter().any(|g| g == group) {
         return not_found();

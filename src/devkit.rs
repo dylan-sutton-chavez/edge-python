@@ -10,12 +10,9 @@ pub const TEST_DRIVER: &str = "import test\nif not test._tests:\n    raise Syste
 
 pub const SCAFFOLD_MAIN_PY: &str = "print(\"hello from edge python\")\n";
 
-// Bump with runtime element.ts and whenever the native plugin ABI changes.
-pub const RUNTIME_CONTRACT: &str = "0.1.0";
-
 pub const STD_PACKAGES: [&str; 5] = ["json", "re", "math", "struct", "test"];
 
-pub const SYSTEM_PACKAGES: [&str; 4] = ["dom", "network", "storage", "time"];
+pub const SYSTEM_PACKAGES: [&str; 5] = ["dom", "network", "storage", "time", "actor"];
 
 /* Collects *_test.py under `dir` recursively, skipping dist and hidden entries, sorted. */
 pub fn discover_tests(dir: &Path) -> Vec<PathBuf> {

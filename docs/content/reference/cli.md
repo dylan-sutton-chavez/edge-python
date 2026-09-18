@@ -3,7 +3,7 @@ title: "Command line interface"
 description: "The edge CLI: run, serve, repl, test, init, package management, build, actor, and uninstall."
 ---
 
-The `edge` CLI runs on macOS, Linux, and WSL. `run`, `repl`, and `test` execute in the built-in [native engine](/reference/modules#the-native-engine) by default, in-process with millisecond startup. The `--web` flag drives the browser runtime in headless Chromium instead, for scripts that need the browser (`dom`, `frame()`, sockets). Under `--web` the CLI is the loop around the browser: it launches Chromium, serves your code, and streams output back to the terminal.
+The `edge` CLI runs on macOS, Linux, Windows, and WSL. It embeds the same `compiler.wasm` the JS host loads, precompiled for the host machine and executed under wasmtime, so `run`, `repl`, `test`, and `actor` start in milliseconds with no browser and no server behind them. Scripts that need a browser (`dom`, `storage`, `frame()`) or sockets belong to the JS host, see [The CLI](/reference/modules#the-cli) for what each host resolves.
 
 ```bash
 edge run app.py        # run a script, a .edge, or stdin
@@ -15,7 +15,7 @@ edge test              # run *_test.py files
 edge init my-app       # scaffold a project
 edge add network       # add a package to packages.json
 edge remove network    # remove a package from packages.json
-edge uninstall         # remove the binary, PATH entry, optionally the bundled browser
+edge uninstall         # remove the binary and the PATH entry
 ```
 
 ## Install
@@ -28,13 +28,13 @@ curl -fsSL https://cdn.edgepython.com/cli/install.sh | sh
 cargo install --path cli
 ```
 
-`install.sh` drops the binary at `~/.local/bin/edge` and appends that directory (plus `EDGE_CHROME_PATH`, when it downloads the bundled browser) to your `~/.bashrc` or `~/.zshrc` unless already present. Open a new shell and `edge --version` should work. Re-run the same line to upgrade.
+`install.sh` drops the binary at `~/.local/bin/edge` and appends that directory to your `~/.bashrc` or `~/.zshrc` unless already present. Open a new shell and `edge --version` should work. Re-run the same line to upgrade. The Linux binaries are static, so any distribution works.
 
-Linux needs glibc 2.17 or newer, the floor the prebuilt binaries are linked against. The installer checks up front and tells you to build from source when the host is older or musl-based, rather than installing a binary that cannot load native plugins. The installer also downloads `chrome-headless-shell` when no browser is reachable. Set `EDGE_NO_BROWSER=1` to skip that on servers that only use the native engine.
+Building from source embeds `compiler.wasm` and the std packages, so run `cargo wasm` and build each `std/*` package for `wasm32-unknown-unknown` first, or point `EDGE_COMPILER_WASM` and `EDGE_STD_DIR` at copies. The build fetches nothing.
 
 ## `edge run`: run a script
 
-Runs a script and streams its output to the terminal. Bare imports resolve through [`packages.json`](/reference/modules#packagesjson). Relative imports resolve against the importing file. Uncaught errors print a traceback to stderr and exit 1.
+Runs a script and streams its output to the terminal. Bare imports resolve through [`packages.json`](/reference/modules#packagesjson), the official packages included, so declare each one with `edge add` first. Relative imports resolve against the importing file. Uncaught errors print a traceback to stderr and exit 1.
 
 ```text
 $ edge run broken.py
@@ -50,7 +50,7 @@ error: ZeroDivisionError: division by zero
 
 With no path, `edge run` reads the script from piped stdin (`cat app.py | edge run`) and errors when stdin is a terminal. `-c <code>` runs inline code instead (`edge run -c 'print(1)'`). With a path or `-c`, piped stdin instead feeds [`input()`](/reference/builtins) one line per call. A packed `.edge` or `.package` also runs here, `edge run app.edge` unpacks and runs it exactly as `./app.edge` would.
 
-Flags: the [native-engine flags](/reference/modules#run-flags) `--events`, `--save-state`, `--restore-state`, and `--preempt`. They are native-only and combining any of them with `--web` is an error.
+Flags: `--events`, `--save-state`, `--restore-state`, and `--preempt`, see [run flags](/reference/modules#run-flags).
 
 ## `edge serve`: local dev server
 
@@ -68,7 +68,7 @@ Flags: `--port <n>` (default `5173`), `--host <addr>` (default `127.0.0.1`), `--
 
 ```text
 $ edge repl
-Edge Python 0.1.0  ·  .reset to start fresh  ·  .exit, Ctrl+C or Ctrl+D to quit
+Edge Python 0.2.0  ·  .reset to start fresh  ·  .exit, Ctrl+C or Ctrl+D to quit
 >>> from math import sqrt
 >>> print(sqrt(2))
 1.4142135623730951
@@ -92,7 +92,7 @@ PASS - parses
   2/2 files passed · 0.0s
 ```
 
-Test files declare tests with the [`test` package](/packages/std/test) and do not need to call `run()`. The runner drives it after the file loads and reads the verdict from the file's `SystemExit` code, never from parsed output. A file that registers no tests fails. State never leaks between files.
+Test files declare tests with the [`test` package](/packages/std/test) and do not need to call `run()`. The runner drives it after the file loads and reads the verdict from the file's `SystemExit` code, never from parsed output. A file that registers no tests fails. State never leaks between files. The project must declare `test` in `packages.json`, otherwise the runner stops with `declare test in packages.json (edge add test)`.
 
 Exit codes: `0` when every file passed, `1` when a file failed or no `*_test.py` was found, `2` when the engine session could not start.
 
@@ -110,21 +110,21 @@ $ edge init my-app
   cd my-app && edge serve
 ```
 
-`--bare` skips `index.html` for script-only projects.
+`--bare` skips `index.html` for script-only projects. The manifest starts empty, nothing resolves until `edge add` fills it.
 
 ## `edge add` / `edge remove`: package management
 
-Edits [`packages.json`](/reference/modules#packagesjson) by name. The CLI knows the official packages, std (`json`, `re`, `math`, `struct`, `test`) and system (`dom`, `network`, `storage`, `time`), so you never paste URLs. Std entries go to `imports` (`.wasm` URLs, except the script-only `test` which resolves to `test.py`), system entries go to `system`. The full catalog is in [Modules](/reference/modules#standard-packages).
+Edits [`packages.json`](/reference/modules#packagesjson) by name. The CLI knows the official packages, std (`json`, `re`, `math`, `struct`, `test`) and system (`dom`, `network`, `storage`, `time`, `actor`), so you never paste URLs. Std entries go to `imports` (`.wasm` URLs, except the script-only `test` which resolves to `test.py`), `dom` goes to `imports` as its `entry.py` facade, and the other system entries go to `system`. The full catalog is in [Modules](/reference/modules#standard-packages).
 
 ```text
 $ edge add math network
-  + math       std
+  + math       imports
   + network    system
 
   updated packages.json
 ```
 
-Point a name at a custom URL with `edge add foo=https://example.com/foo.wasm`. The kind is inferred from the URL: `.wasm` and `.py` mean std, anything else means system. `edge remove` deletes entries the same way.
+Point a name at a custom URL with `edge add foo=https://example.com/foo.wasm`. The kind is inferred from the URL, `.wasm` and `.py` go to `imports`, anything else to `system`. `edge remove` deletes entries the same way.
 
 ## `edge build`: pack the app
 
@@ -136,7 +136,7 @@ Packs the project and its imports into one artifact, in one of three modes for t
 | `edge build --bundle` | a lightweight `.package` | a host that already has `edge`, or a pool |
 | `edge build --web` | a self-contained `dist/` | any browser |
 
-The default `.edge` is this `edge` binary with the project appended, so `./app.edge` runs it directly and it honors the run flags `--save-state`, `--restore-state`, `--preempt`, and `--events`. The `.package` carries only the code and its custom imports, since the runtime is already present where it lands. `--web` vendors the browser runtime, `compiler.wasm`, and every package into `dist/`, rewriting `packages.json` to the vendored paths. Std packages resolve by name at run time, so an `.edge` or `.package` needs no network for them.
+The default `.edge` is this `edge` binary with the project appended, so `./app.edge` runs it directly and it honors the run flags `--save-state`, `--restore-state`, `--preempt`, and `--events`. The `.package` carries only the code and its custom imports, since `edge` is already present where it lands. `--web` vendors the JS host under `dist/js/` with `compiler.wasm` and every declared package beside it, rewriting `packages.json` to the vendored paths. The CLI resolves the official std entries to its embedded copies, so an `.edge` or `.package` needs no network for them.
 
 ```text
 $ edge build
@@ -151,34 +151,24 @@ Flags: `--out <path>` (mode-specific default), `--bundle`, `--web`.
 
 ## `edge actor`: actor pool
 
-Runs many edge-python programs as cooperative actors over a few threads, described by a `actor.yml`. See [Actors](/reference/actors) for the manifest, groups, server, and untrusted code.
+Runs many edge-python programs as cooperative actors over a few threads, described by an `actor.yml`. See [Actors](/reference/actors) for the manifest, groups, server, and untrusted code.
 
 ```bash
 edge actor actor.yml
 ```
 
+Groups resolve their imports through the `packages.json` beside `actor.yml`, or the one `--packages` names, so a group that does `from actor import send` needs `actor` declared there.
+
 ## `edge uninstall`
 
-Removes the binary and its `PATH` entry, and asks before removing the bundled `chrome-headless-shell` cache. System browsers are never touched. The non-interactive equivalent is `curl -fsSL https://cdn.edgepython.com/cli/uninstall.sh | sh`, which leaves the browser cache in place.
+Removes the binary and its `PATH` entry. The non-interactive equivalent is `curl -fsSL https://cdn.edgepython.com/cli/uninstall.sh | sh`.
 
 ## Global flags
 
 | Flag | Effect |
 |------|--------|
 | `--packages <file>` | Use a specific manifest instead of `./packages.json` |
-| `--web` | Drive the browser runtime instead of the native engine (`run`, `repl`, `test`) |
 | `--version`, `-v` | Print the version |
 | `--help`, `-h` | Print the command list |
 
 `Ctrl+C` cancels a running command with exit code 130.
-
-## Bring your own browser
-
-For `--web`, `edge` uses, in order:
-
-1. `EDGE_CHROME_PATH`, when set.
-2. The bundled `chrome-headless-shell` under `~/.cache/edge` (override the root with `EDGE_CHROME_DIR`).
-3. A system Chrome, Chromium, or Edge on `PATH` (or the `CHROME` env var).
-4. Playwright's Chromium, when installed.
-
-`install.sh` downloads `chrome-headless-shell` when none of these is present. There is no Linux arm64 build, so on that platform install Chrome or Chromium manually and point `EDGE_CHROME_PATH` at it.

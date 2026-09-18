@@ -2,31 +2,23 @@ use anyhow::{bail, Context, Result};
 use compiler::devkit::{discover_tests, TEST_DRIVER};
 use std::path::Path;
 
-use crate::engine::{self, Backend, Session};
-use crate::engine::native::NativeSession;
+use crate::host::driver::{base_dir, Session};
 use crate::manifest::Manifest;
 use crate::ui;
 
-/// Discover *_test.py files and drive each through one engine session. Verdicts come only from SystemExit codes, never from parsed output.
-pub fn run(manifest_path: &Path, packages: Option<&Path>, web: bool, path: Option<&Path>) -> Result<()> {
+/// Discovers *_test.py files and drives each through one session, verdicts come only from SystemExit codes.
+pub fn run(manifest_path: &Path, packages: Option<&Path>, path: Option<&Path>) -> Result<()> {
     let target = path.unwrap_or(Path::new("."));
-    let files = if target.is_file() {
-        vec![target.to_path_buf()]
-    } else {
-        discover_tests(target)
-    };
+    let files = if target.is_file() { vec![target.to_path_buf()] } else { discover_tests(target) };
     if files.is_empty() {
         bail!("no *_test.py files found under {}", target.display());
     }
+    // The driver imports test, so the manifest must declare it like any other name.
+    if !Manifest::load(manifest_path)?.imports.contains_key("test") {
+        bail!("declare test in packages.json (edge add test)");
+    }
 
-    let manifest = Manifest::load(manifest_path)?;
-    let open = || -> Result<Box<dyn Backend>> {
-        Ok(if web {
-            Box::new(Session::open(&manifest)?)
-        } else {
-            Box::new(NativeSession::open(packages))
-        })
-    };
+    let open = || Session::open(packages);
     let mut session = open_or_die(&open);
 
     let started = std::time::Instant::now();
@@ -38,7 +30,7 @@ pub fn run(manifest_path: &Path, packages: Option<&Path>, web: bool, path: Optio
         }
         let result = std::fs::read_to_string(file)
             .with_context(|| format!("reading {}", file.display()))
-            .and_then(|src| run_file(session.as_mut(), &src, file));
+            .and_then(|src| run_file(&mut session, &src, file));
         let (ok, reason) = match result {
             Ok(v) => v,
             // A wedged session poisons later files, reopen.
@@ -51,17 +43,21 @@ pub fn run(manifest_path: &Path, packages: Option<&Path>, web: bool, path: Optio
         };
         let name = file.strip_prefix(".").unwrap_or(file);
         ui::test_verdict(ok, &name.display().to_string(), reason);
-        if !ok { failed += 1; }
+        if !ok {
+            failed += 1;
+        }
     }
 
     ui::test_summary(files.len() - failed, files.len(), started.elapsed().as_secs_f64());
     drop(session);
-    if failed > 0 { std::process::exit(1); }
+    if failed > 0 {
+        std::process::exit(1);
+    }
     Ok(())
 }
 
 /// Exit 2 keeps infra failures distinct from red tests.
-fn open_or_die(open: &dyn Fn() -> Result<Box<dyn Backend>>) -> Box<dyn Backend> {
+fn open_or_die(open: &dyn Fn() -> Result<Session>) -> Session {
     match open() {
         Ok(s) => s,
         Err(e) => {
@@ -72,9 +68,9 @@ fn open_or_die(open: &dyn Fn() -> Result<Box<dyn Backend>>) -> Box<dyn Backend> 
 }
 
 /// Eval the file, then the driver when it didn't exit itself.
-fn run_file(session: &mut dyn Backend, src: &str, file: &Path) -> Result<(bool, Option<&'static str>)> {
-    let base = engine::base_dir(file);
-    let outcome = session.eval(src, base.as_deref(), &mut |l| engine::emit_chunk(l))?;
+fn run_file(session: &mut Session, src: &str, file: &Path) -> Result<(bool, Option<&'static str>)> {
+    let base = base_dir(file);
+    let outcome = session.eval(src, base.as_deref(), None)?;
     let outcome = match (outcome.err, outcome.exit_code) {
         (Some(err), _) => {
             ui::traceback(&err);
@@ -82,7 +78,7 @@ fn run_file(session: &mut dyn Backend, src: &str, file: &Path) -> Result<(bool, 
         }
         // The file drove run() itself.
         (None, Some(code)) => return Ok((code == 0, None)),
-        (None, None) => session.eval(TEST_DRIVER, None, &mut |l| engine::emit_chunk(l))?,
+        (None, None) => session.eval(TEST_DRIVER, None, None)?,
     };
     if let Some(err) = outcome.err {
         ui::traceback(&err);
@@ -107,18 +103,7 @@ mod tests {
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
             std::fs::write(&p, "").unwrap();
         }
-        let names: Vec<_> = discover_tests(dir.path())
-            .iter()
-            .map(|p| p.strip_prefix(dir.path()).unwrap().to_str().unwrap().to_string())
-            .collect();
+        let names: Vec<_> = discover_tests(dir.path()).iter().map(|p| p.strip_prefix(dir.path()).unwrap().to_str().unwrap().to_string()).collect();
         assert_eq!(names, ["a_test.py", "sub/b_test.py"]);
-    }
-
-    #[test]
-    fn base_dir_maps_nested_files_only() {
-        assert_eq!(engine::base_dir(Path::new("tests/a_test.py")), Some("tests/".into()));
-        assert_eq!(engine::base_dir(Path::new("./sub/a_test.py")), Some("sub/".into()));
-        assert_eq!(engine::base_dir(Path::new("a_test.py")), None);
-        assert_eq!(engine::base_dir(Path::new("../x_test.py")), None);
     }
 }

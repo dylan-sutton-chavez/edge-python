@@ -1,7 +1,7 @@
 export default {
-    json: 'json (web, native)',
-    math: 'math (web, native)',
-    re: 're (web, native)',
-    struct: 'struct (web, native)',
-    test: 'test (web, native)'
+    json: 'json (js, cli)',
+    math: 'math (js, cli)',
+    re: 're (js, cli)',
+    struct: 'struct (js, cli)',
+    test: 'test (js, cli)'
 }

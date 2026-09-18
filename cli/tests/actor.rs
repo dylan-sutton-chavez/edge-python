@@ -39,7 +39,7 @@ struct Runtime {
     control: Option<String>,
 }
 
-// Runs every cli/tests/actor/*.yml case, asserting the actor's stdout matches its expect block.
+// Runs every cli/tests/actor/*.yml case, asserting the pool's stdout matches its expect block.
 #[test]
 fn actor_cases_match_their_expected_output() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/actor");
@@ -67,7 +67,8 @@ fn actor_cases_match_their_expected_output() {
             failures.push(format!("[{name}] output mismatch\n  want {expected:?}\n  got  {got:?}"));
         }
         if let Some(want) = &case.expect_status
-            && !status.contains(want.as_str()) {
+            && !status.contains(want.as_str())
+        {
             failures.push(format!("[{name}] status missing {want:?}, got {status:?}"));
         }
         for (i, (p, reply)) in case.post.iter().zip(&replies).enumerate() {
@@ -80,21 +81,23 @@ fn actor_cases_match_their_expected_output() {
     assert!(failures.is_empty(), "{} actor case(s) failed:\n{}", failures.len(), failures.join("\n"));
 }
 
-// A batch actor runs to completion, its stdout lines are the result.
+// A batch pool runs to completion, its stdout lines are the result.
 fn run_batch(path: &std::path::Path) -> Vec<String> {
-    let out = Command::new(BIN).args(["actor", path.to_str().unwrap()]).output().unwrap();
+    let out = Command::new(BIN).args(["actor", path.to_str().unwrap()]).stdin(Stdio::null()).output().unwrap();
     String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect()
 }
 
-// A server actor stays alive, publish feeds its ingress, then output, /stats and posts are read. The manifest is copied into a tempdir so its default wal lands there, never in the repo.
+// A server pool stays alive, publish feeds the ingress, then stdout, /stats and posts are read.
 fn run_server(path: &std::path::Path, listen: &str, publish: &[String], control: Option<&str>, posts: &[Post]) -> (Vec<String>, String, Vec<String>) {
     let addr = listen.strip_prefix("tcp://").unwrap_or(listen);
-    let scratch = std::env::temp_dir().join(format!("edge-actor-{}", std::process::id()));
+    let scratch = std::env::temp_dir().join(format!("edge-actor-{}-{}", std::process::id(), path.file_stem().unwrap().to_string_lossy()));
     let _ = std::fs::create_dir_all(&scratch);
     let manifest = scratch.join("actor.yml");
     std::fs::copy(path, &manifest).unwrap();
+    // The groups resolve actor through the manifest beside the yml, so it travels along.
+    std::fs::copy(path.with_file_name("packages.json"), scratch.join("packages.json")).unwrap();
 
-    let mut child = Command::new(BIN).args(["actor", manifest.to_str().unwrap()]).stdout(Stdio::piped()).spawn().unwrap();
+    let mut child = Command::new(BIN).args(["actor", manifest.to_str().unwrap()]).stdin(Stdio::null()).stdout(Stdio::piped()).spawn().unwrap();
     std::thread::sleep(Duration::from_millis(400));
     if let Ok(mut sock) = TcpStream::connect(addr) {
         for line in publish {
@@ -128,30 +131,60 @@ fn post_eval(addr: &str, path: &str, body: &str) -> String {
     resp.split_once("\r\n\r\n").map(|(_, body)| body.to_string()).unwrap_or_default()
 }
 
+/* The bundle wire format `edge build --bundle` writes, magic, entry, then length-prefixed files. */
+fn bundle(entry: &str, files: &[(&str, &str)]) -> Vec<u8> {
+    fn put(b: &mut Vec<u8>, bytes: &[u8]) {
+        b.extend_from_slice(bytes.len().to_string().as_bytes());
+        b.push(b'\n');
+        b.extend_from_slice(bytes);
+    }
+    let mut b = b"EDGEPKG\x01".to_vec();
+    put(&mut b, entry.as_bytes());
+    b.extend_from_slice(files.len().to_string().as_bytes());
+    b.push(b'\n');
+    for (path, content) in files {
+        put(&mut b, path.as_bytes());
+        put(&mut b, content.as_bytes());
+    }
+    b
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let n = (chunk[0] as u32) << 16 | (*chunk.get(1).unwrap_or(&0) as u32) << 8 | *chunk.get(2).unwrap_or(&0) as u32;
+        out.push(TABLE[(n >> 18) as usize & 63] as char);
+        out.push(TABLE[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { TABLE[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { TABLE[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
 /* An untrusted client sends a whole project bundle to an eval group, which runs it in isolation. */
 #[test]
 fn eval_group_runs_a_bundled_project_over_the_wire() {
-    use compiler::native::pack::{Bundle, Entry};
-    let bundle = Bundle {
-        entry: "main.py".to_string(),
-        files: vec![
-            Entry { path: "main.py".to_string(), bytes: b"import util\nprint(util.hi())\n".to_vec() },
-            Entry { path: "util.py".to_string(), bytes: b"def hi():\n    return \"bundled and run\"\n".to_vec() },
-            Entry { path: "packages.json".to_string(), bytes: b"{ \"imports\": { \"util\": \"./util.py\" } }\n".to_vec() },
-        ],
-    };
-    let line = format!("runners EDGEPKG:{}", compiler::util::ws::base64_encode(&bundle.encode()));
+    let payload = bundle("main.py", &[
+        ("main.py", "import util\nprint(util.hi())\n"),
+        ("util.py", "def hi():\n    return \"bundled and run\"\n"),
+        ("packages.json", "{ \"imports\": { \"util\": \"./util.py\" } }\n"),
+    ]);
+    let line = format!("runners EDGEPKG:{}", base64_encode(&payload));
 
     let scratch = std::env::temp_dir().join(format!("edge-actor-bundle-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&scratch);
     let manifest = scratch.join("actor.yml");
     std::fs::write(&manifest, "runtime:\n  listen: tcp://127.0.0.1:7811\ngroups:\n  runners:\n    eval: true\n").unwrap();
 
-    let mut child = Command::new(BIN).args(["actor", manifest.to_str().unwrap()]).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-    // Retry the connect until the ingress binds, the actor boots slower under a loaded test run.
+    let mut child = Command::new(BIN).args(["actor", manifest.to_str().unwrap()]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    // Retry the connect until the ingress binds, the pool boots slower under a loaded test run.
     let mut sock = None;
     for _ in 0..40 {
-        if let Ok(s) = TcpStream::connect("127.0.0.1:7811") { sock = Some(s); break; }
+        if let Ok(s) = TcpStream::connect("127.0.0.1:7811") {
+            sock = Some(s);
+            break;
+        }
         std::thread::sleep(Duration::from_millis(50));
     }
     let mut sock = sock.expect("ingress never came up");

@@ -1,24 +1,21 @@
-# Empty table: this crate is its own workspace root, not part of the parent compiler workspace.
+# An empty table makes this crate its own workspace root, apart from the compiler workspace.
 [workspace]
 
 [package]
 name = "edge"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-description = "The Edge Python developer CLI. Runs, tests, and scaffolds scripts on the in-process native engine by default, drives the browser runtime behind --web, packs apps into standalone binaries or bundles, and runs cooperative actor pools."
+description = "The Edge Python developer CLI. Runs, tests, and scaffolds scripts on the same compiler.wasm the browser uses, hosted under wasmtime, packs apps into standalone binaries or bundles, and runs cooperative actor pools."
 
 [[bin]]
 name = "edge"
 path = "src/main.rs"
 
-# Network fixture, serves canned http, sse and ws echo for the parity corpus.
-[[bin]]
-name = "mock"
-path = "src/bin/mock.rs"
-
 [dependencies]
-# The engine crate, devkit helpers plus the in-process native engine.
-edge-python = { path = "..", features = ["native"] }
+# The engine crate as a library, devkit helpers, manifest parsing and sha256 pinning.
+edge-python = { path = ".." }
+# Runs the precompiled compiler.wasm, no compiler is linked into the binary.
+wasmtime = { version = "48", default-features = false, features = ["runtime", "std", "pooling-allocator"] }
 clap = { version = "4", features = ["derive"] }
 tiny_http = "0.12"
 serde = { version = "1", features = ["derive"] }
@@ -28,14 +25,18 @@ serde_yaml_ng = "0.10"
 anyhow = "1"
 # Catches Ctrl+C in non-REPL commands so they shut down cleanly.
 ctrlc = "3"
-# Drives a system-installed Chrome/Chromium via CDP; the install.sh provisions the browser.
-headless_chrome = "1.0.21"
 # Line editor + history for `edge repl`.
 rustyline = "17.0.0"
-# HTTPS fetcher used by `edge build` to vendor the runtime, compiler.wasm, and packages.
+# HTTPS for URL imports, `edge build` vendoring and the network module.
 ureq = "3"
-# Isolated temp dir for a standalone .edge to unpack into, also used by tests; auto-cleans on drop.
+# Stable actor keys that survive removal, so the scheduler queues never dangle.
+slab = "0.4"
+# A unique temp file for the uninstall script, a predictable path invites symlink squatting.
 tempfile = "3"
+
+[build-dependencies]
+# Precompiles compiler.wasm and the std packages for the build target, never shipped.
+wasmtime = { version = "48", default-features = false, features = ["runtime", "cranelift", "all-arch", "std"] }
 
 [profile.release]
 opt-level = "z"

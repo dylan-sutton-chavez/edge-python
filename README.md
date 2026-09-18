@@ -8,10 +8,10 @@
 
 <br/>
 
-Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Python subset. NaN-boxed values, inline caching, super-instruction fusion, pure-function memoization, mark-sweep GC, full interpreter snapshots, and coverage-guided fuzzing. Runs in the browser as a WebAssembly module, or natively in the CLI as a single script, a standalone binary, or a pool of cooperative actors.
+Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Python subset. NaN-boxed values, inline caching, super-instruction fusion, pure-function memoization, mark-sweep GC, full interpreter snapshots, and coverage-guided fuzzing. Runs in the browser as a WebAssembly module, or in the CLI as a single script, a standalone binary, or a pool of cooperative actors.
 
-- Secure by default. No file, network, or environment access, unless explicitly enabled by a [system module](https://edgepython.com/reference/modules#system-libraries).
-- Around 200 KB footprint. The full compiler and runtime ship as a single WASM binary for the browser or a native engine in the CLI.
+- Secure by default. No file, network, or environment access, unless explicitly enabled by a [system module](https://edgepython.com/reference/modules#system-libraries), and nothing resolves without `packages.json`, the official packages included.
+- Around 200 KB footprint. The compiler and the VM ship as one WASM binary, hosted by the JS host or by the CLI.
 - Compile-time imports. Every module resolves at parse time, no dynamic loading, no runtime surprises.
 - No AST. Source compiles directly to bytecode in a single O(n) pass.
 - Snapshots. Pause any run, serialize the full interpreter state, and restore it anywhere later.
@@ -26,26 +26,26 @@ Single-pass SSA bytecode compiler and threaded-code stack VM for a sandboxed Pyt
 
 ## Repository layout
 
-A Cargo workspace at the repo root holds the engine, `abi`, `pdk`, `rt`, `skill` and `lang`. `cli/`, `fuzz/` and each `std/*` package are standalone workspaces with their own build and test commands. The commands below run from the repo root.
+A Cargo workspace at the repo root holds the engine, `abi`, `pdk`, `skill` and `lang`. `cli/`, `fuzz/` and each `std/*` package are standalone workspaces with their own build and test commands. The commands below run from the repo root.
 
 ```text
 ├── abi
 ├── cli
 │   └── src
+│       ├── actor
+│       ├── builtins
 │       ├── cmd
-│       └── engine
+│       └── host
 ├── docs
 ├── fuzz
+├── js
+│   ├── builtins
+│   └── src
 ├── lang
 ├── pdk
 ├── skill
-├── web
 ├── src
 │   ├── lexer
-│   ├── native
-│   │   ├── builtins
-│   │   ├── io
-│   │   └── actor
 │   ├── packages
 │   ├── parser
 │   ├── util
@@ -56,15 +56,13 @@ A Cargo workspace at the repo root holds the engine, `abi`, `pdk`, `rt`, `skill`
 │   │   └── opcodes
 │   └── wasm
 ├── std
-├── tests
-│   └── cases
-└── proxy
+└── tests
+    └── cases
 ```
 
 ```bash
 cargo wasm # local release .wasm (CI ships a further size-optimised build)
 cargo build --release # host .rlib + cdylib for Rust embedders
-cargo clippy --lib --features native # lint the native engine module
 cargo test --release # run the compiler test suite
 cargo test -p skill # run every executable cell of skill/SKILL.md through the CLI
 ```
@@ -77,14 +75,24 @@ deno test --allow-all std/harness/ # STDPKG=<name> narrows to one package
 
 To add a std package, create `std/<name>/` with the crate (or `src/entry.py` for a script-only package) plus its corpus. No harness edits needed.
 
-The system libraries in `web/builtins/*` are plain ESM, tested through headless Chromium. Web-only corpora sit beside the module, corpora shared with the native engine live in `tests/cases/builtins/`. Cases add optional `html`, `http_mocks`, and `ws_mocks` fixtures:
+The CLI embeds `compiler.wasm` and the std `.wasm` files at build time, precompiled for the host by `cli/build.rs`, so build them first or point `EDGE_COMPILER_WASM` and `EDGE_STD_DIR` at copies. Nothing is fetched at build time:
+
+```bash
+cargo wasm
+for p in json re math struct
+do (cd std/$p && cargo build --release --target wasm32-unknown-unknown)
+done
+cd cli && cargo build --release
+```
+
+The system libraries in `js/builtins/*` are plain ESM, tested through headless Chromium. Corpora only the JS host serves sit beside the module, corpora shared with the CLI live in `tests/cases/builtins/`. Cases add optional `html`, `http_mocks`, and `ws_mocks` fixtures:
 
 ```bash
 deno run -A npm:playwright install --with-deps chromium # once
-cd web/builtins && SYSPKG=<dom|network|storage|time> deno test --allow-all --node-modules-dir=none tests/
+cd js/builtins && SYSPKG=<dom|network|storage|time> deno test --allow-all --node-modules-dir=none tests/
 ```
 
-The browser runtime (`web/src`) is TypeScript, linted and tested with `deno lint web/` and `deno test --allow-all web/tests/web.test.js`.
+The JS host (`js/src`) is TypeScript, linted and tested with `deno lint js/`, `deno test --allow-all js/tests/js.test.js` through Chromium, and `deno test --allow-all js/tests/deno.test.js` under Deno with no browser.
 
 ## Architecture
 
@@ -99,7 +107,7 @@ Single-pass pipeline, source to SSA bytecode chunk, run by a stack interpreter w
 
 Full rationale, NaN-box patterns, IC thresholds, GC roots, and intentional omissions: [Design](https://edgepython.com/implementation/design). Lexer and parser internals: [Lexical](https://edgepython.com/implementation/lexical), [Syntax](https://edgepython.com/implementation/parsing).
 
-Native modules ship via four delivery paths (CDN `.wasm`, native `.so`/`.dylib` plugin, system capability, JS system module), see [Writing modules](https://edgepython.com/reference/modules).
+Native modules ship via three delivery paths (CDN `.wasm`, system capability, JS system module), see [Writing modules](https://edgepython.com/reference/modules).
 
 ## Quick start
 
@@ -108,32 +116,15 @@ Native modules ship via four delivery paths (CDN `.wasm`, native `.so`/`.dylib` 
 Download it to your machine ([reference docs](https://edgepython.com/reference/cli)):
 
 ```bash
-# Compatible with macOS, Linux and WSL
+# Compatible with macOS, Linux, Windows and WSL
 curl -fsSL https://cdn.edgepython.com/cli/install.sh | sh
-# Or from source (any platform with Rust + Cargo)
+# Or from source, after cargo wasm and the std builds above
 cargo install --path cli
 
 edge -h # List all commands
 ```
 
-`run`, `repl` and `test` execute in the built-in native engine. `--web` hosts the runtime in a headless Chromium instead, and `install.sh` downloads a pinned `chrome-headless-shell` into `~/.cache/edge` unless a system Chrome/Chromium is already installed (`EDGE_NO_BROWSER=1` skips it).
-
-### Browser
-
-```html
-<script type="module" src="https://cdn.edgepython.com/web/src/element.js"></script>
-<edge-python entry="./app/main.py" packages="./app/packages.json"></edge-python>
-```
-
-The runtime spawns a Web Worker that pre-fetches imports, dispatches native calls, and streams `print()` output back.
-
-### Rust host
-
-Edge Python is a `cdylib`, so a Rust host can instantiate `compiler.wasm` and call its exports directly, the same `.wasm` that ships to browsers, and the host owns I/O. The crate fetches nothing at build time, so vendor the `.wasm` from a tagged release and pin it by checksum, see [Consuming the release](https://edgepython.com/reference/abi#consuming-the-release-from-a-rust-crate). To add native modules from your own crate, implement the `Resolver` trait, see [Writing modules](https://edgepython.com/reference/modules).
-
-### Native
-
-`edge run`, `edge repl`, and `edge test` execute in the CLI's in-process native engine by default (`--web` restores Chromium). Tagged releases and the CDN's `/native/` route carry each std package as a native plugin library ([native engine](https://edgepython.com/reference/modules#the-native-engine)).
+`run`, `repl`, `test` and `actor` execute the same `compiler.wasm` the JS host loads, precompiled into the binary and driven by wasmtime. `install.sh` only downloads the binary, there is no browser and no server behind it.
 
 ```python
 # hello.py
@@ -149,7 +140,14 @@ $ edge run hello.py
 hello edge
 ```
 
-Imports, std packages, and the built-in `time` / `network` modules resolve without a browser:
+Every module a project uses is declared in `packages.json`, and `edge add` writes the official ones. The CLI resolves the std entries to copies inside the binary and the built-in `time` / `network` modules by name, so nothing hits the network:
+
+```text
+$ edge add json
+  + json       imports
+
+  updated packages.json
+```
 
 ```python
 # app.py
@@ -185,9 +183,22 @@ groups:
     replicas: 100000   # ceiling, actors spawn on demand
 ```
 
+### Browser
+
+```html
+<script type="module" src="https://cdn.edgepython.com/js/src/element.js"></script>
+<edge-python entry="./app/main.py" packages="./app/packages.json"></edge-python>
+```
+
+The JS host spawns a Web Worker that pre-fetches imports, dispatches native calls, and streams `print()` output back. The `packages` attribute is required for any import, without it the page runs with no modules at all.
+
+### Rust host
+
+Edge Python is a `cdylib`, so a Rust host can instantiate `compiler.wasm` and call its exports directly, the same `.wasm` the JS host loads, and the host owns I/O. The `edge` CLI is exactly that host, it embeds the `.wasm` precompiled by wasmtime and implements the imports in `cli/src/host`. The crate fetches nothing at build time, so vendor the `.wasm` from a tagged release and pin it by checksum, see [Consuming the release](https://edgepython.com/reference/abi#consuming-the-release-from-a-rust-crate). To add native modules from your own crate, implement the `Resolver` trait, see [Writing modules](https://edgepython.com/reference/modules).
+
 ## What it is
 
-Edge Python targets sandboxed execution, in the browser and in the CLI's native engine. It is a dynamic, multi-paradigm Python subset with classes, async/await, structural pattern matching, and compile-time module resolution. There is no bundled stdlib, modules are external artifacts.
+Edge Python targets sandboxed execution through two hosts. The JS host is the JavaScript package, built on the browser's sandbox model over Web APIs, so it runs in browsers and in JavaScript runtimes that offer the same APIs, such as Deno. The CLI is a Rust binary hosting the same `compiler.wasm` under wasmtime. `dom`, `storage`, `frame()` and the `<edge-python>` element need a browser. It is a dynamic, multi-paradigm Python subset with classes, async/await, structural pattern matching, and compile-time module resolution. There is no bundled stdlib, modules are external artifacts.
 
 Full language reference, scope, and what intentionally isn't supported: [What Edge Python is](https://edgepython.com/getting-started/introduction).
 
@@ -199,7 +210,7 @@ Coverage-guided fuzzing of the lex -> parse -> VM pipeline lives in [`fuzz/`](fu
 
 The docs in `docs/` are a Nextra static export. Run `npm install` once, then `npm run dev` to work locally. In dev each page compiles on first visit (slower under WSL, where the repo sits on `/mnt/c`), then navigation is instant. `npm run build` pre-renders every page into `out/`, so production serves static HTML only.
 
-Any `python` code block immediately followed by a `text Output` block becomes an interactive playground that runs the snippet in the real runtime, so an example and its stated output are always a verifiable pair.
+Any `python` code block immediately followed by a `text Output` block becomes an interactive playground that runs the snippet on the real engine through the JS host, so an example and its stated output are always a verifiable pair.
 
 ## CI/CD
 

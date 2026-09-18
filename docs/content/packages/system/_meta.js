@@ -1,7 +1,7 @@
 export default {
-    dom: 'dom (web)',
-    network: 'network (web, native)',
-    storage: 'storage (web)',
-    actor: 'actor (native)',
-    time: 'time (web, native)'
+    dom: 'dom (browser)',
+    network: 'network (js, cli)',
+    storage: 'storage (browser)',
+    actor: 'actor (cli)',
+    time: 'time (js, cli)'
 }

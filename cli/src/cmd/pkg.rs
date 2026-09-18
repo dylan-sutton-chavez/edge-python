@@ -25,9 +25,9 @@ pub fn add(path: &Path, pkgs: &[String]) -> Result<()> {
     let mut m = Manifest::load(path)?;
     for (name, kind, url) in resolved {
         match kind {
-            Kind::Std => {
+            Kind::Imports => {
                 m.imports.insert(name.to_string(), url);
-                ui::added(name, "std");
+                ui::added(name, "imports");
             }
             Kind::System => {
                 m.system.insert(name.to_string(), url);
@@ -69,10 +69,10 @@ fn parse_spec(spec: &str) -> (&str, Option<String>) {
     (spec, None)
 }
 
-/// A `.wasm` or `.py` url is a worker-side std package, anything else is a system package.
+/// A `.wasm` or `.py` url is a worker-side module, anything else is a system module.
 fn kind_from_url(url: &str) -> Kind {
     if url.ends_with(".wasm") || url.ends_with(".py") {
-        Kind::Std
+        Kind::Imports
     } else {
         Kind::System
     }

@@ -5,14 +5,14 @@ description: "What Edge Python is, what it is not, and where to go next."
 
 Edge Python is a sandboxed subset of Python. The compiler and the virtual machine are written in Rust. You write ordinary Python syntax. The compiler turns it into bytecode, and a stack VM runs it.
 
-The same engine ships in two forms:
+The engine is one WebAssembly binary of about 200 KB, and two hosts run it:
 
-- A WebAssembly binary of about 200 KB that runs in the browser.
-- A native engine built into the `edge` command line interface.
+- The JS host, the JavaScript package. It is built on the browser's sandbox model over Web APIs, so it runs in browsers and in JavaScript runtimes that offer the same APIs, such as Deno. `dom`, `storage`, `frame()` and the `<edge-python>` element need a browser.
+- The `edge` command line interface, a Rust binary that embeds the same WebAssembly precompiled and runs it under wasmtime.
 
-Sandboxed means the defaults deny everything. A program gets no file system, no network, and no environment access unless the host grants it. Imports resolve at compile time through a resolver the host injects, so a running program never loads code you did not declare.
+Sandboxed means the defaults deny everything. A program gets no file system, no network, and no environment access unless the host grants it. Imports resolve at compile time through a resolver the host injects, so a running program never loads code you did not declare, the official packages included. Every module a project uses is an entry in its `packages.json`.
 
-Every runnable example in these docs executes in the real runtime. Try editing this one:
+Every runnable example in these docs executes on the real engine through the JS host. Try editing this one:
 
 ```python
 text = "the quick brown fox"
@@ -31,7 +31,7 @@ for w, n in words.items():
 
 ## What it is not
 
-Edge Python is not a full Python. It leaves out what does not fit a small sandboxed runtime:
+Edge Python is not a full Python. It leaves out what does not fit a small sandboxed engine:
 
 - No bundled standard library. Every module is an external package. See [Modules](/reference/modules).
 - No dynamic code. `exec`, `eval`, `compile`, and `__import__` do not exist.

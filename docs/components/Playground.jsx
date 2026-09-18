@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pre, Code, Button } from 'nextra/components'
-import { run } from './runtime'
+import { run } from './worker'
 import { escapeHtml } from './shiki'
 
 function fromB64(b64) {
@@ -50,7 +50,7 @@ export function Playground({ code, output }) {
     const seedHtml = useMemo(() => ({ __html: escapeHtml(defaultCode) }), [defaultCode])
     const [result, setResult] = useState(null) // null = showing default; else { text, error, ms }
     const [running, setRunning] = useState(false)
-    const [phase, setPhase] = useState(null) // cold-start/exec phase: 'runtime' | 'worker' | 'running'
+    const [phase, setPhase] = useState(null) // cold-start and exec phase, host, worker or running
 
     // Live guard: the mount effect captures runCode once, so a `running` state read here would be the first render's `false` forever — Ctrl+Enter could then fire concurrent runs. A ref reads the current value through that stale closure.
     const runningRef = useRef(false)
@@ -107,7 +107,7 @@ export function Playground({ code, output }) {
     const liveText = result ? applyTerminalControls(result.text).replace(/\n$/, '') : ''
     const differs = result && !result.error && liveText !== defaultText
     const termBody = result ? [liveText, result.error].filter(Boolean).join('\n') : defaultText
-    const phaseLabel = { runtime: 'loading runtime…', worker: 'initializing worker…', running: 'running…' }
+    const phaseLabel = { host: 'loading host…', worker: 'initializing worker…', running: 'running…' }
     const header = running
         ? `Output · ${phaseLabel[phase] ?? 'running…'}`
         : !result

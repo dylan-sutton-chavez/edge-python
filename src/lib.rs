@@ -4,20 +4,16 @@ extern crate alloc;
 
 pub mod abi;
 
-/* Host bridge shared by the wasm build and the native engine. */
-#[cfg(any(target_arch = "wasm32", feature = "native"))]
+/* Host bridge behind the six plugin imports, wasm only. */
+#[cfg(target_arch = "wasm32")]
 pub mod bridge;
 
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 
-/* Dev-tooling constants and helpers shared by the edge CLI and the native engine. */
+/* Dev-tooling constants and helpers shared with the edge CLI. */
 #[cfg(feature = "std")]
 pub mod devkit;
-
-/* The native engine, resolver, plugin loader, system modules and drive loop shared by every native front end. */
-#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
-pub mod native;
 
 /* Internal compiler helpers (not Edge Python stdlib), separate from pipeline code. */
 pub mod util {
@@ -25,9 +21,6 @@ pub mod util {
     pub mod fstr;
     pub mod jesc;
     pub mod sha256;
-    /* RFC 6455 codec, shared by the native websocket client and the test mock. */
-    #[cfg(all(feature = "native", not(target_arch = "wasm32")))]
-    pub mod ws;
 }
 
 /* NaN-boxed values and the mark-and-sweep heap, the layer both the frontend and the VM build on. */

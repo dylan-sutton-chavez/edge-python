@@ -111,7 +111,7 @@ impl Resolver for TestResolver {
 }
 
 impl TestResolver {
-    /* Nearest ancestor dir with a fixture manifest, mirroring the native fs probe. */
+    /* Nearest ancestor dir with a fixture manifest, mirroring the host manifest probe. */
     fn manifest_root(&self, spec: &str) -> Result<String, String> {
         let s = self.state.borrow();
         for dir in walk_up_dirs(&self.dir) {
@@ -143,7 +143,7 @@ impl TestResolver {
             }
             let Some((dir, target, ext)) = hit else {
                 return Err(format!(
-                    "no packages.json above '{}' declares '{}'", start_dir, name));
+                    "module '{}' is not provided by this host and no packages.json declares it", name));
             };
             if let Some(target) = target {
                 let canonical = join_relative(&dir, &target);
@@ -159,7 +159,7 @@ impl TestResolver {
                 search_dir = next;
                 continue;
             }
-            return Err(format!("no packages.json above '{}' declares '{}'", start_dir, name));
+            return Err(format!("module '{}' is not provided by this host and no packages.json declares it", name));
         }
     }
 
@@ -252,7 +252,7 @@ fn pick(_: &mut HeapPool, args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr> 
     Ok(if args[0].as_bool() { args[2] } else { args[1] })
 }
 
-/* Native class fixtures, `Box(v)` stores v on self, `get` reads it back, exercises the Extern-method self convention end to end. */
+/* Native class fixtures, `Box(v)` stores v on self and `get` reads it back through the self convention. */
 fn class_box_init(heap: &mut HeapPool, args: &[Val], _kw: Option<Val>) -> Result<Val, VmErr> {
     let [inst, v] = args else { return Err(VmErr::Type("Box: expected (self, value)")); };
     let HeapObj::Instance(_, attrs) = heap.get(*inst) else {

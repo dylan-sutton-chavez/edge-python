@@ -52,7 +52,7 @@ For arith and compare opcodes the loop checks `cache.get_fast(ip)`. A present `F
 
 Dicts and sets key by content via `hash_val_with_heap`, so value-equal numerics collapse to one key. For example `1 == 1.0` and `10**16 == 1e16` hit the same slot. An inline int (and any integral float in range) hashes as its `i64` value. Only non-integral floats hash their `f64` bits. Hashing float bits directly would funnel small integers, whose low mantissa bits are zero, into one `FxHasher` bucket and degrade int-keyed lookups to O(n²). `FxBuildHasher` uses a fixed seed, so iteration order is reproducible across runs.
 
-The heap is a `Vec<HeapSlot>` arena with a free list capped at 524,288 entries, sorted to prefer low indices. Strings and bytes up to 128 bytes, all LongInts, and bound methods are interned in side hashes. Equal values collapse to one slot, so short literals short-circuit through identity (`is`). The live-object cap is `Limits.heap` (see [Limits and errors](/reference/limits-and-errors#sandbox-limits)).
+The heap is a `Vec<HeapSlot>` arena with a free list capped at 524,288 entries, sorted to prefer low indices. Strings and bytes up to 128 bytes, all LongInts, and bound methods are interned in side hashes. Equal values collapse to one slot, so short literals short-circuit through identity (`is`). The live-object cap is `Limits.heap` (see [Limits and errors](/reference/limits-and-errors#sandboxed-execution)).
 
 The main `HeapObj` variants are `Str`, `Bytes`, `LongInt`, `List`, `Dict` (insertion-ordered), `Set`, `FrozenSet`, `Tuple`, `Func`, `Range`, `Slice`, `Type`, `ExcInstance`, `BoundMethod`, `NativeFn`, `Class`, `Instance`, `BoundUserMethod`, `Super`, `Property`, `StaticMethod`, `ClassMethod`, `Coroutine`, `Module`, and `Extern`.
 

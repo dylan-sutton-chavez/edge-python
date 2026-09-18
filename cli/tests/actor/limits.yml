@@ -1,0 +1,17 @@
+# A group heap ceiling below the sandbox profile reaches the interpreter, allocation past it raises MemoryError.
+groups:
+  capped:
+    replicas: 1
+    limits:
+      heap: 2000
+    seed: ["go"]
+    code: |
+      receive()
+      try:
+          xs = [str(i) for i in range(50000)]
+          print("unbounded")
+      except MemoryError:
+          print("capped")
+
+expect:
+  - "capped"

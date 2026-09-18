@@ -1,13 +1,6 @@
 use crate::markdown::Block;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Engine {
-    Both,
-    Native,
-    Web,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
     Output,
     Error,
@@ -23,26 +16,22 @@ pub enum Kind {
 
 pub struct Cell {
     pub kind: Kind,
-    pub engine: Engine,
     pub verdict: Verdict,
     pub body: String,
     pub expect: String,
     pub line: usize,
 }
 
-fn parse_text_meta(meta: &str, line: usize) -> Result<(Engine, Verdict), String> {
-    let mut engine = Engine::Both;
+fn parse_text_meta(meta: &str, line: usize) -> Result<Verdict, String> {
     let mut verdict = Verdict::Output;
     for tok in meta.split_whitespace() {
         match tok {
-            "Output" => engine = Engine::Both,
-            "Native" => engine = Engine::Native,
-            "Web" => engine = Engine::Web,
+            "Output" => verdict = Verdict::Output,
             "Error" => verdict = Verdict::Error,
             other => return Err(format!("line {line}: unknown text meta '{other}'")),
         }
     }
-    Ok((engine, verdict))
+    Ok(verdict)
 }
 
 pub fn collect(blocks: &[Block]) -> Result<Vec<Cell>, String> {
@@ -93,14 +82,8 @@ pub fn collect(blocks: &[Block]) -> Result<Vec<Cell>, String> {
                 b.line
             ));
         };
-        let (engine, verdict) = parse_text_meta(&text.meta, text.line)?;
+        let verdict = parse_text_meta(&text.meta, text.line)?;
 
-        if matches!(kind, Kind::Actor | Kind::Untrusted) && engine == Engine::Web {
-            return Err(format!(
-                "line {}: actor cells are native only and cannot pair with Web",
-                text.line
-            ));
-        }
         if kind == Kind::Actor && b.body.contains("eval: true") {
             return Err(format!(
                 "line {}: yml actor group uses eval, label it yml untrusted",
@@ -116,7 +99,6 @@ pub fn collect(blocks: &[Block]) -> Result<Vec<Cell>, String> {
 
         cells.push(Cell {
             kind,
-            engine,
             verdict,
             body: b.body.clone(),
             expect: text.body.clone(),

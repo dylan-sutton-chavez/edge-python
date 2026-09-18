@@ -6,5 +6,3 @@ mod vm;
 mod packages;
 mod snapshot;
 mod devkit;
-#[cfg(feature = "native")]
-mod native_plugin;

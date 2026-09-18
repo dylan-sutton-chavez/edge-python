@@ -1,13 +1,13 @@
 import { chromium } from "npm:playwright@latest";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
-import { DEFAULT_IMPORTS } from "../../web/src/defaults.ts";
 
 const ROOT = new URL("../", import.meta.url).pathname;
-const RUNTIME = new URL("../../web/", import.meta.url).pathname;
-const DIST = RUNTIME + "dist/"; // tsc emit of web/src, built below
+const HOST = new URL("../../js/", import.meta.url).pathname;
+const DIST = HOST + "dist/"; // tsc emit of js/src, built below
 const REPO = new URL("../../", import.meta.url).pathname;
-const CDN_HOST = new URL(Object.values(DEFAULT_IMPORTS)[0]).host;
+const CDN_HOST = "cdn.edgepython.com";
 const MANIFEST = "/_packages.json"; // synthesized, keeps the agnostic <pkg>/ folder free of test artifacts
+const STD = ["json", "re", "math", "struct", "test"];
 
 /* Repo-root dirs with a `<name>/<name>.json` corpus are stdpkgs. `STDPKG=<name>` narrows discovery to one package, used by the matrix-fanned CI to isolate per-shard work. */
 const only = Deno.env.get("STDPKG");
@@ -29,7 +29,7 @@ const TYPES = {
 let distBuilt = false;
 async function buildDist() {
     if (distBuilt) return;
-    const tsc = (cfg) => new Deno.Command(Deno.execPath(), { args: ["run", "-A", "npm:typescript@5.9.3/tsc", "-p", cfg], cwd: RUNTIME }).output();
+    const tsc = (cfg) => new Deno.Command(Deno.execPath(), { args: ["run", "-A", "npm:typescript@5.9.3/tsc", "-p", cfg], cwd: HOST }).output();
     for (const c of ["tsconfig.json", "tsconfig.worker.json"]) {
         const r = await tsc(c);
         if (!r.success) throw new Error(`tsc failed: ${c}`);
@@ -60,10 +60,12 @@ async function runPackage(pkg) {
     }
 
     const cases = JSON.parse(readFileSync(`${dir}/${pkg}.json`, "utf-8"));
-    // The tag's packages.json is pinned by a package with its own (e.g. cross-package corpora), else synthesized keyed by name.
+    // Every std is declared at its CDN url, the package under test points at the local build.
+    const imports = Object.fromEntries(STD.map((name) => [name, `https://${CDN_HOST}/std/${name}.${name === "test" ? "py" : "wasm"}`]));
+    imports[pkg] = entry;
     const manifest = existsSync(`${dir}/packages.json`)
         ? readFileSync(`${dir}/packages.json`, "utf-8")
-        : JSON.stringify({ imports: { [pkg]: entry } });
+        : JSON.stringify({ imports });
 
     const browser = await chromium.launch();
     const page = await browser.newPage();
@@ -74,23 +76,30 @@ async function runPackage(pkg) {
     /* Serve repo files from disk and synthesize the manifest. External CDNs (cdn.edgepython.com) pass through. */
     await page.route("**/*", (route) => {
         const url = new URL(route.request().url());
+        // A sibling std at its CDN url is served from the local build when one exists.
+        if (url.host === CDN_HOST && url.pathname.startsWith("/std/")) {
+            const name = url.pathname.slice("/std/".length).replace(/\.(wasm|py)$/, "");
+            const local = name === "test" ? `${ROOT}test/src/entry.py` : `${ROOT}${name}/target/wasm32-unknown-unknown/release/${name}.wasm`;
+            try { return route.fulfill({ contentType: TYPES[url.pathname.slice(url.pathname.lastIndexOf("."))], body: readFileSync(local) }); }
+            catch { return route.continue(); }
+        }
         // Prefer in-tree wasm so new exports are testable.
         if (url.host === CDN_HOST && url.pathname === "/compiler.wasm") {
             const local = `${REPO}target/wasm32-unknown-unknown/release/compiler.wasm`;
             try { return route.fulfill({ contentType: "application/wasm", body: readFileSync(local) }); }
             catch { return route.continue(); } // no local build, use the deployed wasm
         }
-        if (url.host === CDN_HOST && url.pathname.startsWith("/web/src/")) {
-            const path = DIST + url.pathname.slice("/web/src/".length);
+        if (url.host === CDN_HOST && url.pathname.startsWith("/js/src/")) {
+            const path = DIST + url.pathname.slice("/js/src/".length);
             try {
                 return route.fulfill({ body: readFileSync(path), contentType: TYPES[path.slice(path.lastIndexOf("."))] ?? "application/octet-stream" });
             } catch {
                 return route.continue();
             }
         }
-        // In-tree runtime first, CI must test the checkout not the deploy.
-        if (url.host === CDN_HOST && url.pathname.startsWith("/web/")) {
-            const path = RUNTIME + url.pathname.slice("/web/".length);
+        // In-tree JS host first, CI must test the checkout not the deploy.
+        if (url.host === CDN_HOST && url.pathname.startsWith("/js/")) {
+            const path = HOST + url.pathname.slice("/js/".length);
             try {
                 return route.fulfill({ body: readFileSync(path), contentType: TYPES[path.slice(path.lastIndexOf("."))] ?? "application/octet-stream" });
             } catch {

@@ -1,6 +1,6 @@
 name: CI / CD
 
-# Single pipeline for the monorepo, each job's logic lives in a composite action, this file wires the graph.
+# Single pipeline for the monorepo, each job's logic lives in a composite action, this wires the graph.
 
 on:
   push:
@@ -58,7 +58,7 @@ jobs:
         with:
           mode: test
 
-  # Strips web/src to plain JS, the CDN can't serve TypeScript. Independent of the compiler build.
+  # Strips js/src to plain JS, the CDN can't serve TypeScript. Independent of the compiler build.
   js-build:
     name: JS / Build
     needs: [js-lint]
@@ -69,8 +69,8 @@ jobs:
         with:
           mode: build
 
-  web:
-    name: Web / ${{ matrix.capability }}
+  builtins:
+    name: Builtins / ${{ matrix.capability }}
     needs: [js]
     runs-on: ubuntu-latest
     strategy:
@@ -79,7 +79,7 @@ jobs:
         capability: [dom, network, storage, time]
     steps:
       - uses: actions/checkout@v6
-      - uses: ./.github/actions/web
+      - uses: ./.github/actions/builtins
         with:
           capability: ${{ matrix.capability }}
 
@@ -97,38 +97,10 @@ jobs:
         with:
           package: ${{ matrix.package }}
 
-  # std packages as native plugin cdylibs for the in-process engine, shipped to the CDN and tag Releases.
-  native:
-    name: Native std / ${{ matrix.package }} (${{ matrix.target }})
-    needs: [compiler-check]
-    permissions:
-      contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        package: [json, re, math, struct]
-        target: [aarch64-unknown-linux-gnu, x86_64-unknown-linux-gnu, aarch64-apple-darwin, x86_64-apple-darwin]
-        include:
-          - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-24.04-arm
-          - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest
-          - target: aarch64-apple-darwin
-            runner: macos-15
-          - target: x86_64-apple-darwin
-            runner: macos-15
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/native
-        with:
-          package: ${{ matrix.package }}
-          target: ${{ matrix.target }}
-          github-token: ${{ github.token }}
-
-  # Clippy and check once with no matrix, gates the release build.
+  # cli/build.rs embeds this run's compiler.wasm and std packages, so every cli job waits for both.
   cli-lint:
     name: CLI / Lint and Check
+    needs: [compiler, std]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -136,7 +108,7 @@ jobs:
         with:
           mode: lint
 
-  # Heavy release build per target, starts as soon as cli-lint is green.
+  # Plain cargo per target, musl keeps the Linux binary static, starts as soon as cli-lint is green.
   cli-release:
     name: CLI / Release (${{ matrix.target }})
     needs: [cli-lint]
@@ -144,15 +116,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-24.04-arm
-          - target: x86_64-unknown-linux-gnu
+          - target: x86_64-unknown-linux-musl
             runner: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
           - target: aarch64-apple-darwin
             runner: macos-15
           - target: x86_64-apple-darwin
             runner: macos-15
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            experimental: true
     runs-on: ${{ matrix.runner }}
+    # A red Windows build is reported without blocking the Unix releases behind it.
+    continue-on-error: ${{ matrix.experimental == true }}
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/cli
@@ -162,7 +139,7 @@ jobs:
 
   cli-test:
     name: CLI / Test / ${{ matrix.suite }}
-    needs: [web, std, native, cli-release, js-build]
+    needs: [builtins, std, cli-release, js-build]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -170,11 +147,11 @@ jobs:
         suite: [engine, network, actors, skill]
     steps:
       - uses: actions/checkout@v6
-      - name: Download web/dist (JS build output)
+      - name: Download js/dist (JS build output)
         uses: actions/download-artifact@v8
         with:
-          name: web_dist
-          path: web/dist
+          name: js_dist
+          path: js/dist
       - uses: ./.github/actions/cli
         with:
           mode: test
@@ -182,7 +159,7 @@ jobs:
 
   cdn:
     name: Cloudflare Upload (CDN)
-    needs: [cli-test, native, js-build]
+    needs: [cli-test, js-build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:

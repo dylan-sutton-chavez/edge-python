@@ -30,36 +30,28 @@ impl Manifest {
 }
 
 pub enum Kind {
-    Std,
+    Imports,
     System,
 }
 
 use compiler::devkit::{STD_PACKAGES as STD, SYSTEM_PACKAGES as SYSTEM};
 
-/// Official package registry. Mirrors the runtime's built-in default manifest, user overrides go through `resolve`.
+/// Official package registry, the urls `edge add` writes for a bare name.
 pub fn registry(name: &str) -> Option<(Kind, String)> {
     if STD.contains(&name) {
-        Some((Kind::Std, std_url(name)))
+        Some((Kind::Imports, std_url(name)))
+    } else if name == "dom" {
+        // The facade is a .py module, its sibling manifest on the CDN supplies `_dom` by walk-up.
+        Some((Kind::Imports, "https://cdn.edgepython.com/js/builtins/dom/entry.py".to_string()))
     } else if SYSTEM.contains(&name) {
-        Some((Kind::System, format!("https://cdn.edgepython.com/web/builtins/{name}/index.js")))
+        Some((Kind::System, format!("https://cdn.edgepython.com/js/builtins/{name}/index.js")))
     } else {
         None
     }
 }
 
-/// CDN url for a std package. Most ship as `.wasm`, `test` is pure Edge Python served as `.py`. Mirrors web/src/defaults.ts.
+/// CDN url for a std package. Most ship as `.wasm`, `test` is pure Edge Python served as `.py`.
 fn std_url(name: &str) -> String {
     let ext = if name == "test" { "py" } else { "wasm" };
     format!("https://cdn.edgepython.com/std/{name}.{ext}")
-}
-
-/// Resolve `name` for the runtime, user manifest entry first then the registry fallback.
-pub fn resolve(name: &str, manifest: &Manifest) -> Option<(Kind, String)> {
-    if let Some(url) = manifest.imports.get(name) {
-        return Some((Kind::Std, url.clone()));
-    }
-    if let Some(url) = manifest.system.get(name) {
-        return Some((Kind::System, url.clone()));
-    }
-    registry(name)
 }

@@ -1,11 +1,11 @@
 ---
-title: "time (web, native)"
+title: "time (js, cli)"
 description: "Clocks, calendar functions, and a suspending sleep."
 ---
 
-`time` is clocks and calendar functions. Import it by bare name or declare it in the `system` field of `packages.json`. The native engine builds it in, see [the native engine](/reference/modules#the-native-engine).
+`time` is clocks and calendar functions. Declare it with `edge add time`, a `system` entry, and import it by bare name. It runs in the JS host and in the CLI, which builds it in and resolves the entry by name, see [The CLI](/reference/modules#the-cli).
 
-The surface is `time`, `time_ns`, `monotonic`, `monotonic_ns`, `perf_counter`, `perf_counter_ns`, `sleep`, `gmtime`, `localtime`, `mktime`, `strftime`, `strptime`, `asctime`, `ctime`, `timezone`, `altzone`, `daylight`, `tzname`. `sleep` suspends the coroutine. `gmtime` and `localtime` return the nine fields as a JSON string in `struct_time` order, decode them with `json.loads`. `tm_wday` is Monday=0, `tm_yday` is 1-based, and `tm_isdst` is always -1. `time_ns` returns a decimal string on the web, because epoch nanoseconds exceed what a JS number can hold, and an int in the native engine. `timezone`, `altzone`, `daylight`, and `tzname` are calls, not constants, and `tzname` returns the IANA zone name.
+The surface is `time`, `time_ns`, `monotonic`, `monotonic_ns`, `perf_counter`, `perf_counter_ns`, `sleep`, `gmtime`, `localtime`, `mktime`, `strftime`, `strptime`, `asctime`, `ctime`, `timezone`, `altzone`, `daylight`, `tzname`. `sleep` suspends the coroutine. `gmtime` and `localtime` return the nine fields as a JSON string in `struct_time` order, decode them with `json.loads`. `tm_wday` is Monday=0, `tm_yday` is 1-based, and `tm_isdst` is always -1. `time_ns` returns an int on both hosts. `timezone`, `altzone`, `daylight`, and `tzname` are calls, not constants, and `tzname` returns the IANA zone name.
 
 `gmtime` takes epoch seconds and returns UTC fields, which read the same on every host:
 
@@ -23,4 +23,4 @@ print(time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(0)))
 1970-01-01 00:00:00
 ```
 
-Known limitations: the native engine is always UTC. There is no timezone database, so `tzname()` is `"UTC"` there. CPU and POSIX clocks are out of scope on both runtimes.
+Known limitations: the CLI is always UTC. There is no timezone database, so `tzname()` is `"UTC"` there and `localtime` equals `gmtime`. CPU and POSIX clocks are out of scope on both hosts.

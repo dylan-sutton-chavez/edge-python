@@ -3,7 +3,7 @@ title: "Actors"
 description: "Run many isolated edge-python programs as cooperative tasks over a few threads."
 ---
 
-A actor pool runs many edge-python programs as cooperative tasks multiplexed over a few threads, not one OS thread per program. Each actor is its own VM with its own heap, they share nothing and talk only by message. It serves two shapes of work. You orchestrate your own programs as a pipeline of cooperating groups, or you run untrusted code from clients, each in its own sandbox. Both run from a `actor.yml`.
+An actor pool runs many edge-python programs as cooperative tasks multiplexed over a few threads, not one OS thread per program. Each actor is its own interpreter in its own wasm instance, they share nothing and talk only by message. It serves two shapes of work. You orchestrate your own programs as a pipeline of cooperating groups, or you run untrusted code from clients, each in its own sandbox. Both run from an `actor.yml`.
 
 ```bash
 edge actor actor.yml
@@ -42,7 +42,7 @@ groups:
 
 ## Messages
 
-A actor loops over `receive()` and sends with the `actor` builtin. Sends are fire-and-forward, a actor never blocks waiting on another, which keeps a pool free of circular deadlock.
+An actor loops over `receive()` and sends with the `actor` module. Sends are fire-and-forward, an actor never blocks waiting on another, which keeps a pool free of circular deadlock.
 
 ```python
 from actor import send
@@ -51,7 +51,7 @@ msg = receive()
 send("transform", msg + "-done")   # hand it to the transform group
 ```
 
-A group's `seed:` list delivers messages before the pool starts, the entry point that kicks a run off.
+Like every module, `actor` must be declared. Groups resolve their imports through the `packages.json` beside `actor.yml`, or the manifest `--packages` names, so `edge add actor` there is the first step of any pool that sends. A group's `seed:` list delivers messages before the pool starts, the entry point that kicks a run off.
 
 ## Group fields
 
@@ -79,7 +79,7 @@ runtime:
   max_actors: 1000000   # ceiling across every group
 ```
 
-A client connects and sends one `<group> <body>` line per message over tcp, or posts the body to `/pub/<group>` on the control address when http fits better. Either way the body reaches a actor of that group through `receive()`.
+A client connects and sends one `<group> <body>` line per message over tcp, or posts the body to `/pub/<group>` on the control address when http fits better. Either way the body reaches an actor of that group through `receive()`.
 
 ```bash
 $ curl -X POST localhost:9090/pub/actor -d 'hello'
@@ -104,7 +104,7 @@ $ curl localhost:9090/stats
 
 ## Failure
 
-A actor that raises is retired with its traceback. `retry:` re-delivers the message it was processing to another actor up to that many times, then drops it to the dead count so one poison message cannot take a group down.
+An actor that raises is retired with its traceback. `retry:` re-delivers the message it was processing to another actor up to that many times, then drops it to the dead count so one poison message cannot take a group down.
 
 ```yaml
 groups:
@@ -115,11 +115,11 @@ groups:
 
 ## Untrusted code
 
-An `eval` group runs code it does not trust. Each incoming message is compiled and run as its own program on a thread locked to a seccomp allowlist, so a actor never keeps state between messages, cannot send to other groups, and cannot open a socket, run a process, or make any syscall outside pure computation, whether the code reaches for the kernel directly or a native plugin it loads does. The allowlist needs Linux, so an `eval` group is refused on other systems. The message is a snippet, or a whole project.
+An `eval` group runs code it does not trust. Each incoming message is compiled and run in a fresh wasm instance with its own linear memory, capped by the group's `heap` limit inside the interpreter and by a 256 MiB reservation outside it, and cut off after ten seconds of CPU by a deadline the host enforces from outside the instance, so a runaway loop or a long native operation ends even where the interpreter cannot yield. Nothing survives between messages, the instance is dropped when the run ends. A snippet imports nothing at all, and a bundle imports only what its own `packages.json` declares, never `actor` or `network`, so untrusted code cannot send to other groups, reach the network, or load modules from disk. It works the same on Linux, macOS, and Windows.
 
-A `code` or `run` group is the opposite. It runs code you trust in the host process with no syscall isolation, the guarantee is only the metered limits, so keep third-party code out of it and reach for `eval` on Linux instead.
+A `code` or `run` group runs code you trust. It keeps state between messages, can send, and can reach `network`, with the metered limits as the only cap, so keep third-party code out of it and reach for `eval` instead.
 
-For a project, `edge build --bundle` packs it into a `.package`, and a client sends it base64-encoded behind an `EDGEPKG:` marker. The actor validates it, materializes it in an isolated temp dir, runs its entry, and discards the dir after. Paths that escape the tree are rejected, so an untrusted bundle never writes outside its sandbox.
+For a project, `edge build --bundle` packs it into a `.package`, and a client sends it base64-encoded behind an `EDGEPKG:` marker. The actor validates it and serves its files to the compiler from memory, so an untrusted bundle never touches the disk.
 
 ```yaml
 groups:
@@ -138,7 +138,11 @@ A run that raises answers `{"ok":false,"error":...}` with its traceback, and the
 
 ## A three-stage pipeline
 
-A seed flows through three groups, each stage sending to the next.
+A seed flows through three groups, each stage sending to the next. The `packages.json` beside the manifest declares `actor` for the two stages that send.
+
+```json
+{ "system": { "actor": "https://cdn.edgepython.com/js/builtins/actor/index.js" } }
+```
 
 ```yaml
 groups:

@@ -1,15 +1,17 @@
+mod actor;
+mod builtins;
 mod cmd;
-mod engine;
+mod host;
 mod manifest;
+mod pack;
 /// Minimalist terminal output, plain text only, no colors.
 mod ui;
 
-use anyhow::{bail, Context, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
-use std::io::{IsTerminal, Read};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use manifest::Manifest;
+use host::driver::RunOpts;
 
 // Hand-written so the three top-level help forms print identically.
 const HELP: &str = "\
@@ -20,7 +22,7 @@ Usage  edge <command> [options]
 Commands
   run <file|.edge>   Run a script, a .edge, stdin or -c <code>
   build              Pack a standalone .edge  (--bundle, --web)
-  actor <file>      Run a actor from actor.yml
+  actor <file>       Run an actor pool from actor.yml
   serve              Dev server with live reload
   repl               Interactive shell
   test [path]        Run *_test.py files
@@ -29,9 +31,8 @@ Commands
   remove <pkgs>      Remove packages from packages.json
   uninstall          Remove the edge binary and PATH entry
 
-Native run flags   --events <f>  --save-state <f>  --restore-state <f>  --preempt <n>
+Run flags          --events <f>  --save-state <f>  --restore-state <f>  --preempt <n>
 Global             --packages <file>   manifest, default packages.json
-                   --web               browser runtime instead of native
 
 edge <command> -h for details \u{00b7} -v for version \u{00b7} edgepython.com";
 
@@ -44,10 +45,6 @@ struct Cli {
     /// Use a specific manifest instead of ./packages.json.
     #[arg(long, global = true)]
     packages: Option<PathBuf>,
-
-    /// Drive the browser runtime instead of the in-process native engine.
-    #[arg(long, global = true)]
-    web: bool,
 }
 
 #[derive(Subcommand)]
@@ -59,16 +56,16 @@ enum Cmd {
         /// Run this code inline instead of a file or stdin.
         #[arg(short = 'c', conflicts_with = "file")]
         code: Option<String>,
-        /// Feed each line of this file (or FIFO) into one receive() call. Native only.
+        /// Feed each line of this file (or FIFO) into one receive() call.
         #[arg(long)]
         events: Option<PathBuf>,
-        /// Snapshot to this file when the script suspends on an unservable wait. Native only.
+        /// Snapshot to this file when the script suspends on an unservable wait.
         #[arg(long)]
         save_state: Option<PathBuf>,
-        /// Boot from a snapshot instead of a script and keep running. Native only.
+        /// Boot from a snapshot instead of a script and keep running.
         #[arg(long)]
         restore_state: Option<PathBuf>,
-        /// Yield every n loop back-edges and resume. Native only.
+        /// Yield every n loop back-edges and resume.
         #[arg(long)]
         preempt: Option<usize>,
     },
@@ -109,21 +106,21 @@ enum Cmd {
         /// Package names to remove.
         pkgs: Vec<String>,
     },
-    /// Pack the app, a standalone binary by default, --bundle for a actor, --web for the browser.
+    /// Pack the app, a standalone binary by default, --bundle for a pool, --web for the browser.
     Build {
         /// Output path, defaults to app.edge, app.package, or dist/ per mode.
         #[arg(long)]
         out: Option<PathBuf>,
-        /// Vendor the browser runtime into dist/ instead of a native artifact.
+        /// Vendor the JS host into dist/ instead of a standalone artifact.
         #[arg(long)]
         web: bool,
-        /// Emit a lightweight .package for a actor that already ships the runtime.
+        /// Emit a lightweight .package for a pool that already ships the CLI.
         #[arg(long)]
         bundle: bool,
     },
-    /// Remove the edge binary, its PATH entry, and optionally the bundled browser cache.
+    /// Remove the edge binary and its PATH entry.
     Uninstall,
-    /// Run a pool of actors from a actor.yml manifest.
+    /// Run a pool of actors from an actor.yml manifest.
     Actor {
         /// Path to the actor.yml manifest.
         file: PathBuf,
@@ -131,7 +128,7 @@ enum Cmd {
 }
 
 fn main() -> Result<()> {
-    ctrlc::set_handler(|| { engine::web::kill_browser(); std::process::exit(130); }).ok();
+    ctrlc::set_handler(|| std::process::exit(130)).ok();
 
     // A standalone .edge carries its project, run that instead of parsing subcommands.
     if let Some(payload) = cmd::build::embedded_payload() {
@@ -164,26 +161,20 @@ fn main() -> Result<()> {
         Cmd::Remove { pkgs } => cmd::pkg::remove(&manifest_path, &pkgs),
         Cmd::Serve { host, port, open } => cmd::serve::run(PathBuf::from("."), &host, port, open),
         Cmd::Run { file, code, events, save_state, restore_state, preempt } => {
-            if cli.web {
-                if events.is_some() || save_state.is_some() || restore_state.is_some() || preempt.is_some() {
-                    Err(anyhow::anyhow!("--events, --save-state, --restore-state and --preempt are native-only; drop --web"))
-                } else {
-                    run_script(&manifest_path, file.as_deref(), code)
+            let opts = RunOpts {
+                packages: cli.packages.as_deref().map(|p| p.to_string_lossy().replace('\\', "/")),
+                preempt: preempt.unwrap_or(0),
+                events: events.map(|p| p.to_string_lossy().into_owned()),
+                save_state: save_state.map(|p| p.to_string_lossy().into_owned()),
+                restore_state: restore_state.map(|p| p.to_string_lossy().into_owned()),
+            };
+            host::driver::run(file.as_deref(), code.as_deref(), &opts).map(|code| {
+                if code != 0 {
+                    std::process::exit(code)
                 }
-            } else {
-                let opts = compiler::native::RunOpts {
-                    packages: cli.packages.as_deref().map(|p| p.to_string_lossy().replace('\\', "/")),
-                    preempt: preempt.unwrap_or(0),
-                    events: events.map(|p| p.to_string_lossy().into_owned()),
-                    save_state: save_state.map(|p| p.to_string_lossy().into_owned()),
-                    restore_state: restore_state.map(|p| p.to_string_lossy().into_owned()),
-                };
-                engine::native::run(file.as_deref(), code.as_deref(), &opts).map(|code| {
-                    if code != 0 { std::process::exit(code) }
-                })
-            }
+            })
         }
-        Cmd::Repl => cmd::repl::run(&manifest_path, cli.packages.as_deref(), cli.web),
+        Cmd::Repl => cmd::repl::run(cli.packages.as_deref()),
         Cmd::Build { out, web, bundle } => {
             if web {
                 cmd::build::run(&manifest_path, out.unwrap_or_else(|| PathBuf::from("dist")))
@@ -194,8 +185,8 @@ fn main() -> Result<()> {
             }
         }
         Cmd::Uninstall => cmd::uninstall::run(),
-        Cmd::Actor { file } => cmd::actor::run(&file),
-        Cmd::Test { path } => cmd::test::run(&manifest_path, cli.packages.as_deref(), cli.web, path.as_deref()),
+        Cmd::Actor { file } => cmd::actor::run(&file, cli.packages.as_deref()),
+        Cmd::Test { path } => cmd::test::run(&manifest_path, cli.packages.as_deref(), path.as_deref()),
     };
 
     if let Err(e) = result {
@@ -222,46 +213,14 @@ struct Embedded {
 /// Runs the project embedded in this standalone .edge, honoring the run flags.
 fn run_embedded(payload: &[u8]) -> Result<()> {
     let flags = Embedded::parse();
-    let opts = compiler::native::RunOpts {
+    let opts = RunOpts {
         packages: None,
         preempt: flags.preempt.unwrap_or(0),
         events: flags.events.map(|p| p.to_string_lossy().into_owned()),
         save_state: flags.save_state.map(|p| p.to_string_lossy().into_owned()),
         restore_state: flags.restore_state.map(|p| p.to_string_lossy().into_owned()),
     };
-    let code = engine::native::run_bundle(payload, &opts)?;
-    if code != 0 {
-        std::process::exit(code);
-    }
-    Ok(())
-}
-
-/// Read a script from `code`, `file` or stdin (last resort) and run it, a script that raises exits non-zero.
-fn run_script(manifest_path: &Path, file: Option<&Path>, code: Option<String>) -> Result<()> {
-    let from_pipe = code.is_none() && file.is_none();
-    let src = match (code, file) {
-        (Some(c), _) => c,
-        (None, Some(p)) => std::fs::read_to_string(p).with_context(|| format!("reading {}", p.display()))?,
-        (None, None) => {
-            // A bare `edge run` from a terminal would block on stdin forever, force an explicit pipe or path.
-            if std::io::stdin().is_terminal() {
-                bail!("no script given; pass a file path or pipe Python to stdin");
-            }
-            let mut s = String::new();
-            std::io::stdin().read_to_string(&mut s).context("reading stdin")?;
-            s
-        }
-    };
-    // Unless the script itself came from stdin, piped stdin feeds `input()`.
-    let mut input = String::new();
-    let input = if !from_pipe && !std::io::stdin().is_terminal() && std::io::stdin().read_to_string(&mut input).is_ok() && !input.is_empty() {
-        Some(input)
-    } else {
-        None
-    };
-    let manifest = Manifest::load(manifest_path)?;
-    let base = file.and_then(engine::base_dir);
-    let code = engine::run(&src, &manifest, base.as_deref(), input.as_deref())?;
+    let code = host::driver::run_bundle(payload, &opts)?;
     if code != 0 {
         std::process::exit(code);
     }

@@ -21,20 +21,32 @@
   {
     "given": { "packages.json": "{}\n" },
     "run": ["add", "math"],
-    "stdout": ["+ math", "std"],
+    "stdout": ["+ math", "imports"],
     "contains": { "packages.json": "cdn.edgepython.com/std/math.wasm" }
   },
   {
     "given": { "packages.json": "{}\n" },
     "run": ["add", "network"],
     "stdout": ["+ network", "system"],
-    "contains": { "packages.json": "cdn.edgepython.com/web/builtins/network/index.js" }
+    "contains": { "packages.json": "cdn.edgepython.com/js/builtins/network/index.js" }
   },
   {
     "given": { "packages.json": "{}\n" },
     "run": ["add", "test"],
-    "stdout": ["+ test", "std"],
+    "stdout": ["+ test", "imports"],
     "contains": { "packages.json": "cdn.edgepython.com/std/test.py" }
+  },
+  {
+    "given": { "packages.json": "{}\n" },
+    "run": ["add", "dom"],
+    "stdout": ["+ dom", "imports"],
+    "contains": { "packages.json": "cdn.edgepython.com/js/builtins/dom/entry.py" }
+  },
+  {
+    "given": { "packages.json": "{}\n" },
+    "run": ["add", "actor"],
+    "stdout": ["+ actor", "system"],
+    "contains": { "packages.json": "cdn.edgepython.com/js/builtins/actor/index.js" }
   },
   {
     "given": { "packages.json": "{}\n" },
@@ -94,44 +106,53 @@
     "fails": ["no *_test.py files found"]
   },
   {
+    "given": { "a_test.py": "raise SystemExit(0)\n" },
+    "run": ["test"],
+    "fails": ["declare test in packages.json (edge add test)"]
+  },
+  {
     "given": {
       "sub/util.py": "def add(a, b):\n    return a + b\n",
-      "sub/s_test.py": "from .util import add\nfrom test import test\n\n@test(\"adds\")\ndef t_add():\n    assert add(2, 3) == 5\n"
+      "sub/s_test.py": "from .util import add\nfrom test import test\n\n@test(\"adds\")\ndef t_add():\n    assert add(2, 3) == 5\n",
+      "packages.json": "{ \"imports\": { \"test\": \"https://cdn.edgepython.com/std/test.py\" } }\n"
     },
     "run": ["test"],
     "stdout": ["PASS - adds", "(successful) sub/s_test.py", "1/1 files passed"]
   },
   {
-    "given": { "f_test.py": "from test import test\n\n@test(\"breaks\")\ndef t():\n    assert 1 == 2\n" },
+    "given": {
+      "f_test.py": "from test import test\n\n@test(\"breaks\")\ndef t():\n    assert 1 == 2\n",
+      "packages.json": "{ \"imports\": { \"test\": \"https://cdn.edgepython.com/std/test.py\" } }\n"
+    },
     "run": ["test"],
     "fails": [],
     "stdout": ["FAIL - breaks", "(unsuccessful) f_test.py", "0/1 files passed"]
   },
   {
-    "given": { "e_test.py": "x = 1\n" },
+    "given": {
+      "e_test.py": "x = 1\n",
+      "packages.json": "{ \"imports\": { \"test\": \"https://cdn.edgepython.com/std/test.py\" } }\n"
+    },
     "run": ["test"],
     "fails": [],
     "stdout": ["(unsuccessful) e_test.py: no tests registered"]
   },
   {
     "given": { "u.py": "val = 5\n", "t.py": "from .u import val\nprint(\"got\", val)\n" },
-    "engine": "both",
     "run": ["run", "t.py"],
     "stdout": ["got 5"]
   },
   {
     "run": ["--version"],
-    "stdout": ["edge 0.1.0"]
+    "stdout": ["edge 0.2.0"]
   },
   {
     "given": { "t.py": "print('hi from edge')\n" },
-    "engine": "both",
     "run": ["run", "t.py"],
     "stdout": ["hi from edge"]
   },
   {
     "given": { "boom.py": "x = 1 / 0\n" },
-    "engine": "both",
     "run": ["run", "boom.py"],
     "fails": ["ZeroDivisionError"]
   },
@@ -141,13 +162,11 @@
     "creates": ["dist/index.html", "dist/main.py", "dist/compiler.wasm"]
   },
   {
-    "engine": "both",
     "run": ["repl"],
     "stdin": "def double(n): return n * 2\nprint(double(2.0))\n.exit\n",
     "stdout": ["4.0"]
   },
   {
-    "engine": "both",
     "run": ["repl"],
     "stdin": "x = 42\n.reset\nprint(x)\n.exit\n",
     "stderr": ["NameError"]
@@ -155,10 +174,12 @@
   {
     "run": ["repl"],
     "stdin": "from time import sleep\nsleep(0.05)\nprint(\"done\")\n.exit\n",
-    "stdout": ["done"]
+    "stdout": ["done"],
+    "given": {
+      "packages.json": "{ \"system\": { \"time\": \"https://cdn.edgepython.com/js/builtins/time/index.js\" } }\n"
+    }
   },
   {
-    "engine": "both",
     "run": ["repl"],
     "stdin": "x = 1\nx = 2; 1 / 0\nprint(x)\n.exit\n",
     "stdout": ["2"],
@@ -167,7 +188,7 @@
   {
     "given": { "packages.json": "{}\n" },
     "run": ["add", "test=https://example.com/test.py"],
-    "stdout": ["+ test", "std"],
+    "stdout": ["+ test", "imports"],
     "contains": { "packages.json": "\"imports\"" }
   },
   {
@@ -184,7 +205,7 @@
   {
     "given": { "packages.json": "{}\n" },
     "run": ["add", "baz=https://example.com/baz.wasm"],
-    "stdout": ["+ baz", "std"],
+    "stdout": ["+ baz", "imports"],
     "contains": { "packages.json": "\"imports\"" }
   },
   {
@@ -223,17 +244,14 @@
     "stdout": ["3"]
   },
   {
-    "engine": "both",
     "run": ["run", "-c", "print('inline ok')"],
     "stdout": ["inline ok"]
   },
   {
-    "engine": "both",
     "run": ["run", "-c", "x = 1 / 0"],
     "fails": ["ZeroDivisionError"]
   },
   {
-    "engine": "both",
     "run": ["run", "-c", "s = input()\nprint(len(s))"],
     "stdin": "hello\n",
     "stdout": ["5"]
@@ -255,10 +273,8 @@
     "contains": { "dist/index.html": "./main.py" }
   },
   {
-    "given": {"main.py": "print(1)"},
-    "env": {"EDGE_FAKE_CONTRACT": "inf"},
-    "engine": "web",
+    "given": { "main.py": "import json\n" },
     "run": ["run", "main.py"],
-    "fails": ["cli built for runtime contract 0.1.0, the CDN serves contract inf", "install.sh"]
+    "fails": ["module 'json' is not provided by this host and no packages.json declares it"]
   }
 ]
