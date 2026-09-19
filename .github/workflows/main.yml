@@ -28,27 +28,22 @@ jobs:
         with:
           github-token: ${{ github.token }}
 
+  # One job builds every std, so cross-package corpora import the sibling builds.
+  std:
+    name: Std
+    needs: [compiler]
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/std
+
   js:
     name: JS
-    needs: [compiler]
+    needs: [compiler, std]
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/js
-
-  std:
-    name: Std / ${{ matrix.package }}
-    needs: [compiler]
-    runs-on: ubuntu-26.04
-    strategy:
-      fail-fast: false
-      matrix:
-        package: [json, re, math, struct, test]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/std
-        with:
-          package: ${{ matrix.package }}
 
   builtins:
     name: Builtins / ${{ matrix.capability }}

@@ -1,15 +1,10 @@
-name: Std package
-description: Lint, build/optimize (wasm), test one stdpkg, then stage its artifact. No release.
-
-inputs:
-  package:
-    description: "json | re | math | struct | test"
-    required: true
+name: Std
+description: Lint, build and optimize every std wasm package, run every corpus, then stage the artifacts. No release.
 
 runs:
   using: composite
   steps:
-    # Stable lints the cdylib, nightly drives the build-std wasm build.
+    # Stable lints the cdylibs, nightly drives the build-std wasm build.
     - name: Toolchain (stable)
       uses: dtolnay/rust-toolchain@stable
       with:
@@ -30,8 +25,12 @@ runs:
     - name: Cache Rust
       uses: Swatinem/rust-cache@v2
       with:
-        workspaces: std/${{ inputs.package }} -> std/${{ inputs.package }}/target
-        key: ${{ inputs.package }}
+        workspaces: |
+          std/json -> target
+          std/re -> target
+          std/math -> target
+          std/struct -> target
+        key: std
 
     - name: Cache Deno
       uses: actions/cache@v6
@@ -59,7 +58,6 @@ runs:
 
     # apt ships an old binaryen, so fetch the upstream release.
     - name: Install wasm-opt
-      if: inputs.package != 'test'
       shell: bash
       run: |
         curl -sSL "https://github.com/WebAssembly/binaryen/releases/download/version_121/binaryen-version_121-x86_64-linux.tar.gz" \
@@ -68,70 +66,64 @@ runs:
 
     # Lint only the cdylib, --all-targets clashes with its panic handler.
     - name: Clippy
-      if: inputs.package != 'test'
       shell: bash
-      working-directory: std/${{ inputs.package }}
-      run: cargo +stable clippy --release --target wasm32-unknown-unknown -- -D warnings
+      working-directory: std
+      run: |
+        for p in json re math struct; do
+          (cd "$p" && cargo +stable clippy --release --target wasm32-unknown-unknown -- -D warnings)
+        done
 
     # `test` is pure Edge Python via entry.py with no crate to build.
     - name: Build
-      if: inputs.package != 'test'
       shell: bash
-      working-directory: std/${{ inputs.package }}
+      working-directory: std
       run: |
-        RUSTFLAGS="-Z location-detail=none -Z fmt-debug=none -Z unstable-options -C panic=immediate-abort" \
-        cargo +nightly build \
-          --target wasm32-unknown-unknown \
-          --lib --release \
-          -Z build-std=std,panic_abort
+        for p in json re math struct; do
+          (cd "$p" && RUSTFLAGS="-Z location-detail=none -Z fmt-debug=none -Z unstable-options -C panic=immediate-abort" \
+            cargo +nightly build \
+              --target wasm32-unknown-unknown \
+              --lib --release \
+              -Z build-std=std,panic_abort)
+        done
 
     # Keyword-named crates (struct) emit another artifact name.
-    - name: Normalize artifact name
-      if: inputs.package != 'test'
+    - name: Normalize artifact names
       shell: bash
       run: |
-        DIR="std/${{ inputs.package }}/target/wasm32-unknown-unknown/release"
-        [ -f "$DIR/${{ inputs.package }}.wasm" ] || cp "$DIR"/*.wasm "$DIR/${{ inputs.package }}.wasm"
-
-    - name: Size (unoptimized)
-      if: inputs.package != 'test'
-      shell: bash
-      run: ls -lh "std/${{ inputs.package }}/target/wasm32-unknown-unknown/release/${{ inputs.package }}.wasm"
+        for p in json re math struct; do
+          DIR="std/$p/target/wasm32-unknown-unknown/release"
+          [ -f "$DIR/$p.wasm" ] || cp "$DIR"/*.wasm "$DIR/$p.wasm"
+          ls -lh "$DIR/$p.wasm"
+        done
 
     # Two passes, -Oz then reflatten for a fresh CFG. Traps stay in, they guard bounds.
     - name: Optimize
-      if: inputs.package != 'test'
       shell: bash
-      env:
-        WASM: std/${{ inputs.package }}/target/wasm32-unknown-unknown/release/${{ inputs.package }}.wasm
       run: |
-        wasm-opt -Oz --converge \
-          --generate-global-effects \
-          --strip-debug --strip-producers \
-          --enable-bulk-memory-opt \
-          --enable-nontrapping-float-to-int \
-          --enable-sign-ext \
-          -o /tmp/wasm_stage1.wasm "$WASM"
+        for p in json re math struct; do
+          WASM="std/$p/target/wasm32-unknown-unknown/release/$p.wasm"
+          wasm-opt -Oz --converge \
+            --generate-global-effects \
+            --strip-debug --strip-producers \
+            --enable-bulk-memory-opt \
+            --enable-nontrapping-float-to-int \
+            --enable-sign-ext \
+            -o /tmp/wasm_stage1.wasm "$WASM"
 
-        wasm-opt --flatten --rereloop -Oz -Oz \
-          --enable-bulk-memory-opt \
-          --enable-nontrapping-float-to-int \
-          --enable-sign-ext \
-          -o "$WASM" /tmp/wasm_stage1.wasm
+          wasm-opt --flatten --rereloop -Oz -Oz \
+            --enable-bulk-memory-opt \
+            --enable-nontrapping-float-to-int \
+            --enable-sign-ext \
+            -o "$WASM" /tmp/wasm_stage1.wasm
 
-        rm /tmp/wasm_stage1.wasm
+          rm /tmp/wasm_stage1.wasm
+          ls -lh "$WASM"
+        done
 
-    - name: Size (optimized)
-      if: inputs.package != 'test'
-      shell: bash
-      run: ls -lh "std/${{ inputs.package }}/target/wasm32-unknown-unknown/release/${{ inputs.package }}.wasm"
-
-    # STDPKG narrows Deno's test discovery to this package's corpus.
+    # Every corpus runs against the sibling builds above, so cross-package imports never reach the CDN.
     - name: Test
       shell: bash
       working-directory: std
-      env:
-        STDPKG: ${{ inputs.package }}
       run: deno test --allow-all harness/
 
     # Stage native -> <pkg>.wasm, pure-Python -> <pkg>.py.
@@ -139,15 +131,14 @@ runs:
       shell: bash
       run: |
         mkdir -p _dist
-        if [ -f "std/${{ inputs.package }}/src/entry.py" ]; then
-          cp "std/${{ inputs.package }}/src/entry.py" "_dist/${{ inputs.package }}.py"
-        else
-          cp "std/${{ inputs.package }}/target/wasm32-unknown-unknown/release/${{ inputs.package }}.wasm" "_dist/${{ inputs.package }}.wasm"
-        fi
+        for p in json re math struct; do
+          cp "std/$p/target/wasm32-unknown-unknown/release/$p.wasm" "_dist/$p.wasm"
+        done
+        cp std/test/src/entry.py _dist/test.py
 
     - name: Upload artifact
       uses: actions/upload-artifact@v7
       with:
-        name: dist-${{ inputs.package }}
+        name: dist-std
         path: _dist/
         retention-days: 1

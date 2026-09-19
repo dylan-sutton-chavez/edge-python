@@ -64,29 +64,37 @@ Deno.test("js: <edge-python> runs the corpus through index.html", async () => {
 
     const STD_DIR = new URL("../../std", import.meta.url).pathname;
     const SYSTEM_DIR = new URL("../../js/builtins", import.meta.url).pathname;
+    const offline = new Set(); // CDN paths the tree could not serve, any entry fails the test
     await page.route("**/*", (r) => {
         const u = new URL(r.request().url());
-        // Prefer the in-tree std/ and system/ artifacts, if absent (CI checks out only the js/ subset) fall back to the CDN-deployed copy.
+        // A manifest the tree lacks answers 404 like the deploy, any other miss fails the test.
+        const miss = (hint) => {
+            if (u.pathname.endsWith("/edge.json")) return r.fulfill({ status: 404 });
+            offline.add(hint);
+            return r.abort();
+        };
+        // Serve std and builtins from the tree, a missing file fails the test instead of reaching the CDN.
         if (u.host === CDN_HOST && u.pathname.startsWith("/std/")) {
             // /std/<name>.wasm lives at <name>/target/wasm32-unknown-unknown/release/ in the tree.
             const name = u.pathname.slice("/std/".length).replace(/\.wasm$/, "");
             const file = `${STD_DIR}/${name}/target/wasm32-unknown-unknown/release/${name}.wasm`;
             try { return r.fulfill({ contentType: "application/wasm", body: readFileSync(file) }); }
-            catch { return r.continue(); } // no local std build, use the deployed wasm
+            catch { return miss(`build std/${name} first`); }
         }
         if (u.host === CDN_HOST && u.pathname.startsWith("/js/builtins/")) {
             // Production (Pages) flattens builtins/<cap>/src/* to builtins/<cap>/*, map back to the tree layout.
             const repoPath = u.pathname.replace(/^\/js\/builtins\/([^/]+)\//, "/$1/src/");
             try { return r.fulfill({ contentType: "text/javascript", body: readFileSync(SYSTEM_DIR + repoPath) }); }
-            catch { return r.continue(); } // no local system source, use the deployed module
+            catch { return miss(`js/builtins${repoPath} is missing from the tree`); }
         }
-        // Prefer in-tree wasm so new exports are testable.
+        // In-tree wasm so new exports are testable.
         if (u.host === CDN_HOST && u.pathname === "/compiler.wasm") {
             const local = `${REPO}target/wasm32-unknown-unknown/release/compiler.wasm`;
             try { return r.fulfill({ contentType: "application/wasm", body: readFileSync(local) }); }
-            catch { return r.continue(); } // no local build, use the deployed wasm
+            catch { return miss("run cargo wasm first"); }
         }
-        if (u.host !== "localhost") return r.continue(); // any other CDN asset (compiler.wasm, the JS host) passes through
+        if (u.host === CDN_HOST) return miss(`no local copy of ${u.href}`);
+        if (u.host !== "localhost") return r.continue();
         if (u.pathname.endsWith("/app/trap.wasm")) return r.fulfill({ contentType: "application/wasm", body: pdkModule(1) });
         if (u.pathname.endsWith("/app/abi2.wasm")) return r.fulfill({ contentType: "application/wasm", body: pdkModule(2) });
         const ext = u.pathname.slice(u.pathname.lastIndexOf("."));
@@ -312,6 +320,10 @@ Deno.test("js: <edge-python> runs the corpus through index.html", async () => {
             if (idb.afterV1again.count !== 1 || idb.afterV1again.version !== "t-v1") throw new Error(`cache: matching version wiped the cache ${JSON.stringify(idb.afterV1again)}`);
             if (idb.afterV2.count !== 1 || idb.afterV2.version !== "t-v2") throw new Error(`cache: version mismatch should wipe then restamp ${JSON.stringify(idb.afterV2)}`);
         }
+        if (offline.size) throw new Error([...offline].join("\n"));
+    } catch (e) {
+        // A tree miss explains any failure it caused, report it first.
+        throw offline.size ? new Error([...offline].join("\n"), { cause: e }) : e;
     } finally {
         await browser.close();
     }

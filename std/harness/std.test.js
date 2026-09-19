@@ -9,7 +9,7 @@ const CDN_HOST = "cdn.edgepython.com";
 const MANIFEST = "/_edge.json"; // synthesized, keeps the agnostic <pkg>/ folder free of test artifacts
 const STD = ["json", "re", "math", "struct", "test"];
 
-/* Repo-root dirs with a `<name>/<name>.json` corpus are stdpkgs. `STDPKG=<name>` narrows discovery to one package, used by the matrix-fanned CI to isolate per-shard work. */
+/* Dirs with a `<name>/<name>.json` corpus are stdpkgs, `STDPKG=<name>` narrows discovery to one. */
 const only = Deno.env.get("STDPKG");
 const packages = readdirSync(ROOT).filter((name) => {
     const dir = ROOT + name;
@@ -25,6 +25,13 @@ const TYPES = {
     ".json": "application/json",
     ".py": "text/plain",
 };
+
+// The artifact name can differ from the dir (`struct` is a Rust keyword), any single release .wasm counts.
+function builtWasm(name) {
+    const dir = `${ROOT}${name}/target/wasm32-unknown-unknown/release`;
+    if (existsSync(`${dir}/${name}.wasm`)) return `${name}.wasm`;
+    return existsSync(dir) ? readdirSync(dir).find((f) => f.endsWith(".wasm")) : undefined;
+}
 
 let distBuilt = false;
 async function buildDist() {
@@ -48,13 +55,9 @@ async function runPackage(pkg) {
     if (hasPy) {
         entry = `/${pkg}/src/entry.py`;
     } else {
-        // Artifact name can differ from the dir (e.g. `struct` is a Rust keyword), any single .wasm in release/ counts.
-        const releaseDir = `${dir}/target/wasm32-unknown-unknown/release`;
-        const wasmName = existsSync(`${releaseDir}/${pkg}.wasm`)
-            ? `${pkg}.wasm`
-            : (existsSync(releaseDir) ? readdirSync(releaseDir).find((f) => f.endsWith(".wasm")) : undefined);
+        const wasmName = builtWasm(pkg);
         if (!wasmName) {
-            throw new Error(`built artifact not found for '${pkg}' in ${releaseDir}\nrun (from ${pkg}/): cargo build --release --target wasm32-unknown-unknown`);
+            throw new Error(`built artifact not found for '${pkg}'\nrun (from ${pkg}/): cargo build --release --target wasm32-unknown-unknown`);
         }
         entry = `/${pkg}/target/wasm32-unknown-unknown/release/${wasmName}`;
     }
@@ -73,28 +76,36 @@ async function runPackage(pkg) {
     page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
     page.on("pageerror", (e) => errors.push(e.message));
 
-    /* Serve repo files from disk and synthesize the manifest. External CDNs (cdn.edgepython.com) pass through. */
+    /* Serve repo files and the synthesized manifest, a CDN path the tree lacks fails the test. */
+    const offline = new Set();
     await page.route("**/*", (route) => {
         const url = new URL(route.request().url());
-        // A sibling std at its CDN url is served from the local build when one exists.
+        // A manifest the tree lacks answers 404 like the deploy, any other miss fails the test.
+        const miss = (hint) => {
+            if (url.pathname.endsWith("/edge.json")) return route.fulfill({ status: 404 });
+            offline.add(hint);
+            return route.abort();
+        };
+        // A sibling std at its CDN url is served from its local build.
         if (url.host === CDN_HOST && url.pathname.startsWith("/std/")) {
             const name = url.pathname.slice("/std/".length).replace(/\.(wasm|py)$/, "");
-            const local = name === "test" ? `${ROOT}test/src/entry.py` : `${ROOT}${name}/target/wasm32-unknown-unknown/release/${name}.wasm`;
+            const wasm = name === "test" ? undefined : builtWasm(name);
+            const local = name === "test" ? `${ROOT}test/src/entry.py` : `${ROOT}${name}/target/wasm32-unknown-unknown/release/${wasm}`;
             try { return route.fulfill({ contentType: TYPES[url.pathname.slice(url.pathname.lastIndexOf("."))], body: readFileSync(local) }); }
-            catch { return route.continue(); }
+            catch { return miss(`build std/${name} first`); }
         }
-        // Prefer in-tree wasm so new exports are testable.
+        // In-tree wasm so new exports are testable.
         if (url.host === CDN_HOST && url.pathname === "/compiler.wasm") {
             const local = `${REPO}target/wasm32-unknown-unknown/release/compiler.wasm`;
             try { return route.fulfill({ contentType: "application/wasm", body: readFileSync(local) }); }
-            catch { return route.continue(); } // no local build, use the deployed wasm
+            catch { return miss("run cargo wasm first"); }
         }
         if (url.host === CDN_HOST && url.pathname.startsWith("/js/src/")) {
             const path = DIST + url.pathname.slice("/js/src/".length);
             try {
                 return route.fulfill({ body: readFileSync(path), contentType: TYPES[path.slice(path.lastIndexOf("."))] ?? "application/octet-stream" });
             } catch {
-                return route.continue();
+                return miss(`js/dist has no ${url.pathname.slice("/js/src/".length)}`);
             }
         }
         // In-tree JS host first, CI must test the checkout not the deploy.
@@ -103,9 +114,10 @@ async function runPackage(pkg) {
             try {
                 return route.fulfill({ body: readFileSync(path), contentType: TYPES[path.slice(path.lastIndexOf("."))] ?? "application/octet-stream" });
             } catch {
-                return route.continue();
+                return miss(`js${url.pathname.slice("/js".length)} is missing from the tree`);
             }
         }
+        if (url.host === CDN_HOST) return miss(`no local copy of ${url.href}`);
         if (url.host !== "localhost") return route.continue();
         if (url.pathname === MANIFEST) return route.fulfill({ contentType: "application/json", body: manifest });
         const path = ROOT + url.pathname.slice(1);
@@ -171,10 +183,14 @@ async function runPackage(pkg) {
         }
 
         if (errors.length) failures.push(`[${pkg}] console errors: ${errors.join(" | ")}`);
+    } catch (e) {
+        // A tree miss explains any failure it caused, report it first.
+        throw offline.size ? new Error([...offline].join("\n"), { cause: e }) : e;
     } finally {
         await browser.close();
     }
 
+    if (offline.size) failures.unshift(...offline);
     if (failures.length) throw new Error("\n" + failures.join("\n"));
 }
 

@@ -82,15 +82,22 @@ async function runCapability(cap) {
     const wsBase = base.replace("http://", "ws://");
 
     /* Serve repo files from disk and synthesize the manifest, the fixture host stays unrouted so sse flows. */
+    const offline = new Set();
     await page.route((url) => url.host === "localhost" || url.host === CDN_HOST, (route) => {
         const url = new URL(route.request().url());
+        // A manifest the tree lacks answers 404 like the deploy, any other miss fails the test.
+        const miss = (hint) => {
+            if (url.pathname.endsWith("/edge.json")) return route.fulfill({ status: 404 });
+            offline.add(hint);
+            return route.abort();
+        };
         // js/src is TypeScript, serve its tsc emit so CI tests the checkout not the deploy.
         if (url.host === CDN_HOST && url.pathname.startsWith("/js/src/")) {
             const path = DIST + url.pathname.slice("/js/src/".length);
             try {
                 return route.fulfill({ body: readFileSync(path), contentType: TYPES[path.slice(path.lastIndexOf("."))] ?? "application/octet-stream" });
             } catch {
-                return route.continue();
+                return miss(`js/dist has no ${url.pathname.slice("/js/src/".length)}`);
             }
         }
         // In-tree JS host first, CI must test the checkout not the deploy.
@@ -99,16 +106,16 @@ async function runCapability(cap) {
             try {
                 return route.fulfill({ body: readFileSync(path), contentType: TYPES[path.slice(path.lastIndexOf("."))] ?? "application/octet-stream" });
             } catch {
-                return route.continue();
+                return miss(`js${url.pathname.slice("/js".length)} is missing from the tree`);
             }
         }
         // Prefer this run's compiler so manifest changes are testable.
         if (url.host === CDN_HOST && url.pathname === "/compiler.wasm") {
             const local = `${REPO}target/wasm32-unknown-unknown/release/compiler.wasm`;
             try { return route.fulfill({ contentType: "application/wasm", body: readFileSync(local) }); }
-            catch { return route.continue(); }
+            catch { return miss("run cargo wasm first"); }
         }
-        if (url.host === CDN_HOST) return route.continue();
+        if (url.host === CDN_HOST) return miss(`no local copy of ${url.href}`);
         if (url.pathname === MANIFEST) return route.fulfill({ contentType: "application/json", body: manifest });
         const path = ROOT + url.pathname.slice(1);
         try {
@@ -186,6 +193,9 @@ async function runCapability(cap) {
         }
 
         if (errors.length) failures.push(`[${cap}] console errors: ${errors.join(" | ")}`);
+    } catch (e) {
+        // A tree miss explains any failure it caused, report it first.
+        throw offline.size ? new Error([...offline].join("\n"), { cause: e }) : e;
     } finally {
         await browser.close();
         if (mock) {
@@ -194,6 +204,7 @@ async function runCapability(cap) {
         }
     }
 
+    if (offline.size) failures.unshift(...offline);
     if (failures.length) throw new Error("\n" + failures.join("\n"));
 }
 

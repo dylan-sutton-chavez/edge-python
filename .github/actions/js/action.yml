@@ -49,6 +49,23 @@ runs:
         name: compiler_wasm
         path: target/wasm32-unknown-unknown/release/
 
+    - name: Download std wasm
+      uses: actions/download-artifact@v8
+      with:
+        pattern: dist-*
+        path: std_dist/
+        merge-multiple: true
+
+    # The harness serves each std from its release dir, the same layout a local build leaves.
+    - name: Place std wasm
+      shell: bash
+      run: |
+        for f in std_dist/*.wasm; do
+          p=$(basename "$f" .wasm)
+          mkdir -p "std/$p/target/wasm32-unknown-unknown/release"
+          cp "$f" "std/$p/target/wasm32-unknown-unknown/release/$p.wasm"
+        done
+
     # A 150MB Chromium, cached so only the first run pays the download.
     - name: Cache Playwright browsers
       uses: actions/cache@v6
