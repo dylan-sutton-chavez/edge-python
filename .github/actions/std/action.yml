@@ -34,14 +34,14 @@ runs:
         key: ${{ inputs.package }}
 
     - name: Cache Deno
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: ~/.cache/deno
         key: deno-${{ runner.os }}-${{ hashFiles('std/**/deno.json', 'std/**/deno.lock') }}
         restore-keys: deno-${{ runner.os }}-
 
     - name: Cache Playwright browsers
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: ~/.cache/ms-playwright
         key: playwright-${{ runner.os }}-chromium
@@ -146,7 +146,7 @@ runs:
         fi
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: dist-${{ inputs.package }}
         path: _dist/

@@ -1,10 +1,5 @@
 name: JS
-description: The JS host. lint = deno lint + deno check, build = tsc emit to js/dist, test = Deno + Playwright suite.
-
-inputs:
-  mode:
-    description: "lint | build | test"
-    required: true
+description: The JS host. Deno lint and check, tsc emit to js/dist, then the Deno and Playwright suites.
 
 runs:
   using: composite
@@ -15,20 +10,18 @@ runs:
         deno-version: v2.x
 
     - name: Cache Deno
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: ~/.cache/deno
         key: deno-${{ runner.os }}-${{ hashFiles('**/deno.json', '**/deno.lock') }}
         restore-keys: deno-${{ runner.os }}-
 
     - name: Lint
-      if: inputs.mode == 'lint'
       shell: bash
       run: deno lint js/
 
     # js/src splits main-thread (dom lib) and worker (webworker lib) since tsc rejects mixing the two.
     - name: Type check
-      if: inputs.mode == 'lint'
       shell: bash
       run: |
         deno check --config js/src/deno.json js/src/index.ts js/src/element.ts
@@ -36,7 +29,6 @@ runs:
 
     # Strips types to js/dist, the shape the CDN and the Playwright suite both serve, pinned tsc version.
     - name: Build
-      if: inputs.mode == 'build'
       shell: bash
       working-directory: js
       run: |
@@ -44,8 +36,7 @@ runs:
         deno run -A npm:typescript@5.9.3/tsc -p tsconfig.worker.json
 
     - name: Upload js/dist
-      if: inputs.mode == 'build'
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: js_dist
         path: js/dist
@@ -53,7 +44,6 @@ runs:
 
     # Test against this run's compiler, not the deployed CDN copy.
     - name: Download compiler wasm
-      if: inputs.mode == 'test'
       uses: actions/download-artifact@v8
       with:
         name: compiler_wasm
@@ -61,21 +51,18 @@ runs:
 
     # A 150MB Chromium, cached so only the first run pays the download.
     - name: Cache Playwright browsers
-      if: inputs.mode == 'test'
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: ~/.cache/ms-playwright
         key: playwright-${{ runner.os }}-chromium
 
     # --with-deps installs the OS libs Chromium needs on Linux.
     - name: Install Chromium
-      if: inputs.mode == 'test'
       shell: bash
       run: deno run -A npm:playwright install --with-deps chromium
 
     # The Deno suite proves the host runs with no browser, the Playwright one drives Chromium.
     - name: Test
-      if: inputs.mode == 'test'
       shell: bash
       run: |
         deno test --allow-all js/tests/deno.test.js

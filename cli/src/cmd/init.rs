@@ -1,9 +1,9 @@
 use anyhow::{bail, Context, Result};
-use compiler::devkit::SCAFFOLD_MAIN_PY;
 use std::fs;
 use std::path::Path;
 
-const PACKAGES_JSON: &str = "{}\n";
+const SCAFFOLD_MAIN_PY: &str = "print(\"hello from edge python\")\n";
+const EDGE_JSON: &str = "{}\n";
 const INDEX_HTML: &str = include_str!("../templates/scaffold.html");
 
 fn index_html(title: &str) -> String {
@@ -23,7 +23,7 @@ pub fn run(name: Option<&str>, bare: bool) -> Result<()> {
     }
 
     fs::write(root.join("main.py"), SCAFFOLD_MAIN_PY)?;
-    fs::write(root.join("packages.json"), PACKAGES_JSON)?;
+    fs::write(root.join("edge.json"), EDGE_JSON)?;
 
     let mut items = vec![];
     if !bare {
@@ -32,7 +32,7 @@ pub fn run(name: Option<&str>, bare: bool) -> Result<()> {
         items.push("index.html");
     }
     items.push("main.py");
-    items.push("packages.json");
+    items.push("edge.json");
 
     let next = if dir == "." {
         "edge serve".to_string()

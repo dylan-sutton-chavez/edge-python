@@ -25,7 +25,15 @@ post:
   - path: "/eval/runners"
     body: "print('answered over http')"
     expect: "{\"ok\":true,\"stdout\":\"answered over http\\n\"}"
-  # A snippet declares nothing, so importing actor fails like any undeclared name.
+  # A snippet resolves through the group's edge.json, and actor stays closed to untrusted code.
   - path: "/eval/runners"
     body: "from actor import send"
-    expect: "\"ok\":false,\"error\":\"error: module 'actor' is not provided by this host and no packages.json declares it"
+    expect: "\"ok\":false,\"error\":\"error: module 'actor' is not available to untrusted eval runs"
+  # A declared module that grants no I/O works in a snippet.
+  - path: "/eval/runners"
+    body: "import time\nprint(callable(time.time))"
+    expect: "{\"ok\":true,\"stdout\":\"True\\n\"}"
+  # A snippet that sleeps runs to its end within the deadline, both prints come back.
+  - path: "/eval/runners"
+    body: "from time import sleep\nprint('a')\nawait sleep(0.2)\nprint('b')"
+    expect: "{\"ok\":true,\"stdout\":\"a\\nb\\n\"}"

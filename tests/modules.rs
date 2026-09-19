@@ -6,7 +6,7 @@ mod test {
     use compiler::parser::Parser;
     use compiler::vm::VM;
     use compiler::vm::types::{SchedulerStatus, VmErr};
-    use compiler::packages::NativeBinding;
+    use compiler::modules::NativeBinding;
 
     use crate::common::{TestResolver, test_native};
 
@@ -23,7 +23,7 @@ mod test {
         },
     }
 
-    /* Per-directory `packages.json` for walk-up cases, flat fixtures use `aliases` instead. */
+    /* Per-directory `edge.json` for walk-up cases, flat fixtures use `aliases` instead. */
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
     struct ManifestDef {
@@ -33,7 +33,7 @@ mod test {
         extends: Option<String>,
     }
 
-    /* JSON-driven case from `cases/packages.json`, optional expect_externs/expect_functions/error_span_covers. */
+    /* JSON-driven case from `cases/modules.json`, optional expect_externs/expect_functions/error_span_covers. */
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Case {
@@ -46,7 +46,7 @@ mod test {
         input: Vec<String>,
         #[serde(default)]
         modules: HashMap<String, ModuleDef>,
-        /* Synthetic root `packages.json`, nested entries in `manifests` shadow this. */
+        /* Synthetic root `edge.json`, nested entries in `manifests` shadow this. */
         #[serde(default)]
         aliases: HashMap<String, String>,
         /* Nested manifests by directory, exercises walk-up, `extends`, and circular-extends paths. */
@@ -116,9 +116,9 @@ mod test {
     }
 
     #[test]
-    fn packages_cases() {
+    fn modules_cases() {
         let cases: Vec<Case> = serde_json::from_str(
-            include_str!("cases/packages.json")
+            include_str!("cases/modules.json")
         ).expect("invalid JSON");
 
         for case in cases {

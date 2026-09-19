@@ -59,12 +59,11 @@ overflow
 
 ## Source and token limits
 
-Both hosts hand the compiler a source through a 1 MiB buffer, so a larger script fails before lexing with `source exceeds 1048576 bytes`. The lexer itself accepts up to 10 MiB, a cap only an embedder driving the engine directly can reach. The remaining caps prevent asymmetric inputs, small sources that would produce huge parse trees or instruction streams:
+Source must be under 10 MiB. Larger input is rejected at lex time. The remaining caps prevent asymmetric inputs, small sources that would produce huge parse trees or instruction streams:
 
 | Limit | Value | Diagnostic |
 |---|---|---|
-| Source handed by a host | 1 MiB | `source exceeds 1048576 bytes` |
-| Source size at the lexer | 10 MiB | `source file exceeds maximum size (10 MiB)` |
+| Source size | 10 MiB | `source file exceeds maximum size (10 MiB)` |
 | Indent depth | 100 | `indentation depth exceeds maximum (100)` |
 | F-string nesting depth | 200 | `f-string nesting depth exceeds maximum (200)` |
 | Expression nesting depth | 200 | `expression too deeply nested` |
@@ -264,7 +263,6 @@ Failures that happen before the source reaches the compiler surface as plain tex
 | Error | When |
 |---|---|
 | `input rejected: invalid utf-8 at byte N` | Host input bytes are not valid UTF-8 |
-| `source exceeds 1048576 bytes` | Source over the host's 1 MiB buffer |
 | `source file exceeds maximum size (10 MiB)` | Source over the lex-time cap |
 
 Handle these at the embedder layer (path validation, encoding, size check) before invoking the compiler.

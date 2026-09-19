@@ -2,13 +2,13 @@ use crate::lexer::lex;
 use crate::parser::{Parser, Diagnostic, SSAChunk};
 use crate::vm::{VM, Limits};
 use crate::vm::types::{HeapObj, SchedulerStatus, VmErr};
-use alloc::{boxed::Box, string::{String, ToString}};
+use alloc::{boxed::Box, rc::Rc, string::{String, ToString}};
 use core::ptr::NonNull;
 use crate::s;
 
-use super::{ModuleEntry, PausedRun, SZ, now_ns_host, stream_print, with_runtime, write_out};
+use super::{ModuleEntry, PausedRun, CHUNK_CACHE, now_ns_host, stream_print, with_runtime, with_slot, write_out, write_out_bytes};
 use super::resolver::WasmHostResolver;
-use crate::bridge::{self, VmGuard, safe_bytes, safe_str_owned};
+use crate::bridge::{self, BridgeState, VmGuard, safe_bytes, safe_str_owned};
 
 /* Packed `u32` from `run_start` / `run_resume`, top 3 bits = kind, low 29 = out-buffer length. */
 const STATUS_KIND_SHIFT: u32 = 29;
@@ -24,15 +24,16 @@ const STATUS_EXIT: u32 = 6 << STATUS_KIND_SHIFT;
 // Preempt tick, resumes with no host action.
 const STATUS_PREEMPTED: u32 = 7 << STATUS_KIND_SHIFT;
 
+/* The text lands in the out buffer, `out_len` reports its full length. */
 fn err_status(msg: &str) -> u32 {
-    let n = unsafe { write_out(msg) };
-    STATUS_ERROR | ((n as u32) & STATUS_PAYLOAD_MASK)
+    let n = write_out(msg);
+    STATUS_ERROR | (n as u32).min(STATUS_PAYLOAD_MASK)
 }
 
 /* Lex and parse with the host resolver, Err is rendered diagnostics. */
 fn parse_source(src: &str) -> Result<SSAChunk, String> {
     let (tokens, lex_errs) = lex(src);
-    let dir = with_runtime(|rt| rt.entry_dir.clone());
+    let dir = with_slot(|s| s.entry_dir.clone());
     let resolver = Box::new(WasmHostResolver { dir });
     let mut p = Parser::with_resolver(src, tokens.into_iter(), resolver);
     for e in lex_errs {
@@ -51,59 +52,92 @@ fn parse_source(src: &str) -> Result<SSAChunk, String> {
     Ok(chunk)
 }
 
+/* The parsed program for `src`, shared by every slot booting the same source from the same dir. */
+fn entry_chunk(src: &str) -> Result<Rc<SSAChunk>, String> {
+    let dir = with_slot(|s| s.entry_dir.clone());
+    let hit = with_runtime(|rt| {
+        let i = rt.chunk_cache.iter().position(|(d, c)| *d == dir && c.source.as_str() == src)?;
+        let entry = rt.chunk_cache.remove(i);
+        let chunk = entry.1.clone();
+        rt.chunk_cache.push(entry);
+        Some(chunk)
+    });
+    if let Some(chunk) = hit {
+        return Ok(chunk);
+    }
+    let chunk = Rc::new(parse_source(src)?);
+    with_runtime(|rt| {
+        if rt.chunk_cache.len() >= CHUNK_CACHE {
+            rt.chunk_cache.remove(0);
+        }
+        rt.chunk_cache.push((dir, chunk.clone()));
+    });
+    Ok(chunk)
+}
+
 /* The caps a fresh boot runs under, the host's `set_limits` or the sandbox profile. */
 fn limits() -> Limits {
-    with_runtime(|rt| rt.limits).unwrap_or_else(Limits::sandbox)
+    with_slot(|s| s.limits).unwrap_or_else(Limits::sandbox)
 }
 
 /* The entry frame name for tracebacks, None until the host names the source. */
 fn source_name() -> Option<String> {
-    with_runtime(|rt| (!rt.source_name.is_empty()).then(|| rt.source_name.clone()))
+    with_slot(|s| (!s.source_name.is_empty()).then(|| s.source_name.clone()))
 }
 
-/* Leak the chunk so it survives `run_resume`, then boot with host hooks. */
-fn boot_vm(chunk: SSAChunk, limits: Limits) -> VM<'static> {
-    let chunk_static: &'static SSAChunk = Box::leak(Box::new(chunk));
+/* Boots on `chunk`, the slot holds it until every VM borrowing it is gone. */
+fn boot_vm(chunk: Rc<SSAChunk>, limits: Limits) -> VM<'static> {
+    // SAFETY the slot's Rc outlives the VM, `Slot::clear_run` drops VMs before chunks.
+    let chunk_static: &'static SSAChunk = unsafe { &*Rc::as_ptr(&chunk) };
+    let preempt = with_slot(|s| {
+        s.chunks.push(chunk);
+        s.preempt_every
+    });
     let mut vm = VM::with_limits(chunk_static, limits);
     vm.print_hook = Some(stream_print);
     vm.set_time_hook(now_ns_host);
-    vm.set_preempt_interval(with_runtime(|rt| rt.preempt_every));
+    vm.set_preempt_interval(preempt);
     vm
 }
 
 /* Drain host-supplied stdin bytes, invalid UTF-8 degrades to empty. */
 fn take_input(vm: &mut VM) {
-    let inp_text = with_runtime(|rt| {
-        if rt.inp_len == 0 { return String::new(); }
-        let inp = core::str::from_utf8(&rt.inp[..rt.inp_len]).unwrap_or("").to_string();
-        rt.inp_len = 0;
-        inp
-    });
+    let inp = with_slot(|s| core::mem::take(&mut s.input));
+    let inp_text = core::str::from_utf8(&inp).unwrap_or("");
     if !inp_text.is_empty() {
         // One line per `input()` call, any trailing CR dropped.
-        vm.input_buffer = inp_text.split('\n').map(|l| alloc::string::String::from(l.strip_suffix('\r').unwrap_or(l))).collect();
+        vm.input_buffer = inp_text.split('\n').map(|l| String::from(l.strip_suffix('\r').unwrap_or(l))).collect();
     }
 }
 
-/* Host-fed stdin for the next `take_input`. */
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn set_input(ptr: *const u8, len: u32) {
-    let bytes = unsafe { safe_bytes(ptr, len) };
-    let n = bytes.len().min(SZ);
-    with_runtime(|rt| {
-        rt.inp[..n].copy_from_slice(&bytes[..n]);
-        rt.inp_len = n;
-    });
+/* A fresh boot hard-resets the selected slot, the bridge no longer points into it. */
+fn reset_run() {
+    with_slot(|s| s.clear_run());
+    bridge::set_current_vm(None);
 }
 
+/* Copies a host `(ptr, len)` source, the host frees its buffer after the call. */
+fn source_arg(ptr: *const u8, len: u32) -> Result<String, u32> {
+    core::str::from_utf8(unsafe { safe_bytes(ptr, len) })
+        .map(|s| s.to_string())
+        .map_err(|e| err_status(&s!("input rejected: invalid utf-8 at byte ", int e.valid_up_to())))
+}
+
+/* Host-fed stdin for the next boot. */
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn src_ptr() -> *mut u8 {
-    with_runtime(|rt| rt.src.as_mut_ptr())
+pub unsafe extern "C" fn set_input(ptr: *const u8, len: u32) {
+    let bytes = unsafe { safe_bytes(ptr, len) }.to_vec();
+    with_slot(|s| s.input = bytes);
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn out_ptr() -> *const u8 {
     with_runtime(|rt| rt.out.as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn out_len() -> u32 {
+    with_runtime(|rt| rt.out.len() as u32)
 }
 
 #[unsafe(no_mangle)]
@@ -122,11 +156,66 @@ pub unsafe extern "C" fn wasm_free(ptr: *mut u8, size: u32) {
     }
 }
 
+/* A fresh interpreter slot, the id `vm_select` takes. */
+#[unsafe(no_mangle)]
+pub extern "C" fn vm_create() -> u32 {
+    with_runtime(|rt| {
+        rt.slot();
+        let fresh = Some(super::Slot::new());
+        match rt.slots.iter().position(Option::is_none) {
+            Some(i) => {
+                rt.slots[i] = fresh;
+                i as u32
+            }
+            None => {
+                rt.slots.push(fresh);
+                (rt.slots.len() - 1) as u32
+            }
+        }
+    })
+}
+
+/* Points every per-run export at slot `id`, 0 ok, 1 when no such slot exists. */
+#[unsafe(no_mangle)]
+pub extern "C" fn vm_select(id: u32) -> i32 {
+    with_runtime(|rt| select(rt, id as usize))
+}
+
+fn select(rt: &mut super::WasmRuntime, id: usize) -> i32 {
+    rt.slot();
+    if !rt.slots.get(id).is_some_and(Option::is_some) { return 1; }
+    if id == rt.current { return 0; }
+    // The bridge holds the selected slot's handles, park them and load the next slot's.
+    let active = bridge::with_bridge(|b| core::mem::replace(b, BridgeState::new()));
+    rt.slot().bridge = active;
+    rt.current = id;
+    let incoming = core::mem::replace(&mut rt.slot().bridge, BridgeState::new());
+    bridge::with_bridge(|b| *b = incoming);
+    0
+}
+
+/* Frees slot `id` and its runs, slot 0 stays, returns 1 when there is nothing to drop. */
+#[unsafe(no_mangle)]
+pub extern "C" fn vm_drop(id: u32) -> i32 {
+    let id = id as usize;
+    with_runtime(|rt| {
+        if id == 0 || !rt.slots.get(id).is_some_and(Option::is_some) { return 1; }
+        if id == rt.current {
+            select(rt, 0);
+        }
+        rt.slots[id] = None;
+        0
+    })
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn register_code_module(spec_ptr: *const u8, spec_len: u32, src_ptr: *const u8, src_len: u32) {
     let spec = unsafe { safe_str_owned(spec_ptr, spec_len) };
     let src = unsafe { safe_str_owned(src_ptr, src_len) };
-    with_runtime(|rt| rt.registry.push((spec, ModuleEntry::Code(src))));
+    with_runtime(|rt| {
+        rt.registry.push((spec, ModuleEntry::Code(src)));
+        rt.registry_changed();
+    });
 }
 
 #[unsafe(no_mangle)]
@@ -139,7 +228,22 @@ pub unsafe extern "C" fn register_native_module(spec_ptr: *const u8, spec_len: u
         .enumerate()
         .map(|(i, name)| (name.to_string(), base_id + i as u32))
         .collect();
-    with_runtime(|rt| rt.registry.push((spec, ModuleEntry::Native(funcs))));
+    with_runtime(|rt| {
+        rt.registry.push((spec, ModuleEntry::Native(funcs)));
+        rt.registry_changed();
+    });
+}
+
+/* A spec or bare name the host cannot load, importing it fails at the import with `msg`. */
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn register_module_error(spec_ptr: *const u8, spec_len: u32, msg_ptr: *const u8, msg_len: u32) {
+    let spec = unsafe { safe_str_owned(spec_ptr, spec_len) };
+    let msg = unsafe { safe_str_owned(msg_ptr, msg_len) };
+    with_runtime(|rt| {
+        rt.refusals.retain(|(s, _)| *s != spec);
+        rt.refusals.push((spec, msg));
+        rt.registry_changed();
+    });
 }
 
 #[unsafe(no_mangle)]
@@ -147,35 +251,27 @@ pub unsafe extern "C" fn reset_modules() {
     with_runtime(|rt| {
         rt.registry.clear();
         rt.manifests.clear();
+        rt.refusals.clear();
+        rt.registry_changed();
         // Paused run references the now-stale module table, drop it for a clean reset.
-        rt.paused_run = None;
-        rt.repl_vm = None;
-        rt.repl_mode = false;
+        rt.slot().clear_run();
     });
     // The bridge current_vm may have pointed into the dropped paused VM, reset clears it too.
     bridge::reset();
 }
 
-/* Copies up to SZ bytes of SRC into a `String` so the runtime borrow ends before parsing. */
-fn read_src(len: usize) -> Result<String, core::str::Utf8Error> {
-    with_runtime(|rt| {
-        let len = len.min(SZ);
-        core::str::from_utf8(&rt.src[..len]).map(|s| s.to_string())
-    })
+/* Entry dir for the next parse. */
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn set_entry_dir(ptr: *const u8, len: u32) {
+    let dir = unsafe { safe_str_owned(ptr, len) };
+    with_slot(|s| s.entry_dir = dir);
 }
 
-/* Entry dir for the next parse, host writes it into SRC. */
+/* Entry frame name for the next boot, empty restores `<input>`. */
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn set_entry_dir(len: usize) {
-    let dir = read_src(len).unwrap_or_default();
-    with_runtime(|rt| rt.entry_dir = dir);
-}
-
-/* Entry frame name for the next boot, host writes it into SRC, empty restores `<input>`. */
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn set_source_name(len: usize) {
-    let name = read_src(len).unwrap_or_default();
-    with_runtime(|rt| rt.source_name = name);
+pub unsafe extern "C" fn set_source_name(ptr: *const u8, len: u32) {
+    let name = unsafe { safe_str_owned(ptr, len) };
+    with_slot(|s| s.source_name = name);
 }
 
 /* Caps for the next `run_start` or `repl_eval`, a zero field keeps the sandbox value. */
@@ -184,19 +280,18 @@ pub unsafe extern "C" fn set_limits(heap: u64, ops: u64, calls: u64) {
     let sandbox = Limits::sandbox();
     let pick = |v: u64, fallback: usize| if v == 0 { fallback } else { usize::try_from(v).unwrap_or(usize::MAX) };
     let limits = Limits { heap: pick(heap, sandbox.heap), ops: pick(ops, sandbox.ops), calls: pick(calls, sandbox.calls) };
-    with_runtime(|rt| rt.limits = Some(limits));
+    with_slot(|s| s.limits = Some(limits));
 }
 
 /* Pre-fetch feed, each import as `b<TAB>name` (bare, resolve via manifest), `r<TAB>path` (importer-relative) or `R<TAB>path` (manifest-root-relative), one per line. */
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn extract_imports(len: usize) -> usize {
-    use crate::packages::{scan_imports, ImportSpec};
-    let src = match read_src(len) {
-        Ok(s) => s,
-        Err(_) => return unsafe { write_out("") },
+pub unsafe extern "C" fn extract_imports(ptr: *const u8, len: u32) -> u32 {
+    use crate::modules::{scan_imports, ImportSpec};
+    let Ok(src) = core::str::from_utf8(unsafe { safe_bytes(ptr, len) }) else {
+        return write_out("") as u32;
     };
     let mut buf = alloc::string::String::new();
-    for spec in scan_imports(&src) {
+    for spec in scan_imports(src) {
         if !buf.is_empty() { buf.push('\n'); }
         let (kind, name) = match &spec {
             ImportSpec::Bare(n) => ('b', n),
@@ -207,7 +302,7 @@ pub unsafe extern "C" fn extract_imports(len: usize) -> usize {
         buf.push('\t');
         buf.push_str(name);
     }
-    unsafe { write_out(&buf) }
+    write_out(&buf) as u32
 }
 
 /* Drive one segment of execution, on `Pending*` re-stash the VM into the recycled `PausedRun` box. */
@@ -244,7 +339,7 @@ fn step_vm(mut vm: VM<'static>, src: &str, prev_paused: Option<Box<PausedRun>>) 
             };
             // Re-publish `current_vm` to the boxed VM so embedder calls between yields still allocate, its address is stable.
             let vm_ptr = paused.vm.as_mut().map(|v| NonNull::from(v).cast::<VM<'static>>());
-            with_runtime(|rt| rt.paused_run = Some(paused));
+            with_slot(|s| s.paused_run = Some(paused));
             bridge::set_current_vm(vm_ptr);
             kind
         }
@@ -268,36 +363,42 @@ fn step_vm(mut vm: VM<'static>, src: &str, prev_paused: Option<Box<PausedRun>>) 
     }
 }
 
-/* Terminal-state VM, the REPL keeps it for the next input, one-shot runs drop it. */
+/* The REPL keeps a finished VM for the next input, one-shot runs free it with its chunks. */
 fn park_repl_or_drop(mut vm: VM<'static>) {
-    let repl_mode = with_runtime(|rt| rt.repl_mode);
+    let repl_mode = with_slot(|s| s.repl_mode);
     if repl_mode {
         vm.clear_error_state();
         bridge::set_current_vm(None);
-        with_runtime(|rt| rt.repl_vm = Some(Box::new(vm)));
+        with_slot(|s| s.repl_vm = Some(Box::new(vm)));
+    } else {
+        drop(vm);
+        with_slot(|s| if s.paused_run.is_none() { s.chunks.clear(); });
     }
 }
 
 /* REPL entry, first call boots the interpreter and later inputs adopt a new entry chunk on it. */
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn repl_eval(len: usize) -> u32 {
-    let src = match read_src(len) {
+pub unsafe extern "C" fn repl_eval(ptr: *const u8, len: u32) -> u32 {
+    let src = match source_arg(ptr, len) {
         Ok(s) => s,
-        Err(e) => return err_status(&s!("input rejected: invalid utf-8 at byte ", int e.valid_up_to())),
+        Err(status) => return status,
     };
     let chunk = match parse_source(&src) {
-        Ok(c) => c,
+        Ok(c) => Rc::new(c),
         Err(rendered) => return err_status(&rendered),
     };
-    let existing = with_runtime(|rt| {
-        rt.repl_mode = true;
-        rt.paused_run = None;
-        rt.repl_vm.take()
+    let existing = with_slot(|s| {
+        s.repl_mode = true;
+        s.paused_run = None;
+        s.repl_vm.take()
     });
     let mut vm = match existing {
         Some(boxed) => {
+            // SAFETY the REPL slot keeps every input's chunk while its interpreter lives.
+            let chunk_static: &'static SSAChunk = unsafe { &*Rc::as_ptr(&chunk) };
+            with_slot(|s| s.chunks.push(chunk));
             let mut vm = *boxed;
-            vm.adopt_entry_chunk(Box::leak(Box::new(chunk)));
+            vm.adopt_entry_chunk(chunk_static);
             vm.reset_budget(limits().ops);
             vm
         }
@@ -315,14 +416,14 @@ pub unsafe extern "C" fn repl_eval(len: usize) -> u32 {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn run_start(len: usize) -> u32 {
+pub unsafe extern "C" fn run_start(ptr: *const u8, len: u32) -> u32 {
     // A fresh `run_start` hard-resets execution state.
-    with_runtime(|rt| { rt.paused_run = None; rt.repl_vm = None; rt.repl_mode = false; });
-    let src = match read_src(len) {
+    reset_run();
+    let src = match source_arg(ptr, len) {
         Ok(s) => s,
-        Err(e) => return err_status(&s!("input rejected: invalid utf-8 at byte ", int e.valid_up_to())),
+        Err(status) => return status,
     };
-    let chunk = match parse_source(&src) {
+    let chunk = match entry_chunk(&src) {
         Ok(c) => c,
         Err(rendered) => return err_status(&rendered),
     };
@@ -333,14 +434,16 @@ pub unsafe extern "C" fn run_start(len: usize) -> u32 {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn run_resume() -> u32 {
-    let paused = match with_runtime(|rt| rt.paused_run.take()) {
+    let paused = match with_slot(|s| s.paused_run.take()) {
         Some(p) => p,
         None => return err_status("RuntimeError: run_resume called with no paused run"),
     };
     // Take VM out so `step_vm` owns it, recycle the empty Box for the next stash.
     let mut paused_box = paused;
     let vm = paused_box.vm.take().expect("paused_run with no VM is a runtime bug");
-    step_vm(vm, "", Some(paused_box))
+    // An error past a suspension still renders against the entry source.
+    let src = vm.chunk.source.clone();
+    step_vm(vm, &src, Some(paused_box))
 }
 
 #[unsafe(no_mangle)]
@@ -350,8 +453,8 @@ pub unsafe extern "C" fn run_push_event(ptr: *const u8, len: u32) -> i32 {
         Ok(s) => s.to_string(),
         Err(_) => return 1,
     };
-    with_runtime(|rt| {
-        let Some(paused) = rt.paused_run.as_mut() else { return 1; };
+    with_slot(|slot| {
+        let Some(paused) = slot.paused_run.as_mut() else { return 1; };
         let Some(vm) = paused.vm.as_mut() else { return 1; };
         let val = match vm.heap.alloc(HeapObj::Str(s)) {
             Ok(v) => v,
@@ -366,20 +469,14 @@ pub unsafe extern "C" fn run_push_event(ptr: *const u8, len: u32) -> i32 {
 fn with_paused_vm(handle: u32, f: impl FnOnce(&mut VM<'static>, crate::vm::types::Val) -> i32) -> i32 {
     let Some(val) = bridge::get_val(handle) else { return 1; };
     bridge::release_handles(&[handle]);
-    super::with_runtime(|rt| {
-        let Some(paused) = rt.paused_run.as_mut() else { return 3; };
+    with_slot(|slot| {
+        let Some(paused) = slot.paused_run.as_mut() else { return 3; };
         let Some(vm) = paused.vm.as_mut() else { return 3; };
         f(vm, val)
     })
 }
 
-/* Wakes a `WaitingHostCall` coro with `handle`'s Val, 0 ok, 1 stale, 2 no waiter, 3 no run. */
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn set_host_result(handle: u32) -> i32 {
-    with_paused_vm(handle, |vm, val| if vm.inject_host_result(val) { 0 } else { 2 })
-}
-
-/* Wakes the `WaitingHostCall(id)` coro so the host can resolve concurrent calls out of order, same codes. */
+/* Wakes coro `id` with `handle`, 0 ok, 1 stale handle, 2 no waiter, 3 no paused run. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_host_result_by_id(id: u32, handle: u32) -> i32 {
     with_paused_vm(handle, |vm, val| if vm.inject_host_result_by_id(id as u64, val) { 0 } else { 2 })
@@ -400,7 +497,7 @@ pub unsafe extern "C" fn set_host_error_by_id(id: u32, kind: u32, msg_handle: u3
 
 #[unsafe(no_mangle)]
 pub extern "C" fn last_yield_deadline_ns() -> u64 {
-    with_runtime(|rt| rt.paused_run.as_ref().map(|p| p.last_yield_deadline_ns).unwrap_or(0))
+    with_slot(|s| s.paused_run.as_ref().map(|p| p.last_yield_deadline_ns).unwrap_or(0))
 }
 
 use crate::vm::snapshot;
@@ -408,52 +505,43 @@ use crate::vm::snapshot;
 /* Preempt every `n` loop back-edges, 0 disables. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_preempt_interval(n: u32) {
-    with_runtime(|rt| rt.preempt_every = n as usize);
+    with_slot(|s| s.preempt_every = n as usize);
 }
 
-/* Serialize the parked run, -1 when none. */
+/* Serialize the parked run into the out buffer, its length, -1 when none. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn save_state() -> i64 {
-    let blob = with_runtime(|rt| {
-        let vm = rt.paused_run.as_ref().and_then(|p| p.vm.as_ref())?;
+    let blob = with_slot(|s| {
+        let vm = s.paused_run.as_ref().and_then(|p| p.vm.as_ref())?;
         let source = vm.chunk.source.clone();
         Some(snapshot::save(vm, &source))
     });
     match blob {
-        Some(b) => {
-            let len = b.len() as i64;
-            with_runtime(|rt| rt.snapshot = b);
-            len
-        }
+        Some(b) => write_out_bytes(b) as i64,
         None => -1,
     }
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn snapshot_ptr() -> *const u8 {
-    with_runtime(|rt| rt.snapshot.as_ptr())
-}
-
 /* Boot from the blob's embedded source, overlay its saved state. */
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn restore_state(len: usize) -> u32 {
-    with_runtime(|rt| rt.paused_run = None);
-    bridge::set_current_vm(None);
-    let blob: alloc::vec::Vec<u8> = with_runtime(|rt| rt.src[..len.min(SZ)].to_vec());
-    let source = match snapshot::source_of(&blob) {
+pub unsafe extern "C" fn restore_state(ptr: *const u8, len: u32) -> u32 {
+    reset_run();
+    let blob = unsafe { safe_bytes(ptr, len) };
+    let source = match snapshot::source_of(blob) {
         Ok(s) => s.to_string(),
         Err(e) => return err_status(&e),
     };
-    let limits = match snapshot::limits_of(&blob) {
+    let limits = match snapshot::limits_of(blob) {
         Ok(l) => l,
         Err(e) => return err_status(&e),
     };
-    let chunk = match parse_source(&source) {
+    let chunk = match entry_chunk(&source) {
         Ok(c) => c,
         Err(_) => return err_status("snapshot source no longer parses; was it saved by another compiler version?"),
     };
     let mut vm = boot_vm(chunk, limits);
-    if let Err(e) = snapshot::restore(&mut vm, &blob) {
+    if let Err(e) = snapshot::restore(&mut vm, blob) {
+        park_repl_or_drop(vm);
         return err_status(&e);
     }
     step_vm(vm, &source, None)
@@ -461,61 +549,22 @@ pub unsafe extern "C" fn restore_state(len: usize) -> u32 {
 
 /* Parked or REPL module bindings as JSON. */
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn state_globals() -> usize {
-    let json = with_runtime(|rt| {
-        rt.paused_run
+pub unsafe extern "C" fn state_globals() -> u32 {
+    let json = with_slot(|s| {
+        s.paused_run
             .as_ref()
             .and_then(|p| p.vm.as_ref())
-            .or(rt.repl_vm.as_deref())
+            .or(s.repl_vm.as_deref())
             .map(snapshot::inspect_globals)
     });
-    unsafe { write_out(json.as_deref().unwrap_or("{}")) }
+    write_out(json.as_deref().unwrap_or("{}")) as u32
 }
 
 /* Parked coroutines as JSON, `[]` when idle. */
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn state_stack() -> usize {
-    let json = with_runtime(|rt| {
-        rt.paused_run.as_ref().and_then(|p| p.vm.as_ref()).map(snapshot::inspect_stack)
+pub unsafe extern "C" fn state_stack() -> u32 {
+    let json = with_slot(|s| {
+        s.paused_run.as_ref().and_then(|p| p.vm.as_ref()).map(snapshot::inspect_stack)
     });
-    unsafe { write_out(json.as_deref().unwrap_or("[]")) }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn run(len: usize) -> usize {
-    let src = match read_src(len) {
-        Ok(s) => s,
-        Err(e) => return unsafe {
-            write_out(&s!("input rejected: invalid utf-8 at byte ", int e.valid_up_to()))
-        },
-    };
-
-    // Legacy path keeps a borrowed chunk, nothing is leaked.
-    let out: String = match parse_source(&src) {
-        Err(rendered) => rendered,
-        Ok(chunk) => {
-            let mut vm = VM::with_limits(&chunk, Limits::sandbox());
-            vm.print_hook = Some(stream_print);
-            vm.set_time_hook(now_ns_host);
-            take_input(&mut vm);
-
-            // Publish the VM through the RAII guard, a panic or early return never leaves a stale pointer.
-            let _guard = VmGuard::new(&mut vm);
-            let result = vm.run();
-
-            match result {
-                Ok(_) => String::new(),
-                // Legacy `run` cannot suspend, embedders that need `sleep(n>0)` / `frame()` / `receive()` must drive `run_start` + `run_resume`.
-                Err(VmErr::HostYield(_)) => String::from(
-                    "RuntimeError: scheduler suspended; this build's legacy `run` entry has no resume, drive `run_start` / `run_resume` instead.",
-                ),
-                Err(e) => e.render_traceback(
-                    &src, vm.error_pos(), None,
-                    vm.call_stack_frames(), vm.function_names_ref(),
-                ),
-            }
-        }
-    };
-
-    unsafe { write_out(&out) }
+    write_out(json.as_deref().unwrap_or("[]")) as u32
 }

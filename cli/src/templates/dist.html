@@ -8,12 +8,11 @@
   <script type="module">
     // Self-contained launcher; bypasses <edge-python> since its wasmUrl is hardcoded to the CDN.
     import { createWorker } from "./js/src/index.js";
-    const pkgs = await fetch("./packages.json").then((r) => r.json());
+    const pkgs = await fetch("./edge.json").then((r) => r.json());
     const src = await fetch("./__EDGE_ENTRY__").then((r) => r.text());
     const worker = await createWorker({
-      wasmUrl: "./compiler.wasm",
+      wasmUrl: new URL("./compiler.wasm", location.href).href,
       imports: pkgs.imports || {},
-      systemModules: pkgs.system || {},
     });
     // Byte-stream stdout: buffer raw chunks and console.log only whole lines (console.log adds its own newline).
     let buf = "";

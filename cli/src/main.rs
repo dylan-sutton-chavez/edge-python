@@ -6,6 +6,9 @@ mod manifest;
 mod pack;
 /// Minimalist terminal output, plain text only, no colors.
 mod ui;
+mod wasm_cache;
+// RFC 6455 codec, shared with the websocket echo fixture in tests/run.rs.
+mod ws;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -27,12 +30,12 @@ Commands
   repl               Interactive shell
   test [path]        Run *_test.py files
   init <name>        Scaffold a new project
-  add <pkgs>         Add packages to packages.json
-  remove <pkgs>      Remove packages from packages.json
+  add <pkgs>         Add packages to edge.json
+  remove <pkgs>      Remove packages from edge.json
   uninstall          Remove the edge binary and PATH entry
 
 Run flags          --events <f>  --save-state <f>  --restore-state <f>  --preempt <n>
-Global             --packages <file>   manifest, default packages.json
+Global             --manifest <file>   default edge.json
 
 edge <command> -h for details \u{00b7} -v for version \u{00b7} edgepython.com";
 
@@ -42,9 +45,9 @@ struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
 
-    /// Use a specific manifest instead of ./packages.json.
+    /// Use a specific manifest instead of ./edge.json.
     #[arg(long, global = true)]
-    packages: Option<PathBuf>,
+    manifest: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -92,16 +95,16 @@ enum Cmd {
     Init {
         /// Project directory to create, the current one when omitted.
         name: Option<String>,
-        /// Skip the browser index.html, scaffold only main.py and packages.json.
+        /// Skip the browser index.html, scaffold only main.py and edge.json.
         #[arg(long)]
         bare: bool,
     },
-    /// Add packages to packages.json.
+    /// Add packages to edge.json.
     Add {
         /// Package names to add.
         pkgs: Vec<String>,
     },
-    /// Remove packages from packages.json.
+    /// Remove packages from edge.json.
     Remove {
         /// Package names to remove.
         pkgs: Vec<String>,
@@ -128,8 +131,6 @@ enum Cmd {
 }
 
 fn main() -> Result<()> {
-    ctrlc::set_handler(|| std::process::exit(130)).ok();
-
     // A standalone .edge carries its project, run that instead of parsing subcommands.
     if let Some(payload) = cmd::build::embedded_payload() {
         let result = run_embedded(&payload);
@@ -153,7 +154,7 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    let manifest_path = cli.packages.clone().unwrap_or_else(|| PathBuf::from("packages.json"));
+    let manifest_path = cli.manifest.clone().unwrap_or_else(|| PathBuf::from("edge.json"));
 
     let result = match cli.cmd {
         Cmd::Init { name, bare } => cmd::init::run(name.as_deref(), bare),
@@ -162,7 +163,7 @@ fn main() -> Result<()> {
         Cmd::Serve { host, port, open } => cmd::serve::run(PathBuf::from("."), &host, port, open),
         Cmd::Run { file, code, events, save_state, restore_state, preempt } => {
             let opts = RunOpts {
-                packages: cli.packages.as_deref().map(|p| p.to_string_lossy().replace('\\', "/")),
+                manifest: cli.manifest.as_deref().map(|p| p.to_string_lossy().replace('\\', "/")),
                 preempt: preempt.unwrap_or(0),
                 events: events.map(|p| p.to_string_lossy().into_owned()),
                 save_state: save_state.map(|p| p.to_string_lossy().into_owned()),
@@ -174,7 +175,7 @@ fn main() -> Result<()> {
                 }
             })
         }
-        Cmd::Repl => cmd::repl::run(cli.packages.as_deref()),
+        Cmd::Repl => cmd::repl::run(cli.manifest.as_deref()),
         Cmd::Build { out, web, bundle } => {
             if web {
                 cmd::build::run(&manifest_path, out.unwrap_or_else(|| PathBuf::from("dist")))
@@ -185,8 +186,8 @@ fn main() -> Result<()> {
             }
         }
         Cmd::Uninstall => cmd::uninstall::run(),
-        Cmd::Actor { file } => cmd::actor::run(&file, cli.packages.as_deref()),
-        Cmd::Test { path } => cmd::test::run(&manifest_path, cli.packages.as_deref(), path.as_deref()),
+        Cmd::Actor { file } => cmd::actor::run(&file, cli.manifest.as_deref()),
+        Cmd::Test { path } => cmd::test::run(&manifest_path, cli.manifest.as_deref(), path.as_deref()),
     };
 
     if let Err(e) = result {
@@ -214,7 +215,7 @@ struct Embedded {
 fn run_embedded(payload: &[u8]) -> Result<()> {
     let flags = Embedded::parse();
     let opts = RunOpts {
-        packages: None,
+        manifest: None,
         preempt: flags.preempt.unwrap_or(0),
         events: flags.events.map(|p| p.to_string_lossy().into_owned()),
         save_state: flags.save_state.map(|p| p.to_string_lossy().into_owned()),

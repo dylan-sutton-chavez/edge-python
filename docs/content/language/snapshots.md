@@ -184,7 +184,7 @@ await fetch("/saves/cart", { method: "PUT", body: await worker.saveState() }); /
 
 ## The same blob from the CLI
 
-The [CLI](/reference/cli) works with snapshots as plain files, no JS involved. `edge run --save-state cart.bin` writes the blob when the script parks on a wait the CLI cannot serve, and `edge run --restore-state cart.bin` boots from it and keeps running. `--preempt <n>` is `setPreemptInterval(n)` as a flag, and `--events <f>` feeds `receive()` line by line. The CLI and the JS host run the identical `compiler.wasm`, so a blob saved in one host restores in the other.
+The [CLI](/reference/cli) works with snapshots as plain files, no JS involved. `edge run --save-state cart.bin` writes the blob when the script parks on a wait the CLI cannot serve, and `edge run --restore-state cart.bin` boots from it and keeps running. `--preempt <n>` is `setPreemptInterval(n)` as a flag, and `--events <f>` feeds `receive()` line by line. The CLI and the JS host run the same engine, built from one source, so a blob saved in one host restores in the other.
 
 ## Restore if present, else start fresh
 
@@ -216,7 +216,7 @@ The `state` field reads `"waiting_event"` for a parked `receive()`, `"sleeping"`
 
 ## Limits
 
-Script-only state restores identically, including queued but unconsumed events. Live host resources (DOM handles, sockets, pending host calls) are not captured and must be recreated after restoring. The blob carries the whole heap, and `restoreState` loads it through the runtime's 1 MiB source buffer, so an oversized blob fails on restore with `snapshot exceeds 1048576 bytes`. Keep snapshotted state well under the ceiling. See [blob layout](/reference/abi#snapshot-exports).
+Script-only state restores identically, including queued but unconsumed events. Live host resources (DOM handles, sockets, pending host calls) are not captured and must be recreated after restoring. The blob carries the whole heap and has no size cap. See [blob layout](/reference/abi#snapshot-exports).
 
 ## See also
 

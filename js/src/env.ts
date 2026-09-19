@@ -105,7 +105,7 @@ export function makeCompilerEnv({ getExports, onLine, fetchedSources, lockfile, 
         /* Wall-clock ns as BigInt, wasm marshals to i64 (JS Numbers lose precision past 2^53 ns). */
         host_now_ns: () => BigInt(Date.now()) * 1_000_000n,
 
-        /* Serves cached bytes for packages.json walk-up and `#sha256-...` verification, returns 0 on lockfile drift. */
+        /* Serves cached bytes for edge.json walk-up and `#sha256-...` verification, returns 0 on lockfile drift. */
         host_fetch_bytes: (specPtr, specLen, hashPtr, outLenPtr) => {
             const spec = readStr(specPtr, specLen);
             const bytes = fetchedSources.get(spec);

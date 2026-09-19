@@ -30,8 +30,8 @@ const hostCalls = makeRpc<[string, string, EdgeValue[]], EdgeValue>(
     (reqId, module, name, args) => post({ type: 'host-call', reqId, module, name, args }));
 engine.setHostCallDelegate(hostCalls.call);
 
-const systemLoads = makeRpc<[string, string | undefined], string[]>(
-    (reqId, name, url) => post({ type: 'load-system', reqId, name, url }));
+const systemLoads = makeRpc<[string, string], string[]>(
+    (reqId, url, label) => post({ type: 'load-system', reqId, url, label }));
 engine.setLoadSystemDelegate(systemLoads.call);
 
 /* Fire-and-forget messages return this instead of a result, no 'response' is posted for them. */

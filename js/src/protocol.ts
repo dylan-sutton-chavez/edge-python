@@ -8,7 +8,6 @@ export interface LoadOpts {
     loaders?: string[]
     imports?: Record<string, string> | null
     version?: string | null
-    availableSystems?: string[]
 }
 
 export interface MainThreadManifest {
@@ -61,6 +60,6 @@ export type WorkerRequest =
 export type WorkerMessage =
     | { type: 'line', text: string }
     | { type: 'host-call', reqId: number, module: string, name: string, args: EdgeValue[] }
-    | { type: 'load-system', reqId: number, name: string, url?: string }
+    | { type: 'load-system', reqId: number, url: string, label: string }
     | { type: 'response', reqId?: number, result: unknown }
     | { type: 'error', reqId?: number, message: string };

@@ -7,19 +7,24 @@ mod rt;
 mod vm;
 
 pub use resolver::Project;
-pub use vm::{Completion, Deferred, Status, Vm};
+pub use vm::{Completion, Deferred, Instance, Status, Vm};
 
 use anyhow::{anyhow, Result};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
-use wasmtime::{AsContextMut, Engine, Instance, InstanceAllocationStrategy, InstancePre, Linker, Memory, Module, PoolingAllocationConfig, ResourceLimiter, Store, TypedFunc};
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, OnceLock, Weak};
+use wasmtime::{AsContextMut, Engine, Instance as Wasm, InstancePre, Linker, Memory, Module, ResourceLimiter, Store, TypedFunc};
 
 const COMPILER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/compiler.cwasm"));
-const JSON: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/json.cwasm"));
-const RE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/re.cwasm"));
-const MATH: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/math.cwasm"));
-const STRUCT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/struct.cwasm"));
+// Each std package is deserialized the first time a program imports it.
+const STD: [(&str, &[u8]); 4] = [
+    ("json", include_bytes!(concat!(env!("OUT_DIR"), "/json.cwasm"))),
+    ("re", include_bytes!(concat!(env!("OUT_DIR"), "/re.cwasm"))),
+    ("math", include_bytes!(concat!(env!("OUT_DIR"), "/math.cwasm"))),
+    ("struct", include_bytes!(concat!(env!("OUT_DIR"), "/struct.cwasm"))),
+];
 
 // Wall-clock ns, the base every PendingTimer deadline is minted against.
 pub fn now_ns() -> u64 {
@@ -43,26 +48,24 @@ pub type EdgeOp = TypedFunc<(i32, i32, i32, i32, i32, i32, i32), i32>;
 pub struct Runtime {
     pub engine: Engine,
     compiler: Module,
-    std: Vec<(&'static str, Module)>,
+    std: [OnceLock<Module>; 4],
 }
 
 impl Runtime {
-    /* `pool` sizes a pooling allocator for an actor fleet, None allocates each instance on demand. */
-    pub fn new(pool: Option<u32>) -> Result<Arc<Runtime>> {
-        let mut cfg = config::base();
-        if let Some(n) = pool {
-            let mut p = PoolingAllocationConfig::default();
-            // A compiler instance and its four std plugins share one slot budget.
-            let slots = n.saturating_mul(5);
-            p.total_core_instances(slots).total_memories(slots).total_tables(slots);
-            p.max_memory_size(config::MEMORY_RESERVATION as usize);
-            cfg.allocation_strategy(InstanceAllocationStrategy::Pooling(p));
+    pub fn new() -> Result<Arc<Runtime>> {
+        let engine = wt(Engine::new(&config::base()))?;
+        let compiler = wt(unsafe { Module::deserialize(&engine, COMPILER) })?;
+        Ok(Arc::new(Runtime { engine, compiler, std: Default::default() }))
+    }
+
+    /* A std package's module, None for a name that is not built in. */
+    fn std_module(&self, name: &str) -> Result<Option<&Module>> {
+        let Some(i) = STD.iter().position(|(n, _)| *n == name) else { return Ok(None) };
+        if let Some(module) = self.std[i].get() {
+            return Ok(Some(module));
         }
-        let engine = wt(Engine::new(&cfg))?;
-        let load = |bytes: &[u8]| wt(unsafe { Module::deserialize(&engine, bytes) });
-        let compiler = load(COMPILER)?;
-        let std = vec![("json", load(JSON)?), ("re", load(RE)?), ("math", load(MATH)?), ("struct", load(STRUCT)?)];
-        Ok(Arc::new(Runtime { engine, compiler, std }))
+        let module = wt(unsafe { Module::deserialize(&self.engine, STD[i].1) })?;
+        Ok(Some(self.std[i].get_or_init(|| module)))
     }
 
     /* Advances the engine epoch every 100 ms so untrusted deadlines fire. */
@@ -81,7 +84,10 @@ impl Runtime {
 pub struct Host {
     pub runtime: Arc<Runtime>,
     compiler: InstancePre<State>,
-    std: Vec<(&'static str, InstancePre<State>)>,
+    guest: Linker<State>,
+    std: RefCell<HashMap<String, InstancePre<State>>>,
+    // Third party plugins by the sha256 of their bytes, compiled once per thread.
+    plugins: RefCell<HashMap<[u8; 32], InstancePre<State>>>,
 }
 
 impl Host {
@@ -91,15 +97,34 @@ impl Host {
         let compiler = wt(linker.instantiate_pre(&runtime.compiler))?;
         let mut guest = Linker::new(&runtime.engine);
         plugins::link(&mut guest)?;
-        let mut std = Vec::new();
-        for (name, module) in &runtime.std {
-            std.push((*name, wt(guest.instantiate_pre(module))?));
-        }
-        Ok(Rc::new(Host { runtime, compiler, std }))
+        Ok(Rc::new(Host { runtime, compiler, guest, std: RefCell::new(HashMap::new()), plugins: RefCell::new(HashMap::new()) }))
     }
 
-    fn std_pre(&self, name: &str) -> Option<&InstancePre<State>> {
-        self.std.iter().find(|(n, _)| *n == name).map(|(_, p)| p)
+    /* A third party plugin linked for instantiation, Cranelift compiles it on the first sight. */
+    pub fn third_party(&self, bytes: &[u8]) -> Result<InstancePre<State>, String> {
+        let key = compiler::util::sha256::sha256(bytes);
+        if let Some(pre) = self.plugins.borrow().get(&key) {
+            return Ok(pre.clone());
+        }
+        let module = crate::wasm_cache::load(&self.runtime.engine, bytes)?;
+        let pre = self.plugin_pre(&module)?;
+        self.plugins.borrow_mut().insert(key, pre.clone());
+        Ok(pre)
+    }
+
+    /* A plugin module linked against the six guest imports. */
+    pub fn plugin_pre(&self, module: &Module) -> Result<InstancePre<State>, String> {
+        wt(self.guest.instantiate_pre(module)).map_err(|e| e.to_string())
+    }
+
+    fn std_pre(&self, name: &str) -> Result<Option<InstancePre<State>>, String> {
+        if let Some(pre) = self.std.borrow().get(name) {
+            return Ok(Some(pre.clone()));
+        }
+        let Some(module) = self.runtime.std_module(name).map_err(|e| e.to_string())? else { return Ok(None) };
+        let pre = self.plugin_pre(module)?;
+        self.std.borrow_mut().insert(name.to_string(), pre.clone());
+        Ok(Some(pre))
     }
 }
 
@@ -134,7 +159,15 @@ impl ResourceLimiter for MemoryCap {
     }
 }
 
-/* Everything the host functions reach through the store, one per interpreter. */
+/* Where a stream capability delivers events, the selected interpreter's channel. */
+#[derive(Clone)]
+pub struct Events {
+    pub tx: Sender<Completion>,
+    // Each open stream upgrades this to a strong ref, the interpreter counts them.
+    pub streams: Weak<()>,
+}
+
+/* Everything the host functions reach through the store, shared by the instance's slots. */
 pub struct State {
     pub exports: Option<Exports>,
     pub print: Sink,
@@ -144,23 +177,25 @@ pub struct State {
     pub deferred: Vec<Deferred>,
     pub outbox: Vec<(String, String)>,
     pub limiter: MemoryCap,
+    pub events: Option<Events>,
 }
 
 /* The compiler exports the host drives, bound once per instance. */
 #[derive(Clone)]
 pub struct Exports {
     pub memory: Memory,
-    pub src_ptr: TypedFunc<(), i32>,
     pub out_ptr: TypedFunc<(), i32>,
+    pub out_len: TypedFunc<(), i32>,
     pub wasm_alloc: TypedFunc<i32, i32>,
     pub wasm_free: TypedFunc<(i32, i32), ()>,
     pub register_code_module: TypedFunc<(i32, i32, i32, i32), ()>,
     pub register_native_module: TypedFunc<(i32, i32, i32, i32, i32), ()>,
+    pub register_module_error: TypedFunc<(i32, i32, i32, i32), ()>,
     pub reset_modules: TypedFunc<(), ()>,
-    pub set_entry_dir: TypedFunc<i32, ()>,
+    pub set_entry_dir: TypedFunc<(i32, i32), ()>,
     pub set_input: TypedFunc<(i32, i32), ()>,
-    pub repl_eval: TypedFunc<i32, i32>,
-    pub run_start: TypedFunc<i32, i32>,
+    pub repl_eval: TypedFunc<(i32, i32), i32>,
+    pub run_start: TypedFunc<(i32, i32), i32>,
     pub run_resume: TypedFunc<(), i32>,
     pub run_push_event: TypedFunc<(i32, i32), i32>,
     pub set_host_result_by_id: TypedFunc<(i32, i32), i32>,
@@ -168,8 +203,7 @@ pub struct Exports {
     pub last_yield_deadline_ns: TypedFunc<(), i64>,
     pub set_preempt_interval: TypedFunc<i32, ()>,
     pub save_state: TypedFunc<(), i64>,
-    pub snapshot_ptr: TypedFunc<(), i32>,
-    pub restore_state: TypedFunc<i32, i32>,
+    pub restore_state: TypedFunc<(i32, i32), i32>,
     pub host_edge_op: EdgeOp,
     pub host_edge_encode: TypedFunc<(i32, i32, i32), i32>,
     pub host_edge_decode: TypedFunc<(i32, i32, i32, i32), i32>,
@@ -177,11 +211,14 @@ pub struct Exports {
     pub host_edge_throw: TypedFunc<(i32, i32, i32), ()>,
     pub host_edge_take_error: TypedFunc<(i32, i32, i32), i32>,
     pub set_limits: TypedFunc<(i64, i64, i64), ()>,
-    pub set_source_name: TypedFunc<i32, ()>,
+    pub set_source_name: TypedFunc<(i32, i32), ()>,
+    pub vm_create: TypedFunc<(), i32>,
+    pub vm_select: TypedFunc<i32, i32>,
+    pub vm_drop: TypedFunc<i32, i32>,
 }
 
 impl Exports {
-    fn bind(store: &mut Store<State>, instance: &Instance) -> Result<Exports> {
+    fn bind(store: &mut Store<State>, instance: &Wasm) -> Result<Exports> {
         let memory = instance.get_memory(&mut *store, "memory").ok_or_else(|| anyhow!("compiler.wasm exports no memory"))?;
         macro_rules! f {
             ($name:literal) => {
@@ -190,12 +227,13 @@ impl Exports {
         }
         Ok(Exports {
             memory,
-            src_ptr: f!("src_ptr"),
             out_ptr: f!("out_ptr"),
+            out_len: f!("out_len"),
             wasm_alloc: f!("wasm_alloc"),
             wasm_free: f!("wasm_free"),
             register_code_module: f!("register_code_module"),
             register_native_module: f!("register_native_module"),
+            register_module_error: f!("register_module_error"),
             reset_modules: f!("reset_modules"),
             set_entry_dir: f!("set_entry_dir"),
             set_input: f!("set_input"),
@@ -208,7 +246,6 @@ impl Exports {
             last_yield_deadline_ns: f!("last_yield_deadline_ns"),
             set_preempt_interval: f!("set_preempt_interval"),
             save_state: f!("save_state"),
-            snapshot_ptr: f!("snapshot_ptr"),
             restore_state: f!("restore_state"),
             host_edge_op: f!("host_edge_op"),
             host_edge_encode: f!("host_edge_encode"),
@@ -218,6 +255,9 @@ impl Exports {
             host_edge_take_error: f!("host_edge_take_error"),
             set_limits: f!("set_limits"),
             set_source_name: f!("set_source_name"),
+            vm_create: f!("vm_create"),
+            vm_select: f!("vm_select"),
+            vm_drop: f!("vm_drop"),
         })
     }
 }

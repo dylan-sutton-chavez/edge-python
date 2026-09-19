@@ -3,7 +3,7 @@
 
 [package]
 name = "edge"
-version = "0.2.0"
+version = "0.5.0"
 edition = "2024"
 description = "The Edge Python developer CLI. Runs, tests, and scaffolds scripts on the same compiler.wasm the browser uses, hosted under wasmtime, packs apps into standalone binaries or bundles, and runs cooperative actor pools."
 
@@ -12,10 +12,10 @@ name = "edge"
 path = "src/main.rs"
 
 [dependencies]
-# The engine crate as a library, devkit helpers, manifest parsing and sha256 pinning.
+# The engine crate as a library, manifest parsing and sha256 pinning.
 edge-python = { path = ".." }
-# Runs the precompiled compiler.wasm, no compiler is linked into the binary.
-wasmtime = { version = "48", default-features = false, features = ["runtime", "std", "pooling-allocator"] }
+# Runs the precompiled compiler.wasm, Cranelift compiles the third party plugins a project declares.
+wasmtime = { version = "48", default-features = false, features = ["runtime", "std", "cranelift"] }
 clap = { version = "4", features = ["derive"] }
 tiny_http = "0.12"
 serde = { version = "1", features = ["derive"] }
@@ -23,12 +23,13 @@ serde_json = "1"
 # Parses the actor.yml manifest, the maintained fork of serde_yaml.
 serde_yaml_ng = "0.10"
 anyhow = "1"
-# Catches Ctrl+C in non-REPL commands so they shut down cleanly.
-ctrlc = "3"
 # Line editor + history for `edge repl`.
 rustyline = "17.0.0"
 # HTTPS for URL imports, `edge build` vendoring and the network module.
 ureq = "3"
+# TLS for wss sockets, the same rustls build and roots ureq already links.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
 # Stable actor keys that survive removal, so the scheduler queues never dangle.
 slab = "0.4"
 # A unique temp file for the uninstall script, a predictable path invites symlink squatting.
@@ -44,3 +45,10 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# build.rs runs Cranelift over compiler.wasm, unoptimized it takes ten times longer.
+[profile.release.build-override]
+opt-level = 3
+
+[profile.dev.build-override]
+opt-level = 3

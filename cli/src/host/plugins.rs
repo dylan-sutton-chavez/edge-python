@@ -1,7 +1,7 @@
-use super::{read, read_u32, stage, unstage, write, write_u32, wt, Exports, Native, State, Vm};
+use super::{read, read_u32, stage, unstage, write, write_u32, wt, Exports, Instance, Native, State};
 use anyhow::{anyhow, Result};
 use compiler::abi::EDGE_ABI_VERSION;
-use wasmtime::{Caller, ExternType, Linker, Memory, TypedFunc};
+use wasmtime::{Caller, ExternType, InstancePre, Linker, Memory, TypedFunc};
 
 // The std specs `edge add` writes, the built-in packages answer to them.
 pub const STD_BASE: &str = "https://cdn.edgepython.com/std/";
@@ -112,23 +112,44 @@ fn guest_memory(caller: &mut Caller<'_, State>) -> wasmtime::Result<Memory> {
         .ok_or_else(|| wasmtime::format_err!("plugin exports no memory"))
 }
 
-/* Instantiates a built-in std package in the interpreter's store and registers its exports under `spec`. */
-pub fn register(vm: &mut Vm, name: &str, spec: &str) -> Result<(), String> {
-    if let Some((base, names)) = vm.store.data().registered.get(spec).cloned() {
-        return vm.register_native(spec, &names, base);
+/* Instantiates a built-in std package in the instance's store and registers its exports under `spec`. */
+pub fn register(inst: &mut Instance, name: &str, spec: &str) -> Result<(), String> {
+    if let Some((base, names)) = inst.store.data().registered.get(spec).cloned() {
+        return inst.register_native(spec, &names, base);
     }
-    let host = vm.host.clone();
-    let pre = host.std_pre(name).ok_or_else(|| format!("no built-in std package '{name}'"))?;
-    let instance = wt(pre.instantiate(&mut vm.store)).map_err(|e| format!("instantiating std '{name}': {e}"))?;
-    let memory = instance.get_memory(&mut vm.store, "memory").ok_or_else(|| format!("std '{name}' exports no memory"))?;
-    let version: TypedFunc<(), i32> = wt(instance.get_typed_func(&mut vm.store, "__edge_abi_version")).map_err(|e| e.to_string())?;
-    let got = wt(version.call(&mut vm.store, ())).map_err(|e| e.to_string())?;
+    let host = inst.host.clone();
+    let pre = host.std_pre(name)?.ok_or_else(|| format!("no built-in std package '{name}'"))?;
+    register_pre(inst, &format!("std '{name}'"), spec, &pre)
+}
+
+/* Instantiates a third party plugin from its bytes, once per instance like a std package. */
+pub fn register_bytes(inst: &mut Instance, name: &str, spec: &str, bytes: &[u8]) -> Result<(), String> {
+    if let Some((base, names)) = inst.store.data().registered.get(spec).cloned() {
+        return inst.register_native(spec, &names, base);
+    }
+    let host = inst.host.clone();
+    let pre = host.third_party(bytes).map_err(|e| format!("module '{name}' is not a valid plugin, {}", headline(&e)))?;
+    register_pre(inst, &format!("plugin '{name}'"), spec, &pre)
+}
+
+/* The first line of a wasmtime error, cut before a dangling byte dump that would follow it. */
+fn headline(e: &str) -> &str {
+    let line = e.lines().next().unwrap_or(e);
+    line.rsplit_once(" - ").filter(|(_, tail)| tail.ends_with('[')).map_or(line, |(head, _)| head)
+}
+
+/* Instantiates any linked plugin in the instance's store and registers its exports under `spec`. */
+pub fn register_pre(inst: &mut Instance, what: &str, spec: &str, pre: &InstancePre<State>) -> Result<(), String> {
+    let instance = wt(pre.instantiate(&mut inst.store)).map_err(|e| format!("instantiating {what}: {e}"))?;
+    let memory = instance.get_memory(&mut inst.store, "memory").ok_or_else(|| format!("{what} exports no memory"))?;
+    let version: TypedFunc<(), i32> = wt(instance.get_typed_func(&mut inst.store, "__edge_abi_version")).map_err(|e| e.to_string())?;
+    let got = wt(version.call(&mut inst.store, ())).map_err(|e| e.to_string())?;
     if got != EDGE_ABI_VERSION as i32 {
-        return Err(format!("std '{name}' speaks ABI v{got}, this cli expects v{EDGE_ABI_VERSION}"));
+        return Err(format!("{what} speaks ABI v{got}, this cli expects v{EDGE_ABI_VERSION}"));
     }
-    let alloc: TypedFunc<i32, i32> = wt(instance.get_typed_func(&mut vm.store, "__edge_alloc")).map_err(|e| e.to_string())?;
-    let free: Option<TypedFunc<(i32, i32), ()>> = instance.get_typed_func(&mut vm.store, "__edge_free").ok();
-    let base = vm.store.data().natives.len();
+    let alloc: TypedFunc<i32, i32> = wt(instance.get_typed_func(&mut inst.store, "__edge_alloc")).map_err(|e| e.to_string())?;
+    let free: Option<TypedFunc<(i32, i32), ()>> = instance.get_typed_func(&mut inst.store, "__edge_free").ok();
+    let base = inst.store.data().natives.len();
     let mut names = Vec::new();
     for export in pre.module().exports() {
         let n = export.name();
@@ -139,10 +160,10 @@ pub fn register(vm: &mut Vm, name: &str, spec: &str) -> Result<(), String> {
         if n.starts_with("__") && !(n.starts_with("__fn_") || n.starts_with("__class_") || n.starts_with("__const_")) {
             continue;
         }
-        let Ok(func) = instance.get_typed_func::<(i32, i32, i32), i32>(&mut vm.store, n) else { continue };
+        let Ok(func) = instance.get_typed_func::<(i32, i32, i32), i32>(&mut inst.store, n) else { continue };
         names.push(n.to_string());
-        vm.store.data_mut().natives.push(Native::Plugin { func, alloc: alloc.clone(), free: free.clone(), memory });
+        inst.store.data_mut().natives.push(Native::Plugin { func, alloc: alloc.clone(), free: free.clone(), memory });
     }
-    vm.store.data_mut().registered.insert(spec.to_string(), (base, names.clone()));
-    vm.register_native(spec, &names, base)
+    inst.store.data_mut().registered.insert(spec.to_string(), (base, names.clone()));
+    inst.register_native(spec, &names, base)
 }

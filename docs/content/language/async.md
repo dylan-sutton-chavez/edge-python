@@ -164,7 +164,7 @@ caught
 
 ### Concurrent host calls
 
-Deferred host calls (for example `fetch_text` from the `network` package) run concurrently under `gather`. Each parks its coroutine, the host resolves them in parallel, and every result is routed back to the exact coroutine that issued it. A failed call raises only in its own coroutine, so a `try` / `except` lets the rest of the batch finish.
+Deferred host calls (for example `fetch_text` from the `network` package) run concurrently under `gather`. Each parks its coroutine, the host resolves them in parallel, and every result is routed back to the exact coroutine that issued it. A failed call raises only in its own coroutine, at the line that made the call, so a `try` / `except` lets the rest of the batch finish and an uncaught failure's traceback points at that line.
 
 ```python
 from network import fetch_text

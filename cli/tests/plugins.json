@@ -1,0 +1,57 @@
+[
+  {
+    "copy": {
+      "script.py": "pdk/example/script.py",
+      "edge.json": "pdk/example/edge.json",
+      "slugify_mod.wasm": "target/wasm32-unknown-unknown/release/slugify_mod.wasm"
+    },
+    "run": ["run", "script.py"],
+    "stdout": ["hello-world-from-edge-python\nHELLO-WORLD-FROM-EDGE-PYTHON!\n24\nhello-world-from-edge-pythonhello-world-from-edge-python\npython\nedge\nhello-world-from\ncaught: repeat count must be non-negative\n"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"slugify_mod\": \"./slugify_mod.wasm\" } }\n",
+      "main.py": "from slugify_mod import join_all, version\nprint(join_all(\"-\", \"a\", \"b\", \"c\"), version)\n"
+    },
+    "copy": { "slugify_mod.wasm": "target/wasm32-unknown-unknown/release/slugify_mod.wasm" },
+    "run": ["run", "main.py"],
+    "stdout": ["a-b-c 1"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"slugify_mod\": \"./slugify_mod.wasm\" } }\n",
+      "lib.py": "from slugify_mod import Slugger\n",
+      "main.py": "from .lib import Slugger\ns = Slugger()\ns.add(\"Via A Module\")\nprint(s.build())\n"
+    },
+    "copy": { "slugify_mod.wasm": "target/wasm32-unknown-unknown/release/slugify_mod.wasm" },
+    "run": ["run", "main.py"],
+    "stdout": ["via-a-module"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"slugify_mod\": \"./slugify_mod.wasm\" } }\n",
+      "main.py": "import slugify_mod\nprint(slugify_mod.join_all(1))\n"
+    },
+    "copy": { "slugify_mod.wasm": "target/wasm32-unknown-unknown/release/slugify_mod.wasm" },
+    "run": ["run", "main.py"],
+    "fails": ["TypeError: expected str, got Int(1)", "--> main.py:2:1"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"slugify_mod\": \"./vendor/slugify\" } }\n",
+      "main.py": "from slugify_mod import join_all\nprint(join_all(\"+\", \"no\", \"extension\"))\n"
+    },
+    "copy": { "vendor/slugify": "target/wasm32-unknown-unknown/release/slugify_mod.wasm" },
+    "run": ["run", "main.py"],
+    "stdout": ["no+extension"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"slugify_mod\": \"./slugify_mod.wasm#sha256-0000000000000000000000000000000000000000000000000000000000000000\" } }\n",
+      "main.py": "import slugify_mod\n"
+    },
+    "copy": { "slugify_mod.wasm": "target/wasm32-unknown-unknown/release/slugify_mod.wasm" },
+    "run": ["run", "main.py"],
+    "fails": ["integrity check failed for './slugify_mod.wasm'"]
+  }
+]

@@ -3,7 +3,7 @@ description: Deno-lint and smoke-test one JS host capability (all JS) in Chromiu
 
 inputs:
   capability:
-    description: "dom | network | storage | time"
+    description: "actor | dom | network | storage | time"
     required: true
 
 runs:
@@ -15,7 +15,7 @@ runs:
         deno-version: v2.x
 
     - name: Cache Deno
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: ~/.cache/deno
         key: deno-${{ runner.os }}-${{ hashFiles('js/builtins/**/deno.json', 'js/builtins/**/deno.lock') }}
@@ -35,7 +35,7 @@ runs:
 
     # A 150MB Chromium, cached so only the first run pays the download.
     - name: Cache Playwright browsers
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: ~/.cache/ms-playwright
         key: playwright-${{ runner.os }}-chromium

@@ -1,6 +1,6 @@
 use super::{now_ns, Host, Project, Runtime, Sink, Status, Vm};
 use anyhow::{anyhow, bail, Result};
-use compiler::packages::dir_of;
+use compiler::modules::dir_of;
 use std::io::{BufRead, IsTerminal, Read, Write};
 use std::path::Path;
 use std::rc::Rc;
@@ -8,7 +8,7 @@ use std::rc::Rc;
 /* Run flags, every path is host-side, none reach the sandboxed script. */
 #[derive(Default)]
 pub struct RunOpts {
-    pub packages: Option<String>,
+    pub manifest: Option<String>,
     pub preempt: usize,
     pub events: Option<String>,
     pub save_state: Option<String>,
@@ -30,7 +30,7 @@ pub fn stdout_sink() -> Sink {
 }
 
 fn host() -> Result<Rc<Host>> {
-    Host::new(Runtime::new(None)?)
+    Host::new(Runtime::new()?)
 }
 
 /* Forward-slash spec of a path, the shape the resolver walks. */
@@ -70,7 +70,7 @@ pub fn run(file: Option<&Path>, code: Option<&str>, opts: &RunOpts) -> Result<i3
             input = Some(buf);
         }
     }
-    let project = Project::disk(dir_of(&name), opts.packages.as_deref());
+    let project = Project::disk(dir_of(&name), opts.manifest.as_deref());
     let mut vm = host()?.vm(stdout_sink(), project, None, None)?;
     vm.set_preempt_interval(opts.preempt)?;
     vm.set_source_name(&name)?;
@@ -101,7 +101,7 @@ pub fn restore_and_run(file: &str, opts: &RunOpts) -> Result<i32> {
             return Ok(2);
         }
     };
-    let project = Project::disk("", opts.packages.as_deref());
+    let project = Project::disk("", opts.manifest.as_deref());
     let mut vm = host()?.vm(stdout_sink(), project, None, None)?;
     vm.set_preempt_interval(opts.preempt)?;
     let status = match vm.restore_state(&blob) {
@@ -133,6 +133,16 @@ pub fn drive(vm: &mut Vm, mut status: Status, opts: &RunOpts) -> i32 {
             Status::PendingEvent => {
                 if vm.drain_buffered() > 0 {
                     step(vm)
+                } else if vm.streams() > 0 {
+                    // An open stream may still push an event, wait for it instead of parking.
+                    match vm.wait(Some(STREAM_POLL)) {
+                        Ok(0) => Status::PendingEvent,
+                        Ok(_) => step(vm),
+                        Err(e) => {
+                            eprintln!("error: {e}");
+                            return 1;
+                        }
+                    }
                 } else if let Some(path) = &opts.events {
                     match next_event(&mut events, path) {
                         Some(line) => {
@@ -168,6 +178,9 @@ fn step(vm: &mut Vm) -> Status {
         Err(e) => Status::Error(format!("error: {e}")),
     }
 }
+
+// How long a run parked on receive() waits for a stream event before rechecking.
+const STREAM_POLL: std::time::Duration = std::time::Duration::from_millis(50);
 
 pub(super) fn sleep_until(deadline: u64) {
     let now = now_ns();
@@ -234,15 +247,15 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn open(packages: Option<&Path>) -> Result<Session> {
-        let project = Project::disk("", packages.map(path_spec).as_deref());
+    pub fn open(manifest: Option<&Path>) -> Result<Session> {
+        let project = Project::disk("", manifest.map(path_spec).as_deref());
         let vm = host()?.vm(stdout_sink(), project, None, None)?;
         Ok(Session { vm })
     }
 
     /* Runs one input, `base` repositions relative imports, None means the project root. */
     pub fn eval(&mut self, src: &str, base: Option<&str>, input: Option<&str>) -> Result<Outcome> {
-        self.vm.project.entry_dir = base.unwrap_or("").to_string();
+        self.vm.set_base(base.unwrap_or(""));
         let mut status = self.vm.repl_eval(src, input)?;
         loop {
             status = match status {
@@ -262,6 +275,11 @@ impl Session {
                     self.vm.wait(None)?;
                     step(&mut self.vm)
                 }
+                Status::PendingEvent if self.vm.drain_buffered() > 0 => step(&mut self.vm),
+                Status::PendingEvent if self.vm.streams() > 0 => match self.vm.wait(Some(STREAM_POLL))? {
+                    0 => Status::PendingEvent,
+                    _ => step(&mut self.vm),
+                },
                 Status::PendingEvent => return Ok(Outcome { err: Some(suspend_message("an event")), exit_code: None }),
                 Status::PendingFrame => return Ok(Outcome { err: Some(suspend_message("a render frame")), exit_code: None }),
             };

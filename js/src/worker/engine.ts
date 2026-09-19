@@ -6,7 +6,6 @@ import { makeRt } from '../rt.ts';
 import type { Rt, EdgeValue } from '../rt.ts';
 import { nativeTable, resetNativeTable } from '../native.ts';
 import type { NativeLoader } from '../native.ts';
-import { SOURCE_LIMIT } from '../specs.ts';
 import type { CompilerExports } from '../wasm.ts';
 import type { CacheBackend } from '../cache/types.ts';
 import type { LoadOpts, MainThreadManifest, RunOpts, ExecResult } from '../protocol.ts';
@@ -17,7 +16,6 @@ const TD = new TextDecoder();
 
 /* Packed status from `run_start` / `run_resume`, mirrors `src/wasm/exports.rs`. */
 const STATUS_KIND_SHIFT = 29;
-const STATUS_PAYLOAD_MASK = (1 << STATUS_KIND_SHIFT) - 1;
 const STATUS_DONE = 0;
 const STATUS_PENDING_TIMER = 1;
 const STATUS_PENDING_FRAME = 2;
@@ -29,7 +27,7 @@ const STATUS_PREEMPTED = 7; // preempt tick, resumes with no host action
 
 interface ExecuteOpts extends RunOpts {
     payload: Uint8Array
-    start: (e: CompilerExports, n: number) => number
+    start: (e: CompilerExports, ptr: number, n: number) => number
     onLine?: (text: string) => void
 }
 
@@ -57,10 +55,9 @@ let pauseAck: ((parked: boolean) => void) | null = null;
 let resumeGate: (() => void) | null = null;
 /* (name, args) => Promise<value>. Set by worker.ts (postMessage round-trip) or by a main-thread embedder. */
 let hostCallDelegate: ((module: string, name: string, args: EdgeValue[]) => Promise<EdgeValue>) | null = null;
-/* System modules resolvable by bare name but loaded on demand. (name) => Promise<exportNames>. */
-let loadSystemDelegate: ((name: string, url?: string) => Promise<string[]>) | null = null;
-let lazySystemNames: string[] = [];
-// Source/missing caches persist across runs so the BFS skips refetching modules and re-probing 404'd `packages.json` paths on every Run press. Wiped by `clearCache()`.
+/* JavaScript imports load on the page on demand, (url, label) => Promise<exportNames>. */
+let loadSystemDelegate: ((url: string, label: string) => Promise<string[]>) | null = null;
+// Source and missing caches outlive runs, no refetch or edge.json re-probe until `clearCache()`.
 const fetchedSources = new Map<string, Uint8Array>();
 const knownMissing = new Set<string>();
 /* Synthetic native modules (handlers live on main thread). Registered on a fresh instance, incremental runs keep the existing native table. */
@@ -73,11 +70,10 @@ const requireExports = (): CompilerExports => {
 };
 
 /* Engine orchestrator, internal to the Worker. Consumers use `createWorker` in `src/index.ts`. Lifecycle is `load` once -> many `run` cycles -> `dispose`, and each run instantiates the compiler fresh with no state leak. */
-export async function load({ wasmUrl, integrity = true, loaders: loaderUrls = [], imports = null, version = null, availableSystems = [] }: LoadOpts, manifests: MainThreadManifest[] = []): Promise<{ integrityActive: boolean, loadMs: number }> {
+export async function load({ wasmUrl, integrity = true, loaders: loaderUrls = [], imports = null, version = null }: LoadOpts, manifests: MainThreadManifest[] = []): Promise<{ integrityActive: boolean, loadMs: number }> {
     if (!wasmUrl) throw new Error('load: wasmUrl is required');
     const t0 = performance.now();
     importsMap = imports;
-    lazySystemNames = availableSystems;
 
     cache = await openCache(integrity);
     integrityActive = Boolean(integrity) && cache.persistent;
@@ -110,12 +106,11 @@ export async function run(opts: RunOpts, onLine?: (text: string) => void): Promi
     running = true;
     try {
         const payload = TE.encode(opts.src);
-        if (payload.length > SOURCE_LIMIT) throw new Error(`source exceeds ${SOURCE_LIMIT} bytes`);
         // REPL inputs keep the interpreter alive in the wasm instance, implying incremental so the instance itself persists too.
         if (opts.repl) {
-            return await execute({ ...opts, onLine, payload, incremental: true, start: (e, n) => e.repl_eval(n) });
+            return await execute({ ...opts, onLine, payload, incremental: true, start: (e, ptr, n) => e.repl_eval(ptr, n) });
         }
-        return await execute({ ...opts, onLine, payload, start: (e, n) => e.run_start(n) });
+        return await execute({ ...opts, onLine, payload, start: (e, ptr, n) => e.run_start(ptr, n) });
     }
     finally { running = false; }
 }
@@ -144,11 +139,8 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
 
     const registerSystem = makeRegisterSystem(exports);
 
-    /* Both kinds graft `<name> -> mt:<name>` so the bare name resolves. Eager ones (programmatic objects) register now, lazy ones (urls) load on first import during prefetch. In incremental mode the native table is preserved, so skip re-registration. */
+    // Inline page modules register now and graft their bare names, incremental runs keep the native table.
     const { mainThreadSpecs, augmentedImports } = systemImportMap(registerSystem, incremental);
-
-    const writePayload = () => new Uint8Array(exports.memory.buffer).set(payload, exports.src_ptr());
-    writePayload();
 
     await bfsPrefetch(src, exports, lockfile, {
         cache,
@@ -162,10 +154,10 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
         compilerExports: exports,
         rt,
         loaders,
-        // Lazy system, fetch export names from the page, then register the mt: stubs here.
-        loadSystem: (name: string, url?: string) => {
-            if (!loadSystemDelegate) throw new Error(`system '${name}' imported but no main-thread loader is wired`);
-            return loadSystemDelegate(name, url);
+        // The page imports a JavaScript module and returns its export names, prefetch registers the stubs.
+        loadSystem: (url: string, label: string) => {
+            if (!loadSystemDelegate) throw new Error(`'${label}' is JavaScript but no main-thread loader is wired`);
+            return loadSystemDelegate(url, label);
         },
         registerSystem,
     });
@@ -173,12 +165,10 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
     // Compiler roots the entry's quoted imports at this directory.
     if (exports.set_entry_dir) {
         const dirBytes = TE.encode(entryDir);
-        new Uint8Array(exports.memory.buffer).set(dirBytes, exports.src_ptr());
-        exports.set_entry_dir(dirBytes.length);
+        const dirPtr = writeBytes(exports, dirBytes);
+        exports.set_entry_dir(dirPtr, dirBytes.length);
+        exports.wasm_free(dirPtr, Math.max(1, dirBytes.length));
     }
-
-    // `wasm_alloc` during prefetch may have grown memory and detached our view.
-    writePayload();
 
     // Host-fed stdin, one input() call per line.
     if (input && exports.set_input) {
@@ -190,7 +180,11 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
 
     const t0 = performance.now();
     pendingHostCalls.clear(); // drop any stale captures from a prior run
-    const result = await drive(exports, rt, start(exports, payload.length), t0);
+    // The compiler copies the source out before the call returns.
+    const payloadPtr = writeBytes(exports, payload);
+    const status = start(exports, payloadPtr, payload.length);
+    exports.wasm_free(payloadPtr, Math.max(1, payload.length));
+    const result = await drive(exports, rt, status, t0);
 
     if (integrityActive) {
         try { await cache.saveLockfile(lockfile); }
@@ -200,18 +194,18 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
     return result;
 }
 
-/* Register a main-thread module at `mt:<name>`, push a stub per export (the real call defers to the page) and tell the compiler its export names. */
-const makeRegisterSystem = (exports: CompilerExports) => (name: string, exportNames: string[]): void => {
+/* Registers a page module under `spec`, each export stub defers its call to the page by `key`. */
+const makeRegisterSystem = (exports: CompilerExports) => (spec: string, exportNames: string[], key = spec): void => {
     const baseId = nativeTable.length;
     for (const fnName of exportNames) {
         nativeTable.push(Object.assign(() => {}, {
             __edge_kind: 'capability' as const,
             __edge_main_thread: true,
             __edge_name: fnName,
-            __edge_module: name,
+            __edge_module: key,
         }));
     }
-    const specBytes = TE.encode(`mt:${name}`);
+    const specBytes = TE.encode(spec);
     const namesBytes = TE.encode(exportNames.join('\n'));
     exports.register_native_module(
         writeBytes(exports, specBytes), specBytes.length,
@@ -220,17 +214,15 @@ const makeRegisterSystem = (exports: CompilerExports) => (name: string, exportNa
     );
 };
 
-/* Eager mt: registrations plus the name -> mt:<name> import grafts shared by run() and restoreState(). */
-function systemImportMap(registerSystem: (name: string, exportNames: string[]) => void, skipRegistration: boolean): { mainThreadSpecs: Set<string>, augmentedImports: Record<string, string> } {
+/* Inline page modules and the bare names grafted onto them, shared by run() and restoreState(). */
+function systemImportMap(registerSystem: (spec: string, exportNames: string[]) => void, skipRegistration: boolean): { mainThreadSpecs: Set<string>, augmentedImports: Record<string, string> } {
     const mainThreadSpecs = new Set<string>();
     const augmentedImports: Record<string, string> = { ...(importsMap || {}) }; // programmatic imports from the embedder (index.ts)
     for (const m of mainThreadManifests) {
-        if (!skipRegistration) registerSystem(m.name, m.exports);
-        mainThreadSpecs.add(`mt:${m.name}`);
-        augmentedImports[m.name] = `mt:${m.name}`;
-    }
-    for (const name of lazySystemNames) {
-        if (!mainThreadSpecs.has(`mt:${name}`)) augmentedImports[name] = `mt:${name}`;
+        const spec = `mt:${m.name}`;
+        if (!skipRegistration) registerSystem(spec, m.exports);
+        mainThreadSpecs.add(spec);
+        augmentedImports[m.name] = spec;
     }
     return { mainThreadSpecs, augmentedImports };
 }
@@ -327,7 +319,8 @@ async function drive(exports: CompilerExports, rt: Rt, status: number, t0: numbe
     if (((status >>> STATUS_KIND_SHIFT) & 7) === STATUS_EXIT) {
         return { out: '', ms: performance.now() - t0, exitCode: status & 0xFF };
     }
-    const len = status & STATUS_PAYLOAD_MASK;
+    // Only an error leaves text in the out buffer, a finished run has none.
+    const len = ((status >>> STATUS_KIND_SHIFT) & 7) === STATUS_ERROR ? exports.out_len() : 0;
     const ms = performance.now() - t0;
     const out = len > 0
         ? TD.decode(new Uint8Array(exports.memory.buffer, exports.out_ptr(), len))
@@ -380,7 +373,7 @@ export function saveState(): Uint8Array {
     if (!compilerExports) throw new Error('nothing to save: no run has started');
     const len = Number(compilerExports.save_state());
     if (len < 0) throw new Error('nothing to save: the program is not paused');
-    return new Uint8Array(compilerExports.memory.buffer, compilerExports.snapshot_ptr(), len).slice();
+    return new Uint8Array(compilerExports.memory.buffer, compilerExports.out_ptr(), len).slice();
 }
 
 /* Boot from the blob's embedded source, continue from the saved state. Resolves like run(). */
@@ -388,9 +381,8 @@ export async function restoreState({ blob, onLine }: { blob: Uint8Array | ArrayB
     running = true;
     try {
         const payload = blob instanceof Uint8Array ? blob : new Uint8Array(blob);
-        if (payload.length > SOURCE_LIMIT) throw new Error(`snapshot exceeds ${SOURCE_LIMIT} bytes`);
         // The embedded source drives prefetch so restored imports resolve.
-        return await execute({ src: snapshotSource(payload), payload, onLine, start: (e, n) => e.restore_state(n) });
+        return await execute({ src: snapshotSource(payload), payload, onLine, start: (e, ptr, n) => e.restore_state(ptr, n) });
     }
     finally { running = false; }
 }
@@ -439,8 +431,8 @@ export function setHostCallDelegate(fn: (module: string, name: string, args: Edg
     hostCallDelegate = fn;
 }
 
-/* Register the lazy system loader, (name) => Promise<exportNames>. worker.ts wires the postMessage round-trip. */
-export function setLoadSystemDelegate(fn: (name: string, url?: string) => Promise<string[]>): void {
+/* Registers the page module loader, (url, label) => Promise<exportNames>, worker.ts wires the round trip. */
+export function setLoadSystemDelegate(fn: (url: string, label: string) => Promise<string[]>): void {
     loadSystemDelegate = fn;
 }
 
@@ -468,7 +460,6 @@ export function dispose(): void {
     pendingHostCalls.clear();
     hostCallDelegate = null;
     loadSystemDelegate = null;
-    lazySystemNames = [];
     mainThreadManifests = [];
 }
 

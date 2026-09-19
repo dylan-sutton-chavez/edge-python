@@ -3,7 +3,7 @@ title: "Command line interface"
 description: "The edge CLI: run, serve, repl, test, init, package management, build, actor, and uninstall."
 ---
 
-The `edge` CLI runs on macOS, Linux, Windows, and WSL. It embeds the same `compiler.wasm` the JS host loads, precompiled for the host machine and executed under wasmtime, so `run`, `repl`, `test`, and `actor` start in milliseconds with no browser and no server behind them. Scripts that need a browser (`dom`, `storage`, `frame()`) or sockets belong to the JS host, see [The CLI](/reference/modules#the-cli) for what each host resolves.
+The `edge` CLI runs on macOS, Linux, and WSL. It embeds the engine the JS host loads, a `compiler.wasm` built from the same source for speed and precompiled for the host machine, executed under wasmtime, so `run`, `repl`, `test`, and `actor` start in milliseconds with no browser and no server behind them. Scripts that need a browser (`dom`, `storage`, `frame()`) or import another JavaScript module belong to the JS host, see [The CLI](/reference/modules#the-cli) for what each host resolves.
 
 ```bash
 edge run app.py        # run a script, a .edge, or stdin
@@ -13,8 +13,8 @@ edge serve             # dev server with live reload
 edge repl              # interactive shell
 edge test              # run *_test.py files
 edge init my-app       # scaffold a project
-edge add network       # add a package to packages.json
-edge remove network    # remove a package from packages.json
+edge add network       # add a package to edge.json
+edge remove network    # remove a package from edge.json
 edge uninstall         # remove the binary and the PATH entry
 ```
 
@@ -34,7 +34,7 @@ Building from source embeds `compiler.wasm` and the std packages, so run `cargo 
 
 ## `edge run`: run a script
 
-Runs a script and streams its output to the terminal. Bare imports resolve through [`packages.json`](/reference/modules#packagesjson), the official packages included, so declare each one with `edge add` first. Relative imports resolve against the importing file. Uncaught errors print a traceback to stderr and exit 1.
+Runs a script and streams its output to the terminal. Bare imports resolve through [`edge.json`](/reference/modules#edgejson), the official packages included, so declare each one with `edge add` first. Relative imports resolve against the importing file. Uncaught errors print a traceback to stderr and exit 1.
 
 ```text
 $ edge run broken.py
@@ -67,8 +67,12 @@ Flags: `--port <n>` (default `5173`), `--host <addr>` (default `127.0.0.1`), `--
 ## `edge repl`: interactive shell
 
 ```text
+$ edge add math
+  + math       https://cdn.edgepython.com/std/math.wasm
+
+  updated edge.json
 $ edge repl
-Edge Python 0.2.0  ·  .reset to start fresh  ·  .exit, Ctrl+C or Ctrl+D to quit
+Edge Python 0.5.0  ·  .reset to start fresh  ·  .exit, Ctrl+C or Ctrl+D to quit
 >>> from math import sqrt
 >>> print(sqrt(2))
 1.4142135623730951
@@ -92,7 +96,7 @@ PASS - parses
   2/2 files passed · 0.0s
 ```
 
-Test files declare tests with the [`test` package](/packages/std/test) and do not need to call `run()`. The runner drives it after the file loads and reads the verdict from the file's `SystemExit` code, never from parsed output. A file that registers no tests fails. State never leaks between files. The project must declare `test` in `packages.json`, otherwise the runner stops with `declare test in packages.json (edge add test)`.
+Test files declare tests with the [`test` package](/packages/std/test) and do not need to call `run()`. The runner drives it after the file loads and reads the verdict from the file's `SystemExit` code, never from parsed output. A file that registers no tests fails. State never leaks between files. The project must declare `test` in `edge.json`, otherwise the runner stops with `declare test in edge.json (edge add test)`.
 
 Exit codes: `0` when every file passed, `1` when a file failed or no `*_test.py` was found, `2` when the engine session could not start.
 
@@ -105,7 +109,7 @@ $ edge init my-app
   created my-app/
     ├─ index.html
     ├─ main.py
-    └─ packages.json
+    └─ edge.json
 
   cd my-app && edge serve
 ```
@@ -114,17 +118,19 @@ $ edge init my-app
 
 ## `edge add` / `edge remove`: package management
 
-Edits [`packages.json`](/reference/modules#packagesjson) by name. The CLI knows the official packages, std (`json`, `re`, `math`, `struct`, `test`) and system (`dom`, `network`, `storage`, `time`, `actor`), so you never paste URLs. Std entries go to `imports` (`.wasm` URLs, except the script-only `test` which resolves to `test.py`), `dom` goes to `imports` as its `entry.py` facade, and the other system entries go to `system`. The full catalog is in [Modules](/reference/modules#standard-packages).
+Edits [`edge.json`](/reference/modules#edgejson) by name. The CLI knows the official packages (`json`, `re`, `math`, `struct`, `test`, `dom`, `network`, `storage`, `time`, `actor`), so you never paste URLs. Every entry goes to `imports` and points at the package on the CDN, a `.wasm` for the standard packages (`test` is `test.py`), an `index.js` for the JavaScript libraries, and the `entry.py` facade for `dom`. Each line prints the name and the URL it wrote. The full catalog is in [Modules](/reference/modules#standard-packages).
 
 ```text
 $ edge add math network
-  + math       imports
-  + network    system
+  + math       https://cdn.edgepython.com/std/math.wasm
+  + network    https://cdn.edgepython.com/js/builtins/network/index.js
 
-  updated packages.json
+  updated edge.json
 ```
 
-Point a name at a custom URL with `edge add foo=https://example.com/foo.wasm`. The kind is inferred from the URL, `.wasm` and `.py` go to `imports`, anything else to `system`. `edge remove` deletes entries the same way.
+Point a name at a custom URL with `edge add foo=https://example.com/foo.wasm`. It goes to `imports` too, whatever the URL, because each host tells a code module, a native module, and a JS module apart by the artifact. `edge add` keeps `extends` and any other key already in the manifest. `edge remove` deletes entries the same way.
+
+The catalog is an index the CLI build generates from the repository's `std/*` and `js/builtins/*` folders, so adding an official package is adding its folder and nobody files it under a category.
 
 ## `edge build`: pack the app
 
@@ -136,13 +142,13 @@ Packs the project and its imports into one artifact, in one of three modes for t
 | `edge build --bundle` | a lightweight `.package` | a host that already has `edge`, or a pool |
 | `edge build --web` | a self-contained `dist/` | any browser |
 
-The default `.edge` is this `edge` binary with the project appended, so `./app.edge` runs it directly and it honors the run flags `--save-state`, `--restore-state`, `--preempt`, and `--events`. The `.package` carries only the code and its custom imports, since `edge` is already present where it lands. `--web` vendors the JS host under `dist/js/` with `compiler.wasm` and every declared package beside it, rewriting `packages.json` to the vendored paths. The CLI resolves the official std entries to its embedded copies, so an `.edge` or `.package` needs no network for them.
+The default `.edge` is this `edge` binary with the project appended, so `./app.edge` runs it directly and it honors the run flags `--save-state`, `--restore-state`, `--preempt`, and `--events`. The `.package` carries only the code and its custom imports, since `edge` is already present where it lands. `--web` vendors the JS host under `dist/js/` with `compiler.wasm` beside it, then every declared module together with what it needs from the same origin (its relative JavaScript and Python imports and a sibling `edge.json`), and rewrites `edge.json` to the vendored paths, so the `dist/` works offline, `dom` and `network` included. The CLI resolves the official std entries to its embedded copies, so an `.edge` or `.package` needs no network for them.
 
 ```text
 $ edge build
 
   packed app.edge (3 files)
-  4.20 MB
+  10.43 MB
 
   run  ./app.edge   flags  --save-state --restore-state --preempt --events
 ```
@@ -157,7 +163,7 @@ Runs many edge-python programs as cooperative actors over a few threads, describ
 edge actor actor.yml
 ```
 
-Groups resolve their imports through the `packages.json` beside `actor.yml`, or the one `--packages` names, so a group that does `from actor import send` needs `actor` declared there.
+Groups resolve their imports through the `edge.json` beside `actor.yml`, or the one `--manifest` names, so a group that does `from actor import send` needs `actor` declared there.
 
 ## `edge uninstall`
 
@@ -167,7 +173,7 @@ Removes the binary and its `PATH` entry. The non-interactive equivalent is `curl
 
 | Flag | Effect |
 |------|--------|
-| `--packages <file>` | Use a specific manifest instead of `./packages.json` |
+| `--manifest <file>` | Use a specific manifest instead of `./edge.json` |
 | `--version`, `-v` | Print the version |
 | `--help`, `-h` | Print the command list |
 

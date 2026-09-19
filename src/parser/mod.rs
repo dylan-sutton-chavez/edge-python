@@ -11,7 +11,7 @@ pub use types::*;
 use crate::s;
 use crate::lexer::{Token, TokenType};
 use crate::util::hash::FxHashMap as HashMap;
-use crate::packages::{Resolver, NoopResolver};
+use crate::modules::{Resolver, NoopResolver};
 
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 use core::iter::Peekable;

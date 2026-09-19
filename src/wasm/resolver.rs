@@ -1,4 +1,4 @@
-use crate::packages::{NativeBinding, Resolved, Resolver, partition_bindings, parse_manifest, walk_up_dirs, dir_of, join_relative};
+use crate::modules::{NativeBinding, Resolved, Resolver, partition_bindings, parse_manifest, walk_up_dirs, dir_of, join_relative};
 use crate::util::hash::FxHashSet;
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
 use crate::s;
@@ -10,7 +10,7 @@ use crate::bridge::{error_from_kind, get_val, put_val, release_handles, take_err
 use crate::vm::types::{Val, VmErr};
 use alloc::sync::Arc;
 
-// Cap on packages.json `extends` chain, bounds attacker-crafted loops, 32 dwarfs real workspace depth.
+// Cap on edge.json `extends` chain, bounds attacker-crafted loops, 32 dwarfs real workspace depth.
 const MAX_PACKAGES_HOPS: u32 = 32;
 
 pub(super) struct WasmHostResolver { pub(super) dir: String }
@@ -62,7 +62,7 @@ impl WasmHostResolver {
         loop {
             if hops > MAX_PACKAGES_HOPS {
                 return Err(s!(
-                    "packages.json walk-up exceeded ",
+                    "edge.json walk-up exceeded ",
                     int MAX_PACKAGES_HOPS as i64,
                     " hops resolving '", str name, "'"));
             }
@@ -70,44 +70,44 @@ impl WasmHostResolver {
 
             let mut hit: Option<(String, Option<String>, Option<String>)> = None;
             for dir in walk_up_dirs(&search_dir) {
-                let m_spec = s!(str &dir, "packages.json");
+                let m_spec = s!(str &dir, "edge.json");
                 if let Some((target, ext)) = self.lookup_in_manifest(&m_spec, name)? {
                     hit = Some((dir, target, ext));
                     break;
                 }
             }
             let Some((dir, target, ext)) = hit else {
-                return Err(s!("module '", str name, "' is not provided by this host and no packages.json declares it"));
+                return Err(undeclared(name));
             };
             if let Some(target) = target {
                 let canonical = join_relative(&dir, &target);
                 return self.resolve_canonical(&canonical);
             }
-            let m_spec = s!(str &dir, "packages.json");
+            let m_spec = s!(str &dir, "edge.json");
             if let Some(ext) = ext {
                 if !visited.insert(m_spec) {
-                    return Err(s!("circular extends chain in packages.json"));
+                    return Err(s!("circular extends chain in edge.json"));
                 }
                 let mut next = join_relative(&dir, &ext);
                 if !next.ends_with('/') { next.push('/'); }
                 search_dir = next;
                 continue;
             }
-            return Err(s!("module '", str name, "' is not provided by this host and no packages.json declares it"));
+            return Err(undeclared(name));
         }
     }
 
-    /* Nearest ancestor dir holding a packages.json, probed live like the bare-name walk-up. */
+    /* Nearest ancestor dir holding an edge.json, probed live like the bare-name walk-up. */
     fn manifest_root(&mut self, spec: &str) -> Result<String, String> {
         let start = self.dir.clone();
         for dir in walk_up_dirs(&start) {
-            let m_spec = s!(str &dir, "packages.json");
+            let m_spec = s!(str &dir, "edge.json");
             let cached = with_runtime(|rt| rt.manifests.iter().any(|(s, _)| s == &m_spec));
             if cached || self.fetch_bytes(&m_spec, None).is_ok() {
                 return Ok(dir);
             }
         }
-        Err(s!("no packages.json above '", str &self.dir, "' to resolve '", str spec, "'"))
+        Err(s!("no edge.json above '", str &self.dir, "' to resolve '", str spec, "'"))
     }
 
     #[allow(clippy::type_complexity)]
@@ -124,7 +124,7 @@ impl WasmHostResolver {
             Ok(b) => b,
             Err(_) => return Ok(None),
         };
-        let parsed = parse_manifest(&bytes).map_err(|e| s!("packages.json at '", str m_spec, "': ", str &e))?;
+        let parsed = parse_manifest(&bytes).map_err(|e| s!("edge.json at '", str m_spec, "': ", str &e))?;
         let target = parsed.imports.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
         let ext = parsed.extends.clone();
         with_runtime(|rt| rt.manifests.push((m_spec.to_string(), parsed)));
@@ -132,6 +132,9 @@ impl WasmHostResolver {
     }
 
     fn resolve_canonical(&self, spec: &str) -> Result<Resolved, String> {
+        if let Some(msg) = refusal(spec) {
+            return Err(msg);
+        }
         let entry = with_runtime(|rt| {
             rt.registry.iter().find(|(s, _)| s == spec).map(|(s, e)| {
                 let cloned = match e {
@@ -153,6 +156,16 @@ impl WasmHostResolver {
             }
         }
     }
+}
+
+/* Why the host cannot load `spec`, as it registered through `register_module_error`. */
+fn refusal(spec: &str) -> Option<String> {
+    with_runtime(|rt| rt.refusals.iter().find(|(s, _)| s == spec).map(|(_, m)| m.clone()))
+}
+
+/* An undeclared bare name, the host's own wording wins when it registered one. */
+fn undeclared(name: &str) -> String {
+    refusal(name).unwrap_or_else(|| s!("module '", str name, "' is not provided by this host and no edge.json declares it"))
 }
 
 /* Builds a NativeBinding that marshals handles around `host_call_native`. Lives here so the bridge stays host-import-free. */

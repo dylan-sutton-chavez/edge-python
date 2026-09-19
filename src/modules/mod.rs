@@ -137,11 +137,14 @@ pub(crate) fn binding_to_extern(b: &NativeBinding) -> crate::value::ExternFn {
     }
 }
 
-/* A scanned import, Bare resolves against the manifest chain, Relative anchors at the importer dir, Root at the nearest packages.json dir. Paths carry the .py suffix, dots already mapped to '/'. */
+/* A scanned import, paths carry the .py suffix with dots already mapped to slashes. */
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImportSpec {
+    // A plain name, resolved against the manifest chain.
     Bare(String),
+    // Leading dots, anchored at the importer dir.
     Relative(String),
+    // A dotted name, anchored at the nearest edge.json dir.
     Root(String),
 }
 

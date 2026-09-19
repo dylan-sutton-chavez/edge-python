@@ -1,3 +1,8 @@
+mod common;
+// The CLI's RFC 6455 codec, the websocket echo fixture frames with it.
+#[path = "../src/ws.rs"]
+mod ws;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -17,7 +22,7 @@ fn scratch(name: &str) -> PathBuf {
 fn run_in(dir: &Path, args: &[&str], stdin: Option<&str>) -> (String, String, i32) {
     let mut cmd = Command::new(BIN);
     // Scratch-local module cache, so no case reads or writes the real one.
-    cmd.current_dir(dir).args(args).env("XDG_CACHE_HOME", dir).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.current_dir(dir).args(args).env("XDG_CACHE_HOME", dir).envs(common::local_tree().iter().cloned()).stdout(Stdio::piped()).stderr(Stdio::piped());
     cmd.stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() });
     let mut child = cmd.spawn().unwrap();
     if let Some(input) = stdin {
@@ -34,17 +39,19 @@ fn run_in(dir: &Path, args: &[&str], stdin: Option<&str>) -> (String, String, i3
 
 /* A manifest declaring official names the way `edge add` writes them. */
 fn manifest(names: &[&str]) -> String {
-    let mut imports = Vec::new();
-    let mut system = Vec::new();
-    for name in names {
-        match *name {
-            "json" | "re" | "math" | "struct" => imports.push(format!("\"{name}\": \"https://cdn.edgepython.com/std/{name}.wasm\"")),
-            "test" => imports.push("\"test\": \"https://cdn.edgepython.com/std/test.py\"".to_string()),
-            "dom" => imports.push("\"dom\": \"https://cdn.edgepython.com/js/builtins/dom/entry.py\"".to_string()),
-            _ => system.push(format!("\"{name}\": \"https://cdn.edgepython.com/js/builtins/{name}/index.js\"")),
-        }
-    }
-    format!("{{ \"imports\": {{ {} }}, \"system\": {{ {} }} }}\n", imports.join(", "), system.join(", "))
+    let imports: Vec<String> = names
+        .iter()
+        .map(|name| {
+            let url = match *name {
+                "json" | "re" | "math" | "struct" => format!("https://cdn.edgepython.com/std/{name}.wasm"),
+                "test" => "https://cdn.edgepython.com/std/test.py".to_string(),
+                "dom" => "https://cdn.edgepython.com/js/builtins/dom/entry.py".to_string(),
+                _ => format!("https://cdn.edgepython.com/js/builtins/{name}/index.js"),
+            };
+            format!("\"{name}\": \"{url}\"")
+        })
+        .collect();
+    format!("{{ \"imports\": {{ {} }} }}\n", imports.join(", "))
 }
 
 #[test]
@@ -129,24 +136,13 @@ fn repl_keeps_state_between_lines() {
 #[test]
 fn test_runner_verdicts_come_from_system_exit() {
     let dir = scratch("testrun");
-    std::fs::write(dir.join("packages.json"), manifest(&["test"])).unwrap();
+    std::fs::write(dir.join("edge.json"), manifest(&["test"])).unwrap();
     std::fs::write(dir.join("green_test.py"), "raise SystemExit(0)\n").unwrap();
     let (out, _, code) = run_in(&dir, &["test"], None);
     assert!(out.contains("green_test.py"), "stdout was: {out}");
     assert_eq!(code, 0);
     std::fs::write(dir.join("red_test.py"), "raise SystemExit(1)\n").unwrap();
     let (_, _, code) = run_in(&dir, &["test"], None);
-    assert_eq!(code, 1);
-}
-
-/* The traceback names the entry script, the frame the compiler renders as `<input>`. */
-#[test]
-fn tracebacks_name_the_script() {
-    let dir = scratch("traceback");
-    std::fs::write(dir.join("broken.py"), "before = 1\nx = 1 / 0\n").unwrap();
-    let (_, err, code) = run_in(&dir, &["run", "broken.py"], None);
-    assert!(err.contains("ZeroDivisionError"), "stderr was: {err}");
-    assert!(err.contains("--> broken.py:2:1"), "stderr was: {err}");
     assert_eq!(code, 1);
 }
 
@@ -159,30 +155,75 @@ struct CorpusCase {
     error: Option<String>,
 }
 
-/* The http fixture the network corpus points at, serves `/text` and `/json` on a free port. */
+/* The network fixture the corpus points at, canned http, three sse events and a ws echo. */
 fn spawn_fixture() -> u16 {
-    let server = tiny_http::Server::http("127.0.0.1:0").expect("bind loopback");
-    let port = server.server_addr().to_ip().expect("tcp addr").port();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+    let port = listener.local_addr().expect("tcp addr").port();
     std::thread::spawn(move || {
-        for req in server.incoming_requests() {
-            let path = req.url().split('?').next().unwrap_or("").to_string();
-            let (body, mime, status) = match path.as_str() {
-                "/text" => ("hello from mock", "text/plain", 200),
-                "/json" => ("{\"ok\":true}", "application/json", 200),
-                _ => ("", "text/plain", 404),
-            };
-            let header = tiny_http::Header::from_bytes(&b"Content-Type"[..], mime.as_bytes()).expect("static header");
-            let _ = req.respond(tiny_http::Response::from_string(body).with_header(header).with_status_code(status));
+        for stream in listener.incoming().flatten() {
+            std::thread::spawn(move || serve(stream));
         }
     });
     port
+}
+
+fn serve(mut stream: std::net::TcpStream) {
+    use ws::{accept_key, encode_frame, parse_frame};
+    use std::io::{BufRead, Read, Write};
+    let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+    let mut line = String::new();
+    let _ = reader.read_line(&mut line);
+    let path = line.split_whitespace().nth(1).unwrap_or("/").to_string();
+    let mut key = None;
+    loop {
+        let mut header = String::new();
+        if reader.read_line(&mut header).is_err() || header == "\r\n" || header.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = header.split_once(':')
+            && name.eq_ignore_ascii_case("sec-websocket-key")
+        {
+            key = Some(value.trim().to_string());
+        }
+    }
+    let http = |body: &str| format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+    match (path.as_str(), key) {
+        ("/text", _) => drop(stream.write_all(http("hello from mock").as_bytes())),
+        ("/json", _) => drop(stream.write_all(http("{\"ok\":true}").as_bytes())),
+        ("/sse", _) => {
+            let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n\r\n");
+            for i in 1..=3 {
+                let _ = stream.write_all(format!("id: {i}\ndata: event {i}\n\n").as_bytes());
+            }
+            // The stream stays open until the client goes away.
+            while matches!(reader.read(&mut [0u8; 64]), Ok(n) if n > 0) {}
+        }
+        ("/ws", Some(key)) => {
+            let _ = write!(stream, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n", accept_key(&key));
+            let (mut buf, mut chunk) = (Vec::new(), [0u8; 4096]);
+            while let Ok(n @ 1..) = reader.read(&mut chunk) {
+                buf.extend_from_slice(&chunk[..n]);
+                while let Some((opcode, payload, used)) = parse_frame(&buf) {
+                    buf.drain(..used);
+                    let reply = match opcode {
+                        0x8 => return drop(stream.write_all(&encode_frame(0x8, &payload, None))),
+                        0x9 => encode_frame(0xA, &payload, None),
+                        _ => encode_frame(opcode, &payload, None),
+                    };
+                    let _ = stream.write_all(&reply);
+                }
+            }
+        }
+        _ => drop(stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")),
+    }
 }
 
 // Runs every shared builtins corpus against the CLI, mirroring the JS host cases.
 #[test]
 fn builtin_corpora_mirror_the_web_api() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/cases/builtins");
-    let base = format!("http://127.0.0.1:{}", spawn_fixture());
+    let port = spawn_fixture();
+    let (base, ws_base) = (format!("http://127.0.0.1:{port}"), format!("ws://127.0.0.1:{port}"));
     let mut failures = Vec::new();
     let mut ran = 0;
     for entry in std::fs::read_dir(dir).unwrap() {
@@ -195,9 +236,9 @@ fn builtin_corpora_mirror_the_web_api() {
         for (i, case) in cases.iter().enumerate() {
             ran += 1;
             let scratch = scratch(&format!("{cap}-corpus"));
-            let src = case.src.replace("{BASE}", &base);
+            let src = case.src.replace("{BASE}", &base).replace("{WS_BASE}", &ws_base);
             // The JS host harness prepends the same star import, bare names resolve to the module exports.
-            std::fs::write(scratch.join("packages.json"), manifest(&[&cap])).unwrap();
+            std::fs::write(scratch.join("edge.json"), manifest(&[&cap])).unwrap();
             std::fs::write(scratch.join("main.py"), format!("from {cap} import *\n{src}\n")).unwrap();
             let (out, err, code) = run_in(&scratch, &["run", "main.py"], None);
             if let Some(want) = &case.error {
@@ -216,29 +257,6 @@ fn builtin_corpora_mirror_the_web_api() {
     assert!(failures.is_empty(), "{} corpus case(s) failed:\n{}", failures.len(), failures.join("\n"));
 }
 
-/* A declared name the CLI cannot serve names the host it needs, facade or system module. */
-#[test]
-fn browser_only_imports_say_so() {
-    let dir = scratch("browserhint");
-    std::fs::write(dir.join("packages.json"), manifest(&["dom", "storage"])).unwrap();
-    for name in ["dom", "storage"] {
-        std::fs::write(dir.join("main.py"), format!("import {name}\n")).unwrap();
-        let (_, err, code) = run_in(&dir, &["run", "main.py"], None);
-        assert!(err.contains(&format!("module '{name}' requires a browser")), "stderr was: {err}");
-        assert_eq!(code, 1);
-    }
-}
-
-/* No name resolves on its own, an undeclared official package fails at compile time. */
-#[test]
-fn undeclared_names_fail_at_compile_time() {
-    let dir = scratch("undeclared");
-    std::fs::write(dir.join("main.py"), "import json\n").unwrap();
-    let (_, err, code) = run_in(&dir, &["run", "main.py"], None);
-    assert!(err.contains("module 'json' is not provided by this host and no packages.json declares it"), "stderr was: {err}");
-    assert_eq!(code, 1);
-}
-
 /* A cached url loads with no pin in the spec, then stays pinned to those first bytes. */
 #[test]
 fn a_cached_module_is_pinned_to_its_first_bytes() {
@@ -252,7 +270,7 @@ fn a_cached_module_is_pinned_to_its_first_bytes() {
     std::fs::write(&blob, src).unwrap();
     let pin = compiler::util::sha256::hex_encode(&compiler::util::sha256::sha256(src.as_bytes()));
     std::fs::write(blob.with_extension("py.lock"), &pin).unwrap();
-    std::fs::write(dir.join("packages.json"), format!("{{ \"imports\": {{ \"helper\": \"{url}\" }} }}\n")).unwrap();
+    std::fs::write(dir.join("edge.json"), format!("{{ \"imports\": {{ \"helper\": \"{url}\" }} }}\n")).unwrap();
     std::fs::write(dir.join("main.py"), "from helper import double\nprint(double(21))\n").unwrap();
 
     let (out, err, code) = run_in(&dir, &["run", "main.py"], None);
@@ -272,7 +290,7 @@ fn a_manifest_pin_verifies_the_target_bytes() {
     let src = "def double(n):\n    return n * 2\n";
     std::fs::write(dir.join("helper.py"), src).unwrap();
     let pin = compiler::util::sha256::hex_encode(&compiler::util::sha256::sha256(src.as_bytes()));
-    std::fs::write(dir.join("packages.json"), format!("{{ \"imports\": {{ \"helper\": \"./helper.py#sha256-{pin}\" }} }}\n")).unwrap();
+    std::fs::write(dir.join("edge.json"), format!("{{ \"imports\": {{ \"helper\": \"./helper.py#sha256-{pin}\" }} }}\n")).unwrap();
     std::fs::write(dir.join("main.py"), "from helper import double\nprint(double(21))\n").unwrap();
 
     let (out, err, code) = run_in(&dir, &["run", "main.py"], None);
@@ -280,19 +298,19 @@ fn a_manifest_pin_verifies_the_target_bytes() {
     assert_eq!(code, 0, "stderr was: {err}");
 
     let bad = "0".repeat(64);
-    std::fs::write(dir.join("packages.json"), format!("{{ \"imports\": {{ \"helper\": \"./helper.py#sha256-{bad}\" }} }}\n")).unwrap();
+    std::fs::write(dir.join("edge.json"), format!("{{ \"imports\": {{ \"helper\": \"./helper.py#sha256-{bad}\" }} }}\n")).unwrap();
     let (_, err, code) = run_in(&dir, &["run", "main.py"], None);
     assert!(err.contains("integrity check failed"), "stderr was: {err}");
     assert_eq!(code, 1);
 }
 
-/* Dotted imports anchor at the nearest packages.json dir, not at the importing file. */
+/* Dotted imports anchor at the nearest edge.json dir, not at the importing file. */
 #[test]
 fn dotted_imports_anchor_at_the_manifest_root() {
     let dir = scratch("rooted");
     std::fs::create_dir_all(dir.join("lib")).unwrap();
     std::fs::create_dir_all(dir.join("web")).unwrap();
-    std::fs::write(dir.join("packages.json"), "{ \"imports\": {} }\n").unwrap();
+    std::fs::write(dir.join("edge.json"), "{ \"imports\": {} }\n").unwrap();
     std::fs::write(dir.join("lib/util.py"), "def f():\n    return 'root-lib'\n").unwrap();
     std::fs::write(dir.join("web/main.py"), "from lib.util import f\nprint(f())\n").unwrap();
 
@@ -313,31 +331,13 @@ fn quoted_imports_are_not_found() {
     assert_eq!(code, 1);
 }
 
-/* A third party .wasm needs the JS host, a native library has no host at all. */
-#[test]
-fn binary_module_specs_say_where_they_run() {
-    let dir = scratch("binary");
-    let cases = [
-        ("https://example.com/x.wasm", "module 'https://example.com/x.wasm' requires the JS host"),
-        ("./vendor/x.so", "module './vendor/x.so' is not supported, ship a .wasm"),
-        ("./vendor/x.dylib", "module './vendor/x.dylib' is not supported, ship a .wasm"),
-    ];
-    for (spec, want) in cases {
-        std::fs::write(dir.join("packages.json"), format!("{{ \"imports\": {{ \"x\": \"{spec}\" }} }}\n")).unwrap();
-        std::fs::write(dir.join("main.py"), "import x\n").unwrap();
-        let (_, err, code) = run_in(&dir, &["run", "main.py"], None);
-        assert!(err.contains(want), "spec {spec}, stderr was: {err}");
-        assert_eq!(code, 1);
-    }
-}
-
 /* edge build packs a project into a standalone .edge that runs on its own, imports and all. */
 #[test]
 fn standalone_edge_runs_the_packed_project() {
     let dir = scratch("standalone");
     std::fs::create_dir_all(dir.join("lib")).unwrap();
     std::fs::write(dir.join("lib/util.py"), "def greet():\n    return \"packed\"\n").unwrap();
-    std::fs::write(dir.join("packages.json"), "{ \"imports\": { \"util\": \"./lib/util.py\" } }\n").unwrap();
+    std::fs::write(dir.join("edge.json"), "{ \"imports\": { \"util\": \"./lib/util.py\" } }\n").unwrap();
     std::fs::write(dir.join("main.py"), "import util\nprint(util.greet())\n").unwrap();
 
     let (_, err, code) = run_in(&dir, &["build", "--out", "app.edge"], None);
@@ -372,13 +372,8 @@ fn bundle_writes_a_package_file() {
     assert!(bytes.starts_with(b"EDGEPKG\x01"), "missing bundle magic");
 }
 
-// Website builds need the local JS host hooks, without them the fetch would hit the CDN.
-fn web_build(dir: &Path) -> Option<(String, String, i32)> {
-    if std::env::var_os("EDGE_JS_DIR").is_none() || std::env::var_os("EDGE_COMPILER_WASM").is_none() {
-        eprintln!("skipping, set EDGE_JS_DIR and EDGE_COMPILER_WASM to cover website builds");
-        return None;
-    }
-    Some(run_in(dir, &["build", "--web"], None))
+fn web_build(dir: &Path) -> (String, String, i32) {
+    run_in(dir, &["build", "--web"], None)
 }
 
 /* A second web build must not collect the previous dist/ into dist/dist/. */
@@ -386,10 +381,10 @@ fn web_build(dir: &Path) -> Option<(String, String, i32)> {
 fn rebuilding_web_does_not_nest_dist() {
     let dir = scratch("rebuild");
     std::fs::write(dir.join("main.py"), "print(\"ok\")\n").unwrap();
-    std::fs::write(dir.join("packages.json"), "{}\n").unwrap();
-    let Some((_, err, code)) = web_build(&dir) else { return };
+    std::fs::write(dir.join("edge.json"), "{}\n").unwrap();
+    let (_, err, code) = web_build(&dir);
     assert_eq!(code, 0, "first build stderr was: {err}");
-    let (_, err, code) = web_build(&dir).unwrap();
+    let (_, err, code) = web_build(&dir);
     assert_eq!(code, 0, "second build stderr was: {err}");
     assert!(!dir.join("dist/dist").exists(), "dist was re-ingested on rebuild");
     assert!(dir.join("dist/main.py").exists());
@@ -400,10 +395,10 @@ fn rebuilding_web_does_not_nest_dist() {
 fn a_stale_dist_is_not_collected() {
     let dir = scratch("stale");
     std::fs::write(dir.join("main.py"), "print(\"ok\")\n").unwrap();
-    std::fs::write(dir.join("packages.json"), "{}\n").unwrap();
+    std::fs::write(dir.join("edge.json"), "{}\n").unwrap();
     std::fs::create_dir_all(dir.join("dist")).unwrap();
     std::fs::write(dir.join("dist/stale.py"), "print(\"stale\")\n").unwrap();
-    let Some((_, err, code)) = web_build(&dir) else { return };
+    let (_, err, code) = web_build(&dir);
     assert_eq!(code, 0, "build stderr was: {err}");
     assert!(!dir.join("dist/dist").exists(), "stale dist was re-ingested");
 }
@@ -413,41 +408,149 @@ fn a_stale_dist_is_not_collected() {
 fn a_deeper_dir_named_dist_is_packed() {
     let dir = scratch("deepdist");
     std::fs::write(dir.join("main.py"), "print(\"ok\")\n").unwrap();
-    std::fs::write(dir.join("packages.json"), "{}\n").unwrap();
+    std::fs::write(dir.join("edge.json"), "{}\n").unwrap();
     std::fs::create_dir_all(dir.join("sub/dist")).unwrap();
     std::fs::write(dir.join("sub/dist/keep.py"), "print(\"keep\")\n").unwrap();
-    let Some((_, err, code)) = web_build(&dir) else { return };
+    let (_, err, code) = web_build(&dir);
     assert_eq!(code, 0, "build stderr was: {err}");
     assert!(dir.join("dist/sub/dist/keep.py").exists());
 }
 
-/* The std packages ship inside the binary, their CDN specs resolve with no network. */
-#[test]
-fn std_packages_are_built_in() {
-    let cases = [
-        ("json", "import json\nprint(json.dumps({\"a\": [1, True, None]}))\n", "{\"a\":[1,true,null]}\n"),
-        ("re", "import re\nprint(re.search(r'\\d+', 'abc123def'))\n", "123\n"),
-        ("math", "import math\nprint(math.floor(2.7))\n", "2\n"),
-        ("struct", "import struct\nprint(struct.calcsize('i'))\n", "4\n"),
-        ("test", "from test import test\nprint(callable(test))\n", "True\n"),
-    ];
-    for (pkg, src, want) in cases {
-        let dir = scratch(pkg);
-        std::fs::write(dir.join("packages.json"), manifest(&[pkg])).unwrap();
-        std::fs::write(dir.join("main.py"), src).unwrap();
-        let (out, err, code) = run_in(&dir, &["run", "main.py"], None);
-        assert_eq!(out, want, "{pkg} stdout, stderr was: {err}");
-        assert_eq!(code, 0, "{pkg} exit code, stderr was: {err}");
-    }
-}
+/* The cases of cli/tests/engine.json, each one tempdir whose steps run in order. */
+mod engine_corpus {
+    use super::{run_in, scratch};
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
 
-/* The std spec `edge add` writes resolves to the built-in package, one manifest serves both hosts. */
-#[test]
-fn cdn_std_specs_map_to_the_built_in_package() {
-    let dir = scratch("cdnstd");
-    std::fs::write(dir.join("packages.json"), "{ \"imports\": { \"json\": \"https://cdn.edgepython.com/std/json.wasm\" } }\n").unwrap();
-    std::fs::write(dir.join("main.py"), "import json\nprint(json.dumps([1]))\n").unwrap();
-    let (out, err, code) = run_in(&dir, &["run", "main.py"], None);
-    assert_eq!(out, "[1]\n", "stderr was: {err}");
-    assert_eq!(code, 0);
+    // A text piece, or a text repeated so large inputs stay out of the JSON.
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum Part {
+        Text(String),
+        Repeat(String, usize),
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Case {
+        name: String,
+        #[serde(default)]
+        given: BTreeMap<String, String>,
+        #[serde(default)]
+        generate: BTreeMap<String, Vec<Part>>,
+        steps: Vec<Step>,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Step {
+        run: Vec<String>,
+        #[serde(default)]
+        stdin: Option<Vec<Part>>,
+        #[serde(default)]
+        stdout: Vec<String>,
+        #[serde(default)]
+        stderr: Vec<String>,
+        #[serde(default)]
+        exit: i32,
+        // A lower bound on stderr's size, the whole text must survive.
+        #[serde(default)]
+        stderr_bytes: usize,
+        // Stdout lines starting with each prefix, counted exactly.
+        #[serde(default)]
+        lines: BTreeMap<String, usize>,
+        // Requests the fixture saw for each path since the case began.
+        #[serde(default)]
+        requests: BTreeMap<String, usize>,
+        // A lower bound on the size of each file the step leaves behind.
+        #[serde(default)]
+        file_bytes: BTreeMap<String, u64>,
+    }
+
+    fn join(parts: &[Part]) -> String {
+        parts.iter().map(|p| match p {
+            Part::Text(t) => t.clone(),
+            Part::Repeat(t, n) => t.repeat(*n),
+        }).collect()
+    }
+
+    /* Serves `/lib/mod.py`, answers 404 to the rest and logs every path it was asked for. */
+    fn fixture() -> (String, Arc<Mutex<Vec<String>>>) {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind loopback");
+        let port = server.server_addr().to_ip().expect("tcp addr").port();
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let seen = log.clone();
+        std::thread::spawn(move || {
+            for req in server.incoming_requests() {
+                let path = req.url().to_string();
+                seen.lock().unwrap().push(path.clone());
+                let resp = match path.as_str() {
+                    "/lib/mod.py" => tiny_http::Response::from_string("def f():\n    return 7\n"),
+                    _ => tiny_http::Response::from_string("").with_status_code(404),
+                };
+                let _ = req.respond(resp);
+            }
+        });
+        (format!("http://127.0.0.1:{port}"), log)
+    }
+
+    #[test]
+    fn engine_corpus() {
+        let cases: Vec<Case> = serde_json::from_str(include_str!("engine.json")).expect("engine.json parse");
+        let (base, log) = fixture();
+        let mut failures = Vec::new();
+        for case in &cases {
+            log.lock().unwrap().clear();
+            let dir = scratch("engine");
+            for (path, text) in &case.given {
+                let file = dir.join(path);
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(file, text.replace("{BASE}", &base)).unwrap();
+            }
+            for (path, parts) in &case.generate {
+                std::fs::write(dir.join(path), join(parts)).unwrap();
+            }
+            for (i, step) in case.steps.iter().enumerate() {
+                let args: Vec<&str> = step.run.iter().map(String::as_str).collect();
+                let stdin = step.stdin.as_deref().map(join);
+                let (out, err, code) = run_in(&dir, &args, stdin.as_deref());
+                let mut fail = |why: String| failures.push(format!("[{} #{i}] {why}", case.name));
+                if code != step.exit {
+                    fail(format!("exit {code}, want {}; stderr {:?}", step.exit, &err[..err.len().min(2000)]));
+                }
+                for want in &step.stdout {
+                    if !out.contains(want.as_str()) {
+                        fail(format!("stdout missing {want:?}, got {:?}", &out[..out.len().min(2000)]));
+                    }
+                }
+                for want in &step.stderr {
+                    if !err.contains(want.as_str()) {
+                        fail(format!("stderr missing {want:?}, got {:?}", &err[..err.len().min(2000)]));
+                    }
+                }
+                if err.len() < step.stderr_bytes {
+                    fail(format!("stderr is {} bytes, want at least {}", err.len(), step.stderr_bytes));
+                }
+                for (prefix, want) in &step.lines {
+                    let got = out.lines().filter(|l| l.starts_with(prefix.as_str())).count();
+                    if got != *want {
+                        fail(format!("{got} stdout lines start with {prefix:?}, want {want}; stderr {:?}", &err[..err.len().min(2000)]));
+                    }
+                }
+                for (path, want) in &step.file_bytes {
+                    let got = std::fs::metadata(dir.join(path)).map(|m| m.len()).unwrap_or(0);
+                    if got < *want {
+                        fail(format!("{path} is {got} bytes, want at least {want}"));
+                    }
+                }
+                for (path, want) in &step.requests {
+                    let got = log.lock().unwrap().iter().filter(|p| *p == path).count();
+                    if got != *want {
+                        fail(format!("{path} was requested {got} times, want {want}"));
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{} engine case(s) failed:\n{}", failures.len(), failures.join("\n"));
+    }
 }

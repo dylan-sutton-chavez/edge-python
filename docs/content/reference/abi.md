@@ -212,7 +212,7 @@ cargo build --release --target wasm32-unknown-unknown
 # -> target/wasm32-unknown-unknown/release/slugify_mod.wasm
 ```
 
-Use it from a script, through a `packages.json` alias:
+Use it from a script, through an `edge.json` alias:
 
 ```json
 { "imports": { "slugify_mod": "./slugify_mod.wasm" } }
@@ -368,7 +368,7 @@ For `from <name> import <names>` where the manifest maps `<name>` to a `.wasm` U
 4. Marshals args as handles.
 5. Propagates results.
 
-The reference bridge is `js/src/native.ts` in the repo, and the [CLI](/reference/modules#the-cli) implements the same six imports in Rust over wasmtime, bridging the plugin instance and the compiler instance the same way. Rust embedders mirror the shape.
+The reference bridge is `js/src/native.ts` in the repo, and the [CLI](/reference/modules#the-cli) implements the same six imports in Rust over wasmtime, bridging the plugin instance and the compiler instance the same way. The CLI compiles a plugin with Cranelift on first use and caches the machine code. Rust embedders mirror the shape.
 
 ## Constraints and caveats
 
@@ -405,24 +405,31 @@ Community PDKs (uncoordinated releases, each tracking this sealed spec): Zig (`w
 
 ## Driver exports
 
-Distinct from the sealed plugin imports above, these are exports on `compiler.wasm` itself, part of the host-driver surface an embedder calls to shape a run and to freeze and revive a paused one. The host-facing feature is [Snapshots](/language/snapshots). They reuse the linear-memory buffers and the packed status word of the run lifecycle (`run_start` / `run_resume` / `run_push_event`).
+Distinct from the sealed plugin imports above, these are exports on `compiler.wasm` itself, part of the host-driver surface an embedder calls to shape a run and to freeze and revive a paused one. The host-facing feature is [Snapshots](/language/snapshots). They follow the conventions of the run lifecycle (`run_start` / `run_resume` / `run_push_event`) and share its packed status word.
 
 | Export | Signature | Meaning |
 |---|---|---|
 | `set_limits` | `(heap: u64, ops: u64, calls: u64)` | Caps for the next `run_start` or `repl_eval`. A zero field keeps the sandbox value. `restore_state` keeps the limits embedded in the blob. |
-| `set_source_name` | `(len: usize)` | Name the entry frame in tracebacks, read from the source buffer. An empty name renders `<input>`. |
-| `save_state` | `() -> i64` | Serialise the parked run into an internal buffer. Returns the blob length, or `-1` when nothing is parked. |
-| `snapshot_ptr` | `() -> *const u8` | Pointer to the blob left by the last `save_state`. |
-| `restore_state` | `(len: usize) -> u32` | Boot a VM from a blob staged in the source buffer and overlay its state. Returns the same packed status word as `run_start`. |
-| `state_globals` | `() -> usize` | Write the parked run's module-level bindings as JSON into the out buffer. Returns its byte length. |
-| `state_stack` | `() -> usize` | Write the parked run's coroutines as JSON into the out buffer. Returns its byte length. |
+| `set_source_name` | `(ptr: *const u8, len: u32)` | Name the entry frame in tracebacks. An empty name renders `<input>`. |
+| `save_state` | `() -> i64` | Serialise the parked run into the out buffer. Returns the blob length, or `-1` when nothing is parked. |
+| `restore_state` | `(ptr: *const u8, len: u32) -> u32` | Boot a VM from the blob at `ptr` and overlay its state. Returns the same packed status word as `run_start`. |
+| `state_globals` | `() -> u32` | Write the parked run's module-level bindings as JSON into the out buffer. Returns its byte length. |
+| `state_stack` | `() -> u32` | Write the parked run's coroutines as JSON into the out buffer. Returns its byte length. |
 | `set_preempt_interval` | `(n: u32)` | Yield `PREEMPTED` every `n` loop back-edges so a program with no suspension point stays snapshottable. Defaults to `0`, disabled. Applies to the next `run_start` / `restore_state`. |
+| `vm_create` | `() -> u32` | Add an interpreter slot and return its id. |
+| `vm_select` | `(id: u32) -> i32` | Point every per-run export at slot `id`. Returns `0`, or `1` when no such slot exists. |
+| `vm_drop` | `(id: u32) -> i32` | Free slot `id` and its run. Returns `0`, or `1` when there is nothing to drop. Slot `0` always stays. |
+| `register_module_error` | `(spec_ptr: *const u8, spec_len: u32, msg_ptr: *const u8, msg_len: u32)` | Refuse a spec or bare name. Importing it fails at compile time, at the import, with `msg`. |
 
-`set_limits` and `set_source_name` are read at boot, so a host calls them before `run_start`, the same way it writes the entry dir. The CLI passes each group's `limits` and the script path through them. Buffers are the run lifecycle's: `src_ptr()` (1 MiB input), `out_ptr()` (1 MiB output), and `snapshot_ptr()` for the blob.
+`set_limits` and `set_source_name` are read at boot, so a host calls them before `run_start`, the same way it writes the entry dir. The CLI passes each group's `limits` and the script path through them.
 
-- **Save.** Drive to a pause (`run_start`, then `run_resume` until a `PENDING_*` status), call `save_state()`, and read that many bytes at `snapshot_ptr()` when the result is non-negative.
+Every input, a source, a name, or a blob, is a range the host allocates with `wasm_alloc(size)`, fills, passes as `(ptr, len)`, and frees with `wasm_free(ptr, size)` after the call. Every result lands in one output buffer that grows as needed, `out_len()` bytes at `out_ptr()`, valid until the next export call. Neither direction has a size cap.
+
+An instance starts with slot `0` selected, so a host that runs one program never calls the slot exports. A host that runs many programs in one instance, as the CLI does for an actor group, creates a slot per interpreter and selects it before each call. The run, its stdin, limits, source name, entry dir, preempt interval, and value handles belong to the selected slot. The registered modules and refusals belong to the instance and serve every slot.
+
+- **Save.** Drive to a pause (`run_start`, then `run_resume` until a `PENDING_*` status), call `save_state()`, and read that many bytes at `out_ptr()` when the result is non-negative.
 - **Preempt.** With a non-zero `set_preempt_interval`, `run_start` / `run_resume` also return kind `7` (`PREEMPTED`). The run is parked and snapshottable, and needs no host action. Call `run_resume` to continue, or `save_state()` first to freeze a program that never suspends on its own.
-- **Restore.** Boot a fresh instance and register the same host modules (the embedded source is re-parsed, so its imports must resolve), write the blob into `src_ptr()`, then call `restore_state(len)` and drive it with `run_resume` like any other run.
+- **Restore.** Boot a fresh instance and register the same host modules (the embedded source is re-parsed, so its imports must resolve), stage the blob, then call `restore_state(ptr, len)` and drive it with `run_resume` like any other run.
 - **Inspect.** Call `state_globals()` or `state_stack()` and read that many UTF-8 bytes at `out_ptr()`, one JSON value each.
 
 ### Blob layout
@@ -432,13 +439,13 @@ Little-endian, self-contained, versioned.
 | Offset | Size | Field |
 |---|---|---|
 | 0 | 4 | magic, `0x4E535045` |
-| 4 | 4 | format version, currently `1` |
+| 4 | 4 | format version, currently `2` |
 | 8 | 8 | fingerprint, structural hash of the bytecode |
 | 16 | 8 | source length in bytes |
 | 24 | N | source, UTF-8 |
 | 24+N | rest | serialised VM state (heap, stacks, scheduler, pending) |
 
-`restore_state` re-parses the embedded source, recomputes the fingerprint, and rejects any blob whose fingerprint does not match the freshly compiled chunk. This pins each blob to one program and one compiler build. The whole blob must fit the 1 MiB source buffer. The serializer is `src/vm/snapshot.rs` in the repo, with internals in [Design](/implementation/design).
+`restore_state` re-parses the embedded source, recomputes the fingerprint, and rejects any blob whose fingerprint does not match the freshly compiled chunk. This pins each blob to one program and one compiler build. A blob has no size cap. The serializer is `src/vm/snapshot.rs` in the repo, with internals in [Design](/implementation/design).
 
 ## Consuming the release from a Rust crate
 
@@ -456,5 +463,5 @@ To add native modules from a Rust host, implement the `Resolver` trait. See [Mod
 
 ## See also
 
-- [Modules](/reference/modules): import resolution on the script side, packages.json, integrity verification, and the delivery paths.
+- [Modules](/reference/modules): import resolution on the script side, edge.json, integrity verification, and the delivery paths.
 - [Snapshots](/language/snapshots): freezing and resuming a paused run from the host.

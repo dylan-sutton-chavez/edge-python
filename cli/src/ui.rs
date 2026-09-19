@@ -5,9 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-/// A `+ name   kind` line for an added package.
-pub fn added(name: &str, kind: &str) {
-    println!("  + {name:<10} {kind}");
+/// A `+ name   url` line for an added package.
+pub fn added(name: &str, url: &str) {
+    println!("  + {name:<10} {url}");
 }
 
 /// A `- name` line for a removed package.

@@ -1,12 +1,9 @@
-/* Byte cap on any source handed to the compiler, mirrors the wasm SRC buffer (compiler SZ). */
-export const SOURCE_LIMIT = 1 << 20;
-
 export const sha256Hex = async (bytes: Uint8Array): Promise<string> => {
     const digest = await crypto.subtle.digest('SHA-256', bytes as BufferSource);
     return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
-/* Mirror `compiler::packages::manifest` so transitive imports canonicalize identically on both sides. */
+/* Mirror `compiler::modules::manifest` so transitive imports canonicalize identically on both sides. */
 export const dirOf = (spec: string): string => {
     const i = spec.lastIndexOf('/');
     return i === -1 ? '' : spec.slice(0, i + 1);

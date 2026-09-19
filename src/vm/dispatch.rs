@@ -185,10 +185,9 @@ impl<'a> VM<'a> {
                 }
 
                 let rip = ip;
-                // One-shot raise of CancelledError from the coroutine's park point.
-                let step = if self.cancel_raise {
-                    self.cancel_raise = false;
-                    Err(VmErr::Raised(alloc::string::String::from("CancelledError")))
+                // One-shot raise at the coroutine's park point, a cancellation or an error delivered while parked.
+                let step = if self.resume_raise.is_some() {
+                    Err(self.resume_raise.take().unwrap())
                 } else {
                     self.dispatch(chunk, slots, &mut cache, insns, consts, &mut ip, exc_base)
                 };

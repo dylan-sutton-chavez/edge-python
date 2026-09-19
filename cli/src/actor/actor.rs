@@ -1,17 +1,23 @@
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use compiler::packages::dir_of;
+use compiler::modules::dir_of;
 use compiler::vm::Limits;
 
-use crate::host::{config, driver, Host, Project, Sink, Status, Vm};
+use crate::host::{driver, now_ns, Host, Project, Sink, Status, Vm};
 use crate::pack::{base64_decode, Bundle, BUNDLE_TAG};
 
 use super::config::{Message, Out};
 
 // Epoch ticks an untrusted run may consume, the ticker advances one every 100 ms.
 const EVAL_DEADLINE_TICKS: u64 = 100;
+const EVAL_TICK_NS: u64 = 100_000_000;
+// The reply when host-side waits would outlast the deadline, worded like the epoch trap.
+const EVAL_TIME_LIMIT: &str = "error: RuntimeError: run exceeded its time limit";
+// Linear memory an untrusted run may grow to.
+const EVAL_MEMORY: usize = 256 << 20;
 
 // How an actor runs, a fixed program looping over receive(), or an untrusted per-message evaluator.
 enum Mode {
@@ -27,6 +33,8 @@ pub struct Context {
     pub host: Rc<Host>,
     pub source: Rc<String>,
     pub out: Out,
+    // The group's edge.json, what an eval snippet without its own resolves through.
+    pub manifest: String,
 }
 
 // One live actor plus the mailbox its work drains from.
@@ -45,6 +53,8 @@ pub struct Actor {
     pub wake_at: Option<u64>,
     // The message fed into the interpreter this step, so the scheduler can retry it on a crash.
     in_flight: Option<Message>,
+    // Set once the program took a message from its mailbox.
+    consumed: bool,
 }
 
 // What a run step left the actor waiting on.
@@ -73,7 +83,7 @@ impl Actor {
     }
 
     fn new(mode: Mode) -> Self {
-        Actor { mode, mailbox: VecDeque::new(), done: false, ran: false, idle: false, runnable: false, wake_at: None, in_flight: None }
+        Actor { mode, mailbox: VecDeque::new(), done: false, ran: false, idle: false, runnable: false, wake_at: None, in_flight: None, consumed: false }
     }
 
     // Delivers a message to the mailbox, waking the actor from its idle wait.
@@ -88,6 +98,32 @@ impl Actor {
             Mode::Fixed { vm, .. } => vm.poll().unwrap_or(0) > 0,
             Mode::Eval { .. } => false,
         }
+    }
+
+    /* Streams the actor's interpreter still has open. */
+    pub fn streams(&self) -> usize {
+        match &self.mode {
+            Mode::Fixed { vm, .. } => vm.streams(),
+            Mode::Eval { .. } => 0,
+        }
+    }
+
+    /* True once the instance hosting this actor trapped. */
+    pub fn trapped(&self) -> bool {
+        match &self.mode {
+            Mode::Fixed { vm, .. } => vm.instance().borrow().poisoned(),
+            Mode::Eval { .. } => false,
+        }
+    }
+
+    /* The message it was processing and the ones still queued, what a retired actor hands back. */
+    pub fn into_messages(mut self) -> (Option<Message>, Vec<Message>) {
+        (self.in_flight.take(), std::mem::take(&mut self.mailbox).into_iter().collect())
+    }
+
+    /* Queued messages go back out only when the program reads its mailbox, else another run would loop. */
+    pub fn leftover(self) -> Vec<Message> {
+        if self.consumed { self.mailbox.into_iter().collect() } else { Vec::new() }
     }
 
     /* Everything the last step sent, an eval actor never sends. */
@@ -132,11 +168,16 @@ impl Actor {
                 Status::Preempted => continue,
                 Status::PendingEvent => {
                     self.in_flight = None;
+                    // A stream event that arrived mid-step goes before the mailbox.
+                    if vm.drain_buffered() > 0 {
+                        continue;
+                    }
                     let Some(msg) = self.mailbox.pop_front() else {
                         self.idle = true;
                         return Step::Waiting;
                     };
                     if vm.push_event(&msg.body) {
+                        self.consumed = true;
                         self.in_flight = Some(msg);
                         continue;
                     }
@@ -197,17 +238,42 @@ fn run_eval(ctx: &Context, body: &str, limits: Limits, preempt: usize, capture: 
     } else {
         sink_for(&ctx.out)
     };
-    let project = Project::bundle(files, &entry_dir, true);
-    let mut vm = ctx.host.vm(sink, project, Some(EVAL_DEADLINE_TICKS), Some(config::MEMORY_RESERVATION as usize)).map_err(|e| format!("error: {e}"))?;
+    let own_manifest = files.contains_key(&format!("{entry_dir}edge.json"));
+    let mut project = Project::bundle(files, &entry_dir, true);
+    if !own_manifest {
+        project.manifest = Some(ctx.manifest.clone());
+    }
+    let mut vm = ctx.host.vm(sink, project, Some(EVAL_DEADLINE_TICKS), Some(EVAL_MEMORY)).map_err(|e| format!("error: {e}"))?;
     vm.set_preempt_interval(preempt).map_err(|e| format!("error: {e}"))?;
     vm.set_limits(&limits).map_err(|e| format!("error: {e}"))?;
+    // Host-side waits count toward the same budget the epoch ticker enforces inside the sandbox.
+    let deadline = now_ns() + EVAL_DEADLINE_TICKS * EVAL_TICK_NS;
     let mut status = vm.start(&source, None).map_err(|e| format!("error: {e}"))?;
     loop {
         status = match status {
-            Status::Preempted => vm.resume().map_err(|e| format!("error: {e}"))?,
+            Status::Done | Status::Exit(_) => break,
             Status::Error(tb) => return Err(tb),
-            // A suspension ends an untrusted run, nothing can serve it.
-            _ => break,
+            Status::Preempted => vm.resume().map_err(|e| format!("error: {e}"))?,
+            Status::PendingTimer(wake) => {
+                if wake > deadline {
+                    return Err(EVAL_TIME_LIMIT.to_string());
+                }
+                std::thread::sleep(Duration::from_nanos(wake.saturating_sub(now_ns())));
+                vm.resume().map_err(|e| format!("error: {e}"))?
+            }
+            Status::PendingHostCall => {
+                vm.dispatch();
+                if vm.inflight() == 0 {
+                    return Err(format!("error: {}", driver::suspend_message("a host call")));
+                }
+                let left = Duration::from_nanos(deadline.saturating_sub(now_ns()));
+                if vm.wait(Some(left)).map_err(|e| format!("error: {e}"))? == 0 {
+                    return Err(EVAL_TIME_LIMIT.to_string());
+                }
+                vm.resume().map_err(|e| format!("error: {e}"))?
+            }
+            Status::PendingEvent => return Err(format!("error: {}", driver::suspend_message("receive()"))),
+            Status::PendingFrame => return Err(format!("error: {}", driver::suspend_message("a render frame"))),
         };
     }
     drop(vm);

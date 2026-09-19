@@ -2,11 +2,11 @@
   {
     "run": ["init", "myapp"],
     "stdout": ["created myapp/"],
-    "creates": ["myapp/main.py", "myapp/packages.json", "myapp/index.html"]
+    "creates": ["myapp/main.py", "myapp/edge.json", "myapp/index.html"]
   },
   {
     "run": ["init", "myapp", "--bare"],
-    "creates": ["myapp/main.py", "myapp/packages.json"]
+    "creates": ["myapp/main.py", "myapp/edge.json"]
   },
   {
     "given": { "myapp/.keep": "" },
@@ -16,73 +16,84 @@
   {
     "run": ["init"],
     "stdout": ["created project/"],
-    "creates": ["main.py", "packages.json", "index.html"]
+    "creates": ["main.py", "edge.json", "index.html"]
   },
   {
-    "given": { "packages.json": "{}\n" },
+    "given": { "edge.json": "{}\n" },
     "run": ["add", "math"],
-    "stdout": ["+ math", "imports"],
-    "contains": { "packages.json": "cdn.edgepython.com/std/math.wasm" }
+    "stdout": ["+ math       https://cdn.edgepython.com/std/math.wasm"],
+    "contains": { "edge.json": "cdn.edgepython.com/std/math.wasm" }
   },
   {
-    "given": { "packages.json": "{}\n" },
+    "given": { "edge.json": "{}\n" },
     "run": ["add", "network"],
-    "stdout": ["+ network", "system"],
-    "contains": { "packages.json": "cdn.edgepython.com/js/builtins/network/index.js" }
+    "stdout": ["+ network    https://cdn.edgepython.com/js/builtins/network/index.js"],
+    "contains": { "edge.json": "\"imports\": {\n    \"network\": \"https://cdn.edgepython.com/js/builtins/network/index.js\"" }
   },
   {
-    "given": { "packages.json": "{}\n" },
+    "given": { "edge.json": "{}\n" },
     "run": ["add", "test"],
-    "stdout": ["+ test", "imports"],
-    "contains": { "packages.json": "cdn.edgepython.com/std/test.py" }
+    "stdout": ["+ test       https://cdn.edgepython.com/std/test.py"],
+    "contains": { "edge.json": "cdn.edgepython.com/std/test.py" }
   },
   {
-    "given": { "packages.json": "{}\n" },
+    "given": { "edge.json": "{}\n" },
     "run": ["add", "dom"],
-    "stdout": ["+ dom", "imports"],
-    "contains": { "packages.json": "cdn.edgepython.com/js/builtins/dom/entry.py" }
+    "stdout": ["+ dom        https://cdn.edgepython.com/js/builtins/dom/entry.py"],
+    "contains": { "edge.json": "cdn.edgepython.com/js/builtins/dom/entry.py" }
   },
   {
-    "given": { "packages.json": "{}\n" },
+    "given": { "edge.json": "{}\n" },
     "run": ["add", "actor"],
-    "stdout": ["+ actor", "system"],
-    "contains": { "packages.json": "cdn.edgepython.com/js/builtins/actor/index.js" }
+    "stdout": ["+ actor      https://cdn.edgepython.com/js/builtins/actor/index.js"],
+    "contains": { "edge.json": "\"imports\": {\n    \"actor\": \"https://cdn.edgepython.com/js/builtins/actor/index.js\"" }
   },
   {
-    "given": { "packages.json": "{}\n" },
+    "given": { "edge.json": "{}\n" },
     "run": ["add", "foo=https://example.com/foo.wasm"],
-    "contains": { "packages.json": "example.com/foo.wasm" }
+    "contains": { "edge.json": "example.com/foo.wasm" }
   },
   {
-    "given": { "packages.json": "{}\n" },
+    "given": { "edge.json": "{}\n" },
     "run": ["add", "mystery"],
     "fails": ["unknown package 'mystery'"]
   },
   {
-    "given": { "packages.json": "{}\n" },
+    "given": { "edge.json": "{ \"system\": { \"time\": \"https://cdn.edgepython.com/js/builtins/time/index.js\" } }\n" },
+    "run": ["add", "math"],
+    "fails": ["edge.json at 'edge.json': move the system entries into imports"],
+    "contains": { "edge.json": "\"system\"" }
+  },
+  {
+    "given": { "edge.json": "{ \"extends\": \"..\", \"imports\": {} }\n" },
+    "run": ["add", "math"],
+    "contains": { "edge.json": "\"extends\": \"..\"" }
+  },
+  {
+    "given": { "edge.json": "{}\n" },
     "run": ["add", "math", "mystery"],
     "fails": ["unknown package 'mystery'"],
-    "contains": { "packages.json": "{}\n" }
+    "contains": { "edge.json": "{}\n" }
   },
   {
     "run": ["add"],
     "fails": ["nothing to add"]
   },
   {
-    "given": { "packages.json": "{\"imports\":{\"math\":\"https://cdn.edgepython.com/std/math.wasm\"}}\n" },
+    "given": { "edge.json": "{\"imports\":{\"math\":\"https://cdn.edgepython.com/std/math.wasm\"}}\n" },
     "run": ["remove", "math"],
     "stdout": ["- math"]
   },
   {
-    "given": { "packages.json": "{}\n" },
+    "given": { "edge.json": "{}\n" },
     "run": ["remove", "math"],
     "fails": ["not in"]
   },
   {
-    "given": { "packages.json": "{\"imports\":{\"math\":\"https://cdn.edgepython.com/std/math.wasm\"}}\n" },
+    "given": { "edge.json": "{\"imports\":{\"math\":\"https://cdn.edgepython.com/std/math.wasm\"}}\n" },
     "run": ["remove", "math", "mystery"],
     "fails": ["not in"],
-    "contains": { "packages.json": "math.wasm" }
+    "contains": { "edge.json": "math.wasm" }
   },
   {
     "run": ["remove"],
@@ -90,7 +101,7 @@
   },
   {
     "given": { "custom.json": "{}\n" },
-    "run": ["--packages", "custom.json", "add", "math"],
+    "run": ["--manifest", "custom.json", "add", "math"],
     "contains": { "custom.json": "cdn.edgepython.com/std/math.wasm" }
   },
   {
@@ -108,13 +119,13 @@
   {
     "given": { "a_test.py": "raise SystemExit(0)\n" },
     "run": ["test"],
-    "fails": ["declare test in packages.json (edge add test)"]
+    "fails": ["declare test in edge.json (edge add test)"]
   },
   {
     "given": {
       "sub/util.py": "def add(a, b):\n    return a + b\n",
       "sub/s_test.py": "from .util import add\nfrom test import test\n\n@test(\"adds\")\ndef t_add():\n    assert add(2, 3) == 5\n",
-      "packages.json": "{ \"imports\": { \"test\": \"https://cdn.edgepython.com/std/test.py\" } }\n"
+      "edge.json": "{ \"imports\": { \"test\": \"https://cdn.edgepython.com/std/test.py\" } }\n"
     },
     "run": ["test"],
     "stdout": ["PASS - adds", "(successful) sub/s_test.py", "1/1 files passed"]
@@ -122,7 +133,7 @@
   {
     "given": {
       "f_test.py": "from test import test\n\n@test(\"breaks\")\ndef t():\n    assert 1 == 2\n",
-      "packages.json": "{ \"imports\": { \"test\": \"https://cdn.edgepython.com/std/test.py\" } }\n"
+      "edge.json": "{ \"imports\": { \"test\": \"https://cdn.edgepython.com/std/test.py\" } }\n"
     },
     "run": ["test"],
     "fails": [],
@@ -131,7 +142,7 @@
   {
     "given": {
       "e_test.py": "x = 1\n",
-      "packages.json": "{ \"imports\": { \"test\": \"https://cdn.edgepython.com/std/test.py\" } }\n"
+      "edge.json": "{ \"imports\": { \"test\": \"https://cdn.edgepython.com/std/test.py\" } }\n"
     },
     "run": ["test"],
     "fails": [],
@@ -144,7 +155,7 @@
   },
   {
     "run": ["--version"],
-    "stdout": ["edge 0.2.0"]
+    "stdout": ["edge 0.5.0"]
   },
   {
     "given": { "t.py": "print('hi from edge')\n" },
@@ -157,7 +168,7 @@
     "fails": ["ZeroDivisionError"]
   },
   {
-    "given": { "main.py": "print('ok')\n", "packages.json": "{}\n" },
+    "given": { "main.py": "print('ok')\n", "edge.json": "{}\n" },
     "run": ["build", "--web"],
     "creates": ["dist/index.html", "dist/main.py", "dist/compiler.wasm"]
   },
@@ -176,7 +187,7 @@
     "stdin": "from time import sleep\nsleep(0.05)\nprint(\"done\")\n.exit\n",
     "stdout": ["done"],
     "given": {
-      "packages.json": "{ \"system\": { \"time\": \"https://cdn.edgepython.com/js/builtins/time/index.js\" } }\n"
+      "edge.json": "{ \"imports\": { \"time\": \"https://cdn.edgepython.com/js/builtins/time/index.js\" } }\n"
     }
   },
   {
@@ -186,32 +197,32 @@
     "stderr": ["ZeroDivisionError"]
   },
   {
-    "given": { "packages.json": "{}\n" },
+    "given": { "edge.json": "{}\n" },
     "run": ["add", "test=https://example.com/test.py"],
-    "stdout": ["+ test", "imports"],
-    "contains": { "packages.json": "\"imports\"" }
+    "stdout": ["+ test       https://example.com/test.py"],
+    "contains": { "edge.json": "\"imports\"" }
   },
   {
-    "given": { "packages.json": "{}\n" },
+    "given": { "edge.json": "{}\n" },
     "run": ["add", "foo=https://example.com/foo.py"],
-    "contains": { "packages.json": "\"imports\": {\n    \"foo\": \"https://example.com/foo.py\"" }
+    "contains": { "edge.json": "\"imports\": {\n    \"foo\": \"https://example.com/foo.py\"" }
   },
   {
-    "given": { "packages.json": "{}\n" },
+    "given": { "edge.json": "{}\n" },
     "run": ["add", "bar=https://example.com/bar.js"],
-    "stdout": ["+ bar", "system"],
-    "contains": { "packages.json": "\"system\"" }
+    "stdout": ["+ bar        https://example.com/bar.js"],
+    "contains": { "edge.json": "\"imports\": {\n    \"bar\": \"https://example.com/bar.js\"" }
   },
   {
-    "given": { "packages.json": "{}\n" },
+    "given": { "edge.json": "{}\n" },
     "run": ["add", "baz=https://example.com/baz.wasm"],
-    "stdout": ["+ baz", "imports"],
-    "contains": { "packages.json": "\"imports\"" }
+    "stdout": ["+ baz        https://example.com/baz.wasm"],
+    "contains": { "edge.json": "\"imports\"" }
   },
   {
-    "given": { "packages.json": "{}\n" },
+    "given": { "edge.json": "{}\n" },
     "run": ["add", "one=https://example.com/one.py", "two=https://example.com/two.js"],
-    "contains": { "packages.json": "\"imports\"" }
+    "contains": { "edge.json": "\"imports\": {\n    \"one\": \"https://example.com/one.py\",\n    \"two\": \"https://example.com/two.js\"" }
   },
   {
     "given": { "ask.py": "s = input()\nprint(len(s))\n" },
@@ -262,19 +273,163 @@
     "fails": ["cannot be used with"]
   },
   {
-    "given": { "sub/main.py": "print('ok')\n", "packages.json": "{}\n" },
+    "given": { "sub/main.py": "print('ok')\n", "edge.json": "{}\n" },
     "run": ["build", "--web"],
     "creates": ["dist/sub/main.py"],
     "contains": { "dist/index.html": "./sub/main.py" }
   },
   {
-    "given": { "main.py": "print('ok')\n", "packages.json": "{}\n" },
+    "given": { "main.py": "print('ok')\n", "edge.json": "{}\n" },
     "run": ["build", "--web"],
     "contains": { "dist/index.html": "./main.py" }
   },
   {
     "given": { "main.py": "import json\n" },
     "run": ["run", "main.py"],
-    "fails": ["module 'json' is not provided by this host and no packages.json declares it"]
+    "fails": ["module 'json' is not provided by this host and no edge.json declares it"]
+  },
+  {
+    "given": { "broken.py": "before = 1\nx = 1 / 0\n" },
+    "run": ["run", "broken.py"],
+    "fails": ["ZeroDivisionError", "--> broken.py:2:1"]
+  },
+  {
+    "given": { "late.py": "await sleep(0.01)\nbefore = 1\nx = 1 / 0\n" },
+    "run": ["run", "late.py"],
+    "fails": ["--> late.py:3:1", "x = 1 / 0"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"network\": \"https://cdn.edgepython.com/js/builtins/network/index.js\" } }\n",
+      "main.py": "from network import fetch_text\nprint(\"before\")\nbody = fetch_text(\"http://127.0.0.1:1/\")\nprint(\"after\")\n"
+    },
+    "run": ["run", "main.py"],
+    "stdout": ["before"],
+    "fails": ["RuntimeError", "--> main.py:3:1", "fetch_text("]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"dom\": \"https://cdn.edgepython.com/js/builtins/dom/entry.py\" } }\n",
+      "main.py": "import dom\n"
+    },
+    "run": ["run", "main.py"],
+    "fails": ["error: module 'dom' requires a browser\n"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"storage\": \"https://cdn.edgepython.com/js/builtins/storage/index.js\" } }\n",
+      "main.py": "import storage\n"
+    },
+    "run": ["run", "main.py"],
+    "fails": ["error: module 'storage' requires a browser\n"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"lib\": \"./lib.py\", \"widget\": \"./widget.js\" } }\n",
+      "widget.js": "export default () => ({});\n",
+      "lib.py": "import widget\n",
+      "main.py": "import lib\n"
+    },
+    "run": ["run", "main.py"],
+    "fails": ["error: module 'widget' is JavaScript, the CLI cannot run it (via lib)\n"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"helper\": \"./helper\" } }\n",
+      "helper": "def double(n):\n    return n * 2\n",
+      "main.py": "from helper import double\nprint(double(21))\n"
+    },
+    "run": ["run", "main.py"],
+    "stdout": ["42"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"system\": { \"time\": \"https://cdn.edgepython.com/js/builtins/time/index.js\" } }\n",
+      "main.py": "print(1)\n"
+    },
+    "run": ["run", "main.py"],
+    "fails": ["error: edge.json at 'edge.json': move the system entries into imports"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"x\": \"./x.wasm\" } }\n",
+      "x.wasm": "not a wasm module",
+      "main.py": "import x\n"
+    },
+    "run": ["run", "main.py"],
+    "fails": ["error: module 'x' is not a valid plugin, failed to parse WebAssembly module: magic header not detected: bad magic number\n"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"x\": \"https://example.com/x.mjs\" } }\n",
+      "main.py": "import x\n"
+    },
+    "run": ["run", "main.py"],
+    "fails": ["module 'x' is JavaScript, the CLI cannot run it"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"x\": \"./vendor/x.so\" } }\n",
+      "main.py": "import x\n"
+    },
+    "run": ["run", "main.py"],
+    "fails": ["module 'x' is not supported, ship a .wasm"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"x\": \"./vendor/x.dylib\" } }\n",
+      "main.py": "import x\n"
+    },
+    "run": ["run", "main.py"],
+    "fails": ["module 'x' is not supported, ship a .wasm"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"network\": \"https://cdn.edgepython.com/js/builtins/network/index.js\", \"dom\": \"https://cdn.edgepython.com/js/builtins/dom/entry.py\" } }\n",
+      "main.py": "print(\"ok\")\n"
+    },
+    "run": ["build", "--web"],
+    "creates": ["dist/vendor/network/index.js", "dist/vendor/network/http.js", "dist/vendor/network/ws.js", "dist/vendor/network/sse.js", "dist/vendor/network/state.js", "dist/vendor/dom/entry.py", "dist/vendor/dom/edge.json", "dist/vendor/dom/index.js", "dist/vendor/dom/tree.js", "dist/vendor/dom/state.js"],
+    "contains": { "dist/edge.json": "\"dom\": \"./vendor/dom/entry.py\",\n    \"network\": \"./vendor/network/index.js\"" }
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"json\": \"https://cdn.edgepython.com/std/json.wasm\" } }\n",
+      "main.py": "import json\nprint(json.dumps({\"a\": [1, True, None]}))\n"
+    },
+    "run": ["run", "main.py"],
+    "stdout": ["{\"a\":[1,true,null]}"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"re\": \"https://cdn.edgepython.com/std/re.wasm\" } }\n",
+      "main.py": "import re\nprint(re.search(r'\\d+', 'abc123def'))\n"
+    },
+    "run": ["run", "main.py"],
+    "stdout": ["123"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"math\": \"https://cdn.edgepython.com/std/math.wasm\" } }\n",
+      "main.py": "import math\nprint(math.floor(2.7))\n"
+    },
+    "run": ["run", "main.py"],
+    "stdout": ["2"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"struct\": \"https://cdn.edgepython.com/std/struct.wasm\" } }\n",
+      "main.py": "import struct\nprint(struct.calcsize('i'))\n"
+    },
+    "run": ["run", "main.py"],
+    "stdout": ["4"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"test\": \"https://cdn.edgepython.com/std/test.py\" } }\n",
+      "main.py": "from test import test\nprint(callable(test))\n"
+    },
+    "run": ["run", "main.py"],
+    "stdout": ["True"]
   }
 ]

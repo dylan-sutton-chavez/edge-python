@@ -8,11 +8,11 @@ const CDN_HOST = "cdn.edgepython.com";
 
 const REPO = new URL("../../", import.meta.url).pathname; // edge-python/ repo root
 const cases = JSON.parse(readFileSync(new URL("./js.json", import.meta.url)));
-const PKG = JSON.parse(readFileSync(new URL("./app/packages.json", import.meta.url)));
+const PKG = JSON.parse(readFileSync(new URL("./app/edge.json", import.meta.url)));
 // Negative fixtures, only their own cases import them, abi2 fails to load by design.
 const FIXTURES = new Set(["trap", "abi2"]);
 // star-import every project module, official names sit at CDN urls and the cases import them explicitly
-const star = (m) => Object.entries(m).flatMap(([k, v]) => (k === "imports" || k === "system" ? star(v) : FIXTURES.has(k) || String(v).includes("://") ? [] : `from ${k} import *`));
+const star = (m) => Object.entries(m).flatMap(([k, v]) => (k === "imports" ? star(v) : FIXTURES.has(k) || String(v).includes("://") ? [] : `from ${k} import *`));
 const PRELUDE = star(PKG).join("\n") + "\n";
 const TYPES = {
     ".js": "text/javascript", ".wasm": "application/wasm", ".html": "text/html",
@@ -103,7 +103,7 @@ Deno.test("js: <edge-python> runs the corpus through index.html", async () => {
         // Boot one tag without an entry, then reuse its worker for every case via run().
         await page.evaluate(async () => {
             const el = document.createElement("edge-python");
-            el.setAttribute("packages", "./app/packages.json");
+            el.setAttribute("manifest", "./app/edge.json");
             const ready = new Promise((res) => el.addEventListener("ready", res, { once: true }));
             document.body.appendChild(el);
             await ready;
@@ -111,8 +111,8 @@ Deno.test("js: <edge-python> runs the corpus through index.html", async () => {
         });
 
         const reqd = (frag) => requested.some((u) => u.includes(frag));
-        // Lazy system, a system ESM must not load at boot, only when a run first imports it.
-        if (reqd("/app/ui.js")) throw new Error("system ui.js loaded at boot; system modules must be lazy");
+        // A JavaScript module must not load at boot, only when a run first imports it.
+        if (reqd("/app/ui.js")) throw new Error("ui.js loaded at boot; JavaScript modules must be lazy");
 
         for (const c of cases) {
             errors.length = 0;
@@ -265,9 +265,9 @@ Deno.test("js: <edge-python> runs the corpus through index.html", async () => {
         if (tagged.out !== "") throw new Error(`preempt via element: run reported ${JSON.stringify(tagged.out)}`);
 
         // Laziness, only what the corpus imports gets fetched. Declared-but-unused stays untouched.
-        if (!reqd("/app/ui.js")) throw new Error("system ui was used but ui.js never loaded");
+        if (!reqd("/app/ui.js")) throw new Error("ui was used but ui.js never loaded");
         if (!reqd("json.wasm")) throw new Error("json imported but json.wasm never fetched");
-        if (!reqd("/js/builtins/time")) throw new Error("time imported but its system module never loaded");
+        if (!reqd("/js/builtins/time")) throw new Error("time imported but its JavaScript module never loaded");
         if (reqd("re.wasm")) throw new Error("re declared but never imported, yet re.wasm was fetched (not lazy)");
         if (!reqd("/js/builtins/network")) throw new Error("network imported by the ws cases but never loaded");
 

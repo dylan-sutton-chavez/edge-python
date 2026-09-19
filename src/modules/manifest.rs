@@ -3,22 +3,22 @@ use alloc::vec::Vec;
 
 use crate::s;
 
-/* Parsed `packages.json`. `imports` maps bare names to specs, `extends` inherits another manifest's imports when a name isn't local. */
-// Vec not a map, parsed once, looked up linearly, avoids a hashbrown monomorphization.
+/* Parsed `edge.json`, `extends` inherits another manifest's imports when a name is not local. */
 #[derive(Clone)]
 pub struct Manifest {
+    // Bare name to spec pairs, parsed once and scanned linearly, a Vec avoids a hashbrown monomorphization.
     pub imports: Vec<(String, String)>,
     pub extends: Option<String>,
 }
 
-/* Parse `{ "imports": {...}, "system": {...}, "extends": "..." }`. All optional, unknown keys skipped for forward compat, numbers, arrays, bools rejected. */
+/* Parse `{ "imports": {...}, "extends": "..." }`, keys optional, unknown keys skipped, numbers, arrays, bools rejected. */
 pub fn parse_manifest(bytes: &[u8]) -> Result<Manifest, String> {
-    let src = core::str::from_utf8(bytes).map_err(|_| s!("packages.json is not valid UTF-8"))?;
+    let src = core::str::from_utf8(bytes).map_err(|_| s!("edge.json is not valid UTF-8"))?;
     let mut p = Reader { src: src.as_bytes(), pos: 0 };
     let mut m = Manifest { imports: Vec::new(), extends: None };
 
     p.skip_ws();
-    p.expect(b'{', "packages.json must be a JSON object")?;
+    p.expect(b'{', "edge.json must be a JSON object")?;
     p.skip_ws();
     if p.peek() == Some(b'}') { return Ok(m); }
 
@@ -26,19 +26,12 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<Manifest, String> {
         p.skip_ws();
         let key = p.read_string()?;
         p.skip_ws();
-        p.expect(b':', "expected ':' after key in packages.json")?;
+        p.expect(b':', "expected ':' after key in edge.json")?;
         p.skip_ws();
         match key.as_str() {
             "imports" => p.read_imports_into(&mut m.imports)?,
-            "system" => {
-                let mut pairs = Vec::new();
-                p.read_imports_into(&mut pairs)?;
-// System names fold in as `mt:` specs, urls are runtime-side.
-                m.imports.extend(pairs.into_iter().map(|(name, _)| {
-                    let spec = s!("mt:", str &name);
-                    (name, spec)
-                }));
-            }
+            // One map holds every module, the artifact behind each spec decides how it loads.
+            "system" => return Err(s!("move the system entries into imports")),
             "extends" => m.extends = Some(p.read_string()?),
             _ => p.skip_value()?,
         }
@@ -46,7 +39,7 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<Manifest, String> {
         match p.peek() {
             Some(b',') => { p.pos += 1; continue; }
             Some(b'}') => return Ok(m),
-            _ => return Err(s!("expected ',' or '}' in packages.json")),
+            _ => return Err(s!("expected ',' or '}' in edge.json")),
         }
     }
 }
@@ -129,11 +122,11 @@ impl<'a> Reader<'a> {
         let mut out = String::new();
         loop {
             match self.peek() {
-                None => return Err(s!("unterminated string in packages.json")),
+                None => return Err(s!("unterminated string in edge.json")),
                 Some(b'"') => { self.pos += 1; return Ok(out); }
                 Some(b'\\') => {
                     self.pos += 1;
-                    let esc = self.peek().ok_or_else(|| s!("dangling '\\' in packages.json"))?;
+                    let esc = self.peek().ok_or_else(|| s!("dangling '\\' in edge.json"))?;
                     match esc {
                         b'"' => out.push('"'),
                         b'\\' => out.push('\\'),
@@ -141,7 +134,7 @@ impl<'a> Reader<'a> {
                         b'n' => out.push('\n'),
                         b't' => out.push('\t'),
                         b'r' => out.push('\r'),
-                        _ => return Err(s!("unsupported escape '\\", char esc as char, "' in packages.json")),
+                        _ => return Err(s!("unsupported escape '\\", char esc as char, "' in edge.json")),
                     }
                     self.pos += 1;
                 }
@@ -194,7 +187,7 @@ impl<'a> Reader<'a> {
                     }
                 }
             }
-            _ => Err(s!("unsupported value in packages.json (only strings / string-objects)")),
+            _ => Err(s!("unsupported value in edge.json (only strings / string-objects)")),
         }
     }
 }
@@ -211,6 +204,14 @@ mod tests {
         assert_eq!(join_relative("lib/", "../../escape.py"), "escape.py"); // clamped at root
         assert_eq!(join_relative("lib/test/", "/std/x.py"), "/std/x.py");
         assert_eq!(join_relative("", "https://x/y.py"), "https://x/y.py");
+    }
+
+    #[test]
+    fn a_system_section_is_refused() {
+        let m = parse_manifest(br#"{ "imports": { "ui": "./ui.js" } }"#).unwrap();
+        assert_eq!(m.imports, alloc::vec![(String::from("ui"), String::from("./ui.js"))]);
+        let err = parse_manifest(br#"{ "imports": {}, "system": { "time": "./time.js" } }"#).err();
+        assert_eq!(err.as_deref(), Some("move the system entries into imports"));
     }
 
     #[test]

@@ -4,8 +4,8 @@ set -e
 
 INSTALL_DIR="${EDGE_INSTALL_DIR:-$HOME/.local/bin}"
 
-# Downloaded modules and their pins, edge-owned and refetchable, so they go with the binary.
-MODULE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/edge/modules"
+# Everything the CLI caches, edge-owned and refetchable, so it goes with the binary.
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/edge"
 
 # 1. Binary.
 if [ -f "$INSTALL_DIR/edge" ]; then
@@ -24,10 +24,10 @@ for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
   fi
 done
 
-# 3. Module cache. Unconditional, nothing else reads it and every entry refetches on demand.
-if [ -d "$MODULE_DIR" ]; then
-  rm -rf "$MODULE_DIR"
-  echo "removed $MODULE_DIR"
+# 3. Cache. Unconditional, nothing else reads it and every entry refetches on demand.
+if [ -d "$CACHE_DIR" ]; then
+  rm -rf "$CACHE_DIR"
+  echo "removed $CACHE_DIR"
 fi
 
 echo "edge removed."

@@ -4,9 +4,7 @@
         "trap": "./trap.wasm",
         "abi2": "./abi2.wasm",
         "json": "https://cdn.edgepython.com/std/json.wasm",
-        "re": "https://cdn.edgepython.com/std/re.wasm"
-    },
-    "system": {
+        "re": "https://cdn.edgepython.com/std/re.wasm",
         "ui": "./ui.js",
         "time": "https://cdn.edgepython.com/js/builtins/time/index.js",
         "network": "https://cdn.edgepython.com/js/builtins/network/index.js"

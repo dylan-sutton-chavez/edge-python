@@ -1,4 +1,0 @@
-{
-    "imports": { "dom": "/dom/src/entry.py" },
-    "system": { "_dom": "/dom/src/index.js" }
-}

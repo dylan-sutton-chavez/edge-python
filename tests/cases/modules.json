@@ -122,12 +122,12 @@
   },
   {
     "src": "from missing import x\nprint(x)",
-    "error": "module 'missing' is not provided by this host and no packages.json declares it",
+    "error": "module 'missing' is not provided by this host and no edge.json declares it",
     "error_span_covers": "missing"
   },
   {
     "src": "from json import dumps\nprint(dumps(True))",
-    "error": "module 'json' is not provided by this host and no packages.json declares it",
+    "error": "module 'json' is not provided by this host and no edge.json declares it",
     "error_span_covers": "json"
   },
   {
@@ -385,7 +385,7 @@
     "manifests": {
       "./lib/": { "imports": { "other": "./other.py" } }
     },
-    "error": "module 'utils' is not provided by this host and no packages.json declares it"
+    "error": "module 'utils' is not provided by this host and no edge.json declares it"
   },
   {
     "src": "from .lib.a import run\nprint(run())",
@@ -404,7 +404,7 @@
     "modules": {
       "./lib/a.py": { "code": "from utils import slug\n\ndef run():\n    return slug('x')" }
     },
-    "error": "module 'utils' is not provided by this host and no packages.json declares it"
+    "error": "module 'utils' is not provided by this host and no edge.json declares it"
   },
   {
     "src": "from .svc_a.main import handle as ha\nfrom .svc_b.main import handle as hb\nprint(ha())\nprint(hb())",
@@ -453,7 +453,7 @@
     "modules": {
       "lib/a.py": { "code": "def run():\n    return 'hi'" }
     },
-    "error": "no packages.json above '' to resolve 'lib/a.py'"
+    "error": "no edge.json above '' to resolve 'lib/a.py'"
   },
   {
     "src": "from .svc.main import handle\nprint(handle())",

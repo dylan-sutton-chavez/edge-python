@@ -3,6 +3,5 @@ mod abi;
 mod lexer;
 mod parser;
 mod vm;
-mod packages;
+mod modules;
 mod snapshot;
-mod devkit;

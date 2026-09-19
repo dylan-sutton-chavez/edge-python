@@ -1,33 +1,34 @@
 /* Exports of compiler.wasm shared by every worker-side module, optional members appear only on newer builds. */
 export interface CompilerExports {
     memory: WebAssembly.Memory
-    src_ptr(): number
     out_ptr(): number
+    out_len(): number
     wasm_alloc(size: number): number
     wasm_free(ptr: number, size: number): void
     register_code_module(spec_ptr: number, spec_len: number, src_ptr: number, src_len: number): void
     register_native_module(spec_ptr: number, spec_len: number, names_ptr: number, names_len: number, base_id: number): void
+    register_module_error(spec_ptr: number, spec_len: number, msg_ptr: number, msg_len: number): void
     reset_modules(): void
-    set_entry_dir?(len: number): void
+    set_entry_dir?(ptr: number, len: number): void
     set_input?(ptr: number, len: number): void
-    extract_imports?(len: number): number
-    repl_eval(len: number): number
-    run_start(len: number): number
+    extract_imports?(ptr: number, len: number): number
+    repl_eval(ptr: number, len: number): number
+    run_start(ptr: number, len: number): number
     run_resume(): number
     run_push_event(ptr: number, len: number): number
-    set_host_result(handle: number): number
     set_host_result_by_id(id: number, handle: number): number
     set_host_error_by_id(id: number, kind: number, msg_handle: number): number
     last_yield_deadline_ns(): bigint
     set_preempt_interval?(n: number): void
     set_limits?(heap: bigint, ops: bigint, calls: bigint): void
-    set_source_name?(len: number): void
+    set_source_name?(ptr: number, len: number): void
     save_state(): bigint
-    snapshot_ptr(): number
-    restore_state(len: number): number
+    restore_state(ptr: number, len: number): number
     state_globals(): number
     state_stack(): number
-    run(len: number): number
+    vm_create(): number
+    vm_select(id: number): number
+    vm_drop(id: number): number
     host_edge_op(op: number, recv: number, name_ptr: number, name_len: number, argv_ptr: number, argc: number, out_handle: number): number
     host_edge_encode(tag: number, ptr: number, len: number): number
     host_edge_decode(h: number, out_tag: number, dst: number, dst_max: number): number

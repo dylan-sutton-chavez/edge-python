@@ -1,6 +1,6 @@
-use super::{plugins, Native, Vm};
+use super::{plugins, Instance, Native};
 use crate::builtins;
-use compiler::packages::{dir_of, join_relative, parse_integrity, parse_manifest, scan_imports, walk_up_dirs, ImportSpec};
+use compiler::modules::{dir_of, join_relative, parse_integrity, parse_manifest, scan_imports, walk_up_dirs, ImportSpec};
 use compiler::util::sha256::{hex_encode, sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Read;
@@ -10,8 +10,10 @@ use std::rc::Rc;
 // The pure Edge Python test package, embedded at build time.
 const TEST_PY: &str = include_str!("../../../std/test/src/entry.py");
 const TEST_SPEC: &str = "https://cdn.edgepython.com/std/test.py";
-// Official system modules, a spec under it needs a browser unless the CLI builds it in.
+// Official JavaScript libraries, a spec under it runs on the Rust twin when the CLI has one.
 const JS_BUILTINS_BASE: &str = "https://cdn.edgepython.com/js/builtins/";
+// How a fetch error reads when the server says the file does not exist.
+const ABSENT: &str = "not found on the server";
 // Bounds a runaway download, the largest module is well under a megabyte.
 const MAX_FETCH_BYTES: u64 = 64 << 20;
 
@@ -19,29 +21,29 @@ const MAX_FETCH_BYTES: u64 = 64 << 20;
 #[derive(Clone, Default)]
 pub struct Project {
     pub entry_dir: String,
-    pub packages: Option<String>,
+    pub manifest: Option<String>,
     // An in-memory tree replaces the disk, untrusted runs always carry one.
     pub bundle: Option<Rc<HashMap<String, Vec<u8>>>>,
     pub untrusted: bool,
 }
 
 impl Project {
-    pub fn disk(entry_dir: &str, packages: Option<&str>) -> Project {
-        Project { entry_dir: entry_dir.to_string(), packages: packages.map(String::from), bundle: None, untrusted: false }
+    pub fn disk(entry_dir: &str, manifest: Option<&str>) -> Project {
+        Project { entry_dir: entry_dir.to_string(), manifest: manifest.map(String::from), bundle: None, untrusted: false }
     }
 
     pub fn bundle(files: HashMap<String, Vec<u8>>, entry_dir: &str, untrusted: bool) -> Project {
-        Project { entry_dir: entry_dir.to_string(), packages: None, bundle: Some(Rc::new(files)), untrusted }
+        Project { entry_dir: entry_dir.to_string(), manifest: None, bundle: Some(Rc::new(files)), untrusted }
     }
 }
 
 /* Registers every module `root_src` reaches, mirroring the lazy prefetch of the JS host. */
-pub fn prefetch(vm: &mut Vm, root_src: &str) -> Result<(), String> {
-    Walk::new(vm).run(root_src)
+pub fn prefetch(inst: &mut Instance, root_src: &str) -> Result<(), String> {
+    Walk::new(inst).run(root_src)
 }
 
 struct Walk<'a> {
-    vm: &'a mut Vm,
+    inst: &'a mut Instance,
     project: Project,
     // Bare name to spec, the nearest manifest wins.
     table: HashMap<String, String>,
@@ -49,18 +51,20 @@ struct Walk<'a> {
     queue: VecDeque<String>,
     failures: Vec<String>,
     // Bare names seen before a manifest declared them, retried after each merge.
-    pending_bare: Vec<String>,
+    pending_bare: Vec<(String, Option<String>)>,
     // Root-relative imports waiting on their importer's manifest chain.
-    pending_root: Vec<(String, String)>,
+    pending_root: Vec<(String, String, Option<String>)>,
     manifest_dirs: HashSet<String>,
     missing: HashSet<String>,
+    // Spec to the name its first importer wrote and that importer's own name, None for the entry.
+    origins: HashMap<String, (String, Option<String>)>,
 }
 
 impl<'a> Walk<'a> {
-    fn new(vm: &'a mut Vm) -> Self {
-        let project = vm.project.clone();
+    fn new(inst: &'a mut Instance) -> Self {
+        let project = inst.project.clone();
         Walk {
-            vm,
+            inst,
             project,
             table: HashMap::new(),
             visited: HashSet::new(),
@@ -70,95 +74,134 @@ impl<'a> Walk<'a> {
             pending_root: Vec::new(),
             manifest_dirs: HashSet::new(),
             missing: HashSet::new(),
+            origins: HashMap::new(),
         }
     }
 
     fn run(mut self, root_src: &str) -> Result<(), String> {
         let entry_dir = self.project.entry_dir.clone();
         for imp in scan_imports(root_src) {
-            self.enqueue_import(imp, &entry_dir);
+            self.enqueue_import(imp, &entry_dir, None);
         }
         self.enqueue_manifest_chain(&entry_dir);
         while let Some(spec) = self.queue.pop_front() {
             if !self.visited.insert(spec.clone()) {
                 continue;
             }
-            if let Some(name) = spec.strip_prefix("mt:") {
-                self.system(name);
-                continue;
-            }
-            if spec.ends_with("packages.json") {
+            if spec.ends_with("edge.json") {
                 self.manifest(&spec);
                 continue;
             }
             if let Some(name) = std_name(&spec) {
-                if let Err(e) = plugins::register(self.vm, name, &spec) {
+                if let Err(e) = plugins::register(self.inst, name, &spec) {
                     self.failures.push(e);
                 }
                 continue;
             }
-            if let Some(name) = browser_module(&spec) {
-                self.failures.push(format!("module '{name}' requires a browser"));
+            if let Some(name) = official_js(&spec) {
+                self.twin(&spec, name);
                 continue;
             }
-            if let Some(reason) = foreign(&spec) {
-                self.failures.push(format!("module '{}' {reason}", target(&spec)));
-                continue;
-            }
-            match self.fetch(&spec) {
-                Ok(Some(bytes)) => self.module(&spec, bytes),
-                Ok(None) => self.failures.push(format!("could not read module '{}'", target(&spec))),
-                Err(e) => self.failures.push(e),
+            match extension(&spec) {
+                "js" | "mjs" => self.refuse(&spec, "is JavaScript, the CLI cannot run it"),
+                "so" | "dylib" => self.refuse(&spec, "is not supported, ship a .wasm"),
+                ext => match self.fetch(&spec) {
+                    // A .wasm spec is a plugin, past .py the wasm magic marks one too.
+                    Ok(Some(bytes)) if ext == "wasm" || (ext != "py" && bytes.starts_with(b"\0asm")) => self.plugin(&spec, &bytes),
+                    Ok(Some(bytes)) => self.module(&spec, bytes),
+                    Ok(None) => self.failures.push(format!("could not read module '{}'", target(&spec))),
+                    Err(e) => self.failures.push(e),
+                },
             }
         }
+        self.refuse_undeclared();
         if self.failures.is_empty() {
             return Ok(());
         }
         Err(self.failures.iter().map(|f| format!("error: {f}")).collect::<Vec<_>>().join("\n"))
     }
 
+    /* A bare name no manifest declared fails at its import, with the command that declares it. */
+    fn refuse_undeclared(&mut self) {
+        let names: HashSet<String> = self.pending_bare.drain(..).map(|(name, _)| name).collect();
+        for name in names {
+            let help = match crate::manifest::registry(&name) {
+                Some(_) => format!("run `edge add {name}`"),
+                None => "declare it in edge.json, or use a relative import".to_string(),
+            };
+            let msg = format!("module '{name}' is not provided by this host and no edge.json declares it\nhelp: {help}");
+            if let Err(e) = self.inst.register_error(&name, &msg) {
+                self.failures.push(e);
+            }
+        }
+    }
+
     // A code module registers, then its own imports queue so transitive deps stay lazy.
     fn module(&mut self, spec: &str, bytes: Vec<u8>) {
-        if let Err(e) = self.vm.register_code(spec, &bytes) {
+        if let Err(e) = self.inst.register_code(spec, &bytes) {
             self.failures.push(e);
             return;
         }
         let text = String::from_utf8_lossy(&bytes).into_owned();
-        self.vm.store.data_mut().fetched.insert(spec.to_string(), bytes);
+        self.inst.store.data_mut().fetched.insert(spec.to_string(), bytes);
         let dir = dir_of(spec).to_string();
+        let via = self.origins.get(spec).map(|(name, _)| name.clone());
         for imp in scan_imports(&text) {
-            self.enqueue_import(imp, &dir);
+            self.enqueue_import(imp, &dir, via.as_deref());
         }
-        self.enqueue_manifest_chain(&dir);
+        // The embedded test package has no manifest to probe, the CDN would only answer 404.
+        if target(spec) != TEST_SPEC {
+            self.enqueue_manifest_chain(&dir);
+        }
     }
 
-    /* Registers a built-in capability under `mt:<name>`, names that need a browser fail here. */
-    fn system(&mut self, name: &str) {
-        if self.project.untrusted && matches!(name, "actor" | "network") {
-            self.failures.push(format!("module '{name}' is not available to untrusted eval runs"));
+    /* A third party wasm plugin, compiled by Cranelift and instantiated beside the compiler. */
+    fn plugin(&mut self, spec: &str, bytes: &[u8]) {
+        if self.project.untrusted {
+            self.refuse(spec, "is not available to untrusted eval runs");
             return;
         }
+        let name = self.origins.get(spec).map_or_else(|| target(spec).to_string(), |(name, _)| name.clone());
+        if let Err(e) = plugins::register_bytes(self.inst, &name, spec, bytes) {
+            self.failures.push(e);
+        }
+    }
+
+    /* Registers an official JavaScript library's Rust twin under its spec, the rest need a browser. */
+    fn twin(&mut self, spec: &str, name: &str) {
         let Some((module, exports)) = builtins::exports(name) else {
-            self.failures.push(format!("module '{name}' requires a browser"));
+            self.refuse(spec, "requires a browser");
             return;
         };
-        let spec = format!("mt:{name}");
-        let known = self.vm.store.data().registered.get(&spec).cloned();
+        if self.project.untrusted && matches!(module, "actor" | "network") {
+            self.refuse(spec, "is not available to untrusted eval runs");
+            return;
+        }
+        let known = self.inst.store.data().registered.get(spec).cloned();
         let (base, names) = match known {
             Some(entry) => entry,
             None => {
-                let state = self.vm.store.data_mut();
+                let state = self.inst.store.data_mut();
                 let base = state.natives.len();
                 let mut names = Vec::new();
                 for (export, deferred) in exports {
                     names.push(export.to_string());
                     state.natives.push(Native::Capability { module, name: export.to_string(), deferred });
                 }
-                state.registered.insert(spec.clone(), (base, names.clone()));
+                state.registered.insert(spec.to_string(), (base, names.clone()));
                 (base, names)
             }
         };
-        if let Err(e) = self.vm.register_native(&spec, &names, base) {
+        if let Err(e) = self.inst.register_native(spec, &names, base) {
+            self.failures.push(e);
+        }
+    }
+
+    /* Why a module cannot load here, raised at its import and named as its importer wrote it. */
+    fn refuse(&mut self, spec: &str, reason: &str) {
+        let (name, via) = self.origins.get(spec).cloned().unwrap_or_else(|| (target(spec).to_string(), None));
+        let via = via.map(|v| format!(" (via {v})")).unwrap_or_default();
+        if let Err(e) = self.inst.register_error(spec, &format!("module '{name}' {reason}{via}")) {
             self.failures.push(e);
         }
     }
@@ -180,7 +223,7 @@ impl<'a> Walk<'a> {
         let parsed = match parse_manifest(&bytes) {
             Ok(m) => m,
             Err(e) => {
-                self.failures.push(format!("packages.json at '{spec}': {e}"));
+                self.failures.push(format!("edge.json at '{spec}': {e}"));
                 return;
             }
         };
@@ -189,7 +232,7 @@ impl<'a> Walk<'a> {
         for (name, target) in &parsed.imports {
             self.table.entry(name.clone()).or_insert_with(|| join_relative(&dir, target));
         }
-        self.vm.store.data_mut().fetched.insert(spec.to_string(), bytes);
+        self.inst.store.data_mut().fetched.insert(spec.to_string(), bytes);
         self.retry_pending();
         self.retry_root();
         if let Some(ext) = &parsed.extends {
@@ -197,14 +240,14 @@ impl<'a> Walk<'a> {
             if !next.ends_with('/') {
                 next.push('/');
             }
-            self.queue.push_back(format!("{next}packages.json"));
+            self.queue.push_back(format!("{next}edge.json"));
         }
     }
 
-    /* The root manifest always exists, a `--packages` override is then the only manifest. */
+    /* The root manifest always exists, a `--manifest` override is then the only manifest. */
     fn read_manifest(&mut self, spec: &str) -> Result<Option<Vec<u8>>, String> {
-        let root = spec == "packages.json";
-        if let Some(path) = self.project.packages.clone() {
+        let root = spec == "edge.json";
+        if let Some(path) = self.project.manifest.clone() {
             if !root {
                 return Ok(None);
             }
@@ -214,30 +257,41 @@ impl<'a> Walk<'a> {
                 Err(e) => Err(format!("reading {path}: {e}")),
             };
         }
-        let bytes = self.fetch(spec).unwrap_or(None);
+        // A remote manifest that answered 404 once stays absent, so later runs skip the request.
+        let bytes = match spec.contains("://") && self.project.bundle.is_none() {
+            true => fetch_manifest(spec),
+            false => self.fetch(spec).unwrap_or(None),
+        };
         if root && bytes.is_none() {
             return Ok(Some(b"{}".to_vec()));
         }
         Ok(bytes)
     }
 
-    fn enqueue_import(&mut self, imp: ImportSpec, dir: &str) {
+    // Queues a module spec, the first importer to reach it names it in refusals.
+    fn enqueue(&mut self, spec: String, name: String, via: Option<String>) {
+        self.origins.entry(spec.clone()).or_insert((name, via));
+        self.queue.push_back(spec);
+    }
+
+    fn enqueue_import(&mut self, imp: ImportSpec, dir: &str, via: Option<&str>) {
+        let via = via.map(String::from);
         match imp {
-            ImportSpec::Relative(path) => self.queue.push_back(join_relative(dir, &path)),
-            ImportSpec::Root(path) => self.enqueue_root(path, dir.to_string()),
+            ImportSpec::Relative(path) => self.enqueue(join_relative(dir, &path), path, via),
+            ImportSpec::Root(path) => self.enqueue_root(path, dir.to_string(), via),
             ImportSpec::Bare(name) => match self.table.get(&name) {
-                Some(spec) => self.queue.push_back(spec.clone()),
-                None => self.pending_bare.push(name),
+                Some(spec) => self.enqueue(spec.clone(), name, via),
+                None => self.pending_bare.push((name, via)),
             },
         }
     }
 
     fn retry_pending(&mut self) {
         let pending = std::mem::take(&mut self.pending_bare);
-        for name in pending {
+        for (name, via) in pending {
             match self.table.get(&name) {
-                Some(spec) => self.queue.push_back(spec.clone()),
-                None => self.pending_bare.push(name),
+                Some(spec) => self.enqueue(spec.clone(), name, via),
+                None => self.pending_bare.push((name, via)),
             }
         }
     }
@@ -246,7 +300,7 @@ impl<'a> Walk<'a> {
     fn enqueue_manifest_chain(&mut self, dir: &str) {
         let chain: Vec<String> = walk_up_dirs(dir).collect();
         for d in chain {
-            let m = format!("{d}packages.json");
+            let m = format!("{d}edge.json");
             if !self.missing.contains(&m) {
                 self.queue.push_back(m);
             }
@@ -259,7 +313,7 @@ impl<'a> Walk<'a> {
             if self.manifest_dirs.contains(&d) {
                 return Some(Some(d));
             }
-            let m = format!("{d}packages.json");
+            let m = format!("{d}edge.json");
             if !self.visited.contains(&m) && !self.missing.contains(&m) {
                 return None;
             }
@@ -267,10 +321,10 @@ impl<'a> Walk<'a> {
         Some(None)
     }
 
-    fn enqueue_root(&mut self, spec: String, dir: String) {
+    fn enqueue_root(&mut self, spec: String, dir: String, via: Option<String>) {
         match self.root_for(&dir) {
-            None => self.pending_root.push((spec, dir)),
-            Some(Some(root)) => self.queue.push_back(join_relative(&root, &spec)),
+            None => self.pending_root.push((spec, dir, via)),
+            Some(Some(root)) => self.enqueue(join_relative(&root, &spec), spec, via),
             // No manifest anywhere, the compiler reports it.
             Some(None) => {}
         }
@@ -278,8 +332,8 @@ impl<'a> Walk<'a> {
 
     fn retry_root(&mut self) {
         let pending = std::mem::take(&mut self.pending_root);
-        for (spec, dir) in pending {
-            self.enqueue_root(spec, dir);
+        for (spec, dir, via) in pending {
+            self.enqueue_root(spec, dir, via);
         }
     }
 
@@ -310,13 +364,20 @@ impl<'a> Walk<'a> {
     }
 }
 
-/* The official name a CDN system module spec carries, the facade and its JS twin alike. */
-fn browser_module(spec: &str) -> Option<&str> {
+/* The library an official JavaScript spec belongs to, its facade and modules alike. */
+fn official_js(spec: &str) -> Option<&str> {
     target(spec).strip_prefix(JS_BUILTINS_BASE)?.split('/').next().filter(|n| !n.is_empty())
 }
 
 fn target(spec: &str) -> &str {
     spec.split_once('#').map_or(spec, |(t, _)| t)
+}
+
+/* The extension of the last path segment, query and fragment stripped, it picks how a module loads. */
+fn extension(spec: &str) -> &str {
+    let path = spec.split(['?', '#']).next().unwrap_or(spec);
+    let file = path.rsplit('/').next().unwrap_or(path);
+    file.rsplit_once('.').map_or("", |(_, ext)| ext)
 }
 
 /* An official std spec names a built-in package, the fragment is left to the caller. */
@@ -325,16 +386,22 @@ fn std_name(spec: &str) -> Option<&'static str> {
     ["json", "re", "math", "struct"].into_iter().find(|n| *n == name)
 }
 
-/* Why a binary spec cannot load here, plugins need the JS host and native libraries nothing. */
-fn foreign(spec: &str) -> Option<&'static str> {
-    let t = target(spec);
-    if t.ends_with(".wasm") {
-        return Some("requires the JS host");
+/* A remote manifest, None when it is absent, a 404 leaves a `.missing` marker in the cache. */
+fn fetch_manifest(url: &str) -> Option<Vec<u8>> {
+    let dir = cache_dir().ok()?;
+    let marker = dir.join(format!("{}.missing", hex_encode(&sha256(url.as_bytes()))));
+    if marker.exists() {
+        return None;
     }
-    if t.ends_with(".so") || t.ends_with(".dylib") {
-        return Some("is not supported, ship a .wasm");
+    match fetch_cached(url, None) {
+        Ok(bytes) => Some(bytes),
+        Err(e) => {
+            if e.ends_with(ABSENT) {
+                let _ = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&marker, b""));
+            }
+            None
+        }
     }
-    None
 }
 
 /* Downloads once into the user cache, a `.lock` sidecar pins the digest like the JS host lockfile. */
@@ -352,7 +419,10 @@ fn fetch_cached(url: &str, expected: Option<[u8; 32]>) -> Result<Vec<u8>, String
             Err(_) => {}
         }
     }
-    let mut resp = ureq::get(url).call().map_err(|e| format!("fetching '{url}': {e}"))?;
+    let mut resp = ureq::get(url).call().map_err(|e| match e {
+        ureq::Error::StatusCode(404 | 410) => format!("fetching '{url}': {ABSENT}"),
+        e => format!("fetching '{url}': {e}"),
+    })?;
     let mut bytes = Vec::new();
     resp.body_mut().as_reader().take(MAX_FETCH_BYTES).read_to_end(&mut bytes).map_err(|e| format!("reading '{url}': {e}"))?;
     let got = check_pin(url, &bytes, None, expected)?;

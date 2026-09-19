@@ -1,6 +1,6 @@
 name: CI / CD
 
-# Single pipeline for the monorepo, each job's logic lives in a composite action, this wires the graph.
+# One node per composite action, and needs edges carry artifacts or gate a deploy.
 
 on:
   push:
@@ -17,179 +17,139 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  compiler-check:
-    name: Compiler / Lint and Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/compiler
-        with:
-          mode: check
-
-  js-lint:
-    name: JS / Deno Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/js
-        with:
-          mode: lint
-
   compiler:
-    name: Compiler / Test and Release
-    needs: [compiler-check, js-lint]
-    runs-on: ubuntu-latest
+    name: Compiler
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/compiler
         with:
-          mode: build
           github-token: ${{ github.token }}
 
   js:
-    name: JS / Deno Test
+    name: JS
     needs: [compiler]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/js
-        with:
-          mode: test
-
-  # Strips js/src to plain JS, the CDN can't serve TypeScript. Independent of the compiler build.
-  js-build:
-    name: JS / Build
-    needs: [js-lint]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/js
-        with:
-          mode: build
-
-  builtins:
-    name: Builtins / ${{ matrix.capability }}
-    needs: [js]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        capability: [dom, network, storage, time]
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/builtins
-        with:
-          capability: ${{ matrix.capability }}
 
   std:
     name: Std / ${{ matrix.package }}
-    needs: [js]
-    runs-on: ubuntu-latest
+    needs: [compiler]
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
         package: [json, re, math, struct, test]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/std
         with:
           package: ${{ matrix.package }}
 
-  # cli/build.rs embeds this run's compiler.wasm and std packages, so every cli job waits for both.
-  cli-lint:
-    name: CLI / Lint and Check
-    needs: [compiler, std]
-    runs-on: ubuntu-latest
+  builtins:
+    name: Builtins / ${{ matrix.capability }}
+    needs: [compiler]
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        capability: [actor, dom, network, storage, time]
     steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/cli
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/builtins
         with:
-          mode: lint
+          capability: ${{ matrix.capability }}
 
-  # Plain cargo per target, musl keeps the Linux binary static, starts as soon as cli-lint is green.
-  cli-release:
-    name: CLI / Release (${{ matrix.target }})
-    needs: [cli-lint]
+  # cli/build.rs embeds this run's compiler and std builds, and the test suites vendor js_dist.
+  cli:
+    name: CLI / ${{ matrix.entry }}
+    needs: [compiler, js, std]
     strategy:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-musl
-            runner: ubuntu-latest
-          - target: aarch64-unknown-linux-musl
-            runner: ubuntu-24.04-arm
-          - target: aarch64-apple-darwin
+          - entry: lint
+            mode: lint
+            runner: ubuntu-26.04
+          - entry: test engine
+            mode: test
+            suite: engine
+            runner: ubuntu-26.04
+          - entry: test network
+            mode: test
+            suite: network
+            runner: ubuntu-26.04
+          - entry: test actors
+            mode: test
+            suite: actors
+            runner: ubuntu-26.04
+          - entry: test skill
+            mode: test
+            suite: skill
+            runner: ubuntu-26.04
+          - entry: x86_64-unknown-linux-musl
+            mode: release
+            target: x86_64-unknown-linux-musl
+            runner: ubuntu-26.04
+          - entry: aarch64-unknown-linux-musl
+            mode: release
+            target: aarch64-unknown-linux-musl
+            runner: ubuntu-26.04-arm
+          - entry: aarch64-apple-darwin
+            mode: release
+            target: aarch64-apple-darwin
             runner: macos-15
-          - target: x86_64-apple-darwin
+          - entry: x86_64-apple-darwin
+            mode: release
+            target: x86_64-apple-darwin
             runner: macos-15
-          - target: x86_64-pc-windows-msvc
+          - entry: x86_64-pc-windows-msvc
+            mode: release
+            target: x86_64-pc-windows-msvc
             runner: windows-latest
             experimental: true
     runs-on: ${{ matrix.runner }}
     # A red Windows build is reported without blocking the Unix releases behind it.
     continue-on-error: ${{ matrix.experimental == true }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/cli
-        with:
-          mode: release
-          target: ${{ matrix.target }}
-
-  cli-test:
-    name: CLI / Test / ${{ matrix.suite }}
-    needs: [builtins, std, cli-release, js-build]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        suite: [engine, network, actors, skill]
-    steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Download js/dist (JS build output)
+        if: matrix.mode == 'test'
         uses: actions/download-artifact@v8
         with:
           name: js_dist
           path: js/dist
       - uses: ./.github/actions/cli
         with:
-          mode: test
+          mode: ${{ matrix.mode }}
           suite: ${{ matrix.suite }}
+          target: ${{ matrix.target }}
 
   cdn:
-    name: Cloudflare Upload (CDN)
-    needs: [cli-test, js-build]
+    name: CDN
+    needs: [js, std, builtins, cli]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/cdn-deploy
         with:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-  # Builds on every run (PR gate) and uploads the static export for docs-deploy.
-  docs-build:
-    name: Docs / Build
-    needs: [cli-test]
-    runs-on: ubuntu-latest
+  # Builds on every run as a gate, deploys on main once the CDN serves every URL.
+  docs:
+    name: Docs
+    needs: [cdn]
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/docs
         with:
-          mode: build
-
-  # Tail of the docs build and deploy chain, main pushes only.
-  docs-deploy:
-    name: Docs / Deploy
-    needs: [docs-build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/docs
-        with:
-          mode: deploy
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

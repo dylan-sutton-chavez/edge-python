@@ -56,7 +56,7 @@ fn actor_cases_match_their_expected_output() {
         let case: Case = serde_yaml_ng::from_str(&text).unwrap();
 
         let (got, status, replies) = match &case.runtime.listen {
-            Some(addr) => run_server(&path, addr, &case.publish, case.runtime.control.as_deref(), &case.post),
+            Some(addr) => run_server(&path, addr, &case),
             None => (run_batch(&path), String::new(), Vec::new()),
         };
         // Order across groups is not fixed, compare as a sorted multiset of lines.
@@ -88,28 +88,31 @@ fn run_batch(path: &std::path::Path) -> Vec<String> {
 }
 
 // A server pool stays alive, publish feeds the ingress, then stdout, /stats and posts are read.
-fn run_server(path: &std::path::Path, listen: &str, publish: &[String], control: Option<&str>, posts: &[Post]) -> (Vec<String>, String, Vec<String>) {
+fn run_server(path: &std::path::Path, listen: &str, case: &Case) -> (Vec<String>, String, Vec<String>) {
     let addr = listen.strip_prefix("tcp://").unwrap_or(listen);
     let scratch = std::env::temp_dir().join(format!("edge-actor-{}-{}", std::process::id(), path.file_stem().unwrap().to_string_lossy()));
     let _ = std::fs::create_dir_all(&scratch);
     let manifest = scratch.join("actor.yml");
     std::fs::copy(path, &manifest).unwrap();
     // The groups resolve actor through the manifest beside the yml, so it travels along.
-    std::fs::copy(path.with_file_name("packages.json"), scratch.join("packages.json")).unwrap();
+    std::fs::copy(path.with_file_name("edge.json"), scratch.join("edge.json")).unwrap();
 
     let mut child = Command::new(BIN).args(["actor", manifest.to_str().unwrap()]).stdin(Stdio::null()).stdout(Stdio::piped()).spawn().unwrap();
-    std::thread::sleep(Duration::from_millis(400));
-    if let Ok(mut sock) = TcpStream::connect(addr) {
-        for line in publish {
+    if let Some(mut sock) = connect(addr) {
+        for line in &case.publish {
             let _ = writeln!(sock, "{line}");
         }
         let _ = sock.flush();
     }
     std::thread::sleep(Duration::from_millis(400));
-    let control_addr = control.map(|c| c.strip_prefix("tcp://").unwrap_or(c));
-    let status = control_addr.map(get_status).unwrap_or_default();
+    let control_addr = case.runtime.control.as_deref().map(|c| c.strip_prefix("tcp://").unwrap_or(c));
+    let status = match (control_addr, &case.expect_status) {
+        (Some(c), Some(want)) => status_until(c, want),
+        (Some(c), None) => get_status(c),
+        (None, _) => String::new(),
+    };
     let replies = match control_addr {
-        Some(c) => posts.iter().map(|p| post_eval(c, &p.path, &p.body)).collect(),
+        Some(c) => case.post.iter().map(|p| post_eval(c, &p.path, &p.body)).collect(),
         None => Vec::new(),
     };
     // A /send is accepted once queued, give the actors a beat to print before the kill.
@@ -120,10 +123,21 @@ fn run_server(path: &std::path::Path, listen: &str, publish: &[String], control:
     (String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect(), status, replies)
 }
 
+// Connects once the port binds, a debug pool can take seconds to boot.
+fn connect(addr: &str) -> Option<TcpStream> {
+    for _ in 0..200 {
+        if let Ok(sock) = TcpStream::connect(addr) {
+            return Some(sock);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    None
+}
+
 // POSTs the body to a control path over a bare HTTP request, returning just the reply body.
 fn post_eval(addr: &str, path: &str, body: &str) -> String {
     use std::io::Read;
-    let Ok(mut sock) = TcpStream::connect(addr) else { return String::new() };
+    let Some(mut sock) = connect(addr) else { return String::new() };
     let req = format!("POST {path} HTTP/1.0\r\nHost: {addr}\r\nContent-Length: {}\r\n\r\n{body}", body.len());
     let _ = sock.write_all(req.as_bytes());
     let mut resp = String::new();
@@ -168,7 +182,7 @@ fn eval_group_runs_a_bundled_project_over_the_wire() {
     let payload = bundle("main.py", &[
         ("main.py", "import util\nprint(util.hi())\n"),
         ("util.py", "def hi():\n    return \"bundled and run\"\n"),
-        ("packages.json", "{ \"imports\": { \"util\": \"./util.py\" } }\n"),
+        ("edge.json", "{ \"imports\": { \"util\": \"./util.py\" } }\n"),
     ]);
     let line = format!("runners EDGEPKG:{}", base64_encode(&payload));
 
@@ -178,16 +192,7 @@ fn eval_group_runs_a_bundled_project_over_the_wire() {
     std::fs::write(&manifest, "runtime:\n  listen: tcp://127.0.0.1:7811\ngroups:\n  runners:\n    eval: true\n").unwrap();
 
     let mut child = Command::new(BIN).args(["actor", manifest.to_str().unwrap()]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-    // Retry the connect until the ingress binds, the pool boots slower under a loaded test run.
-    let mut sock = None;
-    for _ in 0..40 {
-        if let Ok(s) = TcpStream::connect("127.0.0.1:7811") {
-            sock = Some(s);
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    let mut sock = sock.expect("ingress never came up");
+    let mut sock = connect("127.0.0.1:7811").expect("ingress never came up");
     let _ = writeln!(sock, "{line}");
     let _ = sock.flush();
     std::thread::sleep(Duration::from_millis(800));
@@ -199,10 +204,23 @@ fn eval_group_runs_a_bundled_project_over_the_wire() {
     assert_eq!(got, vec!["bundled and run"], "stdout was {got:?}, stderr {err:?}");
 }
 
+// Polls /stats until it carries `want`, messages settle after the publish returns.
+fn status_until(addr: &str, want: &str) -> String {
+    let mut body = String::new();
+    for _ in 0..50 {
+        body = get_status(addr);
+        if body.contains(want) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    body
+}
+
 // Fetches /stats over a bare HTTP GET, returning just the response body.
 fn get_status(addr: &str) -> String {
     use std::io::Read;
-    let Ok(mut sock) = TcpStream::connect(addr) else { return String::new() };
+    let Some(mut sock) = connect(addr) else { return String::new() };
     let _ = write!(sock, "GET /stats HTTP/1.0\r\nHost: {addr}\r\n\r\n");
     let mut resp = String::new();
     let _ = sock.read_to_string(&mut resp);

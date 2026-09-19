@@ -7,17 +7,14 @@ export class EdgePythonElement extends HTMLElement {
 
     async connectedCallback() {
         const file = this.getAttribute('entry');
-        const pkg = this.getAttribute('packages');
+        const manifestUrl = this.getAttribute('manifest');
 
-// system -> main-thread modules (lazy, name -> url, imported on first use), imports -> worker .py/.wasm modules
-        const systemModules: Record<string, string> = {};
+        // Each entry resolves against the manifest url, the artifact behind it decides where it runs.
         let imports: Record<string, string> | undefined;
-        if (pkg) {
-            const base = new URL(pkg, location.href);
-            const manifest: { system?: Record<string, string>, imports?: Record<string, string> } = await fetch(base).then(r => r.json());
-            for (const [name, url] of Object.entries(manifest.system ?? {})) {
-                systemModules[name] = new URL(url, base).href;
-            }
+        if (manifestUrl) {
+            const base = new URL(manifestUrl, location.href);
+            const manifest: { imports?: Record<string, string>, system?: unknown } = await fetch(base).then(r => r.json());
+            if (manifest.system !== undefined) throw new Error(`edge.json at '${base.href}': move the system entries into imports`);
             if (manifest.imports) {
                 imports = {};
                 for (const [name, url] of Object.entries(manifest.imports)) imports[name] = new URL(url, base).href;
@@ -27,7 +24,6 @@ export class EdgePythonElement extends HTMLElement {
         // Kept on the element so callers can drive the same worker after the declarative run.
         this.worker = await createWorker({
             wasmUrl: this.getAttribute("wasm") ?? "https://cdn.edgepython.com/compiler.wasm",
-            systemModules,
             imports,
         });
         // `entry` is optional, omit it to just spin up the worker and drive it via run().

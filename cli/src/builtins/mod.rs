@@ -19,6 +19,7 @@ pub fn exports(module: &str) -> Option<(&'static str, Vec<(&'static str, bool)>)
 pub fn call(module: &str, name: &str, args: &[WireValue]) -> Result<WireValue, String> {
     match module {
         "time" => time::call(name, args),
+        "network" => network::call(name, args),
         _ => Err(format!("{module}.{name} is not a synchronous export")),
     }
 }
@@ -42,6 +43,14 @@ pub(crate) fn str_arg(args: &[WireValue], i: usize, who: &str) -> Result<String,
     match args.get(i) {
         Some(WireValue::Bytes(b)) => Ok(String::from_utf8_lossy(b).into_owned()),
         _ => Err(format!("TypeError: {who} expects a str at argument {}", i + 1)),
+    }
+}
+
+pub(crate) fn int_arg(args: &[WireValue], i: usize, who: &str) -> Result<i64, String> {
+    match args.get(i) {
+        Some(WireValue::Int(n)) => i64::try_from(*n).map_err(|_| format!("ValueError: {who} argument {} is out of range", i + 1)),
+        Some(WireValue::Bool(b)) => Ok(*b as i64),
+        _ => Err(format!("TypeError: {who} expects an int at argument {}", i + 1)),
     }
 }
 

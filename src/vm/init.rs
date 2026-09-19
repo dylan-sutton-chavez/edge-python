@@ -118,11 +118,10 @@ impl<'a> VM<'a> {
         Ok(self.inject_host_result_by_id(id, val))
     }
 
-    /* Raise `e` inside the `WaitingHostCall(id)` coro at its saved try-frame, or mark it Errored if none, false if no coro is parked on `id`. A failed host call wakes only its coro, leaving siblings untouched. */
+    /* Raises `e` where coro `id` parked on its next resume, false when nothing waits on `id`. */
     pub fn inject_host_error_by_id(&mut self, id: u64, e: VmErr) -> bool {
         let Some(idx) = self.scheduler.iter().position(|h| matches!(h.state, CoroState::WaitingHostCall(w) if w == id)) else { return false; };
-        let coro = self.scheduler[idx].coro;
-        self.scheduler[idx].state = self.raise_into_outer(coro, e);
+        self.scheduler[idx].state = CoroState::Raising(e, None);
         true
     }
 

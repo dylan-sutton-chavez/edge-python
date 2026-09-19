@@ -8,7 +8,7 @@ const DIST = HOST + "dist/"; // tsc emit of js/src, built below
 const REPO = new URL("../../../", import.meta.url).pathname;
 const CORPUS = new URL("../../../tests/cases/builtins/", import.meta.url).pathname;
 const CDN_HOST = "cdn.edgepython.com";
-const MANIFEST = "/_packages.json"; // synthesized, keeps the agnostic <cap>/ folder free of test artifacts
+const MANIFEST = "/_edge.json"; // synthesized, keeps the agnostic <cap>/ folder free of test artifacts
 
 // Cases per capability, the shared corpus under CORPUS first, then the browser-only one beside the module.
 const loadCases = (cap) => [`${CORPUS}${cap}.json`, `${ROOT}${cap}/${cap}.json`]
@@ -59,18 +59,14 @@ async function startMock() {
 async function runCapability(cap) {
     await buildDist();
     const dir = `${ROOT}${cap}`;
-    // Import the capability's `.py` entry when it has one, else the JS system module.
+    // Import the capability's `.py` entry when it has one, else its JavaScript module.
     const hasPy = existsSync(`${dir}/src/entry.py`);
 
     const cases = loadCases(cap);
-    // The tag's packages.json, pinned by the capability or synthesized around entry.py or the JS module.
-    const manifest = existsSync(`${dir}/packages.json`)
-        ? readFileSync(`${dir}/packages.json`, "utf-8")
-        : JSON.stringify(
-            hasPy
-                ? { imports: { [cap]: `/${cap}/src/entry.py` } }
-                : { system: { [cap]: `/${cap}/src/index.js` } },
-        );
+    // The tag's edge.json, pinned by the capability or synthesized around entry.py or the JS module.
+    const manifest = existsSync(`${dir}/edge.json`)
+        ? readFileSync(`${dir}/edge.json`, "utf-8")
+        : JSON.stringify({ imports: { [cap]: hasPy ? `/${cap}/src/entry.py` : `/${cap}/src/index.js` } });
 
     // Chromium's Local Network Access guard would block loopback, so the test browser disables that check.
     const browser = await chromium.launch({ args: ["--disable-features=LocalNetworkAccessChecks,LocalNetworkAccessChecksWebSockets"] });
@@ -132,7 +128,7 @@ async function runCapability(cap) {
             await Promise.race([
                 page.evaluate(async (manifestPath) => {
                     const el = document.createElement("edge-python");
-                    el.setAttribute("packages", manifestPath);
+                    el.setAttribute("manifest", manifestPath);
                     const ready = new Promise((res) => el.addEventListener("ready", res, { once: true }));
                     document.head.appendChild(el);
                     await ready;

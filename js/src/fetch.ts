@@ -8,6 +8,10 @@ export interface FetchCtx {
     integrityActive: boolean
 }
 
+// Specs are root-relative, the URL join clamps escapes at the origin.
+export const requestUrl = (target: string, baseUrl?: string | null): string =>
+    target.includes('://') ? target : new URL(target, baseUrl ?? self.location.href).toString();
+
 /* CAS-backed fetch keyed by lockfile hash, else fetch + hash + store. Null on fetch failure or non-ok status (opportunistic ok), throws on drift. */
 export async function fetchWithLockfile(spec: string, lockfile: Map<string, string>, ctx: FetchCtx): Promise<Uint8Array | null> {
     const { cache, baseUrl, knownMissing, integrityActive } = ctx;
@@ -27,18 +31,16 @@ export async function fetchWithLockfile(spec: string, lockfile: Map<string, stri
 
     let resp: Response;
     try {
-        // Specs are root-relative, the URL join clamps escapes at the origin.
-        const url = target.includes('://') ? target : new URL(target, baseUrl ?? self.location.href).toString();
-        resp = await fetch(url);
+        resp = await fetch(requestUrl(target, baseUrl));
     } catch (e) {
         // A manifest probe is opportunistic, a module that fails to fetch is worth a warning.
-        if (spec.endsWith('packages.json')) knownMissing.add(spec);
+        if (spec.endsWith('edge.json')) knownMissing.add(spec);
         else console.warn(`[edge-python] fetch failed for '${spec}':`, e);
         return null;
     }
 
     if (!resp.ok) {
-        if (resp.status === 404 && spec.endsWith('packages.json')) knownMissing.add(spec);
+        if (resp.status === 404 && spec.endsWith('edge.json')) knownMissing.add(spec);
         else console.warn(`[edge-python] ${resp.status} for '${spec}' at ${resp.url}`);
         return null;
     }

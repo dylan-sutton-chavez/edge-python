@@ -1,4 +1,4 @@
-use super::{read, read_u32, rt, stage, unstage, write, write_u32, Deferred, Exports, Native, State};
+use super::{read, read_u32, rt, stage, unstage, write, write_u32, Completion, Deferred, Exports, Native, State};
 use crate::builtins;
 use anyhow::{anyhow, Result};
 use compiler::abi::WireValue;
@@ -81,7 +81,7 @@ fn call_native(caller: &mut Caller<'_, State>, id: i32, call_id: i32, argv_ptr: 
             // The trailing kwargs slot is dropped, capabilities take positional values.
             let raw = read(caller, ex.memory, argv_ptr, (argc - 1).max(0) * 4);
             let mut args = Vec::with_capacity(raw.len() / 4);
-            for handle in raw.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])) {
+            for handle in raw.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)) {
                 match rt::decode(caller, &ex, handle) {
                     Ok(value) => args.push(value),
                     Err(e) => {
@@ -92,6 +92,9 @@ fn call_native(caller: &mut Caller<'_, State>, id: i32, call_id: i32, argv_ptr: 
             }
             if module == "actor" {
                 return send(caller, &ex, &args, out_ptr);
+            }
+            if module == "network" && matches!(name.as_str(), "ws_open" | "sse_open") {
+                return open_stream(caller, &ex, &name, &args, out_ptr);
             }
             if deferred {
                 caller.data_mut().deferred.push(Deferred { id: call_id as u32, module, name, args });
@@ -126,6 +129,29 @@ fn send(caller: &mut Caller<'_, State>, ex: &Exports, args: &[WireValue], out_pt
         }
     }
     match rt::encode(caller, ex, &WireValue::None) {
+        Ok(handle) => {
+            write_u32(caller, ex.memory, out_ptr, handle);
+            Ok(0)
+        }
+        Err(e) => {
+            throw(caller, ex, &e);
+            Ok(1)
+        }
+    }
+}
+
+/* A stream returns its handle at once, its thread then feeds events to the calling interpreter. */
+fn open_stream(caller: &mut Caller<'_, State>, ex: &Exports, name: &str, args: &[WireValue], out_ptr: i32) -> wasmtime::Result<i32> {
+    let Some((tx, token)) = caller.data().events.clone().and_then(|e| Some((e.tx, e.streams.upgrade()?))) else {
+        throw(caller, ex, &format!("network.{name} has no interpreter to deliver events to"));
+        return Ok(1);
+    };
+    let emit: builtins::network::Emit = Box::new(move |line| {
+        // The token lives as long as the stream, its count is how many streams remain open.
+        let _open = &token;
+        let _ = tx.send(Completion::Event(line));
+    });
+    match builtins::network::open(name, args, emit).and_then(|value| rt::encode(caller, ex, &value)) {
         Ok(handle) => {
             write_u32(caller, ex.memory, out_ptr, handle);
             Ok(0)

@@ -1,6 +1,8 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use crate::pack::{Bundle, Entry};
-use std::collections::BTreeMap;
+use compiler::modules::{parse_integrity, scan_imports, ImportSpec};
+use compiler::util::sha256::sha256;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -38,7 +40,7 @@ pub fn bundle(manifest_path: &Path, out: PathBuf) -> Result<()> {
     Ok(())
 }
 
-/* Reads every project .py plus its packages.json into a bundle, std resolves by name at run time. */
+/* Reads every project .py plus its edge.json into a bundle, std resolves by name at run time. */
 fn collect_bundle(manifest_path: &Path) -> Result<Bundle> {
     let project = match manifest_path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
@@ -54,7 +56,7 @@ fn collect_bundle(manifest_path: &Path) -> Result<Bundle> {
         files.push(Entry { path: rel, bytes: fs::read(s).with_context(|| format!("reading {}", s.display()))? });
     }
     if manifest_path.exists() {
-        files.push(Entry { path: "packages.json".to_string(), bytes: fs::read(manifest_path)? });
+        files.push(Entry { path: "edge.json".to_string(), bytes: fs::read(manifest_path)? });
     }
     Ok(Bundle { entry: find_entry(&scripts, &project), files })
 }
@@ -115,6 +117,9 @@ fn trailer_payload(path: &Path) -> Option<Vec<u8>> {
 // Production layout we mirror into dist/js/ and dist/.
 const JS_BASE: &str = "https://cdn.edgepython.com/js/";
 const COMPILER_WASM: &str = "https://cdn.edgepython.com/compiler.wasm";
+// Official package trees, the test hooks read them from a checkout instead.
+const BUILTINS_BASE: &str = "https://cdn.edgepython.com/js/builtins/";
+const STD_BASE: &str = "https://cdn.edgepython.com/std/";
 const JS_FILES: &[&str] = &[
     "src/index.js",
     "src/element.js",
@@ -124,6 +129,7 @@ const JS_FILES: &[&str] = &[
     "src/prefetch.js",
     "src/rt.js",
     "src/specs.js",
+    "src/util.js",
     "src/cache/idb.js",
     "src/cache/memory.js",
     "src/worker/worker.js",
@@ -135,7 +141,7 @@ const INDEX_HTML: &str = include_str!("../templates/dist.html");
 /// Pack the project as a browser dist/, vendoring the JS host, compiler and packages.
 pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
     let t0 = Instant::now();
-    let manifest = Manifest::load(manifest_path)?;
+    let mut manifest = Manifest::load(manifest_path)?;
     // `Path::parent` returns Some("") for a bare filename, so collapse that to "." explicitly.
     let project = match manifest_path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
@@ -165,16 +171,17 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
 
     let scripts = collect_scripts(&project, &out_dir);
     let sp = crate::ui::spinner("vendoring packages");
-    let (vendored_imports, vendored_system) = match vendor_packages(&manifest, &out_dir) {
+    let vendored = match vendor_packages(&manifest, &out_dir) {
         Ok(v) => v,
         Err(e) => { sp.fail("failed to vendor packages"); return Err(e); }
     };
     sp.done("vendored packages");
     let script_count = copy_scripts(&scripts, &project, &out_dir)?;
 
-    let rewritten = rewrite_manifest(&manifest, &vendored_imports, &vendored_system);
-    let pretty = serde_json::to_string_pretty(&rewritten)?;
-    fs::write(out_dir.join("packages.json"), format!("{pretty}\n"))?;
+    // Vendored paths replace their urls, every other entry and key stays as written.
+    let packages = vendored.len();
+    manifest.imports.extend(vendored);
+    manifest.save(&out_dir.join("edge.json"))?;
 
     let entry = find_entry(&scripts, &project);
     fs::write(out_dir.join("index.html"), index_html(&entry))?;
@@ -182,7 +189,7 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
     crate::ui::build_report(
         &out_dir,
         JS_FILES.len(),
-        vendored_imports.len() + vendored_system.len(),
+        packages,
         script_count,
         dir_size(&out_dir)?,
         t0.elapsed(),
@@ -243,24 +250,139 @@ fn walk(dir: &Path, out_dir: &Path, found: &mut Vec<PathBuf>) {
     }
 }
 
-/// Every url the manifest declares is fetched under dist/vendor/, relative entries are project files.
-fn vendor_packages(manifest: &Manifest, out_dir: &Path) -> Result<(BTreeMap<String, String>, BTreeMap<String, String>)> {
-    let mut imports_local = BTreeMap::new();
-    let mut system_local = BTreeMap::new();
-    for (name, url) in manifest.imports.iter().filter(|(_, url)| url.contains("://")) {
-        let bytes = fetch(url).with_context(|| format!("fetching {url}"))?;
-        // The real extension is kept, std packages are .wasm and script-only ones .py.
-        let local = format!("vendor/{name}.{}", if url.ends_with(".py") { "py" } else { "wasm" });
-        write_under(out_dir, &local, &bytes)?;
-        imports_local.insert(name.clone(), local);
+/// Every url the manifest declares lands in dist/vendor/<name>/ with the files it reaches beside it.
+fn vendor_packages(manifest: &Manifest, out_dir: &Path) -> Result<BTreeMap<String, String>> {
+    let mut local = BTreeMap::new();
+    for (name, spec) in manifest.imports.iter().filter(|(_, spec)| spec.contains("://")) {
+        let (url, pin) = parse_integrity(spec).map_err(|e| anyhow!(e))?;
+        let path = url.split('?').next().unwrap_or(url);
+        let (base, entry) = path.rsplit_once('/').ok_or_else(|| anyhow!("'{url}' names no file"))?;
+        let bytes = read_package(url)?.ok_or_else(|| anyhow!("fetching {url}: not found"))?;
+        if pin.is_some_and(|want| sha256(&bytes) != want) {
+            bail!("integrity check failed for '{url}'");
+        }
+        let dest = format!("vendor/{name}");
+        vendor_tree(base, entry, bytes, out_dir, &dest)?;
+        local.insert(name.clone(), format!("./{dest}/{entry}"));
     }
-    for (name, url) in manifest.system.iter().filter(|(_, url)| url.contains("://")) {
-        let bytes = fetch(url).with_context(|| format!("fetching {url}"))?;
-        let local = format!("vendor/{name}/index.js");
-        write_under(out_dir, &local, &bytes)?;
-        system_local.insert(name.clone(), local);
+    Ok(local)
+}
+
+/* Copies `entry` into `dest` with every file its imports reach, each kept at its relative path. */
+fn vendor_tree(base: &str, entry: &str, bytes: Vec<u8>, out_dir: &Path, dest: &str) -> Result<()> {
+    let mut queue = vec![(entry.to_string(), Some(bytes), true)];
+    let mut seen = HashSet::new();
+    while let Some((rel, bytes, required)) = queue.pop() {
+        if !seen.insert(rel.clone()) {
+            continue;
+        }
+        let url = format!("{base}/{rel}");
+        let bytes = match bytes.map_or_else(|| read_package(&url), |b| Ok(Some(b)))? {
+            Some(bytes) => bytes,
+            None if required => bail!("fetching {url}: not found"),
+            None => continue,
+        };
+        for (spec, needed) in file_deps(&rel, &bytes)? {
+            let clean = spec.split(['?', '#']).next().unwrap_or(&spec);
+            let dep = join(&rel, clean).ok_or_else(|| anyhow!("'{url}' imports '{spec}' from outside its directory, which a web build cannot vendor"))?;
+            queue.push((dep, None, needed));
+        }
+        write_under(out_dir, &format!("{dest}/{rel}"), &bytes)?;
     }
-    Ok((imports_local, system_local))
+    Ok(())
+}
+
+/* What a vendored file pulls in beside it, each flagged when the build fails without it. */
+fn file_deps(rel: &str, bytes: &[u8]) -> Result<Vec<(String, bool)>> {
+    let text = String::from_utf8_lossy(bytes);
+    let ext = Path::new(rel).extension().and_then(|e| e.to_str()).unwrap_or("");
+    Ok(match ext {
+        "js" | "mjs" => js_imports(&text).into_iter().map(|spec| (spec.to_string(), true)).collect(),
+        "json" => {
+            let manifest: serde_json::Value = serde_json::from_str(&text).with_context(|| format!("parsing {rel}"))?;
+            let imports = manifest.get("imports").and_then(|i| i.as_object()).into_iter().flatten();
+            imports
+                .filter_map(|(_, target)| target.as_str())
+                .filter(|target| !target.contains("://") && !target.starts_with('/'))
+                .map(|target| (target.to_string(), true))
+                .collect()
+        }
+        "wasm" => Vec::new(),
+        _ if bytes.starts_with(b"\0asm") => Vec::new(),
+        // Python source, its relative imports plus the manifest beside it when one is served.
+        _ => scan_imports(&text)
+            .into_iter()
+            .filter_map(|imp| match imp {
+                ImportSpec::Relative(path) => Some((path, true)),
+                _ => None,
+            })
+            .chain([("./edge.json".to_string(), false)])
+            .collect(),
+    })
+}
+
+/* Relative specifiers after `from` or `import`, the static imports and re-exports of an ES module. */
+fn js_imports(src: &str) -> Vec<&str> {
+    let mut found = Vec::new();
+    for keyword in ["from", "import"] {
+        for (at, _) in src.match_indices(keyword) {
+            if src[..at].chars().next_back().is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | '$' | '.')) {
+                continue;
+            }
+            let rest = src[at + keyword.len()..].trim_start();
+            let Some(quote) = rest.chars().next().filter(|c| matches!(c, '"' | '\'')) else { continue };
+            let Some(end) = rest[1..].find(quote) else { continue };
+            let spec = &rest[1..1 + end];
+            if spec.starts_with("./") || spec.starts_with("../") {
+                found.push(spec);
+            }
+        }
+    }
+    found
+}
+
+/* Resolves `spec` against the vendored file `from`, None when it climbs out of the package directory. */
+fn join(from: &str, spec: &str) -> Option<String> {
+    let mut parts: Vec<&str> = from.split('/').collect();
+    parts.pop();
+    for seg in spec.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            seg => parts.push(seg),
+        }
+    }
+    Some(parts.join("/"))
+}
+
+/* A package file's bytes, None when the host has no such file. */
+fn read_package(url: &str) -> Result<Option<Vec<u8>>> {
+    if let Some(path) = local_copy(url) {
+        return match fs::read(&path) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(anyhow!("reading {}: {e}", path.display())),
+        };
+    }
+    match ureq::get(url).call() {
+        Ok(mut resp) => Ok(Some(resp.body_mut().read_to_vec().map_err(|e| anyhow!("reading {url}: {e}"))?)),
+        Err(ureq::Error::StatusCode(404)) => Ok(None),
+        Err(e) => Err(anyhow!("fetching {url}: {e}")),
+    }
+}
+
+// Test hooks, EDGE_JS_DIR serves the official JavaScript libraries and EDGE_STD_DIR the std packages.
+fn local_copy(url: &str) -> Option<PathBuf> {
+    if let (Some(rest), Ok(dir)) = (url.strip_prefix(BUILTINS_BASE), std::env::var("EDGE_JS_DIR")) {
+        let (lib, file) = rest.split_once('/')?;
+        return Some(Path::new(&dir).join("builtins").join(lib).join("src").join(file));
+    }
+    if let (Some(file), Ok(dir)) = (url.strip_prefix(STD_BASE), std::env::var("EDGE_STD_DIR")) {
+        return Some(Path::new(&dir).join(file));
+    }
+    None
 }
 
 fn write_under(root: &Path, rel: &str, bytes: &[u8]) -> Result<()> {
@@ -285,20 +407,6 @@ fn copy_scripts(scripts: &[PathBuf], project: &Path, out_dir: &Path) -> Result<u
         count += 1;
     }
     Ok(count)
-}
-
-/// Overlay vendored entries on top of the user's manifest, vendored paths win.
-fn rewrite_manifest(
-    manifest: &Manifest,
-    vendored_imports: &BTreeMap<String, String>,
-    vendored_system: &BTreeMap<String, String>,
-) -> Manifest {
-    let mut out = Manifest::default();
-    for (k, v) in &manifest.imports { out.imports.insert(k.clone(), v.clone()); }
-    for (k, v) in &manifest.system { out.system.insert(k.clone(), v.clone()); }
-    for (k, v) in vendored_imports { out.imports.insert(k.clone(), v.clone()); }
-    for (k, v) in vendored_system { out.system.insert(k.clone(), v.clone()); }
-    out
 }
 
 /// Pick `main.py`/`app.py`/`index.py` if present, otherwise the first script found.

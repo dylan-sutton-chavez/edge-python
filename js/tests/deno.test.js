@@ -9,27 +9,31 @@ try {
 }
 
 // A fresh engine per test, the query string keeps the module state apart.
-async function boot(name, systems) {
+async function boot(name, builtins) {
     const engine = await import(new URL(`../src/worker/engine.ts?deno=${name}`, import.meta.url).href);
     const handlers = {};
+    const labels = {};
     const pushEvent = (m) => engine.pushEvent(m);
-    engine.setLoadSystemDelegate(async (mod) => {
-        const source = await import(new URL(`../builtins/${mod}/src/index.js`, import.meta.url).href);
-        const factory = source[mod] ?? source.default;
+    engine.setLoadSystemDelegate(async (url, label) => {
+        const source = await import(url);
+        const factory = source.default ?? source[label];
         const h = typeof factory === "function" ? factory({ pushEvent }) : factory;
-        for (const [k, v] of Object.entries(h)) handlers[`${mod}:${k}`] = v;
+        labels[url] = label;
+        for (const [k, v] of Object.entries(h)) handlers[`${url}:${k}`] = v;
         return Object.keys(h);
     });
-    engine.setHostCallDelegate(async (mod, fn, args) => {
-        const h = handlers[`${mod}:${fn}`];
-        if (!h) throw new Error(`no main-thread handler for '${mod}.${fn}'`);
+    engine.setHostCallDelegate(async (url, fn, args) => {
+        const h = handlers[`${url}:${fn}`];
+        if (!h) throw new Error(`no main-thread handler for '${labels[url]}.${fn}'`);
         try {
             return await h(...args);
         } catch (e) {
-            throw new Error(hostCallError(mod, e));
+            throw new Error(hostCallError(labels[url], e));
         }
     });
-    await engine.load({ wasmUrl: WASM.href, integrity: false, imports: {}, availableSystems: systems });
+    // Each builtin is declared the way edge.json would, by the url of its JavaScript module.
+    const imports = Object.fromEntries(builtins.map((b) => [b, new URL(`../builtins/${b}/src/index.js`, import.meta.url).href]));
+    await engine.load({ wasmUrl: WASM.href, integrity: false, imports });
     return engine;
 }
 
@@ -39,10 +43,10 @@ const baseUrl = new URL("./nomanifest/", import.meta.url).href;
 Deno.test("deno: an undeclared name fails at compile time", async () => {
     const engine = await boot("undeclared", []);
     const { out } = await engine.run({ src: "import json\nprint(1)", baseUrl });
-    if (!out.includes("module 'json' is not provided by this host and no packages.json declares it")) throw new Error(`unexpected output ${JSON.stringify(out)}`);
+    if (!out.includes("module 'json' is not provided by this host and no edge.json declares it")) throw new Error(`unexpected output ${JSON.stringify(out)}`);
 });
 
-Deno.test("deno: a declared system module answers", async () => {
+Deno.test("deno: a declared JavaScript module answers", async () => {
     const engine = await boot("time", ["time"]);
     const lines = [];
     const { out } = await engine.run({ src: "from time import tzname\nprint(tzname())", baseUrl }, (t) => lines.push(t));
@@ -54,6 +58,38 @@ Deno.test("deno: a browser module loads and names the Web API it lacks", async (
     const engine = await boot("dom", ["dom"]);
     const { out } = await engine.run({ src: "import dom\ndom.body()", baseUrl });
     if (!out.includes("module 'dom' needs 'document', missing in this runtime")) throw new Error(`unexpected output ${JSON.stringify(out)}`);
+});
+
+Deno.test("deno: a declared actor compiles and its send says it needs the CLI", async () => {
+    const engine = await boot("actor", ["actor"]);
+    const lines = [];
+    const caught = await engine.run({ src: "from actor import send\ntry:\n    send('g', 'x')\nexcept RuntimeError as e:\n    print(e)", baseUrl }, (t) => lines.push(t));
+    if (caught.out !== "" || lines.join("").trim() !== "actor.send needs the CLI") throw new Error(`unexpected ${JSON.stringify([caught.out, lines])}`);
+    const { out } = await engine.run({ src: "from actor import send\nsend('g', 'x')", baseUrl });
+    if (!out.includes("actor.send needs the CLI") || !out.includes("<input>:2:1")) throw new Error(`unexpected output ${JSON.stringify(out)}`);
+});
+
+Deno.test("deno: a leftover system section is refused", async () => {
+    const dir = await Deno.makeTempDir();
+    await Deno.writeTextFile(`${dir}/edge.json`, JSON.stringify({ system: { time: "./time.js" } }));
+    const engine = await boot("legacy", []);
+    const { out } = await engine.run({ src: "import time", baseUrl: `file://${dir}/` });
+    await Deno.remove(dir, { recursive: true });
+    if (!out.includes("edge.json at 'edge.json': move the system entries into imports")) throw new Error(`unexpected output ${JSON.stringify(out)}`);
+});
+
+Deno.test("deno: a manifest beside a module joins its relative targets once", async () => {
+    const dir = await Deno.makeTempDir();
+    await Deno.mkdir(`${dir}/pkg`);
+    await Deno.writeTextFile(`${dir}/edge.json`, JSON.stringify({ imports: { pkg: "./pkg/entry.py" } }));
+    await Deno.writeTextFile(`${dir}/pkg/edge.json`, JSON.stringify({ imports: { _impl: "./impl.py" } }));
+    await Deno.writeTextFile(`${dir}/pkg/entry.py`, "from _impl import value\n");
+    await Deno.writeTextFile(`${dir}/pkg/impl.py`, "value = 42\n");
+    const engine = await boot("facade", []);
+    const lines = [];
+    const { out } = await engine.run({ src: "from pkg import value\nprint(value)", baseUrl: `file://${dir}/` }, (t) => lines.push(t));
+    await Deno.remove(dir, { recursive: true });
+    if (out !== "" || lines.join("").trim() !== "42") throw new Error(`unexpected ${JSON.stringify([out, lines])}`);
 });
 
 Deno.test("deno: frame() names the Web API it lacks", async () => {

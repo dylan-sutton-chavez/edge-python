@@ -1,4 +1,4 @@
-/* JSON string escaping shared by devkit (std) and snapshot (no_std), control chars below 0x20 as \u00xx. */
+/* JSON string escaping for snapshot state dumps, control chars below 0x20 as \u00xx. */
 pub fn escape(out: &mut alloc::string::String, s: &str) {
     for c in s.chars() {
         match c {

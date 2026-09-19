@@ -21,6 +21,8 @@ pub enum CoroState {
     WaitingForChildren { tasks: Vec<Val>, kind: WaitKind },
     /// Next resume injects a `CancelledError` raise.
     CancelPending,
+    /// Next resume raises this error at the park point, with the user instance when one exists.
+    Raising(VmErr, Option<Val>),
     /// Returned with this Val.
     Done(Val),
     /// Raised, stored verbatim for `gather` / `with_timeout`.

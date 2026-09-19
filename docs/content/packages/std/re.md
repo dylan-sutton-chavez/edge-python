@@ -3,7 +3,7 @@ title: "re (js, cli)"
 description: "Regular expressions on a backtracking engine."
 ---
 
-`re` is regular expressions on a backtracking engine. Declare it with `edge add re` and import it by bare name. To pin a different version, point the `packages.json` entry at another URL, see [Modules](/reference/modules#packagesjson).
+`re` is regular expressions on a backtracking engine. Declare it with `edge add re` and import it by bare name. To pin a different version, point the `edge.json` entry at another URL, see [Modules](/reference/modules#edgejson).
 
 Functions are `match`, `search`, `fullmatch`, `findall`, `groups`, `span`, and `sub`, all taking `(pattern, string)`. `compile(pattern)` returns a pattern object with the same operations as methods. Flags go inline: `(?i)`, `(?s)`, `(?m)`.
 

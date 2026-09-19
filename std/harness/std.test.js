@@ -6,7 +6,7 @@ const HOST = new URL("../../js/", import.meta.url).pathname;
 const DIST = HOST + "dist/"; // tsc emit of js/src, built below
 const REPO = new URL("../../", import.meta.url).pathname;
 const CDN_HOST = "cdn.edgepython.com";
-const MANIFEST = "/_packages.json"; // synthesized, keeps the agnostic <pkg>/ folder free of test artifacts
+const MANIFEST = "/_edge.json"; // synthesized, keeps the agnostic <pkg>/ folder free of test artifacts
 const STD = ["json", "re", "math", "struct", "test"];
 
 /* Repo-root dirs with a `<name>/<name>.json` corpus are stdpkgs. `STDPKG=<name>` narrows discovery to one package, used by the matrix-fanned CI to isolate per-shard work. */
@@ -63,8 +63,8 @@ async function runPackage(pkg) {
     // Every std is declared at its CDN url, the package under test points at the local build.
     const imports = Object.fromEntries(STD.map((name) => [name, `https://${CDN_HOST}/std/${name}.${name === "test" ? "py" : "wasm"}`]));
     imports[pkg] = entry;
-    const manifest = existsSync(`${dir}/packages.json`)
-        ? readFileSync(`${dir}/packages.json`, "utf-8")
+    const manifest = existsSync(`${dir}/edge.json`)
+        ? readFileSync(`${dir}/edge.json`, "utf-8")
         : JSON.stringify({ imports });
 
     const browser = await chromium.launch();
@@ -126,7 +126,7 @@ async function runPackage(pkg) {
             await Promise.race([
                 page.evaluate(async (manifestPath) => {
                     const el = document.createElement("edge-python");
-                    el.setAttribute("packages", manifestPath);
+                    el.setAttribute("manifest", manifestPath);
                     const ready = new Promise((res) => el.addEventListener("ready", res, { once: true }));
                     document.head.appendChild(el);
                     await ready;

@@ -178,9 +178,9 @@ pub struct VM<'a> {
     /* True while this `exec` frame can unwind. */
     pub(crate) frame_safe: bool,
     pub(crate) pending_exec_safe: bool,
-    /* Cancellation drive flags set only within one `scheduler_step`, never snapshotted. */
+    /* Cancellation drive flag and the one-shot park-point raise, both live within one resume, never snapshotted. */
     pub(crate) cancelling: bool,
-    pub(crate) cancel_raise: bool,
+    pub(crate) resume_raise: Option<VmErr>,
     pub(crate) yielded: bool,
     /* Return value of the most recently exhausted iterator, read by `LoadYieldFrom` so `x = yield from it` evaluates to the subiterator's StopIteration value. */
     pub(crate) yield_from_value: Val,
@@ -241,7 +241,7 @@ impl<'a> VM<'a> {
             frame_safe: false,
             pending_exec_safe: false,
             cancelling: false,
-            cancel_raise: false,
+            resume_raise: None,
             yielded: false,
             yield_from_value: Val::none(),
             resume_ip: 0,
@@ -498,7 +498,7 @@ impl<'a> VM<'a> {
         self.executing_coros.clear();
         self.handling_exc = None;
         self.cancelling = false;
-        self.cancel_raise = false;
+        self.resume_raise = None;
         self.yielded = false;
         self.resume_ip = 0;
         self.depth = 0;

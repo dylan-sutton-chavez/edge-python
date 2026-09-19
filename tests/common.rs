@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use compiler::packages::{
+use compiler::modules::{
     NativeBinding, Resolved, Resolver, partition_bindings,
     Manifest, walk_up_dirs, dir_of, join_relative,
 };
@@ -119,7 +119,7 @@ impl TestResolver {
                 return Ok(dir);
             }
         }
-        Err(format!("no packages.json above '{}' to resolve '{}'", self.dir, spec))
+        Err(format!("no edge.json above '{}' to resolve '{}'", self.dir, spec))
     }
 
     /* Walk up from `start_dir` for the nearest manifest declaring `name`. `extends` chains with cycle detection. */
@@ -128,7 +128,7 @@ impl TestResolver {
         let mut search_dir = start_dir.to_string();
         let mut hops = 0u32;
         loop {
-            if hops > 32 { return Err(format!("packages.json walk-up exceeded 32 hops resolving '{}'", name)); }
+            if hops > 32 { return Err(format!("edge.json walk-up exceeded 32 hops resolving '{}'", name)); }
             hops += 1;
             let mut hit: Option<(String, Option<String>, Option<String>)> = None;
             for dir in walk_up_dirs(&search_dir) {
@@ -143,23 +143,23 @@ impl TestResolver {
             }
             let Some((dir, target, ext)) = hit else {
                 return Err(format!(
-                    "module '{}' is not provided by this host and no packages.json declares it", name));
+                    "module '{}' is not provided by this host and no edge.json declares it", name));
             };
             if let Some(target) = target {
                 let canonical = join_relative(&dir, &target);
                 return self.resolve_canonical(&canonical);
             }
             if let Some(ext) = ext {
-                let m_spec = format!("{}packages.json", dir);
+                let m_spec = format!("{}edge.json", dir);
                 if !visited.insert(m_spec) {
-                    return Err("circular extends chain in packages.json".to_string());
+                    return Err("circular extends chain in edge.json".to_string());
                 }
                 let mut next = join_relative(&dir, &ext);
                 if !next.ends_with('/') { next.push('/'); }
                 search_dir = next;
                 continue;
             }
-            return Err(format!("module '{}' is not provided by this host and no packages.json declares it", name));
+            return Err(format!("module '{}' is not provided by this host and no edge.json declares it", name));
         }
     }
 

@@ -5,7 +5,7 @@ extern crate alloc;
 use alloc::{boxed::Box, format, string::{String, ToString}, sync::Arc, vec::Vec};
 
 use compiler::lexer::{lex, TokenType};
-use compiler::packages::{NativeBinding, Resolved, Resolver};
+use compiler::modules::{NativeBinding, Resolved, Resolver};
 use compiler::parser::{Diagnostic, Parser, SSAChunk};
 use compiler::value::{HeapObj, HeapPool, Val, VmErr};
 use compiler::vm::VM;

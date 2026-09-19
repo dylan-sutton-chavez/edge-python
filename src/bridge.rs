@@ -18,7 +18,7 @@ pub(crate) struct BridgeState {
 }
 
 impl BridgeState {
-    const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         BridgeState { handles: HandleTable::new(), error_stash: ErrorStash::new(), current_vm: None }
     }
 }

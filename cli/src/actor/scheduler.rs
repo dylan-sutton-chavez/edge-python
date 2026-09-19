@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -7,7 +8,7 @@ use slab::Slab;
 
 use compiler::vm::Limits;
 
-use crate::host::{now_ns, Host, Project, Runtime};
+use crate::host::{now_ns, Host, Instance, Project, Runtime, Vm};
 
 use super::actor::{sink_for, Actor, Context, Step};
 use super::config::{ActorConfig, Group, Message};
@@ -15,12 +16,15 @@ use super::pool::Router;
 
 // How long an idle scheduler naps before re-checking sleeping and blocked actors.
 const NAP: Duration = Duration::from_millis(2);
+// Actors per compiler instance, a 4 GiB memory holds this many interpreters with room to spare.
+const SLOTS_PER_INSTANCE: usize = 4096;
 
-// A group ready to boot actors from, every replica compiles the shared source itself.
+// A group ready to boot actors from, its replicas share compiler instances and the parsed source.
 struct GroupState {
+    name: String,
     ctx: Context,
     dir: String,
-    packages: Option<String>,
+    manifest: Option<String>,
     retry: usize,
     // Actor ceiling, actors spawn lazily up to this instead of all at boot.
     max: usize,
@@ -33,8 +37,10 @@ struct GroupState {
     ready: VecDeque<usize>,
     // Keys parked in receive(), popped first when a message needs an actor.
     idle_free: Vec<usize>,
-    // Keys parked on a timer or a host call, re-checked each tick.
+    // Keys parked on a timer, a host call or an open stream, re-checked each tick.
     waiting: Vec<usize>,
+    // Compiler instances hosting the group's actors as slots.
+    instances: Vec<Rc<RefCell<Instance>>>,
 }
 
 // The single-threaded cooperative loop, one instance owns every actor in the shard.
@@ -222,9 +228,11 @@ impl Scheduler {
         let g = &mut self.groups[gi];
         match step {
             Step::Failed(tb, msg) => {
-                g.actors.remove(key);
+                let leftover = g.actors.remove(key).leftover();
+                self.pending.extend(leftover);
                 self.crashes.push(tb);
                 self.handle_crash(gi, msg);
+                self.crash_trapped(gi);
             }
             Step::Sleeping(deadline) => {
                 g.actors[key].wake_at = Some(deadline);
@@ -232,10 +240,34 @@ impl Scheduler {
             }
             Step::Blocked => g.waiting.push(key),
             _ if g.actors[key].done => {
-                g.actors.remove(key);
+                // Messages queued behind the finished run go back out for another actor.
+                let leftover = g.actors.remove(key).leftover();
+                self.pending.extend(leftover);
             }
-            _ if g.actors[key].idle => g.idle_free.push(key),
+            _ if g.actors[key].idle => {
+                // An open stream can still wake the actor, so it is polled like a blocked one.
+                if g.actors[key].streams() > 0 {
+                    g.waiting.push(key);
+                }
+                g.idle_free.push(key);
+            }
             _ => g.ready.push_back(key),
+        }
+    }
+
+    // A trap poisons its whole instance, the actors living there crash and their queues move on.
+    fn crash_trapped(&mut self, gi: usize) {
+        let g = &mut self.groups[gi];
+        if !g.instances.iter().any(|i| i.borrow().poisoned()) {
+            return;
+        }
+        g.instances.retain(|i| !i.borrow().poisoned());
+        let doomed: Vec<usize> = g.actors.iter().filter(|(_, a)| a.trapped()).map(|(k, _)| k).collect();
+        for key in doomed {
+            let (in_flight, leftover) = self.groups[gi].actors.remove(key).into_messages();
+            self.pending.extend(leftover);
+            self.crashes.push(format!("error: group '{}' lost an actor, its interpreter instance trapped", self.groups[gi].name));
+            self.handle_crash(gi, in_flight);
         }
     }
 
@@ -268,10 +300,13 @@ impl Scheduler {
 
 impl GroupState {
     fn boot(g: Group, max_actors: usize, host: Rc<Host>) -> Self {
+        // Eval snippets that bring no edge.json resolve through the group's own.
+        let manifest = g.manifest.clone().unwrap_or_else(|| format!("{}edge.json", g.dir));
         GroupState {
-            ctx: Context { host, source: Rc::new(g.source), out: g.out },
+            name: g.name,
+            ctx: Context { host, source: Rc::new(g.source), out: g.out, manifest },
             dir: g.dir,
-            packages: g.packages,
+            manifest: g.manifest,
             retry: g.retry,
             max: g.replicas.min(max_actors),
             limits: g.limits,
@@ -281,16 +316,16 @@ impl GroupState {
             ready: VecDeque::new(),
             idle_free: Vec::new(),
             waiting: Vec::new(),
+            instances: Vec::new(),
         }
     }
 
-    /* Boots a fresh actor with its own interpreter unless it evals, None when no slot is left. */
+    /* Boots a fresh actor, an interpreter slot unless the group evals each message apart. */
     fn spawn(&mut self) -> Option<usize> {
         let actor = if self.eval {
             Actor::eval(self.limits, self.preempt)
         } else {
-            let project = Project::disk(&self.dir, self.packages.as_deref());
-            let mut vm = self.ctx.host.vm(sink_for(&self.ctx.out), project, None, None).ok()?;
+            let mut vm = self.slot().ok()?;
             vm.set_preempt_interval(self.preempt).ok()?;
             vm.set_limits(&self.limits).ok()?;
             Actor::fixed(vm)
@@ -298,6 +333,19 @@ impl GroupState {
         let key = self.actors.insert(actor);
         self.ready.push_back(key);
         Some(key)
+    }
+
+    /* A slot in an instance with room, a new instance registers the group's modules on first boot. */
+    fn slot(&mut self) -> anyhow::Result<Vm> {
+        self.instances.retain(|i| !i.borrow().poisoned());
+        if let Some(inst) = self.instances.iter().find(|i| i.borrow().slots() < SLOTS_PER_INSTANCE) {
+            return Instance::slot(inst);
+        }
+        let project = Project::disk(&self.dir, self.manifest.as_deref());
+        let inst = self.ctx.host.instance(sink_for(&self.ctx.out), project, None, None)?;
+        let vm = Instance::slot(&inst)?;
+        self.instances.push(inst);
+        Ok(vm)
     }
 
     /* Picks an idle actor, else a fresh spawn under the ceiling, else the least-loaded live one. */
@@ -315,7 +363,7 @@ impl GroupState {
         self.actors.iter().filter(|(_, n)| !n.done).min_by_key(|(_, n)| n.mailbox.len()).map(|(k, _)| k)
     }
 
-    // Moves sleepers past their deadline and actors whose host calls answered back to ready.
+    // Moves sleepers past their deadline and actors whose host calls or streams answered back to ready.
     fn wake(&mut self, now: u64) {
         let waiting = core::mem::take(&mut self.waiting);
         for key in waiting {
@@ -328,7 +376,8 @@ impl GroupState {
                 actor.wake_at = None;
                 actor.runnable = true;
                 self.ready.push_back(key);
-            } else {
+            } else if !(actor.idle && actor.streams() == 0) {
+                // An idle actor whose streams closed waits on its mailbox alone.
                 self.waiting.push(key);
             }
         }

@@ -63,16 +63,16 @@ struct LimitSpec {
     preempt: Option<usize>,
 }
 
-// Loads actor.yml, boots the described pool, `packages` overrides every group's manifest walk-up.
-pub fn run(path: &Path, packages: Option<&Path>) -> Result<()> {
+// Loads actor.yml, boots the described pool, `manifest_path` overrides every group's manifest walk-up.
+pub fn run(path: &Path, manifest_path: Option<&Path>) -> Result<()> {
     let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let manifest: Manifest = serde_yaml_ng::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
     let mut dir = path.parent().and_then(|p| p.to_str()).unwrap_or(".").replace('\\', "/");
-    // The manifest walk-up probes `{dir}packages.json`, so a named directory needs its slash.
+    // The manifest walk-up probes `{dir}edge.json`, so a named directory needs its slash.
     if !dir.is_empty() && !dir.ends_with('/') {
         dir.push('/');
     }
-    let packages = packages.map(|p| p.to_string_lossy().replace('\\', "/"));
+    let manifest_path = manifest_path.map(|p| p.to_string_lossy().replace('\\', "/"));
 
     let mut groups = Vec::new();
     for (name, spec) in manifest.groups {
@@ -94,7 +94,7 @@ pub fn run(path: &Path, packages: Option<&Path>) -> Result<()> {
             name,
             source,
             dir: group_dir,
-            packages: packages.clone(),
+            manifest: manifest_path.clone(),
             replicas: spec.replicas.unwrap_or(1),
             eval: spec.eval,
             retry: spec.retry,
@@ -146,7 +146,7 @@ fn load_run(dir: &str, run: &str) -> Result<(String, String)> {
     if path.is_dir() {
         let entry = path.join("main.py");
         let source = std::fs::read_to_string(&entry).with_context(|| format!("reading {}", entry.display()))?;
-        // The resolver walks up from `{base}packages.json`, so a directory base needs a trailing slash.
+        // The resolver walks up from `{base}edge.json`, so a directory base needs a trailing slash.
         let mut base = path.to_string_lossy().replace('\\', "/");
         if !base.ends_with('/') { base.push('/'); }
         return Ok((source, base));

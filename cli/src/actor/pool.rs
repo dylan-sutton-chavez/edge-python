@@ -8,9 +8,6 @@ use crate::host::Runtime;
 use super::config::{ActorConfig, Message};
 use super::scheduler::Scheduler;
 
-// Interpreter slots the pooling allocator reserves, past it messages queue on live actors.
-const MAX_SLOTS: usize = 2048;
-
 // Shared termination state, the pool ends when every shard is idle with nothing in flight.
 pub struct Barrier {
     // Messages routed to a shard but not yet consumed.
@@ -82,11 +79,9 @@ impl Barrier {
     }
 }
 
-/* One engine for the whole pool, sized from the ceilings, ticking when untrusted groups need deadlines. */
+/* One engine for the whole pool, ticking when untrusted groups need deadlines. */
 pub fn runtime(config: &ActorConfig) -> Result<Arc<Runtime>, String> {
-    let wanted: usize = config.groups.iter().map(|g| g.replicas.min(config.max_actors)).fold(0, |a, b| a.saturating_add(b));
-    let slots = wanted.clamp(8, MAX_SLOTS) as u32;
-    let runtime = Runtime::new(Some(slots)).map_err(|e| e.to_string())?;
+    let runtime = Runtime::new().map_err(|e| e.to_string())?;
     if config.groups.iter().any(|g| g.eval) {
         runtime.start_ticker();
     }

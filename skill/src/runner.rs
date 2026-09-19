@@ -52,9 +52,7 @@ pub const MANIFEST: &str = r#"{
     "math": "https://cdn.edgepython.com/std/math.wasm",
     "struct": "https://cdn.edgepython.com/std/struct.wasm",
     "test": "https://cdn.edgepython.com/std/test.py",
-    "dom": "https://cdn.edgepython.com/js/builtins/dom/entry.py"
-  },
-  "system": {
+    "dom": "https://cdn.edgepython.com/js/builtins/dom/entry.py",
     "storage": "https://cdn.edgepython.com/js/builtins/storage/index.js",
     "network": "https://cdn.edgepython.com/js/builtins/network/index.js",
     "time": "https://cdn.edgepython.com/js/builtins/time/index.js",
@@ -69,14 +67,14 @@ fn scratch() -> Result<std::path::PathBuf, String> {
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let dir = std::env::temp_dir().join(format!("skill-cell-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
     std::fs::create_dir_all(&dir).map_err(|e| format!("tempdir failed: {e}"))?;
-    std::fs::write(dir.join("packages.json"), MANIFEST).map_err(|e| format!("write packages.json failed: {e}"))?;
+    std::fs::write(dir.join("edge.json"), MANIFEST).map_err(|e| format!("write edge.json failed: {e}"))?;
     Ok(dir)
 }
 
 pub fn run_script(edge: &str, src: &str, timeout: Duration) -> Result<Outcome, String> {
     let dir = scratch()?;
     let mut cmd = Command::new(edge);
-    cmd.arg("run").arg("--packages").arg(dir.join("packages.json"));
+    cmd.arg("run").arg("--manifest").arg(dir.join("edge.json"));
     let outcome = spawn(cmd, src, timeout);
     let _ = std::fs::remove_dir_all(&dir);
     outcome

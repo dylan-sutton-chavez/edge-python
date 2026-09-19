@@ -1,6 +1,8 @@
+use crate::bridge::BridgeState;
 use crate::vm::{Limits, VM};
-use crate::packages::Manifest;
-use alloc::{boxed::Box, string::String, vec::Vec};
+use crate::modules::Manifest;
+use crate::parser::SSAChunk;
+use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 
 // Wires parser and VM to the host via the handle ABI, the wire contract lives in `crate::abi`.
 mod exports;
@@ -41,7 +43,8 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     core::arch::wasm32::unreachable()
 }
 
-pub(super) const SZ: usize = 1 << 20;
+// Parsed entry programs kept for slots that boot the same source.
+const CHUNK_CACHE: usize = 8;
 
 pub(super) enum ModuleEntry {
     Code(String),
@@ -56,49 +59,93 @@ pub(super) struct PausedRun {
     pub last_yield_deadline_ns: u64,
 }
 
-/* Mutable WASM-host state behind `with_runtime`, handles, stash and live-VM pointer live in `crate::bridge`. */
-pub(super) struct WasmRuntime {
-    pub src: [u8; SZ],
-    pub out: [u8; SZ],
-    pub inp: [u8; SZ],
-    pub inp_len: usize,
-    pub registry: Vec<(String, ModuleEntry)>,
-    pub manifests: Vec<(String, Manifest)>,
-    /* Entry dir rooting the source's quoted imports. */
-    pub entry_dir: String,
-    /* Last `save_state` blob, read via `snapshot_ptr`. */
-    pub snapshot: Vec<u8>,
+/* One interpreter the host drives, the exports act on the selected slot. */
+pub(super) struct Slot {
     /* Owned across `run_start` / `run_resume`, mutually exclusive with the bridge's `current_vm`. */
     pub paused_run: Option<Box<PausedRun>>,
     /* REPL, the interpreter kept alive between `repl_eval` inputs. */
     pub repl_vm: Option<Box<VM<'static>>>,
     pub repl_mode: bool,
+    /* Host-fed stdin for the next boot, one `input()` call per line. */
+    pub input: Vec<u8>,
     /* Back-edges between preempt yields, 0 disables. */
     pub preempt_every: usize,
     /* Caps for the next boot, the sandbox profile until the host sets its own. */
     pub limits: Option<Limits>,
     /* Entry frame name in tracebacks, empty renders the anonymous marker. */
     pub source_name: String,
+    /* Entry dir rooting the source's quoted imports. */
+    pub entry_dir: String,
+    /* Chunks the VMs above borrow, declared after them so a dropped slot frees the VMs first. */
+    pub chunks: Vec<Rc<SSAChunk>>,
+    /* Handles, stash and live VM pointer parked here while another slot is selected. */
+    pub bridge: BridgeState,
+}
+
+impl Slot {
+    fn new() -> Self {
+        Slot {
+            paused_run: None,
+            repl_vm: None,
+            repl_mode: false,
+            input: Vec::new(),
+            preempt_every: 0,
+            limits: None,
+            source_name: String::new(),
+            entry_dir: String::new(),
+            chunks: Vec::new(),
+            bridge: BridgeState::new(),
+        }
+    }
+
+    /* Drops the run and REPL interpreters, then the chunks they borrowed. */
+    pub fn clear_run(&mut self) {
+        self.paused_run = None;
+        self.repl_vm = None;
+        self.repl_mode = false;
+        self.chunks.clear();
+    }
+}
+
+/* Mutable WASM-host state behind `with_runtime`, handles and the stash live in `crate::bridge`. */
+pub(super) struct WasmRuntime {
+    /* Last result text or snapshot, read through `out_ptr` / `out_len` before the next call. */
+    pub out: Vec<u8>,
+    pub registry: Vec<(String, ModuleEntry)>,
+    pub manifests: Vec<(String, Manifest)>,
+    /* Specs the host refuses, importing one fails at the import with its message. */
+    pub refusals: Vec<(String, String)>,
+    /* Entry chunks with the entry dir they were parsed under, most recent last. */
+    pub chunk_cache: Vec<(String, Rc<SSAChunk>)>,
+    pub slots: Vec<Option<Slot>>,
+    pub current: usize,
 }
 
 impl WasmRuntime {
     const fn new() -> Self {
         Self {
-            src: [0; SZ],
-            out: [0; SZ],
-            inp: [0; SZ],
-            inp_len: 0,
+            out: Vec::new(),
             registry: Vec::new(),
             manifests: Vec::new(),
-            entry_dir: String::new(),
-            snapshot: Vec::new(),
-            paused_run: None,
-            repl_vm: None,
-            repl_mode: false,
-            preempt_every: 0,
-            limits: None,
-            source_name: String::new(),
+            refusals: Vec::new(),
+            chunk_cache: Vec::new(),
+            slots: Vec::new(),
+            current: 0,
         }
+    }
+
+    /* The selected slot, slot 0 exists from the first call so a single-VM host never selects. */
+    pub fn slot(&mut self) -> &mut Slot {
+        if self.slots.is_empty() {
+            self.slots.push(Some(Slot::new()));
+        }
+        let current = self.current;
+        self.slots[current].get_or_insert_with(Slot::new)
+    }
+
+    /* Any registration can change what a source compiles to, so parsed chunks go stale. */
+    pub fn registry_changed(&mut self) {
+        self.chunk_cache.clear();
     }
 }
 
@@ -109,9 +156,17 @@ pub(super) fn with_runtime<R>(f: impl FnOnce(&mut WasmRuntime) -> R) -> R {
     unsafe { f(&mut *core::ptr::addr_of_mut!(RUNTIME)) }
 }
 
-pub(super) unsafe fn write_out(s: &str) -> usize {
-    let b = s.as_bytes();
-    let n = b.len().min(SZ);
-    with_runtime(|rt| rt.out[..n].copy_from_slice(&b[..n]));
-    n
+pub(super) fn with_slot<R>(f: impl FnOnce(&mut Slot) -> R) -> R {
+    with_runtime(|rt| f(rt.slot()))
+}
+
+pub(super) fn write_out(s: &str) -> usize {
+    write_out_bytes(s.as_bytes().to_vec())
+}
+
+pub(super) fn write_out_bytes(b: Vec<u8>) -> usize {
+    with_runtime(|rt| {
+        rt.out = b;
+        rt.out.len()
+    })
 }

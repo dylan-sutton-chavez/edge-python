@@ -17,12 +17,12 @@ inputs:
 runs:
   using: composite
   steps:
-    # cli/build.rs embeds this run's compiler.wasm and std packages, never the CDN copies.
+    # cli/build.rs embeds this run's speed build of compiler.wasm and std packages, never the CDN copies.
     - name: Download compiler wasm
       uses: actions/download-artifact@v8
       with:
-        name: compiler_wasm
-        path: target/wasm32-unknown-unknown/release/
+        name: compiler_wasm_cli
+        path: compiler_cli/
 
     - name: Download std packages
       uses: actions/download-artifact@v8
@@ -35,7 +35,7 @@ runs:
     - name: Point the build script at the artifacts
       shell: bash
       run: |
-        echo "EDGE_COMPILER_WASM=$GITHUB_WORKSPACE/target/wasm32-unknown-unknown/release/compiler.wasm" >> "$GITHUB_ENV"
+        echo "EDGE_COMPILER_WASM=$GITHUB_WORKSPACE/compiler_cli/compiler-cli.wasm" >> "$GITHUB_ENV"
         echo "EDGE_STD_DIR=$GITHUB_WORKSPACE/std_local" >> "$GITHUB_ENV"
 
     - name: Toolchain (lint)
@@ -102,7 +102,7 @@ runs:
 
     - name: Upload release artifact
       if: inputs.mode == 'release'
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: edge-${{ inputs.target }}
         path: cli/edge-${{ inputs.target }}.tar.gz
@@ -111,12 +111,20 @@ runs:
     - name: Toolchain (test)
       if: inputs.mode == 'test'
       uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
 
     - name: Cache Rust (test)
       if: inputs.mode == 'test'
       uses: Swatinem/rust-cache@v2
       with:
         workspaces: cli -> cli/target
+
+    # The plugin suite in plugins.json loads this pdk/example build from the root target dir.
+    - name: Build the plugin fixture
+      if: inputs.mode == 'test' && (inputs.suite == 'engine' || inputs.suite == '')
+      shell: bash
+      run: cargo build --release --target wasm32-unknown-unknown -p slugify-mod
 
     # engine runs cli and run minus the network corpus, network runs that corpus, actors and skill theirs.
     - name: Test

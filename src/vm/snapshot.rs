@@ -258,6 +258,7 @@ codec!(enum CoroState, put_coro_state, get_coro_state {
     7 Done(v: val),
     8 Errored(e: (put_vm_err, get_vm_err)),
     9 Cancelled,
+    10 Raising(e: (put_vm_err, get_vm_err), exc: opt_val),
 });
 
 codec!(struct CoroutineHandle, put_handle, get_handle {
@@ -778,6 +779,7 @@ pub fn inspect_stack(vm: &VM) -> String {
             CoroState::Done(_) => "done",
             CoroState::Errored(_) => "errored",
             CoroState::Cancelled => "cancelled",
+            CoroState::Raising(..) => "raising",
         };
         out.push_str("{\"state\":\"");
         out.push_str(state);

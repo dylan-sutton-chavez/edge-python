@@ -3,7 +3,7 @@ use crate::s;
 use super::Parser;
 use super::types::{Diagnostic, ImportEntry, ImportKind, NativeClassEntry, OpCode, SSAChunk, parse_string, ssa_strip};
 use crate::lexer::{Token, TokenType, lex};
-use crate::packages::{Resolved, binding_to_extern};
+use crate::modules::{Resolved, binding_to_extern};
 use crate::util::hash::FxHashSet;
 
 use alloc::{string::{String, ToString}, vec::Vec};
@@ -54,7 +54,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.resolve_and_bind_named(&spec, spec_span, names);
     }
 
-    /* Reads a dotted module spec, leading dots anchor at the importer dir, a dotted name at the nearest packages.json dir, a plain name stays bare. Returns (resolver spec, default alias, span). */
+    /* Reads a module spec, leading dots importer-relative, dotted names root-relative, else bare, returning spec, alias, span. */
     fn read_module_spec(&mut self) -> Option<(String, String, (usize, usize))> {
         let first = self.advance();
         let first_start = first.start;
@@ -179,7 +179,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     }
 
     /* Build a Native ImportKind from resolved bindings/classes/consts. */
-    fn native_import_kind(bindings: &[crate::packages::NativeBinding], classes: &[crate::packages::NativeClass], consts: &[crate::packages::NativeBinding]) -> ImportKind {
+    fn native_import_kind(bindings: &[crate::modules::NativeBinding], classes: &[crate::modules::NativeClass], consts: &[crate::modules::NativeBinding]) -> ImportKind {
         ImportKind::Native {
             funcs: bindings.iter().map(binding_to_extern).collect(),
             classes: classes.iter().map(|c| NativeClassEntry {

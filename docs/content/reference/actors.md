@@ -3,7 +3,7 @@ title: "Actors"
 description: "Run many isolated edge-python programs as cooperative tasks over a few threads."
 ---
 
-An actor pool runs many edge-python programs as cooperative tasks multiplexed over a few threads, not one OS thread per program. Each actor is its own interpreter in its own wasm instance, they share nothing and talk only by message. It serves two shapes of work. You orchestrate your own programs as a pipeline of cooperating groups, or you run untrusted code from clients, each in its own sandbox. Both run from an `actor.yml`.
+An actor pool runs many edge-python programs as cooperative tasks multiplexed over a few threads, not one OS thread per program. Each actor is its own interpreter with its own heap, they share nothing and talk only by message. It serves two shapes of work. You orchestrate your own programs as a pipeline of cooperating groups, or you run untrusted code from clients, each in its own sandbox. Both run from an `actor.yml`.
 
 ```bash
 edge actor actor.yml
@@ -27,11 +27,11 @@ groups:
     eval: true         # compile each message as its own program
 ```
 
-`code:` is an inline body. `run:` points at a script or a project directory, and a directory runs its `main.py` and resolves that project's `packages.json` and nested imports. `eval: true` is untrusted mode, covered below.
+`code:` is an inline body. `run:` points at a script or a project directory, and a directory runs its `main.py` and resolves that project's `edge.json` and nested imports. `eval: true` is untrusted mode, covered below.
 
 ## Actors and load
 
-`replicas:` is a ceiling, not a count. Actors are born on demand up to it and an idle actor costs a few KB, so a group declares a large ceiling and pays only for the actors actually running. A message is handed to an idle actor first, then to a fresh one under the ceiling, then to the least-loaded live actor once the group is saturated.
+`replicas:` is a ceiling, not a count. Actors are born on demand up to it and an idle actor costs about 31 KB, so a group declares a large ceiling and pays only for the actors actually running. A message is handed to an idle actor first, then to a fresh one under the ceiling, then to the least-loaded live actor once the group is saturated.
 
 ```yaml
 groups:
@@ -51,7 +51,7 @@ msg = receive()
 send("transform", msg + "-done")   # hand it to the transform group
 ```
 
-Like every module, `actor` must be declared. Groups resolve their imports through the `packages.json` beside `actor.yml`, or the manifest `--packages` names, so `edge add actor` there is the first step of any pool that sends. A group's `seed:` list delivers messages before the pool starts, the entry point that kicks a run off.
+Like every module, `actor` must be declared. Groups resolve their imports through the `edge.json` beside `actor.yml`, or the one `--manifest` names, so `edge add actor` there is the first step of any pool that sends. A group's `seed:` list delivers messages before the pool starts, the entry point that kicks a run off.
 
 ## Group fields
 
@@ -104,7 +104,7 @@ $ curl localhost:9090/stats
 
 ## Failure
 
-An actor that raises is retired with its traceback. `retry:` re-delivers the message it was processing to another actor up to that many times, then drops it to the dead count so one poison message cannot take a group down.
+An actor that raises is retired with its traceback. `retry:` re-delivers the message it was processing to another actor up to that many times, then drops it to the dead count so one poison message cannot take a group down. A group's actors share a few wasm instances, so a fault in the engine itself retires every actor of the instance it hit the same way, and their queued messages move on to other actors.
 
 ```yaml
 groups:
@@ -115,7 +115,7 @@ groups:
 
 ## Untrusted code
 
-An `eval` group runs code it does not trust. Each incoming message is compiled and run in a fresh wasm instance with its own linear memory, capped by the group's `heap` limit inside the interpreter and by a 256 MiB reservation outside it, and cut off after ten seconds of CPU by a deadline the host enforces from outside the instance, so a runaway loop or a long native operation ends even where the interpreter cannot yield. Nothing survives between messages, the instance is dropped when the run ends. A snippet imports nothing at all, and a bundle imports only what its own `packages.json` declares, never `actor` or `network`, so untrusted code cannot send to other groups, reach the network, or load modules from disk. It works the same on Linux, macOS, and Windows.
+An `eval` group runs code it does not trust. Each incoming message is compiled and run in a fresh wasm instance with its own linear memory, capped by the group's `heap` limit inside the interpreter and by a 256 MiB reservation outside it, and cut off after ten seconds of wall-clock time by a deadline the host enforces from outside the instance, so a runaway loop or a long native operation ends even where the interpreter cannot yield. Nothing survives between messages, the instance is dropped when the run ends. A bundle that carries its own `edge.json` resolves through it, any other message through the pool's manifest, and either way `actor`, `network`, and `.wasm` plugins are refused, so untrusted code cannot send to other groups, reach the network, or load modules from disk.
 
 A `code` or `run` group runs code you trust. It keeps state between messages, can send, and can reach `network`, with the metered limits as the only cap, so keep third-party code out of it and reach for `eval` instead.
 
@@ -138,10 +138,10 @@ A run that raises answers `{"ok":false,"error":...}` with its traceback, and the
 
 ## A three-stage pipeline
 
-A seed flows through three groups, each stage sending to the next. The `packages.json` beside the manifest declares `actor` for the two stages that send.
+A seed flows through three groups, each stage sending to the next. The `edge.json` beside the manifest declares `actor` for the two stages that send.
 
 ```json
-{ "system": { "actor": "https://cdn.edgepython.com/js/builtins/actor/index.js" } }
+{ "imports": { "actor": "https://cdn.edgepython.com/js/builtins/actor/index.js" } }
 ```
 
 ```yaml

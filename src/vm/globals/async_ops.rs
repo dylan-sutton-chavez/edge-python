@@ -44,6 +44,7 @@ impl<'a> VM<'a> {
         let saved_stack_len = self.stack.len();
         let saved_iter_len = self.iter_stack.len();
         let saved_exc_len = self.exception_stack.len();
+        let saved_call_len = self.call_stack.len();
         self.stack.extend_from_slice(&outer_stack);
         self.iter_stack.extend(outer_iters);
         // Denormalize, stored depths are relative to the coro's saved stack/iter, lift them to absolute positions in the live VM stacks.
@@ -81,7 +82,32 @@ impl<'a> VM<'a> {
                 self.pending_exec_safe = resume_safe;
                 let (_, body, _, _) = self.functions[fi];
                 match self.exec_from(body, &mut slots, ip) {
-                    Err(e) => break 'drive Err(e),
+                    Err(e @ VmErr::HostYield(_)) => break 'drive Err(e),
+                    // An escaping error re-raises at the caller's call site, so its handlers and the traceback note follow.
+                    Err(e) => {
+                        self.stack.truncate(frame_stack_base);
+                        self.iter_stack.truncate(frame_iter_base);
+                        self.exception_stack.truncate(frame_exc_base);
+                        let (caller, resume_at): (&SSAChunk, usize) = match sync_frames.last() {
+                            Some(f) => (&self.functions[f.fi].1, f.ip),
+                            None => match outer_body {
+                                BodyRef::Fn(ofi) => (&self.functions[ofi].1, outer_ip),
+                                BodyRef::Module => (self.chunk, outer_ip),
+                            },
+                        };
+                        let call_ip = resume_at.saturating_sub(1) as u32;
+                        let frame = CallFrame {
+                            fi,
+                            call_byte_pos: caller.resolve_call(call_ip).or_else(|| caller.resolve(call_ip)).unwrap_or(0),
+                            caller_source: caller.source.clone(),
+                            caller_path: caller.path.clone(),
+                            current_class: None,
+                            current_self: None,
+                            cells: Vec::new(),
+                        };
+                        self.call_stack.insert(saved_call_len.min(self.call_stack.len()), frame);
+                        self.resume_raise = Some(e);
+                    }
                     Ok(val) if self.yielded => {
                         let new_stack = if self.stack.len() > frame_stack_base { self.stack.split_off(frame_stack_base) } else { Vec::new() };
                         let new_iter: Vec<IterFrame> = if self.iter_stack.len() > frame_iter_base { self.iter_stack.drain(frame_iter_base..).collect() } else { Vec::new() };
@@ -129,7 +155,17 @@ impl<'a> VM<'a> {
 
         self.depth -= 1;
         self.executing_coros.retain(|&id| id != callee.0);
-        let result = result?;
+        let result = match result {
+            Ok(v) => v,
+            Err(e) => {
+                self.stack.truncate(saved_stack_len.min(self.stack.len()));
+                self.iter_stack.truncate(saved_iter_len.min(self.iter_stack.len()));
+                self.exception_stack.truncate(saved_exc_len.min(self.exception_stack.len()));
+                self.resume_raise = None;
+                self.resume_ip = saved_resume_ip;
+                return Err(e);
+            }
+        };
 
         if self.yielded {
             let resume_ip = if outer_ran { self.resume_ip } else { outer_ip };
@@ -255,13 +291,13 @@ impl<'a> VM<'a> {
         }
     }
 
-    // Finalize outer's state based on WaitKind and the (now-terminal) tasks. For Run / Gather / Timeout the placeholder is replaced, on error, raise it into the outer (popping a try-frame and jumping to the handler) or transition Errored if no handler is active.
+    // Settles the outer coro from its finished tasks, a task error raises at the outer's park point.
     fn compute_wake_outcome(&mut self, outer: Val, tasks: &[Val], kind: &WaitKind) -> CoroState {
         match kind {
             WaitKind::Run(target) => {
                 let outcome = self.scheduler.iter().find(|h| h.coro == *target).map(|h| h.state.clone());
                 match outcome {
-                    Some(CoroState::Errored(e)) => self.raise_into_outer(outer, e),
+                    Some(CoroState::Errored(e)) => CoroState::Raising(e, self.pending.exc_val.take()),
                     Some(CoroState::Done(v)) => {
                         self.splice_outer_placeholder(outer, v);
                         CoroState::Ready
@@ -288,23 +324,23 @@ impl<'a> VM<'a> {
                 if let Some(e) = first_err {
                     // pending.exc_val may hold a later child's instance, force a rebuild from the first-in-order error.
                     self.pending.exc_val = None;
-                    return self.raise_into_outer(outer, e);
+                    return CoroState::Raising(e, None);
                 }
                 match self.heap.alloc(HeapObj::List(Rc::new(RefCell::new(results)))) {
                     Ok(list) => { self.splice_outer_placeholder(outer, list); CoroState::Ready }
-                    Err(e) => self.raise_into_outer(outer, e),
+                    Err(e) => CoroState::Raising(e, None),
                 }
             }
             WaitKind::Timeout { deadline_ns, target } => {
                 let deadline_hit = self.now_ns() >= *deadline_ns;
                 let outcome = self.scheduler.iter().find(|h| h.coro == *target).map(|h| h.state.clone());
                 match outcome {
-                    Some(CoroState::Errored(e)) => self.raise_into_outer(outer, e),
+                    Some(CoroState::Errored(e)) => CoroState::Raising(e, self.pending.exc_val.take()),
                     Some(CoroState::Done(v)) if !deadline_hit => {
                         self.splice_outer_placeholder(outer, v);
                         CoroState::Ready
                     }
-                    _ => self.raise_into_outer(outer, VmErr::Raised("TimeoutError".into())),
+                    _ => CoroState::Raising(VmErr::Raised("TimeoutError".into()), None),
                 }
             }
         }
@@ -313,45 +349,6 @@ impl<'a> VM<'a> {
     fn splice_outer_placeholder(&mut self, outer: Val, value: Val) {
         if let HeapObj::Coroutine(_, _, stack, _, _, _, _) = self.heap.get_mut(outer)
             && let Some(top) = stack.last_mut() { *top = value; }
-    }
-
-    // Pop a try-frame from the outer's saved exception_frames and stage a raise, truncate saved stack/iter to the frame, push the exception instance, set IP to the handler. If no frame is active, the outer transitions to Errored and propagation continues.
-    pub(crate) fn raise_into_outer(&mut self, outer: Val, e: VmErr) -> CoroState {
-        let frame_opt = if let HeapObj::Coroutine(_, _, _, _, _, _, ef) = self.heap.get_mut(outer) {
-            ef.pop()
-        } else { None };
-        let Some(frame) = frame_opt else { return CoroState::Errored(e); };
-        // Build (or reuse) the exception instance.
-        let exc_val = if let Some(v) = self.pending.exc_val.take() {
-            v
-        } else {
-            let class_name = e.class_name();
-            let is_heap_err = matches!(e, VmErr::Heap);
-            let msg_val = match self.heap.alloc(HeapObj::Str(e.message())) {
-                Ok(v) => v,
-                Err(_) if is_heap_err => match self.heap.alloc_emergency(HeapObj::Str(e.message())) {
-                    Ok(v) => v,
-                    Err(e2) => return CoroState::Errored(e2),
-                },
-                Err(alloc_e) => return CoroState::Errored(alloc_e),
-            };
-            match self.heap.alloc(HeapObj::ExcInstance(class_name.clone(), alloc::vec![msg_val])) {
-                Ok(v) => v,
-                Err(_) if is_heap_err => match self.heap.alloc_emergency(HeapObj::ExcInstance(class_name, alloc::vec![msg_val])) {
-                    Ok(v) => v,
-                    Err(e2) => return CoroState::Errored(e2),
-                },
-                Err(alloc_e) => return CoroState::Errored(alloc_e),
-            }
-        };
-        // Splice into the outer's saved state, depths are relative to the saved stack/iter, matching the normalization on yield.
-        if let HeapObj::Coroutine(ip, _, stack, _, iters, _, _) = self.heap.get_mut(outer) {
-            stack.truncate(frame.stack_depth);
-            iters.truncate(frame.iter_depth);
-            stack.push(exc_val);
-            *ip = frame.handler_ip;
-        }
-        CoroState::Ready
     }
 
     /* Single scheduler driver, picks a Ready coro and steps it. On no Ready, classifies the wait-state and yields to the host (PendingTimer / PendingFrame / PendingHostCall / PendingEvent) or returns Ok when nothing alive remains. */
@@ -368,7 +365,7 @@ impl<'a> VM<'a> {
             let mut alive = false;
             for (i, h) in self.scheduler.iter().enumerate() {
                 match &h.state {
-                    CoroState::Ready | CoroState::CancelPending => { next_ready = Some(i); alive = true; break; }
+                    CoroState::Ready | CoroState::CancelPending | CoroState::Raising(..) => { next_ready = Some(i); alive = true; break; }
                     CoroState::Sleeping(w) => {
                         alive = true;
                         if min_wake.is_none_or(|m| *w < m) { min_wake = Some(*w); }
@@ -436,12 +433,12 @@ impl<'a> VM<'a> {
         self.pending.waiting_for_children = None;
         self.pending_exec_safe = true;
         self.cancelling = true;
-        self.cancel_raise = true;
+        self.resume_raise = Some(VmErr::Raised("CancelledError".into()));
         let result = self.resume_coroutine(coro);
         let yielded = self.yielded;
         self.yielded = false;
         self.cancelling = false;
-        self.cancel_raise = false;
+        self.resume_raise = None;
         match result {
             Err(VmErr::Raised(ref s)) if s == "CancelledError" => CoroState::Cancelled,
             Ok(_) if yielded => CoroState::Errored(VmErr::Runtime(
@@ -464,7 +461,13 @@ impl<'a> VM<'a> {
         self.pending.host_call_request = false;
         self.pending.waiting_for_children = None;
         self.pending_exec_safe = true;
+        if let CoroState::Raising(e, exc) = core::mem::replace(&mut self.scheduler[idx].state, CoroState::Ready) {
+            self.resume_raise = Some(e);
+            self.pending.exc_val = exc;
+        }
         let result = self.resume_coroutine(coro);
+        // An early resume failure never reached the park point, so the raise must not leak.
+        self.resume_raise = None;
         let yielded = self.yielded;
         self.yielded = false;
         let new_state = match result {

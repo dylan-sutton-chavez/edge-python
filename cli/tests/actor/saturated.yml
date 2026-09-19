@@ -1,0 +1,31 @@
+# A single-shot group at its replicas ceiling passes queued messages on, the sink counts every one.
+groups:
+  dispatcher:
+    replicas: 1
+    code: |
+      from actor import send
+      receive()
+      i = 0
+      while i < 3000:
+          send("workers", str(i))
+          i = i + 1
+    seed:
+      - go
+  workers:
+    replicas: 8
+    code: |
+      from actor import send
+      m = receive()
+      send("sink", m)
+  sink:
+    replicas: 1
+    code: |
+      n = 0
+      while True:
+          receive()
+          n = n + 1
+          if n == 3000:
+              print("all", n)
+
+expect:
+  - "all 3000"

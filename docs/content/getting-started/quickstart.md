@@ -51,7 +51,7 @@ Edge Python ships no standard library, and nothing resolves until you declare it
 edge add json
 ```
 
-That writes `packages.json` beside your script:
+That writes `edge.json` beside your script:
 
 ```json
 {
@@ -81,7 +81,7 @@ Run it:
 edge run app.py
 ```
 
-The CLI keeps the official packages inside the binary, so the entry needs no network there. The package catalog lives in [Modules](/reference/modules#standard-packages) and the manifest format in [packages.json](/reference/modules#packagesjson).
+The CLI keeps the official packages inside the binary, so the entry needs no network there. The package catalog lives in [Modules](/reference/modules#standard-packages) and the manifest format in [edge.json](/reference/modules#edgejson).
 
 ## Next steps
 

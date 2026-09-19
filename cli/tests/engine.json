@@ -1,0 +1,101 @@
+[
+  {
+    "name": "an entry script past 1 MiB runs",
+    "generate": { "main.py": ["s = \"", ["a", 5242880], "\"\nprint(len(s))\n"] },
+    "steps": [{ "run": ["run", "main.py"], "stdout": ["5242880\n"] }]
+  },
+  {
+    "name": "stdin past 1 MiB reaches input() whole",
+    "given": { "main.py": "print(len(input()))\n" },
+    "steps": [{ "run": ["run", "main.py"], "stdin": [["b", 2097152], "\n"], "stdout": ["2097152\n"] }]
+  },
+  {
+    "name": "a snapshot past 1 MiB saves and restores",
+    "given": {
+      "main.py": "xs = [(\"v\" * 40) + str(i) for i in range(60000)]\nprint(\"built\", len(xs))\nmsg = await receive()\nprint(\"resumed\", msg, len(xs))\n",
+      "ev.txt": "later\n"
+    },
+    "steps": [
+      { "run": ["run", "main.py", "--save-state", "state.bin"], "stdout": ["built 60000\n"], "stderr": ["state saved"], "file_bytes": { "state.bin": 1048577 } },
+      { "run": ["run", "--restore-state", "state.bin", "--events", "ev.txt"], "stdout": ["resumed later 60000\n"] }
+    ]
+  },
+  {
+    "name": "a traceback past 1 MiB prints whole with its location",
+    "given": { "main.py": "msg = ''.join(['x' * 1000 for _ in range(2000)])\nraise ValueError(msg)\n" },
+    "steps": [{ "run": ["run", "main.py"], "exit": 1, "stderr": ["--> main.py:2:1"], "stderr_bytes": 2000000 }]
+  },
+  {
+    "name": "a browser library fails at its import",
+    "given": {
+      "edge.json": "{ \"imports\": { \"storage\": \"https://cdn.edgepython.com/js/builtins/storage/index.js\", \"dom\": \"https://cdn.edgepython.com/js/builtins/dom/entry.py\" } }\n",
+      "st.py": "x = 1\nimport storage\n",
+      "dm.py": "x = 1\nfrom dom import body\n"
+    },
+    "steps": [
+      { "run": ["run", "st.py"], "exit": 1, "stderr": ["error: module 'storage' requires a browser\n", "--> <input>:2:8", "2 | import storage"] },
+      { "run": ["run", "dm.py"], "exit": 1, "stderr": ["error: module 'dom' requires a browser\n", "--> <input>:2:6"] }
+    ]
+  },
+  {
+    "name": "a JavaScript or native module fails at its import",
+    "given": {
+      "edge.json": "{ \"imports\": { \"w\": \"./w.js\", \"s\": \"./s.so\" } }\n",
+      "w.js": "export default () => ({});\n",
+      "s.so": "",
+      "w.py": "x = 1\nimport w\n",
+      "s.py": "x = 1\nimport s\n"
+    },
+    "steps": [
+      { "run": ["run", "w.py"], "exit": 1, "stderr": ["error: module 'w' is JavaScript, the CLI cannot run it\n", "--> <input>:2:8"] },
+      { "run": ["run", "s.py"], "exit": 1, "stderr": ["error: module 's' is not supported, ship a .wasm\n", "--> <input>:2:8"] }
+    ]
+  },
+  {
+    "name": "a refusal reached through another module names that importer",
+    "given": {
+      "edge.json": "{ \"imports\": { \"lib\": \"./lib.py\", \"widget\": \"./widget.js\" } }\n",
+      "widget.js": "export default () => ({});\n",
+      "lib.py": "import widget\n",
+      "main.py": "import lib\n"
+    },
+    "steps": [{ "run": ["run", "main.py"], "exit": 1, "stderr": ["module 'widget' is JavaScript, the CLI cannot run it (via lib)\n", "--> <input>:1:8"] }]
+  },
+  {
+    "name": "an undeclared official name says how to declare it",
+    "given": { "main.py": "x = 1\nimport json\n" },
+    "steps": [{ "run": ["run", "main.py"], "exit": 1, "stderr": ["error: module 'json' is not provided by this host and no edge.json declares it\nhelp: run `edge add json`\n", "--> <input>:2:8"] }]
+  },
+  {
+    "name": "an undeclared unknown name keeps the generic hint",
+    "given": { "main.py": "import helpers\n" },
+    "steps": [{ "run": ["run", "main.py"], "exit": 1, "stderr": ["help: declare it in edge.json, or use a relative import\n", "--> <input>:1:8"] }]
+  },
+  {
+    "name": "a remote module's missing manifests are asked for once",
+    "given": {
+      "edge.json": "{ \"imports\": { \"lib\": \"{BASE}/lib/mod.py\" } }\n",
+      "main.py": "from lib import f\nprint(f())\n"
+    },
+    "steps": [
+      { "run": ["run", "main.py"], "stdout": ["7\n"] },
+      { "run": ["run", "main.py"], "stdout": ["7\n"], "requests": { "/lib/mod.py": 1, "/lib/edge.json": 1, "/edge.json": 1 } }
+    ]
+  },
+  {
+    "name": "a single-shot pool delivers every message",
+    "given": {
+      "edge.json": "{ \"imports\": { \"actor\": \"https://cdn.edgepython.com/js/builtins/actor/index.js\" } }\n",
+      "pool.yml": "runtime:\n  max_actors: 1000000\ngroups:\n  dispatcher:\n    seed: [\"go\"]\n    code: |\n      from actor import send\n      receive()\n      i = 0\n      while i < 20000:\n          send(\"workers\", str(i))\n          i = i + 1\n  workers:\n    replicas: 1000000\n    code: |\n      m = receive()\n      print(\"ok\", m)\n"
+    },
+    "steps": [{ "run": ["actor", "pool.yml"], "lines": { "ok ": 20000 } }]
+  },
+  {
+    "name": "thousands of actors share the std packages",
+    "given": {
+      "edge.json": "{ \"imports\": { \"actor\": \"https://cdn.edgepython.com/js/builtins/actor/index.js\", \"json\": \"https://cdn.edgepython.com/std/json.wasm\", \"re\": \"https://cdn.edgepython.com/std/re.wasm\", \"math\": \"https://cdn.edgepython.com/std/math.wasm\", \"struct\": \"https://cdn.edgepython.com/std/struct.wasm\" } }\n",
+      "pool.yml": "runtime:\n  max_actors: 1000000\ngroups:\n  dispatcher:\n    seed: [\"go\"]\n    code: |\n      from actor import send\n      receive()\n      i = 0\n      while i < 3000:\n          send(\"workers\", str(i))\n          i = i + 1\n  workers:\n    replicas: 1000000\n    code: |\n      import json, re, math, struct\n      m = receive()\n      print(\"ok\", json.dumps([m]), math.floor(2.5), struct.calcsize(\"i\"))\n"
+    },
+    "steps": [{ "run": ["actor", "pool.yml"], "lines": { "ok [\"": 3000 } }]
+  }
+]

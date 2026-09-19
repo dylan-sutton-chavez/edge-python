@@ -5,7 +5,7 @@ description: Write, run, test and package Edge Python programs with the edge CLI
 
 # Edge Python
 
-This document is self-verifying and its examples follow the cells v1 grammar. A `python` or `yml` block followed immediately by a `text` block is a runnable cell, and the `skill` crate in this directory executes every cell through the edge CLI and compares it against the `text` block. The tag on the `text` block is `Output` for a run whose stdout must equal the block, or `Error` for a failing run whose stderr contains the given text. A `python` block tagged `skip` never runs on any engine and never pairs with a `text` block, and it always says why with one comment at the exact construct that is nondeterministic. A `yml` block tagged `actor` runs a trusted actor pool through `edge actor`, while one tagged `untrusted` runs eval groups. Any `python` block without a `text` pair is illustrative only. Every cell runs in a scratch directory holding this `packages.json`, since nothing resolves undeclared, and the `yml` cells find the same manifest beside their `actor.yml`. Verify the whole file from the repository root with `cargo run -p skill -- skill/SKILL.md`.
+This document is self-verifying and its examples follow the cells v1 grammar. A `python` or `yml` block followed immediately by a `text` block is a runnable cell, and the `skill` crate in this directory executes every cell through the edge CLI and compares it against the `text` block. The tag on the `text` block is `Output` for a run whose stdout must equal the block, or `Error` for a failing run whose stderr contains the given text. A `python` block tagged `skip` never runs on any engine and never pairs with a `text` block, and it always says why with one comment at the exact construct that is nondeterministic. A `yml` block tagged `actor` runs a trusted actor pool through `edge actor`, while one tagged `untrusted` runs eval groups. Any `python` block without a `text` pair is illustrative only. Every cell runs in a scratch directory holding this `edge.json`, since nothing resolves undeclared, and the `yml` cells find the same manifest beside their `actor.yml`. Verify the whole file from the repository root with `cargo run -p skill -- skill/SKILL.md`.
 
 ```json
 {
@@ -15,9 +15,7 @@ This document is self-verifying and its examples follow the cells v1 grammar. A 
     "math": "https://cdn.edgepython.com/std/math.wasm",
     "struct": "https://cdn.edgepython.com/std/struct.wasm",
     "test": "https://cdn.edgepython.com/std/test.py",
-    "dom": "https://cdn.edgepython.com/js/builtins/dom/entry.py"
-  },
-  "system": {
+    "dom": "https://cdn.edgepython.com/js/builtins/dom/entry.py",
     "storage": "https://cdn.edgepython.com/js/builtins/storage/index.js",
     "network": "https://cdn.edgepython.com/js/builtins/network/index.js",
     "time": "https://cdn.edgepython.com/js/builtins/time/index.js",
@@ -26,13 +24,13 @@ This document is self-verifying and its examples follow the cells v1 grammar. A 
 }
 ```
 
-Edge Python is a sandboxed Python subset compiled in a single pass to bytecode and executed by a stack VM. It is one WebAssembly binary, hosted by the JS host, a JavaScript package built on the browser's sandbox model that runs in browsers and in JavaScript runtimes such as Deno, and by the `edge` CLI. There is no bundled stdlib, every module is an external package declared in `packages.json` and resolved at compile time, the official packages included. Programs are deterministic, there is no file, network or environment access unless a system module grants it.
+Edge Python is a sandboxed Python subset compiled in a single pass to bytecode and executed by a stack VM. It is one WebAssembly binary, hosted by the JS host, a JavaScript package built on the browser's sandbox model that runs in browsers and in JavaScript runtimes such as Deno, and by the `edge` CLI. There is no bundled stdlib, every module is an external package declared in `edge.json` and resolved at compile time, the official packages included. Programs are deterministic, there is no file, network or environment access unless a declared module grants it.
 
 Use this skill to write correct Edge Python on the first try. The language looks like Python 3 but is a strict subset, and the differences matter more than the similarities. Read the delta section before writing non-trivial code.
 
 ## The working loop
 
-A project is any folder with `.py` files and a `packages.json` declaring every module they import. The loop is always the same.
+A project is any folder with `.py` files and an `edge.json` declaring every module they import. The loop is always the same.
 
 1. Write or edit the `.py` files.
 2. Run the entry point with `edge run main.py`.
@@ -40,7 +38,7 @@ A project is any folder with `.py` files and a `packages.json` declaring every m
 4. Pack a release with `edge build` when the program must run elsewhere.
 
 ```bash
-edge init myapp        # scaffold main.py, an empty packages.json and index.html
+edge init myapp        # scaffold main.py, an empty edge.json and index.html
 cd myapp
 edge add json          # declare each package the code imports
 edge run main.py       # run the entry point
@@ -64,7 +62,7 @@ Bare `edge` prints help and exits 0. `edge -v` prints the version. `Ctrl+C` exit
 
 | Flag | Effect |
 |---|---|
-| `--packages <file>` | Use this manifest instead of `./packages.json` |
+| `--manifest <file>` | Use this manifest instead of `./edge.json` |
 
 ### edge run
 
@@ -87,11 +85,11 @@ A persistent interpreter across prompts. Imports, definitions and mutations surv
 
 ### edge test
 
-`edge test [path]` discovers `*_test.py` recursively, skipping hidden dirs, `node_modules`, `target` and `dist`. A file argument runs exactly that file. Each file executes in a fresh interpreter and state never leaks between files. The project must declare `test`, otherwise the runner stops with `declare test in packages.json (edge add test)`. Exit code is 0 when everything passes, 1 when a file fails or no tests are found, 2 when the engine cannot start. See the test package section for the API.
+`edge test [path]` discovers `*_test.py` recursively, skipping hidden dirs, `node_modules`, `target` and `dist`. A file argument runs exactly that file. Each file executes in a fresh interpreter and state never leaks between files. The project must declare `test`, otherwise the runner stops with `declare test in edge.json (edge add test)`. Exit code is 0 when everything passes, 1 when a file fails or no tests are found, 2 when the engine cannot start. See the test package section for the API.
 
 ### edge init, edge add, edge remove
 
-`edge init [name]` scaffolds `main.py`, an empty `packages.json` and `index.html`, with `--bare` skipping the HTML. `edge add json network` writes manifest entries for the official packages, std names and `dom` go to `imports` (`dom` as its `entry.py` facade) and the other system names to `system`, and `edge add foo=<url>` registers a custom URL, a `.wasm` or `.py` URL is treated as a std package and anything else as a system module. `edge remove` deletes entries. Unknown names abort the whole command before any write.
+`edge init [name]` scaffolds `main.py`, an empty `edge.json` and `index.html`, with `--bare` skipping the HTML. `edge add json network` writes one `imports` entry per official package, its CDN URL (`dom` points at its `entry.py` facade), and prints each name with the URL it wrote. `edge add foo=<url>` registers a custom URL, also under `imports`, since each host tells a `.py`, `.wasm` or `.js` module apart by the artifact. `edge add` keeps `extends` and any other key already there. `edge remove` deletes entries. Unknown names abort the whole command before any write.
 
 ### edge serve
 
@@ -107,11 +105,11 @@ Three mutually exclusive modes.
 | `edge build --bundle` | `app.package` | Raw bundle for hosts and pools that already have `edge` |
 | `edge build --web` | `dist/` | Browser distribution with the vendored JS host and packages |
 
-`--out <path>` overrides the default. The bundle contains every `.py` under the project plus `packages.json`, and the entry is `main.py`, `app.py` or `index.py` when present. An `.edge` binary accepts only the snapshot flags `--save-state`, `--restore-state`, `--preempt` and `--events`.
+`--out <path>` overrides the default. The bundle contains every `.py` under the project plus `edge.json`, and the entry is `main.py`, `app.py` or `index.py` when present. An `.edge` binary accepts only the snapshot flags `--save-state`, `--restore-state`, `--preempt` and `--events`.
 
 ### edge actor
 
-`edge actor <file>` runs an actor pool from an `actor.yml` manifest, resolving group imports through the `packages.json` beside it or the one `--packages` names. See the actors section for the schema and the two execution models.
+`edge actor <file>` runs an actor pool from an `actor.yml` manifest, resolving group imports through the `edge.json` beside it or the one `--manifest` names. See the actors section for the schema and the two execution models.
 
 ### edge uninstall
 
@@ -267,7 +265,7 @@ print(root(16.0), loads(dumps({"ok": True}))["ok"])
 4.0 True
 ```
 
-Dotted specs import files. A leading dot anchors at the importing file, one extra dot per directory up. Without it the spec anchors at the nearest `packages.json` dir. The `.py` suffix is implicit.
+Dotted specs import files. A leading dot anchors at the importing file, one extra dot per directory up. Without it the spec anchors at the nearest `edge.json` dir. The `.py` suffix is implicit.
 
 ```python
 from .lib.helpers import slugify
@@ -277,21 +275,19 @@ from lib.helpers import slugify as sl
 
 Not supported. `from . import x` and any form of dynamic import.
 
-Bare names resolve through `packages.json`, walking up from the importing file with the nearest manifest winning. The manifest maps names to paths or URLs under `imports`, JS system modules under `system`, and may `extend` a parent manifest.
+Bare names resolve through `edge.json`, walking up from the importing file with the nearest manifest winning. The manifest maps each name to a path or URL under `imports`, and `extends` may name a parent manifest. The artifact decides the kind, `.py` is a code module, `.wasm` a native plugin and `.js` a JavaScript module the JS host runs on the page's main thread, so a manifest never classifies a package. A leftover `system` section fails with `edge.json at '<path>': move the system entries into imports`.
 
 ```json
 {
   "imports": {
     "utils": "./lib/utils.py",
-    "mypkg": "https://example.com/mypkg.wasm"
-  },
-  "system": {
+    "mypkg": "https://example.com/mypkg.wasm",
     "charts": "https://example.com/charts.js"
   }
 }
 ```
 
-The official names `json`, `re`, `math`, `struct`, `test`, `dom`, `network`, `storage`, `time` and `actor` resolve only when declared, `edge add <name>` writes each entry, and an undeclared name fails at compile time with `module '<name>' is not provided by this host and no packages.json declares it`. The CLI keeps the std packages inside the binary and resolves `system` entries for `time`, `network` and `actor` by name, so a declared official package needs no network there. Modules are singletons with shared mutable state, an import cycle raises `RuntimeError` at startup, and inside an imported module `__name__` is its canonical spec so `if __name__ == "__main__":` blocks are skipped on import. `import_module(name)` looks up a module already bound by a plain `import` in scope.
+The official names `json`, `re`, `math`, `struct`, `test`, `dom`, `network`, `storage`, `time` and `actor` resolve only when declared, `edge add <name>` writes each entry, and an undeclared name fails at compile time with `module '<name>' is not provided by this host and no edge.json declares it`, and the CLI adds a `help:` line with the `edge add` command for an official name. The CLI keeps the std packages inside the binary and maps the official `time`, `network` and `actor` URLs to its built-in modules, so a declared official package needs no network there. Modules are singletons with shared mutable state, an import cycle raises `RuntimeError` at startup, and inside an imported module `__name__` is its canonical spec so `if __name__ == "__main__":` blocks are skipped on import. `import_module(name)` looks up a module already bound by a plain `import` in scope.
 
 ## Builtins
 
@@ -713,14 +709,14 @@ PASS - division by zero raises
 
 ## System modules
 
-Four system libraries plus the actor module, each declared with `edge add <name>`. Availability differs by host, importing a module that needs a browser in the CLI is a compile-time error reading `requires a browser`, and in a JavaScript runtime without a page the first `dom` or `storage` call raises `module 'dom' needs 'document', missing in this runtime`.
+Four system libraries plus the actor module, each declared with `edge add <name>`. Availability differs by host. The CLI implements the ones that can run without a browser, so importing `dom` or `storage` there is a compile-time error reading `requires a browser`, any other JavaScript module fails with `is JavaScript, the CLI cannot run it`, and in a JavaScript runtime without a page the first `dom` or `storage` call raises `module 'dom' needs 'document', missing in this runtime`.
 
 | Module | CLI | JS host |
 |---|---|---|
-| `time` | Built into the binary, always UTC | System JS module, IANA timezone |
-| `network` | Built into the binary, `fetch` only, no CORS | System JS module, CORS applies in a browser |
-| `storage` | Not available | System JS module, browser only |
-| `dom` | Not available | System JS module, browser only |
+| `time` | Built into the binary, always UTC | JavaScript module, IANA timezone |
+| `network` | Built into the binary, no `abort_request`, no CORS | JavaScript module, CORS applies in a browser |
+| `storage` | Fails with `requires a browser` | JavaScript module, browser only |
+| `dom` | Fails with `requires a browser` | JavaScript module behind a Python facade, browser only |
 | `actor` | Built into the binary, see actors | A CDN stub, `send` throws `actor.send needs the CLI` at the first call |
 
 ### time
@@ -741,7 +737,7 @@ float
 
 ### network
 
-`fetch(url[, options_json])` returns a JSON string with `id`, `ok`, `status`, `headers` and `body`. `fetch_text` and `fetch_json` return the body directly and raise on non-2xx responses. All three suspend until the response arrives. The CLI exports only `fetch`, `fetch_text` and `fetch_json`. In the JS host `abort_request(id)` cancels an in-flight request, WebSockets use `ws_open`, `ws_send`, `ws_close` and `ws_state`, SSE uses `sse_open`, `sse_close` and `sse_state`, and both stream events through `receive()` as JSON payloads with a `type` field.
+`fetch(url[, options_json])` returns a JSON string with `id`, `ok`, `status`, `headers` and `body`. `fetch_text` and `fetch_json` return the body directly and raise on non-2xx responses. All three suspend until the response arrives. WebSockets use `ws_open`, `ws_send`, `ws_close` and `ws_state`, SSE uses `sse_open`, `sse_close` and `sse_state`, and both stream events through `receive()` as JSON payloads with a `type` field. In the JS host `abort_request(id)` also cancels an in-flight request, the one name the CLI lacks.
 
 ```python
 from network import fetch_json
@@ -798,7 +794,7 @@ Each group picks exactly one of `run`, `code` or `eval: true`. Without `listen:`
 
 ### The trusted model
 
-Actors keep state between messages, pick work up with the `receive()` builtin and forward with `send` from the `actor` module, strings only, never blocking. The `packages.json` beside `actor.yml` declares `actor` like any module.
+Actors keep state between messages, pick work up with the `receive()` builtin and forward with `send` from the `actor` module, strings only, never blocking. The `edge.json` beside `actor.yml` declares `actor` like any module.
 
 ```yml actor
 groups:
@@ -816,7 +812,7 @@ got hello
 
 ### The untrusted model
 
-`eval: true` groups compile each message as its own program in a fresh wasm instance with its own memory, capped by the group's `heap` limit and a 256 MiB reservation, and cut off after ten seconds of CPU by a deadline the host enforces from outside. No state survives between messages, a snippet imports nothing at all, and a bundle imports only what its own `packages.json` declares, never `actor` or `network`, so untrusted code cannot send, reach the network or load modules from disk. It works the same on Linux, macOS and Windows. A `code` or `run` group is trusted instead, it keeps state, can send and can use `network`, so reach for `eval` when the code is not yours.
+`eval: true` groups compile each message as its own program in a fresh wasm instance with its own memory, capped by the group's `heap` limit and a 256 MiB reservation, and cut off after ten seconds of wall-clock time by a deadline the host enforces from outside. No state survives between messages. A bundle that carries its own `edge.json` resolves through it, any other message through the pool's manifest, and either way `actor`, `network` and `.wasm` plugins are refused, so untrusted code cannot send, reach the network or load modules from disk. A `code` or `run` group is trusted instead, it keeps state, can send and can use `network`, so reach for `eval` when the code is not yours.
 
 ```yml untrusted
 groups:
@@ -893,7 +889,7 @@ Programs run under a fixed budget. Exceeding one raises the matching exception, 
 | Call depth | 256 frames | `RecursionError` |
 | Operations | 100 million | `RuntimeError` |
 | Live objects | 100 thousand | `MemoryError` |
-| Source size | 1 MiB, the host buffer | Error before compile |
+| Source size | 10 MiB | Compile error |
 | Expression nesting | 200 | Compile error |
 | Indentation depth | 100 | Compile error |
 | Instructions per chunk | 65535 | Compile error |

@@ -1,3 +1,5 @@
 # `cargo wasm` build edge-python release WebAssembly artifact.
 [alias]
 wasm = "build --release --target wasm32-unknown-unknown -p edge-python --no-default-features"
+# `cargo wasm-cli` builds the speed-tuned copy released CLIs embed.
+wasm-cli = "build --profile cli --target wasm32-unknown-unknown -p edge-python --no-default-features"

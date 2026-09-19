@@ -7,7 +7,7 @@ const UNINSTALL_SH: &str = include_str!("../../setup/uninstall.sh");
 
 /// Drop the bundled uninstall.sh to a temp file and run it via bash.
 pub fn run() -> Result<()> {
-    println!("This removes the edge binary, its module cache and the PATH entry from your shell rc files.");
+    println!("This removes the edge binary, its cache and the PATH entry from your shell rc files.");
 
     // Spawning bash with the script as a file lets read prompts (none, in this path) work normally.
     let temp = stage_script()?;

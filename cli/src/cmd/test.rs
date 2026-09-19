@@ -1,13 +1,15 @@
 use anyhow::{bail, Context, Result};
-use compiler::devkit::{discover_tests, TEST_DRIVER};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::host::driver::{base_dir, Session};
 use crate::manifest::Manifest;
 use crate::ui;
 
+// Runs registered tests, exit 3 flags an empty file.
+const TEST_DRIVER: &str = "import test\nif not test._tests:\n    raise SystemExit(3)\ntest.run()";
+
 /// Discovers *_test.py files and drives each through one session, verdicts come only from SystemExit codes.
-pub fn run(manifest_path: &Path, packages: Option<&Path>, path: Option<&Path>) -> Result<()> {
+pub fn run(manifest_path: &Path, manifest: Option<&Path>, path: Option<&Path>) -> Result<()> {
     let target = path.unwrap_or(Path::new("."));
     let files = if target.is_file() { vec![target.to_path_buf()] } else { discover_tests(target) };
     if files.is_empty() {
@@ -15,10 +17,10 @@ pub fn run(manifest_path: &Path, packages: Option<&Path>, path: Option<&Path>) -
     }
     // The driver imports test, so the manifest must declare it like any other name.
     if !Manifest::load(manifest_path)?.imports.contains_key("test") {
-        bail!("declare test in packages.json (edge add test)");
+        bail!("declare test in edge.json (edge add test)");
     }
 
-    let open = || Session::open(packages);
+    let open = || Session::open(manifest);
     let mut session = open_or_die(&open);
 
     let started = std::time::Instant::now();
@@ -54,6 +56,31 @@ pub fn run(manifest_path: &Path, packages: Option<&Path>, path: Option<&Path>) -
         std::process::exit(1);
     }
     Ok(())
+}
+
+/* Collects *_test.py under `dir` recursively, skipping dist and hidden entries, sorted. */
+fn discover_tests(dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    walk(dir, &mut found);
+    found.sort();
+    found
+}
+
+fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if name.starts_with('.') || name == "dist" {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_dir() {
+            walk(&path, out);
+        } else if name.ends_with("_test.py") {
+            out.push(path);
+        }
+    }
 }
 
 /// Exit 2 keeps infra failures distinct from red tests.

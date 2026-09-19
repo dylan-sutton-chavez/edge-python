@@ -3,7 +3,7 @@ title: "struct (js, cli)"
 description: "Packs primitive values into bytes and back."
 ---
 
-`struct` packs primitive values into `bytes` and back. Declare it with `edge add struct` and import it by bare name. To pin a different version, point the `packages.json` entry at another URL, see [Modules](/reference/modules#packagesjson).
+`struct` packs primitive values into `bytes` and back. Declare it with `edge add struct` and import it by bare name. To pin a different version, point the `edge.json` entry at another URL, see [Modules](/reference/modules#edgejson).
 
 Functions are `pack(fmt, *values)`, `unpack(fmt, data)`, and `calcsize(fmt)`. Codes are `x b B ? h H i I q Q f d` with repeat counts, and byte-order prefixes are `<` (the default), `=`, `>`, `!`. There is no native-alignment mode. `unpack` returns a list. A packed buffer crosses the host boundary once, which makes it the fast lane for bulk numeric data. Out-of-range integers raise `ValueError`, non-integer values for integer codes raise `TypeError`, and `f` / `d` accept integers. Not implemented: `s` / `p` strings, `e` half floats, `n` / `N`, and `pack_into` / `unpack_from` / `iter_unpack`.
 

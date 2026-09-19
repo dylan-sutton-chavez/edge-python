@@ -18,6 +18,7 @@ impl<'a> VM<'a> {
         // Scheduler holds parked coroutines (and their `WaitingForChildren` task lists) across `top_loop` resumes, mark them so the saved state isn't swept under us.
         for handle in &self.scheduler {
             self.heap.mark(handle.coro);
+            if let CoroState::Raising(_, Some(exc)) = &handle.state { self.heap.mark(*exc); }
             if let CoroState::WaitingForChildren { tasks, kind } = &handle.state {
                 for &t in tasks { self.heap.mark(t); }
                 match kind {

@@ -11,8 +11,8 @@ const PROMPT: &str = ">>> ";
 type Repl = Editor<(), DefaultHistory>;
 
 /// A persistent interpreter driven by rustyline, one line per eval.
-pub fn run(packages: Option<&Path>) -> Result<()> {
-    let mut session = Session::open(packages)?;
+pub fn run(manifest: Option<&Path>) -> Result<()> {
+    let mut session = Session::open(manifest)?;
     println!("Edge Python {}  ·  .reset to start fresh  ·  .exit, Ctrl+C or Ctrl+D to quit", env!("CARGO_PKG_VERSION"));
 
     let mut rl: Repl = Editor::new()?;

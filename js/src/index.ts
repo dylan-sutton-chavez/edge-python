@@ -10,7 +10,6 @@ export type MainThreadModuleSource = MainThreadHandlers | MainThreadModuleFactor
 
 export interface CreateWorkerOpts {
     wasmUrl?: string
-    systemModules?: Record<string, string>
     mainThreadModules?: Record<string, MainThreadModuleSource>
     imports?: Record<string, string>
     integrity?: boolean
@@ -69,35 +68,31 @@ export async function createWorker(opts?: CreateWorkerOpts): Promise<WorkerHandl
     /* Fire a string into the running script's `receive()` queue. Defined early so main-thread module factories can capture it. */
     const pushEvent = (message: unknown) => tell({ type: 'push-event', message: String(message) });
 
-    /* Resolve each `mainThreadModules[name]` (factory or object) into a flat handler map keyed `module:name`. */
+    /* Every page module's handlers keyed by its spec and export name, inline ones use their mt spec. */
     // deno-lint-ignore no-explicit-any
     const mainThreadHandlers: Record<string, (...args: any[]) => unknown> = {};
+    const labels = new Map<string, string>(); // spec to the name host-call errors show
+    const addHandlers = (spec: string, label: string, handlers: MainThreadHandlers): string[] => {
+        labels.set(spec, label);
+        for (const [fnName, handler] of Object.entries(handlers)) mainThreadHandlers[`${spec}:${fnName}`] = handler;
+        return Object.keys(handlers);
+    };
     const manifests: MainThreadManifest[] = [];
     for (const [modName, source] of Object.entries(opts?.mainThreadModules || {})) {
         const handlers = typeof source === 'function' ? source({ pushEvent }) : source;
-        manifests.push({ name: modName, exports: Object.keys(handlers) });
-        for (const [fnName, handler] of Object.entries(handlers)) {
-            mainThreadHandlers[`${modName}:${fnName}`] = handler;
-        }
+        manifests.push({ name: modName, exports: addHandlers(`mt:${modName}`, modName, handlers) });
     }
 
-    /* Lazy system modules, name to ESM url, imported once the worker reports the bare name. */
-    const systemUrls: Record<string, string> = { ...(opts?.systemModules || {}) };
-    const loadedSystems = new Map<string, string[]>(); // name to export names, memoized across runs
-    const loadSystemModule = async (name: string, manifestUrl?: string): Promise<string[]> => {
-        const memo = loadedSystems.get(name);
+    /* A JavaScript import loads here the first time a run reaches its url, labelled by the importer. */
+    const loaded = new Map<string, string[]>(); // url to export names, memoized across runs
+    const loadModule = async (url: string, label: string): Promise<string[]> => {
+        const memo = loaded.get(url);
         if (memo) return memo;
-        // Embedder entries win, manifest-declared systems supply their own url.
-        const url = systemUrls[name] ?? manifestUrl;
-        if (!url) throw new Error(`no system module registered for '${name}'`);
         const mod = await import(url);
-        const factory: MainThreadModuleSource = mod[name] ?? mod.default;
-        const handlers = typeof factory === 'function' ? factory({ pushEvent }) : factory;
-        for (const [fnName, handler] of Object.entries(handlers)) {
-            mainThreadHandlers[`${name}:${fnName}`] = handler;
-        }
-        const exportNames = Object.keys(handlers);
-        loadedSystems.set(name, exportNames);
+        const factory: MainThreadModuleSource | undefined = mod.default ?? mod[label];
+        if (!factory) throw new Error(`no default export and no '${label}' export`);
+        const exportNames = addHandlers(url, label, typeof factory === 'function' ? factory({ pushEvent }) : factory);
+        loaded.set(url, exportNames);
         return exportNames;
     };
 
@@ -107,22 +102,23 @@ export async function createWorker(opts?: CreateWorkerOpts): Promise<WorkerHandl
                 if (outputHandler) outputHandler(data.text);
                 return;
             case 'host-call': {
+                const label = labels.get(data.module) ?? data.module;
                 const handler = mainThreadHandlers[`${data.module}:${data.name}`];
                 if (!handler) {
-                    tell({ type: 'host-call-response', reqId: data.reqId, error: `no main-thread handler for '${data.module}.${data.name}'` });
+                    tell({ type: 'host-call-response', reqId: data.reqId, error: `no main-thread handler for '${label}.${data.name}'` });
                     return;
                 }
                 try {
                     const value = await handler(...data.args);
                     tell({ type: 'host-call-response', reqId: data.reqId, value: value as EdgeValue });
                 } catch (e) {
-                    tell({ type: 'host-call-response', reqId: data.reqId, error: hostCallError(data.module, e) });
+                    tell({ type: 'host-call-response', reqId: data.reqId, error: hostCallError(label, e) });
                 }
                 return;
             }
             case 'load-system': {
                 try {
-                    const exports = await loadSystemModule(data.name, data.url);
+                    const exports = await loadModule(data.url, data.label);
                     tell({ type: 'load-system-response', reqId: data.reqId, exports });
                 } catch (e) {
                     tell({ type: 'load-system-response', reqId: data.reqId, error: errMsg(e) });
@@ -155,13 +151,13 @@ export async function createWorker(opts?: CreateWorkerOpts): Promise<WorkerHandl
         pending.clear();
     };
 
-    /* Strip mainThreadModules/systemModules before crossing postMessage, not structured-cloneable / loaded on the page. The worker only needs eager manifests and the lazy system names. */
-    const { mainThreadModules: _drop, systemModules: _dropSystems, ...workerOpts } = opts || {};
+    // Handlers stay on the page, the worker gets only their names, which are structured-cloneable.
+    const { mainThreadModules: _drop, ...workerOpts } = opts || {};
     // Only what the embedder declares reaches the worker, no name resolves on its own.
     const imports: Record<string, string> = { ...(opts?.imports || {}) };
     const ready = await send<{ integrityActive: boolean, loadMs: number }>({
         type: 'load',
-        opts: { ...workerOpts, imports, availableSystems: Object.keys(systemUrls) },
+        opts: { ...workerOpts, imports },
         mainThreadManifests: manifests,
     });
 

@@ -3,7 +3,7 @@ title: "math (js, cli)"
 description: "Scalar math plus a batch path over bytes buffers."
 ---
 
-`math` is scalar math on `libm`, with `ValueError: math domain error` for domain errors. Declare it with `edge add math` and import it by bare name. To pin a different version, point the `packages.json` entry at another URL, see [Modules](/reference/modules#packagesjson).
+`math` is scalar math on `libm`, with `ValueError: math domain error` for domain errors. Declare it with `edge add math` and import it by bare name. To pin a different version, point the `edge.json` entry at another URL, see [Modules](/reference/modules#edgejson).
 
 Module constants are `pi`, `e`, `tau`, `inf`, `nan` (values, not calls). Integer helpers are `factorial`, `gcd`, `lcm`, `isqrt`, `comb`, `perm`, bounded by the VM's 128-bit integers. `hypot` and `gcd` are variadic. `modf` and `frexp` return tuples, and `floor`, `ceil`, and `trunc` return `int`. The rest of the scalar surface, by group:
 

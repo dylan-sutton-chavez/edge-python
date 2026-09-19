@@ -1,12 +1,9 @@
 name: Compiler
-description: Rust compiler crate. check = shear + clippy; build = wasm build/opt + test + upload.
+description: Rust compiler crate. Shear and clippy, wasm build and optimize, tests, artifacts, tag release.
 
 inputs:
-  mode:
-    description: "check | build"
-    required: true
   github-token:
-    description: Token for the tag Release upload (build mode, tags only).
+    description: Token for the tag Release upload (tags only).
     required: false
     default: ""
 
@@ -16,53 +13,38 @@ runs:
     - name: Cache Rust
       uses: Swatinem/rust-cache@v2
 
-    - name: Toolchain (clippy)
-      if: inputs.mode == 'check'
+    - name: Toolchain (stable)
       uses: dtolnay/rust-toolchain@stable
       with:
+        targets: wasm32-unknown-unknown
         components: clippy
 
     - name: Install cargo-shear
-      if: inputs.mode == 'check'
       shell: bash
-      run: cargo install cargo-shear
+      run: cargo install cargo-shear --locked
 
     # Detects declared but unused dependencies across the workspace.
     - name: Shear
-      if: inputs.mode == 'check'
       shell: bash
       run: cargo shear
 
     - name: Clippy (host)
-      if: inputs.mode == 'check'
       shell: bash
       run: cargo clippy --all-targets -- -D warnings
 
-    - name: Install wasm target (check)
-      if: inputs.mode == 'check'
-      shell: bash
-      run: rustup target add wasm32-unknown-unknown
-
     - name: Clippy (wasm)
-      if: inputs.mode == 'check'
       shell: bash
       run: cargo clippy --lib --no-default-features --target wasm32-unknown-unknown -p edge-python -p slugify-mod -- -D warnings
 
     # build-std needs nightly plus rust-src.
     - name: Toolchain (nightly)
-      if: inputs.mode == 'build'
       uses: dtolnay/rust-toolchain@nightly
       with:
+        targets: wasm32-unknown-unknown
         components: rust-src
-
-    - name: Install wasm target (build)
-      if: inputs.mode == 'build'
-      shell: bash
-      run: rustup target add wasm32-unknown-unknown
 
     # apt ships an old binaryen, so fetch the upstream release.
     - name: Install wasm-opt
-      if: inputs.mode == 'build'
       shell: bash
       run: |
         curl -sSL https://github.com/WebAssembly/binaryen/releases/download/version_121/binaryen-version_121-x86_64-linux.tar.gz \
@@ -70,7 +52,6 @@ runs:
         wasm-opt --version
 
     - name: Build
-      if: inputs.mode == 'build'
       shell: bash
       run: |
         RUSTFLAGS="-Z location-detail=none -Z fmt-debug=none -Z unstable-options -C panic=immediate-abort" \
@@ -84,13 +65,11 @@ runs:
           -Z build-std-features=optimize_for_size
 
     - name: Size (unoptimized)
-      if: inputs.mode == 'build'
       shell: bash
       run: ls -lh target/wasm32-unknown-unknown/release/compiler.wasm
 
     # Three passes, -Oz, reflatten for a fresh CFG, then a converge sweep. Traps stay, they guard bounds.
     - name: Optimize
-      if: inputs.mode == 'build'
       shell: bash
       run: |
         INPUT=target/wasm32-unknown-unknown/release/compiler.wasm
@@ -118,25 +97,37 @@ runs:
         rm /tmp/wasm_stage1.wasm /tmp/wasm_stage2.wasm
 
     - name: Size (optimized)
-      if: inputs.mode == 'build'
       shell: bash
       run: ls -lh target/wasm32-unknown-unknown/release/compiler.wasm
 
+    # The CLI precompiles its compiler.wasm to native code, so this build trades size for speed.
+    - name: Build (CLI)
+      shell: bash
+      run: |
+        cargo build --profile cli --target wasm32-unknown-unknown -p edge-python --no-default-features
+        wasm-opt -O3 --enable-bulk-memory --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-multivalue --enable-reference-types -o compiler-cli.wasm target/wasm32-unknown-unknown/cli/compiler.wasm
+        ls -lh compiler-cli.wasm
+
     - name: Test
-      if: inputs.mode == 'build'
       shell: bash
       run: cargo test -p edge-python -p lang
 
     - name: Upload wasm artifact
-      if: inputs.mode == 'build'
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: compiler_wasm
         path: target/wasm32-unknown-unknown/release/compiler.wasm
         retention-days: 1
 
+    - name: Upload CLI wasm artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: compiler_wasm_cli
+        path: compiler-cli.wasm
+        retention-days: 1
+
     - name: Upload WASM Release
-      if: inputs.mode == 'build' && startsWith(github.ref, 'refs/tags/')
+      if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v3
       with:
         token: ${{ inputs.github-token }}

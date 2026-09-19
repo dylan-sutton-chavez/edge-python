@@ -20,13 +20,13 @@ concurrency:
 jobs:
   fuzz:
     name: American Fuzzy Lop (fuzzer)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     env:
       DURATION: ${{ github.event.inputs.duration || '1200' }}
       AFL_NO_AFFINITY: "1"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
 
       # No cargo cache on purpose (a restored ~/.cargo corrupts cargo-afl's state); install also builds the AFL LLVM runtime, so don't rebuild it.
@@ -65,7 +65,7 @@ jobs:
 
       - name: Upload findings
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-findings
           path: findings.tar.gz

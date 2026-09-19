@@ -12,8 +12,8 @@ pub struct Group {
     // Source plus its directory, the scheduler boots a fresh interpreter per actor from these.
     pub source: String,
     pub dir: String,
-    // A --packages override, the only manifest every actor of the group resolves through.
-    pub packages: Option<String>,
+    // A --manifest override, the only manifest every actor of the group resolves through.
+    pub manifest: Option<String>,
     pub replicas: usize,
     pub limits: Limits,
     pub preempt: usize,

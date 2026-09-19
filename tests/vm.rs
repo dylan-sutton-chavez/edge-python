@@ -165,4 +165,146 @@ mod test {
             }
         }
     }
+
+    /* An error the host delivers into a parked call renders like one the call raised itself. */
+    mod host_errors {
+        use compiler::lexer::lex;
+        use compiler::parser::{Parser, SSAChunk};
+        use compiler::vm::VM;
+        use compiler::vm::snapshot;
+        use compiler::vm::types::{Limits, SchedulerStatus, VmErr};
+
+        use crate::common::{test_native, TestResolver};
+
+        // Compiles `src` against a module `m` whose `host_defer` always defers to the host.
+        fn compile(src: &str) -> SSAChunk {
+            let resolver = TestResolver::new().with_native("m", vec![test_native("host_defer").unwrap()]).with_alias("m", "m");
+            let (tokens, _) = lex(src);
+            let (mut chunk, errs) = Parser::with_resolver(src, tokens.into_iter(), Box::new(resolver)).parse();
+            assert!(errs.is_empty(), "parse errors on {src:?}: {:?}", errs.iter().map(|e| &e.msg).collect::<Vec<_>>());
+            compiler::vm::optimizer::constant_fold(&mut chunk);
+            chunk
+        }
+
+        fn render(vm: &VM, e: &VmErr, src: &str) -> String {
+            e.render_traceback(src, vm.error_pos(), Some("main.py"), vm.call_stack_frames(), vm.function_names_ref())
+        }
+
+        // Runs `src`, answering every deferred call with `error`, returns the output and any rendered traceback.
+        fn run(src: &str, error: &str) -> (Vec<String>, Option<String>) {
+            let chunk = compile(src);
+            let mut vm = VM::with_limits(&chunk, Limits::sandbox());
+            let mut next_id = 0u64;
+            loop {
+                match vm.run() {
+                    Ok(_) => return (vm.output.clone(), None),
+                    Err(VmErr::HostYield(SchedulerStatus::PendingHostCall)) => {
+                        assert!(vm.push_host_error_by_id(next_id, error), "no call parked on id {next_id}");
+                        next_id += 1;
+                    }
+                    Err(e) => return (vm.output.clone(), Some(render(&vm, &e, src))),
+                }
+            }
+        }
+
+        // The location lines of a traceback, the part that must not depend on how the error arrived.
+        fn locations(tb: &str) -> Vec<&str> {
+            tb.lines().filter(|l| l.contains("-->") || l.starts_with("note:") || l.starts_with("error:")).collect()
+        }
+
+        fn traceback(src: &str) -> String {
+            let (_, tb) = run(src, "RuntimeError: boom");
+            tb.unwrap_or_else(|| panic!("expected an uncaught error from {src:?}"))
+        }
+
+        #[test]
+        fn uncaught_at_top_level_points_at_the_call() {
+            let tb = traceback("from m import host_defer\nprint('before')\nhost_defer()\nprint('after')\n");
+            assert!(tb.contains("RuntimeError: boom"), "{tb}");
+            assert!(tb.contains("--> main.py:3:1"), "{tb}");
+            assert!(tb.contains("3 | host_defer()"), "{tb}");
+        }
+
+        #[test]
+        fn uncaught_in_a_function_keeps_the_called_from_note() {
+            let tb = traceback("from m import host_defer\ndef helper():\n    x = 1\n    host_defer()\nhelper()\n");
+            assert!(tb.contains("--> main.py:4:5"), "{tb}");
+            assert!(tb.contains("note: called from helper()"), "{tb}");
+            assert!(tb.contains(":5:7"), "{tb}");
+        }
+
+        #[test]
+        fn caught_error_leaves_no_stale_position() {
+            let src = "from m import host_defer\ntry:\n    host_defer()\nexcept RuntimeError as e:\n    print('caught', e)\nx = 1 / 0\n";
+            let (out, tb) = run(src, "RuntimeError: boom");
+            assert_eq!(out, vec!["caught boom"]);
+            let tb = tb.expect("the later ZeroDivisionError escapes");
+            assert!(tb.contains("ZeroDivisionError"), "{tb}");
+            assert!(tb.contains("--> main.py:6:1"), "{tb}");
+        }
+
+        #[test]
+        fn a_callers_handler_catches_an_error_raised_inside_a_resumed_helper() {
+            let src = "from m import host_defer\ndef helper():\n    host_defer()\n    print('helper continued')\ntry:\n    helper()\nexcept RuntimeError:\n    print('caught in caller')\nprint('end')\n";
+            let (out, tb) = run(src, "RuntimeError: boom");
+            assert_eq!(tb, None);
+            assert_eq!(out, vec!["caught in caller", "end"]);
+        }
+
+        #[test]
+        fn a_gather_child_error_points_at_the_childs_call() {
+            let tb = traceback("from m import host_defer\nasync def child():\n    host_defer()\ngather(child())\n");
+            assert!(tb.contains("--> main.py:3:5"), "{tb}");
+        }
+
+        #[test]
+        fn nested_helpers_render_like_an_error_raised_without_suspending() {
+            let layout = |stmt: &str| format!("from m import host_defer\ndef inner():\n    {stmt}\ndef outer():\n    inner()\nouter()\n");
+            let delivered = traceback(&layout("host_defer()"));
+            let raised = traceback(&layout("raise RuntimeError('boom')"));
+            assert_eq!(locations(&delivered), locations(&raised), "\n{delivered}\n{raised}");
+            assert!(delivered.contains("note: called from inner()") && delivered.contains("note: called from outer()"), "{delivered}");
+        }
+
+        #[test]
+        fn an_ordinary_error_after_a_helper_resumed_reaches_the_callers_handler() {
+            let src = "def helper():\n    sleep(0.01)\n    raise ValueError('x')\ntry:\n    helper()\nexcept ValueError:\n    print('caught')\nprint('end')\n";
+            let (out, tb) = run(src, "unused");
+            assert_eq!(tb, None);
+            assert_eq!(out, vec!["caught", "end"]);
+        }
+
+        #[test]
+        fn an_ordinary_error_after_a_helper_resumed_keeps_its_line_and_note() {
+            let resumed = traceback("def helper():\n    sleep(0.01)\n    x = 1 / 0\nhelper()\n");
+            let direct = traceback("def helper():\n    pass\n    x = 1 / 0\nhelper()\n");
+            assert!(resumed.contains("--> main.py:3:5"), "{resumed}");
+            assert_eq!(locations(&resumed), locations(&direct), "\n{resumed}\n{direct}");
+        }
+
+        #[test]
+        fn a_pending_raise_survives_a_snapshot() {
+            let src = "from m import host_defer\nprint('before')\nhost_defer()\nprint('after')\n";
+            let chunk = compile(src);
+            let mut vm = VM::with_limits(&chunk, Limits::sandbox());
+            assert!(matches!(vm.run(), Err(VmErr::HostYield(SchedulerStatus::PendingHostCall))));
+            assert!(vm.push_host_error_by_id(0, "RuntimeError: boom"));
+            let blob = snapshot::save(&vm, src);
+            let mut restored = VM::with_limits(&chunk, Limits::sandbox());
+            snapshot::restore(&mut restored, &blob).expect("restore");
+            let e = restored.run().expect_err("the delivered error escapes after restore");
+            let tb = render(&restored, &e, src);
+            assert!(tb.contains("RuntimeError: boom") && tb.contains("--> main.py:3:1"), "{tb}");
+            assert!(!restored.output.iter().any(|l| l == "after"), "{:?}", restored.output);
+        }
+
+        #[test]
+        fn a_caught_gather_child_error_leaves_no_stale_position() {
+            let src = "from m import host_defer\nasync def child():\n    host_defer()\ntry:\n    gather(child())\nexcept RuntimeError:\n    print('caught')\nx = 1 / 0\n";
+            let (out, tb) = run(src, "RuntimeError: boom");
+            assert_eq!(out, vec!["caught"]);
+            let tb = tb.expect("the later ZeroDivisionError escapes");
+            assert!(tb.contains("--> main.py:8:1"), "{tb}");
+        }
+    }
 }
