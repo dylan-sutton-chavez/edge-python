@@ -1,0 +1,26 @@
+name: Promote
+description: Ship this run's tested tmp tree and the site to the dev environment.
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v7
+      with:
+        node-version-file: site/.node-version
+        cache: npm
+        cache-dependency-path: |
+          site/package-lock.json
+          infra/package-lock.json
+
+    - name: Install
+      shell: bash
+      run: |
+        (cd site && npm ci)
+        (cd infra && npm ci)
+
+    # Copies the tmp tree to dev, resets its D1, publishes the Worker, then clears tmp.
+    - name: Promote
+      shell: bash
+      working-directory: infra
+      run: npm run promote -- "$EDGE_RUN"

@@ -1,0 +1,80 @@
+---
+import Icon from './ui/icon.astro'
+import Avatar from './ui/avatar.astro'
+import NavMenu from './nav-menu.astro'
+import { avatarFor } from '../lib/account/avatar'
+
+const item = 'block w-full px-4 py-1 text-left hover:bg-line-strong transition'
+
+const path = Astro.url.pathname.replace(/\/+$/, '') || '/'
+const { user } = Astro.locals
+---
+
+<header class="bg-header border-b border-line w-full sticky top-0 z-10">
+  <div class="max-w-[1200px] mx-auto px-2.5 py-3 sm:p-3 flex items-center gap-3.5 text-xs">
+    <a href="/" class="shrink-0 whitespace-nowrap text-sm font-semibold">Edge Python</a>
+
+    <NavMenu current={path} class="min-w-0 overflow-x-auto [scrollbar-width:none]" />
+
+    <button type="button" data-theme-toggle aria-label="Toggle theme" class="ml-auto shrink-0 inline-flex items-center justify-center transition border border-line rounded-full h-8.5 w-8.5 text-fg-subtle hover:text-fg">
+      <Icon name="sun" size="xl" class="hidden dark:block" />
+      <Icon name="moon" size="xl" class="dark:hidden" />
+    </button>
+
+    {user ? (
+      <div class="menu shrink-0">
+        <button popovertarget={user.handle ? 'user' : undefined} data-user-trigger aria-label={user.handle ? `@${user.handle}` : 'Complete your profile'} class="flex items-center h-8.5 rounded-full transition hover:opacity-80">
+          <Avatar {...(user.avatar ?? avatarFor(user.id))} size="md" />
+        </button>
+
+        <div popover id="user" class="panel w-48 inset-auto m-0 p-0 border-0 bg-transparent opacity-0 open:opacity-100 starting:open:opacity-0 transition-all transition-discrete">
+          <ul class="bg-surface border border-line rounded-2xl py-3">
+            <li><a href={`/${user.handle ?? ''}`} class={item}>Profile</a></li>
+            <li><a href="/settings" class={item}>Settings</a></li>
+
+            <li class="mt-2 pt-2 border-t border-line-strong">
+              <button data-signout popovertarget="user" popovertargetaction="hide" class={item}>Sign out</button>
+            </li>
+          </ul>
+        </div>
+      </div>
+    ) : (
+      <button type="button" data-signin-open class="shrink-0 bg-surface hover:bg-header text-fg px-2.5 sm:px-3 border border-line rounded-full flex items-center justify-center transition h-8.5">
+        <span>Sign in</span>
+      </button>
+    )}
+  </div>
+</header>
+
+<style>
+  .menu { --anchor: --user }
+  .menu > [data-user-trigger] { anchor-name: var(--anchor) }
+
+  .panel {
+    position-anchor: var(--anchor);
+    top: calc(anchor(bottom) + 8px);
+    right: anchor(right);
+    position-try-fallbacks: flip-block;
+  }
+</style>
+
+<script>
+  import { signOut } from '../lib/account/auth'
+
+  document.querySelector('[data-theme-toggle]')?.addEventListener('click', () => {
+    const theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem('theme', theme)
+  })
+
+  document.addEventListener('signin:done', () => location.replace(location.pathname))
+
+  document.querySelector('[data-user-trigger]:not([popovertarget])')?.addEventListener('click', () => {
+    document.dispatchEvent(new CustomEvent('signin:open', { detail: 'user' }))
+  })
+
+  document.querySelector('[data-signout]')?.addEventListener('click', async () => {
+    await signOut()
+    location.reload()
+  })
+</script>

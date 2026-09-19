@@ -5,6 +5,9 @@ import { Buffer } from "node:buffer";
 
 // One CDN host serves every family under a path prefix (/std, /js).
 const CDN_HOST = "cdn.edgepython.com";
+// The staged CDN this run tests, a tmp prefix in CI or the local one from infra.
+const BASE = Deno.env.get("EDGE_CDN_BASE")?.replace(/\/$/, "");
+if (!BASE) throw new Error("set EDGE_CDN_BASE (npm run cdn:local in infra)");
 
 const REPO = new URL("../../", import.meta.url).pathname; // edge-python/ repo root
 const cases = JSON.parse(readFileSync(new URL("./js.json", import.meta.url)));
@@ -19,13 +22,11 @@ const TYPES = {
     ".py": "text/x-python", ".json": "application/json",
 };
 
-// Build js/src TypeScript into js/dist so the browser and the bootstrap test can load it.
-let distBuilt = false;
-async function buildDist() {
-    if (distBuilt) return;
-    const tsc = (cfg) => new Deno.Command(Deno.execPath(), { args: ["run", "-A", "npm:typescript@5.9.3/tsc", "-p", cfg], cwd: new URL("../", import.meta.url).pathname }).output();
-    for (const c of ["tsconfig.json", "tsconfig.worker.json"]) { const r = await tsc(c); if (!r.success) throw new Error(`tsc: ${c}`); }
-    distBuilt = true;
+/* The official origin answers from BASE, decoded bytes and the CDN's own headers, CORS included. */
+async function cdn(route, url) {
+    const res = await fetch(BASE + url.pathname + url.search);
+    const headers = Object.fromEntries([...res.headers].filter(([k]) => k !== "content-encoding" && k !== "content-length"));
+    return route.fulfill({ status: res.status, headers, body: Buffer.from(await res.arrayBuffer()) });
 }
 
 /* Minimal wasm-pdk module built by hand, `__edge_abi_version` reports `abi` and `boom` traps when called. */
@@ -52,8 +53,6 @@ function pdkModule(abi) {
 
 /* Drives <edge-python> through index.html, boots one tag, then feeds every js.json case to its worker via run(), comparing #app for output cases and the run trace for error cases. Run with deno test --allow-all runtime/tests/runtime.test.js. */
 Deno.test("js: <edge-python> runs the corpus through index.html", async () => {
-    await buildDist();
-
     const browser = await chromium.launch();
     const page = await browser.newPage();
     const errors = [];
@@ -62,39 +61,14 @@ Deno.test("js: <edge-python> runs the corpus through index.html", async () => {
     const requested = [];
     page.on("request", (q) => requested.push(q.url()));
 
-    const STD_DIR = new URL("../../std", import.meta.url).pathname;
-    const SYSTEM_DIR = new URL("../../js/builtins", import.meta.url).pathname;
-    const offline = new Set(); // CDN paths the tree could not serve, any entry fails the test
+    const strays = new Set(); // requests to any host but the CDN and the page fixtures, each fails the test
     await page.route("**/*", (r) => {
         const u = new URL(r.request().url());
-        // A manifest the tree lacks answers 404 like the deploy, any other miss fails the test.
-        const miss = (hint) => {
-            if (u.pathname.endsWith("/edge.json")) return r.fulfill({ status: 404 });
-            offline.add(hint);
+        if (u.host === CDN_HOST) return cdn(r, u);
+        if (u.host !== "localhost") {
+            strays.add(`unexpected request to ${u.href}`);
             return r.abort();
-        };
-        // Serve std and builtins from the tree, a missing file fails the test instead of reaching the CDN.
-        if (u.host === CDN_HOST && u.pathname.startsWith("/std/")) {
-            // /std/<name>.wasm lives at <name>/target/wasm32-unknown-unknown/release/ in the tree.
-            const name = u.pathname.slice("/std/".length).replace(/\.wasm$/, "");
-            const file = `${STD_DIR}/${name}/target/wasm32-unknown-unknown/release/${name}.wasm`;
-            try { return r.fulfill({ contentType: "application/wasm", body: readFileSync(file) }); }
-            catch { return miss(`build std/${name} first`); }
         }
-        if (u.host === CDN_HOST && u.pathname.startsWith("/js/builtins/")) {
-            // Production (Pages) flattens builtins/<cap>/src/* to builtins/<cap>/*, map back to the tree layout.
-            const repoPath = u.pathname.replace(/^\/js\/builtins\/([^/]+)\//, "/$1/src/");
-            try { return r.fulfill({ contentType: "text/javascript", body: readFileSync(SYSTEM_DIR + repoPath) }); }
-            catch { return miss(`js/builtins${repoPath} is missing from the tree`); }
-        }
-        // In-tree wasm so new exports are testable.
-        if (u.host === CDN_HOST && u.pathname === "/compiler.wasm") {
-            const local = `${REPO}target/wasm32-unknown-unknown/release/compiler.wasm`;
-            try { return r.fulfill({ contentType: "application/wasm", body: readFileSync(local) }); }
-            catch { return miss("run cargo wasm first"); }
-        }
-        if (u.host === CDN_HOST) return miss(`no local copy of ${u.href}`);
-        if (u.host !== "localhost") return r.continue();
         if (u.pathname.endsWith("/app/trap.wasm")) return r.fulfill({ contentType: "application/wasm", body: pdkModule(1) });
         if (u.pathname.endsWith("/app/abi2.wasm")) return r.fulfill({ contentType: "application/wasm", body: pdkModule(2) });
         const ext = u.pathname.slice(u.pathname.lastIndexOf("."));
@@ -280,7 +254,7 @@ Deno.test("js: <edge-python> runs the corpus through index.html", async () => {
         if (!reqd("/js/builtins/network")) throw new Error("network imported by the ws cases but never loaded");
 
         // The IndexedDB cache survives a versionless boot and is wiped only by a version mismatch.
-        const idb = await page.evaluate(async () => {
+        const idb = await page.evaluate(async (host) => {
             if (!globalThis.el.worker.integrityActive) return null;
             const readStore = () => new Promise((res, rej) => {
                 const req = indexedDB.open("edgepython", 1);
@@ -296,7 +270,7 @@ Deno.test("js: <edge-python> runs the corpus through index.html", async () => {
                 };
                 req.onerror = () => rej(req.error);
             });
-            const { createWorker } = await import("/js/dist/index.js");
+            const { createWorker } = await import(host);
             const spawn = (opts) => createWorker({ wasmUrl: "https://cdn.edgepython.com/compiler.wasm", ...opts });
             const before = await readStore();
             const plain = await spawn();
@@ -312,7 +286,7 @@ Deno.test("js: <edge-python> runs the corpus through index.html", async () => {
             const afterV2 = await readStore();
             v2.dispose();
             return { before, afterPlain, afterV1, afterV1again, afterV2 };
-        });
+        }, `https://${CDN_HOST}/js/src/index.js`);
         if (idb) {
             if (!(idb.before.count > 0)) throw new Error(`cache: corpus left an empty lockfile store ${JSON.stringify(idb.before)}`);
             if (idb.afterPlain.count !== idb.before.count) throw new Error(`cache: versionless boot wiped the cache ${JSON.stringify(idb)}`);
@@ -320,10 +294,10 @@ Deno.test("js: <edge-python> runs the corpus through index.html", async () => {
             if (idb.afterV1again.count !== 1 || idb.afterV1again.version !== "t-v1") throw new Error(`cache: matching version wiped the cache ${JSON.stringify(idb.afterV1again)}`);
             if (idb.afterV2.count !== 1 || idb.afterV2.version !== "t-v2") throw new Error(`cache: version mismatch should wipe then restamp ${JSON.stringify(idb.afterV2)}`);
         }
-        if (offline.size) throw new Error([...offline].join("\n"));
+        if (strays.size) throw new Error([...strays].join("\n"));
     } catch (e) {
-        // A tree miss explains any failure it caused, report it first.
-        throw offline.size ? new Error([...offline].join("\n"), { cause: e }) : e;
+        // A stray request explains any failure it caused, report it first.
+        throw strays.size ? new Error([...strays].join("\n"), { cause: e }) : e;
     } finally {
         await browser.close();
     }
@@ -331,8 +305,7 @@ Deno.test("js: <edge-python> runs the corpus through index.html", async () => {
 
 // The blob bootstrap posts a requestless error when the cross-origin import fails, createWorker must reject with it instead of hanging.
 Deno.test("js: createWorker rejects on a worker bootstrap failure", async () => {
-    await buildDist();
-    const { createWorker } = await import("../dist/index.js");
+    const { createWorker } = await import(new URL("../src/index.ts", import.meta.url).href);
     const RealWorker = globalThis.Worker;
     const hadLocation = "location" in globalThis;
     const RealLocation = globalThis.location;

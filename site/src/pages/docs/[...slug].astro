@@ -1,0 +1,32 @@
+---
+import { getCollection, render } from 'astro:content'
+import Base from '../../layouts/base.astro'
+import DocsNav from '../../components/docs-nav.astro'
+import Playground from '../../components/playground.astro'
+import CodeBlock from '../../components/ui/code-block.astro'
+import TableBlock from '../../components/ui/table-block.astro'
+import { tree } from '../../lib/docs/tree'
+
+const entries = await getCollection('docs')
+const sections = tree(entries, '')
+const docs = sections.flatMap((section) => section.docs)
+
+const first = docs[0]
+if (!first) return new Response(null, { status: 404 })
+if (!Astro.params.slug) return Astro.redirect(`/docs/${first.slug}`)
+
+const doc = docs.find((each) => each.slug === Astro.params.slug)
+if (!doc) return new Response(null, { status: 404 })
+
+const { Content } = await render(entries.find((each) => each.id === doc.id)!)
+---
+
+<Base title={doc.title} gap="lg" class="flex-1">
+  <div class="flex flex-col lg:flex-row gap-3 flex-1 min-h-0">
+    <DocsNav sections={sections} current={doc} />
+
+    <section class="prose flex-1 min-w-0">
+      <Content components={{ Playground, pre: CodeBlock, table: TableBlock }} />
+    </section>
+  </div>
+</Base>

@@ -1,0 +1,41 @@
+---
+import { Font } from 'astro:assets'
+import '../styles/global.css'
+import Header from '../components/header.astro'
+import SignIn from '../components/sign-in.astro'
+import Footer from '../components/footer.astro'
+
+const GAPS = { xs: 'gap-3', sm: 'gap-4', lg: 'gap-7' }
+
+interface Props {
+  title?: string
+  description?: string
+  gap?: keyof typeof GAPS
+  class?: string
+}
+
+const { title, description = 'Packages for Edge Python, pinned by sha256.', gap = 'sm', class: className } = Astro.props
+---
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{title ? `${title} on Edge Python` : 'Edge Python'}</title>
+  <meta name="description" content={description} />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <Font cssVariable="--font-inter" preload />
+  <Font cssVariable="--font-jetbrains-mono" />
+  <script is:inline>
+    document.documentElement.dataset.theme = localStorage.getItem('theme') ?? 'light'
+  </script>
+</head>
+<body class="bg-page text-fg flex min-h-screen flex-col has-[dialog:modal]:overflow-hidden">
+  <Header />
+  <SignIn />
+  <main class:list={['p-3.5 w-full max-w-[1200px] mx-auto my-2 text-base flex flex-col', GAPS[gap], className]}>
+    <slot />
+  </main>
+  <Footer />
+</body>
+</html>

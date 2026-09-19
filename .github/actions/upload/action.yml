@@ -1,0 +1,30 @@
+name: Upload
+description: Stage one part of the CDN tree from this checkout's build outputs and put it under this run's tmp prefix.
+
+inputs:
+  part:
+    description: "compiler | std | js | cli"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v7
+      with:
+        node-version-file: site/.node-version
+        cache: npm
+        cache-dependency-path: infra/package-lock.json
+
+    - name: Install infra
+      shell: bash
+      working-directory: infra
+      run: npm ci
+
+    # The job env carries EDGE_RUN and the Cloudflare credentials.
+    - name: Stage and upload
+      shell: bash
+      working-directory: infra
+      run: |
+        npm run stage -- ../_cdn ${{ inputs.part }}
+        npm run upload -- "$EDGE_RUN" ../_cdn

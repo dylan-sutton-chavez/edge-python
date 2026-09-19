@@ -1,0 +1,36 @@
+{
+  "name": "site",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "config": "tsx wrangler.config.ts",
+    "types": "npm run config && wrangler types",
+    "db:local": "npm run config && tsx db/local.ts",
+    "dev": "npm run db:local && astro dev",
+    "build": "npm run config && astro build",
+    "preview": "npm run config && astro preview",
+    "deploy": "npm run build && wrangler deploy",
+    "check": "npm run types && astro check --minimumSeverity warning",
+    "test": "npm run db:local && tsx tests/run.ts"
+  },
+  "dependencies": {
+    "@astrojs/cloudflare": "^14.3.2",
+    "@astrojs/markdown-remark": "^7.3.1",
+    "@astrojs/mdx": "^8.0.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "astro": "^7.3.2",
+    "shiki": "^4.4.3",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.10",
+    "@types/node": "^22.20.3",
+    "tsx": "^4.23.13",
+    "typescript": "^6.0.3",
+    "wrangler": "^4.134.0"
+  }
+}

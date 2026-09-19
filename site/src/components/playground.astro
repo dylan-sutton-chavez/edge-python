@@ -1,0 +1,130 @@
+---
+import { env } from 'cloudflare:workers'
+import Icon from './ui/icon.astro'
+
+interface Props {
+  code: string
+  name?: string
+  output?: string
+  placeholder?: string
+  minLines?: number
+  maxLines?: number
+  outputMaxLines?: number
+}
+
+const { code, name, output = '', placeholder, minLines = 1, maxLines = 5, outputMaxLines = 5 } = Astro.props
+
+const rows = Math.min(Math.max(code.split('\n').length, minLines), maxLines)
+
+const panel = 'bg-panel rounded-2xl mb-6'
+const card = 'bg-page border border-line-strong rounded-2xl p-4'
+const footer = 'flex items-center justify-between py-3 px-[17px] text-2xs text-fg-hint'
+---
+
+<div data-playground data-cdn={env.CDN} data-min={minLines} data-max={maxLines} data-expected={output}>
+  <div class={panel}>
+    <div class:list={[card, 'text-xs']}>
+      <div class="relative font-mono leading-code">
+        <pre aria-hidden="true" class="pointer-events-none absolute inset-0 m-0 overflow-hidden whitespace-pre font-mono leading-code"><code data-view class="[&_span]:text-(--shiki-light) dark:[&_span]:text-(--shiki-dark)"></code></pre>
+        <textarea
+          data-input name={name} rows={rows} placeholder={placeholder} spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="Edge Python source"
+          class="relative block w-full resize-none overflow-auto whitespace-pre border-0 bg-transparent p-0 font-mono leading-code text-transparent caret-fg outline-none placeholder:text-fg-placeholder selection:bg-link/30 selection:text-transparent [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{code}</textarea>
+      </div>
+    </div>
+
+    <div class={footer}>
+      <span>cmd + enter</span>
+      <button data-run class="flex items-center gap-1.5 text-fg-hint transition hover:text-fg-muted">
+        <Icon name="play" size="xs"/>Run
+      </button>
+    </div>
+  </div>
+
+  <div class={panel}>
+    <div class:list={[card, 'text-sm']}>
+      <pre
+        data-output
+        class="m-0 overflow-auto whitespace-pre font-mono leading-code [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        style={`min-height:calc(${minLines} * var(--leading-code));max-height:calc(${outputMaxLines} * var(--leading-code))`}
+      >{output}</pre>
+    </div>
+
+    <div class={footer}>
+      <span data-status class="text-xs">Output</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  import { createEditor } from '../lib/playground/editor'
+  import { createHighlight } from '../lib/playground/highlight'
+  import { applyControls } from '../lib/playground/terminal'
+  import { run, type Phase } from '../lib/playground/runtime'
+
+  const PHASES: Record<Phase, string> = {
+    runtime: 'loading runtime…',
+    worker: 'initializing worker…',
+    running: 'running…'
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-playground]').forEach((root) => {
+    const input = root.querySelector<HTMLTextAreaElement>('[data-input]')
+    const view = root.querySelector<HTMLElement>('[data-view]')
+    const output = root.querySelector<HTMLElement>('[data-output]')
+    const status = root.querySelector<HTMLElement>('[data-status]')
+    const button = root.querySelector<HTMLButtonElement>('[data-run]')
+
+    if (!input || !view || !output || !status || !button) return
+
+    const expected = root.dataset.expected ?? ''
+    let running = false
+
+    const highlight = createHighlight(() => editor.refresh())
+
+    const editor = createEditor({
+      input,
+      view,
+      highlight,
+      onRun: () => start(),
+      minLines: Number(root.dataset.min) || 1,
+      maxLines: Number(root.dataset.max) || 5
+    })
+
+    async function start() {
+      if (running) return
+      running = true
+      button!.disabled = true
+
+      let buffer = ''
+
+      try {
+        const result = await run(
+          editor.getCode(),
+          root.dataset.cdn!,
+          (chunk) => {
+            buffer += chunk
+            output!.textContent = applyControls(buffer).replace(/\n$/, '')
+          },
+          (phase) => { status!.textContent = `Output, ${PHASES[phase]}` }
+        )
+
+        const text = applyControls(buffer).replace(/\n$/, '')
+        output!.textContent = [text, result.error].filter(Boolean).join('\n')
+
+        status!.textContent = result.error
+          ? 'Output, failed'
+          : expected && text.trimEnd() !== expected.trimEnd()
+            ? 'Output, differs'
+            : `Output, ${result.ms < 1000 ? `${result.ms.toFixed(0)}ms` : `${(result.ms / 1000).toFixed(2)}s`}`
+      } catch (error) {
+        output!.textContent = String((error as Error)?.message ?? error)
+        status!.textContent = 'Output, failed'
+      } finally {
+        running = false
+        button!.disabled = false
+      }
+    }
+
+    button.addEventListener('click', () => start())
+  })
+</script>

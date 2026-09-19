@@ -1,0 +1,27 @@
+{
+  "name": "infra",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "app": "tsx src/app.ts",
+    "stage": "tsx src/stage.ts",
+    "upload": "tsx src/upload.ts",
+    "promote": "tsx src/promote.ts",
+    "cdn:local": "tsx src/local.ts"
+  },
+  "dependencies": {
+    "cloudflare": "^7.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "miniflare": "5.20260918.0-alpha",
+    "tsx": "^4.23.13",
+    "typescript": "^6.0.3",
+    "wrangler": "^4.134.0"
+  }
+}

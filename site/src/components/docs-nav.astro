@@ -1,0 +1,91 @@
+---
+import Icon from './ui/icon.astro'
+import Sheet from './ui/sheet.astro'
+import type { Doc, Section } from '../lib/docs/tree'
+
+interface Props {
+  sections: Section[]
+  current: Doc
+}
+
+const { sections, current } = Astro.props
+
+const href = (doc: Doc) => `/docs/${doc.slug}`
+const holds = (section: Section) => section.docs.some((doc) => doc.id === current.id)
+
+const pill = 'block w-full px-4 py-1.5 rounded-full text-left'
+const row = 'block w-full px-4 py-1.5 text-left hover:bg-line-strong transition'
+const summary = 'flex items-center gap-1 px-4 py-1.5 list-none cursor-pointer select-none transition text-2xs text-fg-subtle hover:text-fg [&::-webkit-details-marker]:hidden'
+const chevron = 'rotate-90 text-fg-hint transition-transform group-open/section:-rotate-90'
+---
+
+<aside class="hidden lg:block w-[260px] shrink-0 space-y-1 text-sm sticky top-[73px] self-start max-h-[calc(100dvh-87px)] overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+  {sections.map((section) => (
+    <details name="docs-aside" open={holds(section)} class="group/section">
+      <summary class={summary}>
+        <span>{section.label ?? 'Docs'}</span>
+        <Icon name="next" size="sm" class={chevron} />
+      </summary>
+
+      <ul class="space-y-1 pt-1 pb-3">
+        {section.docs.map((doc) => (
+          <li>
+            <a
+              href={href(doc)}
+              aria-current={doc.id === current.id ? 'page' : undefined}
+              class:list={[pill, doc.id === current.id ? 'bg-surface' : 'hover:bg-surface']}
+            >{doc.title}</a>
+          </li>
+        ))}
+      </ul>
+    </details>
+  ))}
+</aside>
+
+<Sheet id="docs-nav" class="group lg:hidden sticky z-[9] text-sm">
+  <button slot="trigger" type="button" popovertarget="docs-nav" class:list={[pill, 'flex items-center gap-2 border border-line bg-surface/70 backdrop-blur-[1px]']}>
+    <span>{current.title}</span>
+    <Icon name="next" size="sm" class="ml-auto rotate-90 text-fg-subtle transition-transform group-has-[[data-sheet]:popover-open]:-rotate-90" />
+  </button>
+
+  <div class="space-y-1">
+    {sections.map((section) => (
+      <details name="docs-sheet" open={holds(section)} class="group/section">
+        <summary class={summary}>
+          <span>{section.label ?? 'Docs'}</span>
+          <Icon name="next" size="sm" class={chevron} />
+        </summary>
+
+        <ul class="pb-2">
+          {section.docs.map((doc) => (
+            <li>
+              <a
+                href={href(doc)}
+                aria-current={doc.id === current.id ? 'page' : undefined}
+                class:list={[row, doc.id === current.id && 'bg-line-strong']}
+              >{doc.title}</a>
+            </li>
+          ))}
+        </ul>
+      </details>
+    ))}
+  </div>
+</Sheet>
+
+<style>
+  details {
+    interpolate-size: allow-keywords;
+  }
+
+  details::details-content {
+    block-size: 0;
+    overflow-y: clip;
+    transition: block-size 200ms, content-visibility 200ms allow-discrete;
+  }
+
+  details[open]::details-content { block-size: auto; }
+
+  @media (prefers-reduced-motion: reduce) {
+    details::details-content { transition: none; }
+  }
+</style>

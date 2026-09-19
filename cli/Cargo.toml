@@ -26,7 +26,7 @@ anyhow = "1"
 # Line editor + history for `edge repl`.
 rustyline = "17.0.0"
 # HTTPS for URL imports, `edge build` vendoring and the network module.
-ureq = "3"
+ureq = { version = "3", features = ["brotli"] }
 # TLS for wss sockets, the same rustls build and roots ureq already links.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1"

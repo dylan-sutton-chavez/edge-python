@@ -1,0 +1,34 @@
+name: Site
+description: The Astro site on Workers, checked, built and walked through its route corpus on every run.
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v7
+      with:
+        node-version-file: site/.node-version
+        cache: npm
+        cache-dependency-path: site/package-lock.json
+
+    - name: Install
+      shell: bash
+      working-directory: site
+      run: npm ci
+
+    # Worker types from the generated wrangler.json, then astro check over pages and the docs.
+    - name: Check
+      shell: bash
+      working-directory: site
+      run: npm run check
+
+    - name: Build
+      shell: bash
+      working-directory: site
+      run: npm run build
+
+    # The route corpus runs against the built Worker on local bindings, no Cloudflare account involved.
+    - name: Test
+      shell: bash
+      working-directory: site
+      run: npm test

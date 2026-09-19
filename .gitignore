@@ -17,16 +17,17 @@ Thumbs.db
 *.swp
 *~
 
-# Node (for the docs)
+# Node (site and infra)
 node_modules/
 **/node_modules/
 dist/
 *.log
 
-# Next.js / Nextra (docs)
-.next/
-**/.next/
-docs/out/
+# Astro and wrangler output for the site
+site/.astro/
+site/wrangler.json
+site/worker-configuration.d.ts
+.dev.vars
 
 # WASM
 pkg/
@@ -34,6 +35,9 @@ pkg/
 
 # Cloudflare
 .wrangler/
+
+# A CDN tree staged by infra for local tests
+/_cdn/
 
 # Secrets
 .env

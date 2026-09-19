@@ -22,7 +22,7 @@ fn scratch(name: &str) -> PathBuf {
 fn run_in(dir: &Path, args: &[&str], stdin: Option<&str>) -> (String, String, i32) {
     let mut cmd = Command::new(BIN);
     // Scratch-local module cache, so no case reads or writes the real one.
-    cmd.current_dir(dir).args(args).env("XDG_CACHE_HOME", dir).envs(common::local_tree().iter().cloned()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.current_dir(dir).args(args).env("XDG_CACHE_HOME", dir).stdout(Stdio::piped()).stderr(Stdio::piped());
     cmd.stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() });
     let mut child = cmd.spawn().unwrap();
     if let Some(input) = stdin {
@@ -373,6 +373,7 @@ fn bundle_writes_a_package_file() {
 }
 
 fn web_build(dir: &Path) -> (String, String, i32) {
+    common::cdn_base().unwrap_or_else(|e| panic!("{e}"));
     run_in(dir, &["build", "--web"], None)
 }
 

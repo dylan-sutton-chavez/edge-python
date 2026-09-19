@@ -58,7 +58,11 @@ fn check(bin: &str, c: &Case) -> Result<(), String> {
         if let Some(d) = path.parent() { let _ = std::fs::create_dir_all(d); }
         std::fs::copy(&from, path).map_err(|e| format!("fixture {}: {e}, build it first", from.display()))?;
     }
-    let mut child = Command::new(bin).args(&c.run).current_dir(&dir).envs(common::local_tree().iter().cloned()).envs(&c.env)
+    let mut cmd = Command::new(bin);
+    if c.run.iter().any(|arg| arg == "--web") {
+        cmd.env("EDGE_CDN_BASE", common::cdn_base()?);
+    }
+    let mut child = cmd.args(&c.run).current_dir(&dir).envs(&c.env)
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
         .spawn().map_err(|e| e.to_string())?;
     if !c.stdin.is_empty() {

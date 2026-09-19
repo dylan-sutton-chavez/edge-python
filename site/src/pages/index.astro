@@ -1,0 +1,84 @@
+---
+import Base from '../layouts/base.astro'
+import Icon from '../components/ui/icon.astro'
+import Field from '../components/ui/field.astro'
+import PackageCard from '../components/package-card.astro'
+import { packages } from '../data/packages'
+
+const guides = [
+  { icon: 'file', label: 'Quickstart', detail: 'curl -fsSL https://cdn.edgepython.com/cli/install.sh | sh', href: '/docs/getting-started/quickstart' },
+  { icon: 'boxes', label: 'Modules', detail: 'edge add json', href: '/docs/reference/modules' }
+] as const
+
+const scopes = [
+  { label: 'std', current: true },
+  { label: 'system', current: false },
+  { label: 'community', current: false }
+]
+---
+
+<Base>
+  <div class="flex w-full flex-col gap-9">
+    <div class="flex flex-wrap items-center sm:items-start gap-x-4 gap-y-2">
+      <h1 class="text-xl font-semibold">Edge Python</h1>
+
+      <div class="order-2 sm:order-3 ml-auto sm:ml-0 sm:basis-full flex items-center gap-4 text-2xs text-fg-hint">
+        <span class="flex items-center gap-1.5"><Icon name="create" size="xs" />{packages.length} {packages.length === 1 ? 'package' : 'packages'}</span>
+      </div>
+
+      <div class="order-3 sm:order-2 basis-full sm:basis-auto sm:ml-auto flex items-center gap-3 text-sm">
+        <a href="/publish" class="flex items-center gap-2 transition border border-line text-fg-hint px-4 py-1 rounded-full hover:text-fg">
+          <Icon name="create" />
+          Publish
+        </a>
+        <button type="button" class="flex items-center gap-2 transition bg-fg text-page hover:bg-solid-hover border border-transparent px-4 py-1 rounded-full">
+          <Icon name="agent" />
+          Connect an agent
+        </button>
+      </div>
+    </div>
+
+    <section class="flex flex-col gap-2">
+      <h2 class="ml-4">Get started</h2>
+
+      <ul class="bg-page border border-line-strong rounded-2xl overflow-hidden divide-y divide-line-strong">
+        {guides.map((guide) => (
+          <li>
+            <a href={guide.href} class="group flex items-center gap-3 px-4 py-3 transition hover:bg-surface focus-visible:outline-none focus-visible:bg-surface">
+              <Icon name={guide.icon} class="shrink-0 text-fg-subtle" />
+              <div class="min-w-0 flex-1">
+                <p class="text-sm">{guide.label}</p>
+                <p class="truncate font-mono text-2xs text-fg-hint">{guide.detail}</p>
+              </div>
+              <Icon name="arrow" size="sm" class="shrink-0 text-fg-hint opacity-0 -translate-x-1 transition group-hover:opacity-100 group-hover:translate-x-0 group-focus-visible:opacity-100 group-focus-visible:translate-x-0" />
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
+
+    <section class="flex flex-col gap-3">
+      <h2 class="ml-4">Packages</h2>
+
+      <div class="flex flex-col gap-3 text-sm sm:flex-row sm:items-center">
+        <form role="search" class="w-full sm:w-[341px]">
+          <Field name="search" label="Search" hideLabel type="search" placeholder="Search..." icon="search" clearable />
+        </form>
+
+        <div class="flex items-center gap-4 sm:ml-auto">
+          <span class="text-fg-hint">Search</span>
+          {scopes.map(({ label, current }) => (
+            <button class:list={['rounded-full border border-line-strong px-3 py-1', current ? 'text-fg' : 'text-fg-faint transition hover:text-fg']}>
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <ul class="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+        {packages.map((item) => <PackageCard {...item} />)}
+      </ul>
+    </section>
+  </div>
+</Base>
+

@@ -1,4 +1,4 @@
-#![allow(clippy::missing_safety_doc)] // safety contract in docs/content/reference/abi.md, per-fn sections would duplicate it
+#![allow(clippy::missing_safety_doc)] // safety contract in docs/03-reference/06-abi.mdx, per-fn sections would duplicate it
 
 use crate::abi::{classify_decode, classify_encode, DecodeBits, EncodeRequest, ErrorKind, ErrorStash, HandleTable, Op, PrimitiveBytes, TAG_INVALID};
 use crate::vm::types::{DictMap, HeapObj, Val, VmErr};

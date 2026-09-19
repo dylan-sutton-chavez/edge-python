@@ -1,5 +1,5 @@
 name: CLI
-description: cli/ is its own workspace. lint = clippy + check; release = build per target; test = cargo test.
+description: cli/ is its own workspace. lint is clippy and check, release builds and stages per target, test runs cargo test.
 
 inputs:
   mode:
@@ -17,26 +17,17 @@ inputs:
 runs:
   using: composite
   steps:
-    # cli/build.rs embeds this run's speed build of compiler.wasm and std packages, never the CDN copies.
-    - name: Download compiler wasm
-      uses: actions/download-artifact@v8
-      with:
-        name: compiler_wasm_cli
-        path: compiler_cli/
-
-    - name: Download std packages
-      uses: actions/download-artifact@v8
-      with:
-        pattern: dist-*
-        path: std_local/
-        merge-multiple: true
-
-    # Every cargo step below inherits these, the build script reads both paths.
-    - name: Point the build script at the artifacts
+    # cli/build.rs embeds this run's speed build of compiler.wasm and std packages, read back from tmp.
+    - name: Fetch the build inputs
       shell: bash
       run: |
-        echo "EDGE_COMPILER_WASM=$GITHUB_WORKSPACE/compiler_cli/compiler-cli.wasm" >> "$GITHUB_ENV"
-        echo "EDGE_STD_DIR=$GITHUB_WORKSPACE/std_local" >> "$GITHUB_ENV"
+        mkdir -p _inputs/std
+        curl -fsSL --retry 3 "$EDGE_CDN_BASE/_build/compiler-cli.wasm" -o _inputs/compiler-cli.wasm
+        for p in json re math struct; do
+          curl -fsSL --retry 3 "$EDGE_CDN_BASE/std/$p.wasm" -o "_inputs/std/$p.wasm"
+        done
+        echo "EDGE_COMPILER_WASM=$GITHUB_WORKSPACE/_inputs/compiler-cli.wasm" >> "$GITHUB_ENV"
+        echo "EDGE_STD_DIR=$GITHUB_WORKSPACE/_inputs/std" >> "$GITHUB_ENV"
 
     - name: Toolchain (lint)
       if: inputs.mode == 'lint'
@@ -100,13 +91,12 @@ runs:
         case "$TARGET" in *windows*) bin=edge.exe ;; esac
         tar -C "target/$TARGET/release" -czf "edge-$TARGET.tar.gz" "$bin"
 
-    - name: Upload release artifact
+    # The tarball and the install scripts land under cli/ in this run's tmp tree.
+    - name: Stage on tmp
       if: inputs.mode == 'release'
-      uses: actions/upload-artifact@v7
+      uses: ./.github/actions/upload
       with:
-        name: edge-${{ inputs.target }}
-        path: cli/edge-${{ inputs.target }}.tar.gz
-        retention-days: 1
+        part: cli
 
     - name: Toolchain (test)
       if: inputs.mode == 'test'
@@ -131,8 +121,6 @@ runs:
       if: inputs.mode == 'test'
       shell: bash
       working-directory: cli
-      env:
-        EDGE_JS_DIR: ${{ github.workspace }}/js
       run: |
         case "${{ inputs.suite }}" in
           engine)  cargo test --test cli --test run -- --skip builtin_corpora_mirror_the_web_api ;;

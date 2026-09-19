@@ -1,13 +1,14 @@
 // deno-lint-ignore no-import-prefix
 import { chromium } from "npm:playwright@latest";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import { Buffer } from "node:buffer";
 
 const ROOT = new URL("../", import.meta.url).pathname;
-const HOST = new URL("../../", import.meta.url).pathname;
-const DIST = HOST + "dist/"; // tsc emit of js/src, built below
-const REPO = new URL("../../../", import.meta.url).pathname;
 const CORPUS = new URL("../../../tests/cases/builtins/", import.meta.url).pathname;
 const CDN_HOST = "cdn.edgepython.com";
+// The staged CDN this run tests, a tmp prefix in CI or the local one from infra.
+const BASE = Deno.env.get("EDGE_CDN_BASE")?.replace(/\/$/, "");
+if (!BASE) throw new Error("set EDGE_CDN_BASE (npm run cdn:local in infra)");
 const MANIFEST = "/_edge.json"; // synthesized, keeps the agnostic <cap>/ folder free of test artifacts
 
 // Cases per capability, the shared corpus under CORPUS first, then the browser-only one beside the module.
@@ -34,15 +35,11 @@ const TYPES = {
     ".css": "text/css",
 };
 
-let distBuilt = false;
-async function buildDist() {
-    if (distBuilt) return;
-    const tsc = (cfg) => new Deno.Command(Deno.execPath(), { args: ["run", "-A", "npm:typescript@5.9.3/tsc", "-p", cfg], cwd: HOST }).output();
-    for (const c of ["tsconfig.json", "tsconfig.worker.json"]) {
-        const r = await tsc(c);
-        if (!r.success) throw new Error(`tsc failed: ${c}`);
-    }
-    distBuilt = true;
+/* The official origin answers from BASE, decoded bytes and the CDN's own headers, CORS included. */
+async function cdn(route, url) {
+    const res = await fetch(BASE + url.pathname + url.search);
+    const headers = Object.fromEntries([...res.headers].filter(([k]) => k !== "content-encoding" && k !== "content-length"));
+    return route.fulfill({ status: res.status, headers, body: Buffer.from(await res.arrayBuffer()) });
 }
 
 // Boots the network fixture, its port fills the corpus placeholders.
@@ -57,16 +54,15 @@ async function startMock() {
 }
 
 async function runCapability(cap) {
-    await buildDist();
     const dir = `${ROOT}${cap}`;
-    // Import the capability's `.py` entry when it has one, else its JavaScript module.
+    // Import the capability's `.py` entry when it has one, else its JavaScript module, both from the CDN.
     const hasPy = existsSync(`${dir}/src/entry.py`);
 
     const cases = loadCases(cap);
-    // The tag's edge.json, pinned by the capability or synthesized around entry.py or the JS module.
+    // The tag's edge.json, pinned by the capability or synthesized around its published url.
     const manifest = existsSync(`${dir}/edge.json`)
         ? readFileSync(`${dir}/edge.json`, "utf-8")
-        : JSON.stringify({ imports: { [cap]: hasPy ? `/${cap}/src/entry.py` : `/${cap}/src/index.js` } });
+        : JSON.stringify({ imports: { [cap]: `https://${CDN_HOST}/js/builtins/${cap}/${hasPy ? "entry.py" : "index.js"}` } });
 
     // Chromium's Local Network Access guard would block loopback, so the test browser disables that check.
     const browser = await chromium.launch({ args: ["--disable-features=LocalNetworkAccessChecks,LocalNetworkAccessChecksWebSockets"] });
@@ -81,41 +77,16 @@ async function runCapability(cap) {
     const base = mock ? `http://127.0.0.1:${mock.port}` : "";
     const wsBase = base.replace("http://", "ws://");
 
-    /* Serve repo files from disk and synthesize the manifest, the fixture host stays unrouted so sse flows. */
-    const offline = new Set();
-    await page.route((url) => url.host === "localhost" || url.host === CDN_HOST, (route) => {
+    /* Serve the harness page and the synthesized manifest, the fixture host stays unrouted so sse flows. */
+    const strays = new Set();
+    const fixture = mock ? `127.0.0.1:${mock.port}` : null;
+    await page.route((url) => url.host !== fixture, (route) => {
         const url = new URL(route.request().url());
-        // A manifest the tree lacks answers 404 like the deploy, any other miss fails the test.
-        const miss = (hint) => {
-            if (url.pathname.endsWith("/edge.json")) return route.fulfill({ status: 404 });
-            offline.add(hint);
+        if (url.host === CDN_HOST) return cdn(route, url);
+        if (url.host !== "localhost") {
+            strays.add(`unexpected request to ${url.href}`);
             return route.abort();
-        };
-        // js/src is TypeScript, serve its tsc emit so CI tests the checkout not the deploy.
-        if (url.host === CDN_HOST && url.pathname.startsWith("/js/src/")) {
-            const path = DIST + url.pathname.slice("/js/src/".length);
-            try {
-                return route.fulfill({ body: readFileSync(path), contentType: TYPES[path.slice(path.lastIndexOf("."))] ?? "application/octet-stream" });
-            } catch {
-                return miss(`js/dist has no ${url.pathname.slice("/js/src/".length)}`);
-            }
         }
-        // In-tree JS host first, CI must test the checkout not the deploy.
-        if (url.host === CDN_HOST && url.pathname.startsWith("/js/")) {
-            const path = HOST + url.pathname.slice("/js/".length);
-            try {
-                return route.fulfill({ body: readFileSync(path), contentType: TYPES[path.slice(path.lastIndexOf("."))] ?? "application/octet-stream" });
-            } catch {
-                return miss(`js${url.pathname.slice("/js".length)} is missing from the tree`);
-            }
-        }
-        // Prefer this run's compiler so manifest changes are testable.
-        if (url.host === CDN_HOST && url.pathname === "/compiler.wasm") {
-            const local = `${REPO}target/wasm32-unknown-unknown/release/compiler.wasm`;
-            try { return route.fulfill({ contentType: "application/wasm", body: readFileSync(local) }); }
-            catch { return miss("run cargo wasm first"); }
-        }
-        if (url.host === CDN_HOST) return miss(`no local copy of ${url.href}`);
         if (url.pathname === MANIFEST) return route.fulfill({ contentType: "application/json", body: manifest });
         const path = ROOT + url.pathname.slice(1);
         try {
@@ -194,8 +165,8 @@ async function runCapability(cap) {
 
         if (errors.length) failures.push(`[${cap}] console errors: ${errors.join(" | ")}`);
     } catch (e) {
-        // A tree miss explains any failure it caused, report it first.
-        throw offline.size ? new Error([...offline].join("\n"), { cause: e }) : e;
+        // A stray request explains any failure it caused, report it first.
+        throw strays.size ? new Error([...strays].join("\n"), { cause: e }) : e;
     } finally {
         await browser.close();
         if (mock) {
@@ -204,7 +175,7 @@ async function runCapability(cap) {
         }
     }
 
-    if (offline.size) failures.unshift(...offline);
+    if (strays.size) failures.unshift(...strays);
     if (failures.length) throw new Error("\n" + failures.join("\n"));
 }
 

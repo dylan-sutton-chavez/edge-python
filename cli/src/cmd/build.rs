@@ -115,11 +115,9 @@ fn trailer_payload(path: &Path) -> Option<Vec<u8>> {
 }
 
 // Production layout we mirror into dist/js/ and dist/.
+const ORIGIN: &str = "https://cdn.edgepython.com";
 const JS_BASE: &str = "https://cdn.edgepython.com/js/";
 const COMPILER_WASM: &str = "https://cdn.edgepython.com/compiler.wasm";
-// Official package trees, the test hooks read them from a checkout instead.
-const BUILTINS_BASE: &str = "https://cdn.edgepython.com/js/builtins/";
-const STD_BASE: &str = "https://cdn.edgepython.com/std/";
 const JS_FILES: &[&str] = &[
     "src/index.js",
     "src/element.js",
@@ -157,12 +155,7 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
     }
 
     let sp = crate::ui::spinner("fetching compiler.wasm");
-    // Test hook, a local compiler instead of the CDN.
-    let compiler_result = match std::env::var("EDGE_COMPILER_WASM") {
-        Ok(p) => fs::read(&p).with_context(|| format!("reading {p}")),
-        Err(_) => fetch(COMPILER_WASM).context("fetching compiler.wasm"),
-    };
-    let compiler_bytes = match compiler_result {
+    let compiler_bytes = match fetch(COMPILER_WASM).context("fetching compiler.wasm") {
         Ok(b) => b,
         Err(e) => { sp.fail("failed to fetch compiler.wasm"); return Err(e); }
     };
@@ -199,19 +192,9 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
 
 /// Fetch the JS host modules into `dist/js/` mirroring their CDN layout.
 fn vendor_js(out_dir: &Path) -> Result<()> {
-    // Test hook, a local JS host instead of the CDN.
-    let local = std::env::var("EDGE_JS_DIR").ok();
     for rel in JS_FILES {
-        let bytes = match &local {
-            Some(dir) => {
-                let path = Path::new(dir).join(rel.replacen("src/", "dist/", 1));
-                fs::read(&path).with_context(|| format!("reading {}", path.display()))?
-            }
-            None => {
-                let url = format!("{JS_BASE}{rel}");
-                fetch(&url).with_context(|| format!("fetching {url}"))?
-            }
-        };
+        let url = format!("{JS_BASE}{rel}");
+        let bytes = fetch(&url).with_context(|| format!("fetching {url}"))?;
         let path = out_dir.join("js").join(rel);
         if let Some(p) = path.parent() {
             fs::create_dir_all(p)?;
@@ -359,30 +342,19 @@ fn join(from: &str, spec: &str) -> Option<String> {
 
 /* A package file's bytes, None when the host has no such file. */
 fn read_package(url: &str) -> Result<Option<Vec<u8>>> {
-    if let Some(path) = local_copy(url) {
-        return match fs::read(&path) {
-            Ok(bytes) => Ok(Some(bytes)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(anyhow!("reading {}: {e}", path.display())),
-        };
-    }
-    match ureq::get(url).call() {
+    match ureq::get(&cdn(url)).call() {
         Ok(mut resp) => Ok(Some(resp.body_mut().read_to_vec().map_err(|e| anyhow!("reading {url}: {e}"))?)),
         Err(ureq::Error::StatusCode(404)) => Ok(None),
         Err(e) => Err(anyhow!("fetching {url}: {e}")),
     }
 }
 
-// Test hooks, EDGE_JS_DIR serves the official JavaScript libraries and EDGE_STD_DIR the std packages.
-fn local_copy(url: &str) -> Option<PathBuf> {
-    if let (Some(rest), Ok(dir)) = (url.strip_prefix(BUILTINS_BASE), std::env::var("EDGE_JS_DIR")) {
-        let (lib, file) = rest.split_once('/')?;
-        return Some(Path::new(&dir).join("builtins").join(lib).join("src").join(file));
+// Tests and staging serve the official origin from EDGE_CDN_BASE, production never sets it.
+fn cdn(url: &str) -> String {
+    match (url.strip_prefix(ORIGIN), std::env::var("EDGE_CDN_BASE")) {
+        (Some(path), Ok(base)) => format!("{}{path}", base.trim_end_matches('/')),
+        _ => url.to_string(),
     }
-    if let (Some(file), Ok(dir)) = (url.strip_prefix(STD_BASE), std::env::var("EDGE_STD_DIR")) {
-        return Some(Path::new(&dir).join(file));
-    }
-    None
 }
 
 fn write_under(root: &Path, rel: &str, bytes: &[u8]) -> Result<()> {
@@ -442,7 +414,7 @@ fn index_html(entry: &str) -> String {
 }
 
 fn fetch(url: &str) -> Result<Vec<u8>> {
-    let mut resp = ureq::get(url).call().map_err(|e| anyhow!("HTTP error: {e}"))?;
+    let mut resp = ureq::get(&cdn(url)).call().map_err(|e| anyhow!("HTTP error: {e}"))?;
     resp.body_mut().read_to_vec().map_err(|e| anyhow!("reading body: {e}"))
 }
 

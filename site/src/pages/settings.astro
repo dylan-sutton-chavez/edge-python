@@ -1,0 +1,141 @@
+---
+import type { ComponentProps } from 'astro/types'
+import { env } from 'cloudflare:workers'
+import Base from '../layouts/base.astro'
+import Icon from '../components/ui/icon.astro'
+import Sheet from '../components/ui/sheet.astro'
+import Profile from '../components/settings/profile.astro'
+import Account from '../components/settings/account.astro'
+import { linkedProviders } from '../lib/server/users'
+
+const { user } = Astro.locals
+if (!user) return Astro.redirect('/')
+if (!user.handle) return Astro.redirect('/?welcome')
+
+type Item = { label: string; icon: ComponentProps<typeof Icon>['name'] }
+
+const groups: { label: string; items: Item[] }[] = [
+  { label: 'Personal', items: [{ label: 'Profile', icon: 'user' }, { label: 'Account', icon: 'mailbox' }] }
+]
+
+const items = groups.flatMap((group) => group.items)
+const linked = await linkedProviders(env.DB, user.id)
+
+const current = 'Profile'
+
+const pill = 'flex items-center gap-2 w-full px-4 py-1.5 rounded-full'
+const row = 'flex items-center gap-2 w-full px-4 py-1.5 text-left hover:bg-line-strong transition'
+---
+
+<Base title="Settings" gap="lg" class="flex-1">
+  <h1 class="sr-only">Settings</h1>
+
+  <div data-settings class="flex flex-col lg:flex-row gap-3 flex-1 min-h-0 text-sm">
+    <aside class="hidden lg:block w-[260px] shrink-0 space-y-4">
+      {groups.map((group) => (
+        <div>
+          <span class="px-4 text-2xs text-fg-subtle">{group.label}</span>
+
+          <ul class="mt-2 space-y-1">
+            {group.items.map((item) => (
+              <li>
+                <button
+                  type="button"
+                  data-panel={item.label}
+                  aria-current={item.label === current ? 'page' : undefined}
+                  class:list={[pill, item.label === current ? 'bg-surface' : 'hover:bg-surface']}
+                >
+                  <Icon name={item.icon} size="lg" />
+                  <span>{item.label}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </aside>
+
+    <Sheet id="settings-nav" class="group lg:hidden sticky z-[9]">
+      <button slot="trigger" type="button" popovertarget="settings-nav" class:list={[pill, 'border border-line bg-surface/70 backdrop-blur-[1px]']}>
+        {items.map((item) => (
+          <span data-bar-icon={item.label} class:list={['flex', item.label !== current && 'hidden']}><Icon name={item.icon} size="lg" /></span>
+        ))}
+
+        <span data-bar-label>{current}</span>
+        <Icon name="next" size="sm" class="ml-auto rotate-90 text-fg-subtle transition-transform group-has-[[data-sheet]:popover-open]:-rotate-90" />
+      </button>
+
+      <div class="space-y-3">
+        {groups.map((group) => (
+          <div>
+            <span class="px-4 text-2xs text-fg-subtle">{group.label}</span>
+
+            <ul class="mt-1">
+              {group.items.map((item) => (
+                <li>
+                  <button
+                    type="button"
+                    data-panel={item.label}
+                    popovertarget="settings-nav"
+                    popovertargetaction="hide"
+                    class:list={[row, item.label === current && 'bg-line-strong']}
+                  >
+                    <Icon name={item.icon} size="lg" />
+                    <span>{item.label}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </Sheet>
+
+    <section class="flex-1 min-w-0">
+      {items.map((item) => (
+        <div data-view={item.label} hidden={item.label !== current}>
+          {item.label === 'Profile' && <Profile user={user} />}
+          {item.label === 'Account' && <Account user={user} linked={linked} />}
+        </div>
+      ))}
+    </section>
+  </div>
+</Base>
+
+<script>
+  const root = document.querySelector<HTMLElement>('[data-settings]')
+
+  function select(name: string) {
+    if (!root) return
+
+    root.querySelectorAll<HTMLElement>('[data-panel]').forEach((button) => {
+      const on = button.dataset.panel === name
+      const inSheet = button.hasAttribute('popovertargetaction')
+
+      button.classList.toggle(inSheet ? 'bg-line-strong' : 'bg-surface', on)
+
+      if (inSheet) return
+      button.classList.toggle('hover:bg-surface', !on)
+      on ? button.setAttribute('aria-current', 'page') : button.removeAttribute('aria-current')
+    })
+
+    root.querySelectorAll<HTMLElement>('[data-view]').forEach((view) => {
+      view.hidden = view.dataset.view !== name
+    })
+
+    root.querySelectorAll<HTMLElement>('[data-bar-icon]').forEach((icon) => {
+      icon.classList.toggle('hidden', icon.dataset.barIcon !== name)
+    })
+
+    const label = root.querySelector<HTMLElement>('[data-bar-label]')
+    if (label) label.textContent = name
+  }
+
+  root?.addEventListener('click', (event) => {
+    const name = (event.target as HTMLElement).closest<HTMLElement>('[data-panel]')?.dataset.panel
+    if (name) select(name)
+  })
+
+  // Coming back from connecting a provider lands on /settings#account.
+  if (location.hash === '#account') select('Account')
+</script>

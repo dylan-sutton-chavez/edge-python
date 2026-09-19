@@ -120,8 +120,8 @@ Interactive removal of the binary and PATH entries.
 | Variable | Effect |
 |---|---|
 | `EDGE_STD_DIR` | Directory holding the std `.wasm` files the CLI build embeds |
-| `EDGE_COMPILER_WASM` | Path to `compiler.wasm` for the CLI build and for `edge build --web` |
-| `EDGE_JS_DIR` | Serve the JS host from local disk for `edge build --web`, used for pre-deploy validation |
+| `EDGE_COMPILER_WASM` | Path to `compiler.wasm` for the CLI build |
+| `EDGE_CDN_BASE` | Serve the official CDN origin from another base for `edge build --web`, used by tests and staging |
 
 ## The Python delta
 

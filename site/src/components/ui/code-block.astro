@@ -1,0 +1,54 @@
+---
+import Icon from './icon.astro'
+
+interface Props {
+  'data-language'?: string
+  class?: string
+  [key: string]: unknown
+}
+
+const { 'data-language': language, class: className, style, ...attrs } = Astro.props
+---
+
+<div data-code class="bg-panel rounded-2xl mb-6">
+  <div class="bg-page border border-line-strong rounded-2xl p-4 text-xs">
+    <pre
+      {...attrs}
+      class:list={['m-0 overflow-auto whitespace-pre font-mono leading-code [scrollbar-width:none] [&::-webkit-scrollbar]:hidden', className]}
+    ><slot /></pre>
+  </div>
+
+  <div class="flex items-center justify-between py-3 px-[17px] text-2xs text-fg-hint">
+    <span>{language}</span>
+
+    <button data-copy class="flex items-center gap-1.5 text-fg-hint transition hover:text-fg-muted">
+      <Icon name="file" size="xs" /><span data-copy-label>Copy</span>
+    </button>
+  </div>
+</div>
+
+<script>
+  const RESET = 1200
+
+  document.querySelectorAll<HTMLElement>('[data-code]').forEach((block) => {
+    const button = block.querySelector<HTMLButtonElement>('[data-copy]')
+    const label = block.querySelector<HTMLElement>('[data-copy-label]')
+    const code = block.querySelector('pre')
+
+    if (!button || !label || !code) return
+
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(code.textContent ?? '')
+        label.textContent = 'Copied'
+      } catch {
+        label.textContent = "Couldn't copy"
+      }
+
+      clearTimeout(timer)
+      timer = setTimeout(() => { label.textContent = 'Copy' }, RESET)
+    })
+  })
+</script>

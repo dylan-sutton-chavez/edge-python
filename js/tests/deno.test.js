@@ -1,12 +1,9 @@
 import { hostCallError } from "../src/util.ts";
 
 /* The engine under Deno with no browser, undeclared names fail and missing Web APIs name themselves. */
-const WASM = new URL("../../target/wasm32-unknown-unknown/release/compiler.wasm", import.meta.url);
-try {
-    Deno.statSync(WASM);
-} catch {
-    throw new Error(`${WASM.pathname} is missing, run cargo wasm first`);
-}
+const BASE = Deno.env.get("EDGE_CDN_BASE")?.replace(/\/$/, "");
+if (!BASE) throw new Error("set EDGE_CDN_BASE (npm run cdn:local in infra)");
+const WASM = `${BASE}/compiler.wasm`;
 
 // A fresh engine per test, the query string keeps the module state apart.
 async function boot(name, builtins) {
@@ -33,7 +30,7 @@ async function boot(name, builtins) {
     });
     // Each builtin is declared the way edge.json would, by the url of its JavaScript module.
     const imports = Object.fromEntries(builtins.map((b) => [b, new URL(`../builtins/${b}/src/index.js`, import.meta.url).href]));
-    await engine.load({ wasmUrl: WASM.href, integrity: false, imports });
+    await engine.load({ wasmUrl: WASM, integrity: false, imports });
     return engine;
 }
 

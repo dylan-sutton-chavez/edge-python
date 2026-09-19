@@ -1,0 +1,106 @@
+---
+import Icon from '../ui/icon.astro'
+import type { Me } from '../../lib/account/auth'
+import { isConfigured } from '../../lib/server/oauth'
+
+interface Props {
+  user: Me
+  linked: string[]
+}
+
+const { user, linked } = Astro.props
+
+// A linked provider stays listed so it can still be disconnected.
+const providers = ([
+  { id: 'github', name: 'GitHub', icon: 'github' },
+  { id: 'google', name: 'Google', icon: 'google' }
+] as const).filter(({ id }) => isConfigured(id) || linked.includes(id))
+
+const card = 'bg-page border border-line-strong rounded-2xl p-4'
+---
+
+<div class="flex flex-col gap-6">
+  <div>
+    <h2 class="text-md">Account</h2>
+    <p class="text-fg-hint mt-0.5">How you sign in. None of this is public.</p>
+  </div>
+
+  <section class="flex flex-col gap-2">
+    <h3 class="ml-4">Email</h3>
+
+    <div class:list={[card, 'flex items-center gap-3']}>
+      <Icon name="mailbox" size="lg" class="shrink-0 text-fg-subtle" />
+      <span class="min-w-0 flex-1 truncate font-mono text-xs">{user.email}</span>
+    </div>
+
+    <p class="ml-4 text-2xs text-fg-hint">Sign-in codes go to this address.</p>
+  </section>
+
+  <section class="flex flex-col gap-2">
+    <h3 class="ml-4">Sign-in methods</h3>
+
+    <div class="bg-page border border-line-strong rounded-2xl overflow-hidden">
+      <ul class="divide-y divide-line-strong">
+        <li class="flex items-center gap-3 px-4 py-3">
+          <Icon name="key" size="lg" class="shrink-0 text-fg-subtle" />
+
+          <div class="min-w-0 flex-1">
+            <p>Email code</p>
+            <p class="truncate text-2xs text-fg-hint">Always on. A six-digit code, valid for ten minutes.</p>
+          </div>
+
+          <span class="shrink-0 text-2xs text-fg-hint">Default</span>
+        </li>
+
+        {providers.map(({ id, name, icon }) => (
+          <li class="flex items-center gap-3 px-4 py-3">
+            <Icon name={icon} size="lg" class="shrink-0 text-fg-subtle" />
+
+            <div class="min-w-0 flex-1">
+              <p>{name}</p>
+              <p class="truncate text-2xs text-fg-hint">{linked.includes(id) ? 'Connected' : 'Not connected'}</p>
+            </div>
+
+            {linked.includes(id) ? (
+              <button type="button" data-disconnect={id} class="shrink-0 text-xs underline text-fg-hint hover:text-danger transition">Disconnect</button>
+            ) : (
+              <a href={`/api/auth/${id}`} class="shrink-0 text-xs underline text-link">Connect</a>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+
+    <p class="ml-4 text-2xs text-fg-hint">The email code always works, so disconnecting a provider never locks you out.</p>
+  </section>
+
+  <section class="flex flex-col gap-2">
+    <h3 class="ml-4">Delete account</h3>
+
+    <div class:list={[card, 'flex flex-col gap-4 sm:flex-row sm:items-center']}>
+      <p class="min-w-0 flex-1 text-fg-muted">Your profile and sign-in methods go with it. This cannot be undone.</p>
+
+      <button type="button" data-delete class="shrink-0 text-sm flex items-center gap-2 transition border border-line text-fg-hint px-4 py-1 rounded-full hover:text-danger">
+        <Icon name="trash" />Delete
+      </button>
+    </div>
+  </section>
+</div>
+
+<script>
+  import { deleteAccount, disconnect } from '../../lib/account/auth'
+
+  document.querySelectorAll<HTMLButtonElement>('[data-disconnect]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      await disconnect(button.dataset.disconnect!)
+      location.reload()
+    })
+  })
+
+  document.querySelector('[data-delete]')?.addEventListener('click', async () => {
+    if (!confirm('Delete your account? This cannot be undone.')) return
+
+    await deleteAccount()
+    location.replace('/')
+  })
+</script>

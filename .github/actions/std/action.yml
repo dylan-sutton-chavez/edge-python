@@ -1,5 +1,5 @@
 name: Std
-description: Lint, build and optimize every std wasm package, run every corpus, then stage the artifacts. No release.
+description: Lint, build and optimize every std wasm package, then stage them on this run's tmp CDN. No release.
 
 runs:
   using: composite
@@ -17,11 +17,6 @@ runs:
         targets: wasm32-unknown-unknown
         components: rust-src
 
-    - name: Setup Deno
-      uses: denoland/setup-deno@v2
-      with:
-        deno-version: v2.x
-
     - name: Cache Rust
       uses: Swatinem/rust-cache@v2
       with:
@@ -31,30 +26,6 @@ runs:
           std/math -> target
           std/struct -> target
         key: std
-
-    - name: Cache Deno
-      uses: actions/cache@v6
-      with:
-        path: ~/.cache/deno
-        key: deno-${{ runner.os }}-${{ hashFiles('std/**/deno.json', 'std/**/deno.lock') }}
-        restore-keys: deno-${{ runner.os }}-
-
-    - name: Cache Playwright browsers
-      uses: actions/cache@v6
-      with:
-        path: ~/.cache/ms-playwright
-        key: playwright-${{ runner.os }}-chromium
-
-    - name: Install Chromium
-      shell: bash
-      run: deno run -A npm:playwright install --with-deps chromium
-
-    # Test against this run's compiler, not the deployed CDN copy.
-    - name: Download compiler wasm
-      uses: actions/download-artifact@v8
-      with:
-        name: compiler_wasm
-        path: target/wasm32-unknown-unknown/release/
 
     # apt ships an old binaryen, so fetch the upstream release.
     - name: Install wasm-opt
@@ -120,25 +91,8 @@ runs:
           ls -lh "$WASM"
         done
 
-    # Every corpus runs against the sibling builds above, so cross-package imports never reach the CDN.
-    - name: Test
-      shell: bash
-      working-directory: std
-      run: deno test --allow-all harness/
-
-    # Stage native -> <pkg>.wasm, pure-Python -> <pkg>.py.
-    - name: Stage artifact
-      shell: bash
-      run: |
-        mkdir -p _dist
-        for p in json re math struct; do
-          cp "std/$p/target/wasm32-unknown-unknown/release/$p.wasm" "_dist/$p.wasm"
-        done
-        cp std/test/src/entry.py _dist/test.py
-
-    - name: Upload artifact
-      uses: actions/upload-artifact@v7
+    # The corpora run in the test job, against these builds on tmp.
+    - name: Stage on tmp
+      uses: ./.github/actions/upload
       with:
-        name: dist-std
-        path: _dist/
-        retention-days: 1
+        part: std

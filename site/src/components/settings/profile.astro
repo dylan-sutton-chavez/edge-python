@@ -1,0 +1,156 @@
+---
+import Icon from '../ui/icon.astro'
+import Field from '../ui/field.astro'
+import Avatar from '../ui/avatar.astro'
+import { PALETTES, ICONS, avatarFor } from '../../lib/account/avatar'
+import type { Me } from '../../lib/account/auth'
+
+interface Props {
+  user: Me
+}
+
+const { user } = Astro.props
+
+const avatar = user.avatar ?? avatarFor(user.id)
+const glyphs = Array.from({ length: ICONS }, (_, index) => index + 1)
+
+const card = 'bg-page border border-line-strong rounded-2xl p-4'
+const marked = 'relative rounded-full opacity-70 transition has-[:checked]:opacity-100 has-[:checked]:ring-2 has-[:checked]:ring-fg has-[:checked]:ring-offset-2 has-[:checked]:ring-offset-page has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-line-emphasis'
+const spinner = 'col-start-1 row-start-1 spinner transition opacity-0 group-data-[busy]:opacity-100'
+---
+
+<form data-profile class="flex flex-col gap-6">
+  <div>
+    <h2 class="text-md">Profile</h2>
+    <p class="text-fg-hint mt-0.5">How you appear on every package you publish.</p>
+  </div>
+
+  <section class="flex flex-col gap-2">
+    <h3 class="ml-4">Avatar</h3>
+
+    <div class:list={[card, 'flex flex-col gap-6 sm:flex-row sm:items-start sm:gap-8']}>
+      <div data-preview class="flex shrink-0 self-center sm:self-start">
+        <Avatar {...avatar} size="xl" label="Your avatar" />
+      </div>
+
+      <div class="min-w-0 flex-1 flex flex-col gap-5">
+        <fieldset class="min-w-0 flex flex-col gap-2">
+          <legend class="text-fg-subtle mb-2">Palette</legend>
+
+          <div class="flex items-center gap-2 py-1">
+            {PALETTES.map((palette) => (
+              <label class={marked}>
+                <input type="radio" name="palette" value={palette} checked={palette === avatar.palette} aria-label={palette} class="sr-only" />
+                <span class={`avatar-${palette} block size-7 rounded-full bg-(--av-bg)`}></span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+
+        <fieldset class="min-w-0 flex flex-col gap-2">
+          <legend class="text-fg-subtle mb-2">Glyph</legend>
+
+          <div data-glyphs class="flex gap-2 overflow-x-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:w-fit sm:grid-cols-9 sm:overflow-visible">
+            {glyphs.map((icon) => (
+              <label class:list={[marked, 'shrink-0']}>
+                <input type="radio" name="icon" value={icon} checked={icon === avatar.icon} aria-label={`Icon ${icon}`} class="sr-only" />
+                <Avatar icon={icon} palette={avatar.palette} size="md" />
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      </div>
+    </div>
+  </section>
+
+  <section class="flex flex-col gap-2">
+    <h3 class="ml-4">Identity</h3>
+
+    <div class:list={[card, 'flex flex-col gap-4']}>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field name="settings-name" label="Name" placeholder="Your name" value={user.name ?? ''} autocomplete="name" />
+        <Field name="settings-handle" label="Handle" prefix="@" placeholder="handle" value={user.handle ?? ''} autocomplete="off" autocapitalize="off" spellcheck="false" maxlength={20} error />
+      </div>
+
+      <div class="flex flex-col gap-2 text-sm">
+        <label for="settings-bio" class="ml-4">Bio</label>
+
+        <textarea
+          id="settings-bio"
+          name="settings-bio"
+          rows="4"
+          maxlength="160"
+          placeholder="One or two lines about what you build."
+          class="w-full resize-none rounded-2xl border border-line-emphasis bg-surface px-4 py-2 placeholder:text-fg-placeholder focus:outline-none"
+        >{user.bio ?? ''}</textarea>
+      </div>
+    </div>
+  </section>
+
+  <div class="flex items-center justify-end gap-3 pb-2 text-sm">
+    <button type="reset" class="flex items-center gap-2 transition border border-line text-fg-hint px-4 py-1 rounded-full hover:text-fg">Discard</button>
+    <button type="submit" class="group grid place-items-center transition bg-fg text-page hover:bg-solid-hover border border-transparent px-4 py-1 rounded-full">
+      <span class="col-start-1 row-start-1 transition group-data-[busy]:opacity-0">Save changes</span>
+      <Icon name="loader" size="md" class={spinner} />
+    </button>
+  </div>
+</form>
+
+<script>
+  import { saveProfile } from '../../lib/account/auth'
+  import { validateHandle } from '../../lib/account/handle'
+  import { setError, pending } from '../../lib/account/form'
+  import type { Palette } from '../../lib/account/avatar'
+
+  const form = document.querySelector<HTMLFormElement>('[data-profile]')
+
+  if (form) {
+    const field = <T extends Element>(name: string) => form.querySelector<T>(`[name="${name}"]`)!
+    const checked = (name: string) => form.querySelector<HTMLInputElement>(`input[name="${name}"]:checked`)!
+    const handle = field<HTMLInputElement>('settings-handle')
+
+    // Recolors every glyph to the chosen palette and mirrors the chosen glyph in the preview.
+    const paint = () => {
+      const palette = checked('palette').value
+
+      form.querySelectorAll<HTMLElement>('[data-glyphs] label > span, [data-preview] > span').forEach((glyph) => {
+        glyph.className = glyph.className.replace(/avatar-\w+/, `avatar-${palette}`)
+      })
+
+      form.querySelector('[data-preview] > span')!.innerHTML = checked('icon').nextElementSibling!.innerHTML
+    }
+
+    form.addEventListener('change', paint)
+
+    form.addEventListener('reset', () => requestAnimationFrame(() => {
+      paint()
+      setError(handle, null)
+    }))
+
+    handle.addEventListener('input', () => {
+      handle.value = handle.value.toLowerCase()
+      setError(handle, handle.value ? validateHandle(handle.value) : null)
+    })
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault()
+
+      const problem = validateHandle(handle.value)
+      setError(handle, problem)
+      if (problem) return
+
+      try {
+        await pending(form.querySelector<HTMLButtonElement>('button[type="submit"]')!, () => saveProfile({
+          handle: handle.value,
+          name: field<HTMLInputElement>('settings-name').value.trim(),
+          bio: field<HTMLTextAreaElement>('settings-bio').value,
+          avatar: { icon: Number(checked('icon').value), palette: checked('palette').value as Palette }
+        }))
+
+        location.reload()
+      } catch (error) {
+        setError(handle, (error as Error).message)
+      }
+    })
+  }
+</script>

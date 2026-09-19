@@ -1,6 +1,6 @@
 name: CI / CD
 
-# One node per composite action, and needs edges carry artifacts or gate a deploy.
+# Builds stage into this run's tmp CDN prefix, tests read it back, promote ships it to dev.
 
 on:
   push:
@@ -16,75 +16,57 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  EDGE_RUN: ${{ github.run_id }}
+  EDGE_CDN_BASE: https://cdn.tmp.edgepython.com/${{ github.run_id }}
+
 jobs:
   compiler:
     name: Compiler
     runs-on: ubuntu-26.04
     permissions:
       contents: write
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/compiler
         with:
           github-token: ${{ github.token }}
 
-  # One job builds every std, so cross-package corpora import the sibling builds.
   std:
     name: Std
     needs: [compiler]
     runs-on: ubuntu-26.04
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/std
 
   js:
     name: JS
-    needs: [compiler, std]
+    needs: [compiler]
     runs-on: ubuntu-26.04
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/js
 
-  builtins:
-    name: Builtins / ${{ matrix.capability }}
-    needs: [compiler]
-    runs-on: ubuntu-26.04
-    strategy:
-      fail-fast: false
-      matrix:
-        capability: [actor, dom, network, storage, time]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/builtins
-        with:
-          capability: ${{ matrix.capability }}
-
-  # cli/build.rs embeds this run's compiler and std builds, and the test suites vendor js_dist.
+  # cli/build.rs embeds the compiler and std builds this run staged on tmp.
   cli:
     name: CLI / ${{ matrix.entry }}
-    needs: [compiler, js, std]
+    needs: [std, js]
     strategy:
       fail-fast: false
       matrix:
         include:
           - entry: lint
             mode: lint
-            runner: ubuntu-26.04
-          - entry: test engine
-            mode: test
-            suite: engine
-            runner: ubuntu-26.04
-          - entry: test network
-            mode: test
-            suite: network
-            runner: ubuntu-26.04
-          - entry: test actors
-            mode: test
-            suite: actors
-            runner: ubuntu-26.04
-          - entry: test skill
-            mode: test
-            suite: skill
             runner: ubuntu-26.04
           - entry: x86_64-unknown-linux-musl
             mode: release
@@ -110,41 +92,86 @@ jobs:
     runs-on: ${{ matrix.runner }}
     # A red Windows build is reported without blocking the Unix releases behind it.
     continue-on-error: ${{ matrix.experimental == true }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v7
-      - name: Download js/dist (JS build output)
-        if: matrix.mode == 'test'
-        uses: actions/download-artifact@v8
-        with:
-          name: js_dist
-          path: js/dist
       - uses: ./.github/actions/cli
         with:
           mode: ${{ matrix.mode }}
-          suite: ${{ matrix.suite }}
           target: ${{ matrix.target }}
 
-  cdn:
-    name: CDN
-    needs: [js, std, builtins, cli]
+  # Every suite runs against the tmp CDN this run staged, never the deployed one.
+  test:
+    name: Test / ${{ matrix.entry }}
+    needs: [cli]
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - entry: js
+            suite: js
+          - entry: std
+            suite: std
+          - entry: builtins-actor
+            suite: builtins
+            capability: actor
+          - entry: builtins-dom
+            suite: builtins
+            capability: dom
+          - entry: builtins-network
+            suite: builtins
+            capability: network
+          - entry: builtins-storage
+            suite: builtins
+            capability: storage
+          - entry: builtins-time
+            suite: builtins
+            capability: time
+          - entry: cli-engine
+            cli: engine
+          - entry: cli-network
+            cli: network
+          - entry: cli-actors
+            cli: actors
+          - entry: cli-skill
+            cli: skill
+    steps:
+      - uses: actions/checkout@v7
+      - if: matrix.suite
+        uses: ./.github/actions/test
+        with:
+          suite: ${{ matrix.suite }}
+          capability: ${{ matrix.capability }}
+      - if: matrix.cli
+        uses: ./.github/actions/cli
+        with:
+          mode: test
+          suite: ${{ matrix.cli }}
+
+  site:
+    name: Site
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/site
+
+  # Main pushes only, the tested tmp tree and the site ship together to dev.
+  promote:
+    name: Promote
+    needs: [test, site]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_ACCESS_EMAILS: ${{ secrets.DEV_CLOUDFLARE_ACCESS_EMAILS }}
+      OAUTH_GITHUB_ID: ${{ secrets.DEV_OAUTH_GITHUB_ID }}
+      OAUTH_GITHUB_SECRET: ${{ secrets.DEV_OAUTH_GITHUB_SECRET }}
+      OAUTH_GOOGLE_ID: ${{ secrets.DEV_OAUTH_GOOGLE_ID }}
+      OAUTH_GOOGLE_SECRET: ${{ secrets.DEV_OAUTH_GOOGLE_SECRET }}
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/cdn-deploy
-        with:
-          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
-  # Builds on every run as a gate, deploys on main once the CDN serves every URL.
-  docs:
-    name: Docs
-    needs: [cdn]
-    if: ${{ !failure() && !cancelled() }}
-    runs-on: ubuntu-26.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/docs
-        with:
-          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - uses: ./.github/actions/promote

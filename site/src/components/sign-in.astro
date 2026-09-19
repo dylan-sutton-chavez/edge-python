@@ -1,0 +1,179 @@
+---
+import Icon from './ui/icon.astro'
+import Field from './ui/field.astro'
+import Avatar from './ui/avatar.astro'
+import { ICONS, PALETTES } from '../lib/account/avatar'
+import { isConfigured } from '../lib/server/oauth'
+
+const steps = ['user', 'avatar']
+const palettes = PALETTES.map((value) => ({ value, label: value[0]!.toUpperCase() + value.slice(1) }))
+const icons = Array.from({ length: ICONS }, (_, i) => i + 1)
+
+// A provider without credentials in this environment stays out of the dialog.
+const providers = ([
+  { id: 'google', label: 'Sign in with Google', href: '/api/auth/google', icon: 'google' },
+  { id: 'github', label: 'Sign in with GitHub', href: '/api/auth/github', icon: 'github' }
+] as const).filter(({ id }) => isConfigured(id))
+
+const provider = 'group grid place-items-center border hover:bg-surface hover:border-line-emphasis transition border-line-strong w-full rounded-full px-4 py-2'
+const solid = 'group grid place-items-center bg-fg w-full hover:bg-solid-hover transition text-page px-4 py-2 rounded-full'
+const link = 'underline text-link'
+const panel = 'col-start-1 row-start-1'
+const label = 'col-start-1 row-start-1 transition group-data-[busy]:opacity-0'
+const brand = 'col-start-1 row-start-1 flex items-center gap-2.5 transition group-data-[busy]:opacity-0'
+const spinner = 'col-start-1 row-start-1 spinner transition opacity-0 group-data-[busy]:opacity-100'
+---
+
+<dialog data-signin data-step="providers" aria-labelledby="signin-title" class="outline-none backdrop:bg-scrim backdrop:backdrop-blur-[1px] m-auto w-[calc(100%-1.75rem)] max-w-[520px] bg-transparent text-fg">
+  <section class="bg-page border border-line-strong rounded-2xl p-6 flex flex-col gap-7 text-sm">
+    <div class="flex flex-col gap-1">
+      <div class="flex items-center">
+        <h2 id="signin-title" data-title class="text-base font-semibold">Sign In</h2>
+
+        <button type="button" data-signin-close aria-label="Close" class="ml-auto text-fg-hint hover:text-fg transition">
+          <Icon name="close" size="sm" />
+        </button>
+      </div>
+
+      <p data-subtitle class="text-fg-faint">Sign in to publish packages and pin them by sha256.</p>
+    </div>
+
+    <div data-panels class="grid items-start overflow-hidden transition-[height] motion-reduce:transition-none">
+      <div data-panel="providers" data-active class:list={[panel, 'space-y-7']}>
+        {providers.length > 0 && (
+          <>
+            <div class="space-y-4">
+              {providers.map(({ label: text, href, icon }) => (
+                <a href={href} class={provider}>
+                  <span class={brand}>
+                    <Icon name={icon} size="xl" />
+
+                    <span>{text}</span>
+                  </span>
+
+                  <Icon name="loader" size="xl" class={spinner} />
+                </a>
+              ))}
+            </div>
+
+            <hr class="border-line-strong" />
+          </>
+        )}
+
+        <form data-email class="space-y-4">
+          <Field name="email" label="Email" type="email" required placeholder="Enter your Email" error />
+
+          <button class={solid}>
+            <span class={label}>Continue with Email</span>
+            <Icon name="loader" size="xl" class={spinner} />
+          </button>
+        </form>
+
+        <p class="text-center text-2xs">
+          By continuing, you accept our <a href="/terms" class={link}>Terms and Conditions</a>.
+        </p>
+      </div>
+
+      <form data-panel="code" class:list={[panel, 'space-y-4']}>
+        <Field name="code" label="Code" placeholder="6-digit code" inputmode="numeric" autocomplete="one-time-code" maxlength={6} error />
+
+        <button class={solid}>
+          <span class={label}>Verify</span>
+          <Icon name="loader" size="xl" class={spinner} />
+        </button>
+
+        <p class="flex justify-center gap-4 text-2xs">
+          <button type="button" data-resend class={link}>Resend code</button>
+          <button type="button" data-restart class={link}>Use another email</button>
+        </p>
+      </form>
+
+      <form id="signin-user" data-panel="user" class:list={[panel, 'space-y-4']}>
+        <Field name="handle" label="Handle" prefix="@" placeholder="your-handle" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength={20} error />
+        <Field name="profile-name" label="Name" placeholder="How should we call you?" autocomplete="name" />
+      </form>
+
+      <form id="signin-avatar" data-panel="avatar" class:list={[panel, 'space-y-5']}>
+        <div class="flex flex-col items-center gap-4">
+          <div data-preview class="flex">
+            <Avatar icon={1} palette="sand" size="xl" />
+          </div>
+
+          <fieldset class="flex gap-1 sm:gap-2 border border-line p-1 rounded-full">
+            <legend class="sr-only">Palette</legend>
+            {palettes.map((option) => (
+              <label class="px-2 sm:px-3 py-0.5 rounded-full flex items-center justify-center shrink-0 whitespace-nowrap text-fg-subtle transition hover:text-fg hover:bg-surface has-[:checked]:bg-surface has-[:checked]:text-fg has-[:focus-visible]:ring-1 has-[:focus-visible]:ring-line-emphasis">
+                <input type="radio" name="palette" value={option.value} checked={option.value === 'sand'} class="sr-only" />
+                <span>{option.label}</span>
+              </label>
+            ))}
+          </fieldset>
+        </div>
+
+        <div data-icons class="flex flex-wrap justify-center gap-2 pb-1">
+          {icons.map((icon) => (
+            <label class="rounded-full ring-offset-2 ring-offset-page has-[:checked]:ring-2 has-[:checked]:ring-link has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-line-emphasis">
+              <input type="radio" name="icon" value={icon} checked={icon === 1} aria-label={`Icon ${icon}`} class="sr-only" />
+              <Avatar icon={icon} palette="sand" size="lg" />
+            </label>
+          ))}
+        </div>
+      </form>
+    </div>
+
+    <div data-footer hidden class="flex items-center gap-4">
+      <ol data-dots aria-label="Profile steps" class="mr-auto flex items-center gap-1.5">
+        {steps.map((_, i) => <li class="size-1.5 rounded-full bg-fg-disabled aria-[current=step]:bg-link" aria-current={i === 0 ? 'step' : undefined}></li>)}
+      </ol>
+
+      <button type="button" data-back hidden class="flex items-center gap-2 transition hover:text-fg text-fg-hint">Back</button>
+      <button type="submit" form="signin-user" data-next class="group flex items-center gap-2 transition bg-fg text-page hover:bg-solid-hover border border-transparent px-4 py-1 rounded-full">
+        <span class="grid place-items-center">
+          <span data-label class={label}>Next</span>
+          <Icon name="loader" size="xl" class={spinner} />
+        </span>
+      </button>
+    </div>
+  </section>
+</dialog>
+
+<style>
+  [data-panel] {
+    visibility: hidden;
+    opacity: 0;
+    transform: translateX(24px);
+    transition: transform 200ms, opacity 200ms, visibility 0s 200ms;
+  }
+
+  [data-panel][data-active] {
+    visibility: visible;
+    opacity: 1;
+    transform: none;
+    transition-delay: 0s;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-panel] {
+      transform: none;
+      transition: none;
+    }
+  }
+</style>
+
+<script>
+  import { createSignIn, type Step } from '../lib/account/sign-in'
+
+  const dialog = document.querySelector<HTMLDialogElement>('[data-signin]')
+
+  if (dialog) {
+    const { open } = createSignIn(dialog)
+
+    document.querySelectorAll<HTMLButtonElement>('[data-signin-open]').forEach((trigger) => {
+      trigger.addEventListener('click', () => open())
+    })
+
+    document.addEventListener('signin:open', (event) => open((event as CustomEvent<Step>).detail))
+
+    if (new URLSearchParams(location.search).has('welcome')) open('user')
+  }
+</script>

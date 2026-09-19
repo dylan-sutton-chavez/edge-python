@@ -1,0 +1,101 @@
+---
+interface Props {
+  id: string
+  class?: string
+}
+
+const { id, class: className } = Astro.props
+---
+
+<div class={className}>
+  <slot name="trigger" />
+
+  <div popover id={id} data-sheet class="sheet inset-auto inset-x-0 bottom-0 w-full m-0 p-0 border-0 bg-transparent select-none translate-y-full open:translate-y-0 starting:open:translate-y-full transition-all transition-discrete">
+    <div class="bg-surface border-t border-line rounded-t-2xl pt-2.5 pb-7 max-h-[85dvh] overflow-y-auto touch-none">
+      <div class="w-9 h-1 rounded-full bg-line-emphasis mx-auto mb-2.5" aria-hidden="true"></div>
+      <slot />
+    </div>
+  </div>
+</div>
+
+<style>
+  .sheet::backdrop {
+    background: var(--scrim);
+    opacity: 0;
+    transition: opacity 200ms, display 200ms allow-discrete, overlay 200ms allow-discrete;
+  }
+
+  .sheet:popover-open::backdrop { opacity: 1 }
+
+  @starting-style {
+    .sheet:popover-open::backdrop { opacity: 0 }
+  }
+</style>
+
+<script>
+  const SLOP = 8
+  const FLICK = 0.5
+
+  const roots = [...document.querySelectorAll<HTMLElement>('[data-sheet]')]
+    .map((sheet) => sheet.parentElement)
+    .filter((root): root is HTMLElement => !!root && getComputedStyle(root).position === 'sticky')
+
+  const place = (root: HTMLElement) => {
+    root.style.top = ''
+    root.style.top = `${root.getBoundingClientRect().top + scrollY}px`
+  }
+
+  const placeAll = () => roots.forEach(place)
+
+  placeAll()
+  document.fonts.ready.then(placeAll)
+  addEventListener('resize', placeAll)
+
+  document.querySelectorAll<HTMLElement>('[data-sheet]').forEach((sheet) => {
+    let origin: number | null = null
+    let offset = 0
+    let since = 0
+
+    sheet.addEventListener('click', (event) => {
+      if ((event.target as HTMLElement).closest('a')) sheet.hidePopover()
+    })
+
+    sheet.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return
+      origin = event.clientY
+      offset = 0
+    })
+
+    sheet.addEventListener('pointermove', (event) => {
+      if (origin === null) return
+
+      if (!sheet.hasPointerCapture(event.pointerId)) {
+        if (event.clientY - origin < SLOP) return
+        sheet.setPointerCapture(event.pointerId)
+        sheet.style.transition = 'none'
+        origin = event.clientY
+        since = event.timeStamp
+      }
+
+      offset = Math.max(0, event.clientY - origin)
+      sheet.style.translate = `0 ${offset}px`
+    })
+
+    const release = (event: PointerEvent) => {
+      if (origin === null) return
+      origin = null
+      if (!sheet.hasPointerCapture(event.pointerId)) return
+
+      const far = offset > sheet.offsetHeight / 3
+      const fast = offset / Math.max(1, event.timeStamp - since) > FLICK
+
+      sheet.style.transition = ''
+      sheet.style.translate = ''
+
+      if (event.type === 'pointerup' && (far || fast)) sheet.hidePopover()
+    }
+
+    sheet.addEventListener('pointerup', release)
+    sheet.addEventListener('pointercancel', release)
+  })
+</script>

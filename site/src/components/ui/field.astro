@@ -1,0 +1,59 @@
+---
+import type { ComponentProps, HTMLAttributes } from 'astro/types'
+import Icon from './icon.astro'
+
+interface Props extends Omit<HTMLAttributes<'input'>, 'class' | 'type' | 'name' | 'placeholder' | 'required'> {
+  name: string
+  label: string
+  hideLabel?: boolean
+  type?: 'text' | 'search' | 'email'
+  placeholder?: string
+  required?: boolean
+  icon?: ComponentProps<typeof Icon>['name']
+  clearable?: boolean
+  prefix?: string
+  error?: boolean
+  class?: string
+}
+
+const { name, label, hideLabel = false, type = 'text', placeholder, required = false, icon, clearable = false, prefix, error = false, class: className, ...attrs } = Astro.props
+---
+
+<div class:list={['flex flex-col gap-2 text-sm', className]}>
+  <label for={name} class={hideLabel ? 'sr-only' : 'ml-4'}>{label}</label>
+
+  <span class="w-full px-4 py-2 bg-surface border border-line-emphasis rounded-full flex items-center gap-2 has-[[aria-invalid=true]]:border-danger">
+    {icon && <Icon name={icon} class="shrink-0 text-fg-placeholder" />}
+    {prefix && <span class="shrink-0 select-none text-fg-hint -mr-2">{prefix}</span>}
+    <input
+      {...attrs}
+      id={name}
+      name={name}
+      type={type}
+      placeholder={placeholder}
+      required={required}
+      aria-describedby={error ? `${name}-error` : undefined}
+      class="peer bg-surface focus:outline-none placeholder:text-fg-placeholder w-full"
+    />
+    {clearable && (
+      <button type="button" aria-label="Clear" data-clear class="shrink-0 text-fg-placeholder hover:text-fg transition peer-placeholder-shown:hidden">
+        <Icon name="close" size="sm" />
+      </button>
+    )}
+  </span>
+
+  {error && <p id={`${name}-error`} data-error hidden class="ml-4 text-2xs text-danger"></p>}
+</div>
+
+<script>
+  document.querySelectorAll<HTMLButtonElement>('[data-clear]').forEach((btn) => {
+    const input = btn.parentElement?.querySelector<HTMLInputElement>('input')
+    if (!input) return
+
+    btn.addEventListener('click', () => {
+      input.value = ''
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.focus()
+    })
+  })
+</script>

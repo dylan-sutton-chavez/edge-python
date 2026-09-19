@@ -1,0 +1,38 @@
+---
+import { env } from 'cloudflare:workers'
+import Base from '../../layouts/base.astro'
+import Avatar from '../../components/ui/avatar.astro'
+import PackageCard from '../../components/package-card.astro'
+import { userByHandle, publicUser } from '../../lib/server/users'
+import { avatarFor } from '../../lib/account/avatar'
+import { packages } from '../../data/packages'
+
+const found = await userByHandle(env.DB, Astro.params.user ?? '')
+if (!found) return new Response(null, { status: 404 })
+
+const user = publicUser(found)
+const own = packages.filter((each) => each.author.handle === user.handle)
+---
+
+<Base title={user.name ?? `@${user.handle}`} gap="lg">
+  <div class="flex flex-col items-start">
+    <Avatar {...(user.avatar ?? avatarFor(user.id))} size="xl" label={`@${user.handle}`} />
+
+    <h1 class="mt-3 text-xl font-semibold">{user.name ?? `@${user.handle}`}</h1>
+    <p class="mt-1 text-sm">@{user.handle}</p>
+
+    {user.bio && <p class="mt-3 text-fg-muted">{user.bio}</p>}
+  </div>
+
+  <section class="gap-3 flex flex-col">
+    <h2 class="ml-4">Packages</h2>
+
+    {own.length > 0 ? (
+      <ul class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+        {own.map((item) => <PackageCard {...item} />)}
+      </ul>
+    ) : (
+      <p class="ml-4 text-fg-hint">No packages yet.</p>
+    )}
+  </section>
+</Base>

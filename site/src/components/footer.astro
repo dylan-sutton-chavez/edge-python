@@ -1,0 +1,31 @@
+---
+import Mark from '../assets/mark.svg'
+
+type Link = [label: string, href: string, blank?: boolean]
+
+const columns: { title: string; links: Link[] }[] = [
+  { title: 'Registry', links: [['Explore', '/'], ['Packages', '/packages'], ['Publish', '/publish']] },
+  { title: 'Docs', links: [['Introduction', '/docs/getting-started/introduction'], ['Modules', '/docs/reference/modules'], ['Publishing', '/docs/registry/publishing'], ['HTTP API', '/docs/registry/api']] },
+  { title: 'Edge Python', links: [['Website', 'https://edgepython.com/', true], ['GitHub', 'https://github.com/dylan-sutton-chavez/edge-python', true]] }
+]
+---
+
+<footer class="border-t border-line-strong w-full max-w-[1200px] mx-auto text-xs px-3.5 py-6 text-fg-disabled flex flex-col sm:flex-row gap-6">
+  <div>
+    <Mark class="h-5 w-auto mb-3.5" aria-hidden="true" />
+    <p>Packages for Edge Python, pinned by sha256.</p>
+  </div>
+
+  <nav aria-label="Footer" class="sm:ml-auto flex flex-col sm:flex-row gap-6">
+    {columns.map(({ title, links }) => (
+      <div>
+        <h2>{title}</h2>
+        <ul class="text-fg-hint space-y-1 mt-2">
+          {links.map(([label, href, blank]) => (
+            <li><a href={href} target={blank ? '_blank' : undefined} rel={blank ? 'noopener noreferrer' : undefined} class="hover:text-fg-subtle transition">{label}</a></li>
+          ))}
+        </ul>
+      </div>
+    ))}
+  </nav>
+</footer>

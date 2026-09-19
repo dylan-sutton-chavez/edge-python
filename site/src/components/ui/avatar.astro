@@ -1,0 +1,26 @@
+---
+import type { Avatar } from '../../lib/account/avatar'
+
+const SIZES = { sm: 'size-6 p-1', md: 'size-8.5 p-1.5', lg: 'size-10 p-2', xl: 'size-27 p-5' }
+
+const glyphs = import.meta.glob<string>('../../assets/avatars/avatar-*.svg', { query: '?raw', import: 'default', eager: true })
+
+interface Props extends Avatar {
+  size?: keyof typeof SIZES
+  label?: string
+  class?: string
+}
+
+const { icon, palette, size = 'sm', label, class: className } = Astro.props
+
+const glyph = Object.entries(glyphs).find(([path]) => path.endsWith(`/avatar-${icon}.svg`))?.[1]
+if (!glyph) throw new Error(`Unknown avatar icon ${icon}.`)
+---
+
+<span
+  class:list={[`avatar-${palette}`, 'inline-flex shrink-0 rounded-full bg-(--av-bg) [&>svg]:size-full', SIZES[size], className]}
+  role={label ? 'img' : undefined}
+  aria-label={label}
+  aria-hidden={label ? undefined : 'true'}
+  set:html={glyph}
+/>

@@ -2,7 +2,7 @@ use alloc::{string::String, vec::Vec};
 
 pub use wasm_abi::{nan_box, WireValue, EDGE_ABI_VERSION, MAX_WIRE_DEPTH, TAG_INVALID};
 
-/* Sealed op codes / tags / error kinds with a `from_u32` reverse map from one variant list, so the two can't drift. Values mirror `wasm_abi::*` byte-for-byte per docs/content/reference/abi.md, extend host modules via new Op values, never new imports. */
+/* Sealed op codes, tags and error kinds, each with a `from_u32` reverse map, spec in docs/03-reference/06-abi.mdx. */
 macro_rules! abi_enum {
     ($name:ident { $($variant:ident = $value:path),+ $(,)? }) => {
         #[allow(non_camel_case_types)]

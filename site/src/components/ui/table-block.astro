@@ -1,0 +1,12 @@
+---
+interface Props {
+  class?: string
+  [key: string]: unknown
+}
+
+const { class: className, ...attrs } = Astro.props
+---
+
+<div data-table>
+  <table {...attrs} class={className}><slot /></table>
+</div>

@@ -1,0 +1,186 @@
+@import "tailwindcss";
+
+@custom-variant dark ([data-theme="dark"] &);
+@custom-variant hover (&:hover);
+
+:root {
+  color-scheme: light;
+
+  --page: #EBEAE7;
+  --header: #EFEEEB;
+  --surface: #E4E3E0;
+  --panel: #E7E6E3;
+
+  --line: #DFDEDB;
+  --line-strong: #D7D6D3;
+  --line-emphasis: #D0CFCC;
+
+  --fg: #151515;
+  --fg-muted: #2C2B28;
+  --fg-subtle: #41403D;
+  --fg-faint: #5F5E5B;
+  --fg-hint: #767572;
+  --fg-disabled: #9F9E9B;
+  --fg-placeholder: #B3B2AF;
+  --solid-hover: #343330;
+
+  --link: #2563EB;
+  --danger: #C1301F;
+  --scrim: #3d3d3c46;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --page: #151515;
+  --header: #111111;
+  --surface: #1C1C1C;
+  --panel: #191919;
+
+  --line: #212121;
+  --line-strong: #292929;
+  --line-emphasis: #303030;
+
+  --fg: #EBEAE7;
+  --fg-muted: #d4d4cf;
+  --fg-subtle: #bfbebb;
+  --fg-faint: #a19f9d;
+  --fg-hint: #8a8a8a;
+  --fg-disabled: #616161;
+  --fg-placeholder: #4d4d4d;
+  --solid-hover: #ccccc8;
+
+  --link: #3B82F6;
+  --danger: #E15647;
+  --scrim: #08080652;
+}
+
+@theme {
+  --text-*: initial;
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+
+  --leading-code: 21px;
+
+  --default-transition-duration: 200ms;
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-header: var(--header);
+  --color-surface: var(--surface);
+  --color-panel: var(--panel);
+
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-line-emphasis: var(--line-emphasis);
+
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-fg-faint: var(--fg-faint);
+  --color-fg-hint: var(--fg-hint);
+  --color-fg-disabled: var(--fg-disabled);
+  --color-fg-placeholder: var(--fg-placeholder);
+  --color-solid-hover: var(--solid-hover);
+
+  --color-link: var(--link);
+  --color-danger: var(--danger);
+  --color-scrim: var(--scrim);
+
+  --font-mono: var(--font-jetbrains-mono);
+}
+
+.avatar-sand { --av-bg: #A5978E; --av-dark: #3A322D; --av-light: #EBE8E6; }
+.avatar-moss { --av-bg: #7F9C7A; --av-dark: #1F3A26; --av-light: #E8F0E4; }
+.avatar-sky { --av-bg: #8AA2C4; --av-dark: #1E2F4F; --av-light: #E6ECF5; }
+
+html { scrollbar-width: none; }
+html::-webkit-scrollbar { display: none; }
+
+body { font-family: var(--font-inter); }
+
+button:not(:disabled),
+label:has(input[type="radio"]:not(:disabled)) {
+  cursor: pointer;
+}
+
+input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.prose {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.prose h1 { font-size: var(--text-xl); font-weight: 600; }
+.prose h2 { font-size: var(--text-lg); font-weight: 600; }
+.prose h3 { font-size: var(--text-md); font-weight: 600; }
+
+.prose a { color: var(--link); text-decoration: underline; }
+
+.prose ul, .prose ol { padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.prose ul { list-style: disc; }
+.prose ol { list-style: decimal; }
+
+.prose :not(pre) > code {
+  font-family: var(--font-jetbrains-mono);
+  font-size: var(--text-xs);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 1px 5px;
+}
+
+.prose pre span { color: var(--shiki-light); }
+[data-theme="dark"] .prose pre span { color: var(--shiki-dark); }
+
+.prose [data-table] {
+  overflow-x: auto;
+  background: var(--page);
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  scrollbar-width: none;
+}
+
+.prose [data-table]::-webkit-scrollbar { display: none; }
+
+.prose table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-sm);
+}
+
+.prose th, .prose td { padding: 12px 16px; text-align: left; white-space: nowrap; }
+.prose th { color: var(--fg-subtle); font-weight: 400; }
+.prose tbody td { border-top: 1px solid var(--line-strong); }
+
+.prose blockquote {
+  border-left: 2px solid var(--line-emphasis);
+  padding-left: 16px;
+  color: var(--fg-muted);
+}
+
+.spinner { animation: spoke 1.1s steps(8) infinite; }
+.spinner > * { opacity: 0.2; }
+.spinner > :nth-child(1) { opacity: 1; }
+.spinner > :nth-child(2) { opacity: 0.8; }
+.spinner > :nth-child(3) { opacity: 0.6; }
+.spinner > :nth-child(4) { opacity: 0.4; }
+
+@keyframes spoke {
+  to { transform: rotate(1turn); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2.4s; }
+}

@@ -1,11 +1,12 @@
 import { chromium } from "npm:playwright@latest";
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import { Buffer } from "node:buffer";
 
 const ROOT = new URL("../", import.meta.url).pathname;
-const HOST = new URL("../../js/", import.meta.url).pathname;
-const DIST = HOST + "dist/"; // tsc emit of js/src, built below
-const REPO = new URL("../../", import.meta.url).pathname;
 const CDN_HOST = "cdn.edgepython.com";
+// The staged CDN this run tests, a tmp prefix in CI or the local one from infra.
+const BASE = Deno.env.get("EDGE_CDN_BASE")?.replace(/\/$/, "");
+if (!BASE) throw new Error("set EDGE_CDN_BASE (npm run cdn:local in infra)");
 const MANIFEST = "/_edge.json"; // synthesized, keeps the agnostic <pkg>/ folder free of test artifacts
 const STD = ["json", "re", "math", "struct", "test"];
 
@@ -26,46 +27,19 @@ const TYPES = {
     ".py": "text/plain",
 };
 
-// The artifact name can differ from the dir (`struct` is a Rust keyword), any single release .wasm counts.
-function builtWasm(name) {
-    const dir = `${ROOT}${name}/target/wasm32-unknown-unknown/release`;
-    if (existsSync(`${dir}/${name}.wasm`)) return `${name}.wasm`;
-    return existsSync(dir) ? readdirSync(dir).find((f) => f.endsWith(".wasm")) : undefined;
-}
-
-let distBuilt = false;
-async function buildDist() {
-    if (distBuilt) return;
-    const tsc = (cfg) => new Deno.Command(Deno.execPath(), { args: ["run", "-A", "npm:typescript@5.9.3/tsc", "-p", cfg], cwd: HOST }).output();
-    for (const c of ["tsconfig.json", "tsconfig.worker.json"]) {
-        const r = await tsc(c);
-        if (!r.success) throw new Error(`tsc failed: ${c}`);
-    }
-    distBuilt = true;
+/* The official origin answers from BASE, decoded bytes and the CDN's own headers, CORS included. */
+async function cdn(route, url) {
+    const res = await fetch(BASE + url.pathname + url.search);
+    const headers = Object.fromEntries([...res.headers].filter(([k]) => k !== "content-encoding" && k !== "content-length"));
+    return route.fulfill({ status: res.status, headers, body: Buffer.from(await res.arrayBuffer()) });
 }
 
 // Agnostic driver, feeds each <pkg>/<pkg>.json corpus to the <edge-python> tag. Run with deno test --allow-all harness/
 async function runPackage(pkg) {
-    await buildDist();
     const dir = `${ROOT}${pkg}`;
-    // Import the package's `.py` entry when it has one, else the built wasm.
-    const hasPy = existsSync(`${dir}/src/entry.py`);
-
-    let entry;
-    if (hasPy) {
-        entry = `/${pkg}/src/entry.py`;
-    } else {
-        const wasmName = builtWasm(pkg);
-        if (!wasmName) {
-            throw new Error(`built artifact not found for '${pkg}'\nrun (from ${pkg}/): cargo build --release --target wasm32-unknown-unknown`);
-        }
-        entry = `/${pkg}/target/wasm32-unknown-unknown/release/${wasmName}`;
-    }
-
     const cases = JSON.parse(readFileSync(`${dir}/${pkg}.json`, "utf-8"));
-    // Every std is declared at its CDN url, the package under test points at the local build.
+    // Every std is declared at its CDN url, the package under test included.
     const imports = Object.fromEntries(STD.map((name) => [name, `https://${CDN_HOST}/std/${name}.${name === "test" ? "py" : "wasm"}`]));
-    imports[pkg] = entry;
     const manifest = existsSync(`${dir}/edge.json`)
         ? readFileSync(`${dir}/edge.json`, "utf-8")
         : JSON.stringify({ imports });
@@ -76,49 +50,15 @@ async function runPackage(pkg) {
     page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
     page.on("pageerror", (e) => errors.push(e.message));
 
-    /* Serve repo files and the synthesized manifest, a CDN path the tree lacks fails the test. */
-    const offline = new Set();
+    /* Serve the harness page and the synthesized manifest, any host but the CDN fails the test. */
+    const strays = new Set();
     await page.route("**/*", (route) => {
         const url = new URL(route.request().url());
-        // A manifest the tree lacks answers 404 like the deploy, any other miss fails the test.
-        const miss = (hint) => {
-            if (url.pathname.endsWith("/edge.json")) return route.fulfill({ status: 404 });
-            offline.add(hint);
+        if (url.host === CDN_HOST) return cdn(route, url);
+        if (url.host !== "localhost") {
+            strays.add(`unexpected request to ${url.href}`);
             return route.abort();
-        };
-        // A sibling std at its CDN url is served from its local build.
-        if (url.host === CDN_HOST && url.pathname.startsWith("/std/")) {
-            const name = url.pathname.slice("/std/".length).replace(/\.(wasm|py)$/, "");
-            const wasm = name === "test" ? undefined : builtWasm(name);
-            const local = name === "test" ? `${ROOT}test/src/entry.py` : `${ROOT}${name}/target/wasm32-unknown-unknown/release/${wasm}`;
-            try { return route.fulfill({ contentType: TYPES[url.pathname.slice(url.pathname.lastIndexOf("."))], body: readFileSync(local) }); }
-            catch { return miss(`build std/${name} first`); }
         }
-        // In-tree wasm so new exports are testable.
-        if (url.host === CDN_HOST && url.pathname === "/compiler.wasm") {
-            const local = `${REPO}target/wasm32-unknown-unknown/release/compiler.wasm`;
-            try { return route.fulfill({ contentType: "application/wasm", body: readFileSync(local) }); }
-            catch { return miss("run cargo wasm first"); }
-        }
-        if (url.host === CDN_HOST && url.pathname.startsWith("/js/src/")) {
-            const path = DIST + url.pathname.slice("/js/src/".length);
-            try {
-                return route.fulfill({ body: readFileSync(path), contentType: TYPES[path.slice(path.lastIndexOf("."))] ?? "application/octet-stream" });
-            } catch {
-                return miss(`js/dist has no ${url.pathname.slice("/js/src/".length)}`);
-            }
-        }
-        // In-tree JS host first, CI must test the checkout not the deploy.
-        if (url.host === CDN_HOST && url.pathname.startsWith("/js/")) {
-            const path = HOST + url.pathname.slice("/js/".length);
-            try {
-                return route.fulfill({ body: readFileSync(path), contentType: TYPES[path.slice(path.lastIndexOf("."))] ?? "application/octet-stream" });
-            } catch {
-                return miss(`js${url.pathname.slice("/js".length)} is missing from the tree`);
-            }
-        }
-        if (url.host === CDN_HOST) return miss(`no local copy of ${url.href}`);
-        if (url.host !== "localhost") return route.continue();
         if (url.pathname === MANIFEST) return route.fulfill({ contentType: "application/json", body: manifest });
         const path = ROOT + url.pathname.slice(1);
         try {
@@ -184,13 +124,13 @@ async function runPackage(pkg) {
 
         if (errors.length) failures.push(`[${pkg}] console errors: ${errors.join(" | ")}`);
     } catch (e) {
-        // A tree miss explains any failure it caused, report it first.
-        throw offline.size ? new Error([...offline].join("\n"), { cause: e }) : e;
+        // A stray request explains any failure it caused, report it first.
+        throw strays.size ? new Error([...strays].join("\n"), { cause: e }) : e;
     } finally {
         await browser.close();
     }
 
-    if (offline.size) failures.unshift(...offline);
+    if (strays.size) failures.unshift(...strays);
     if (failures.length) throw new Error("\n" + failures.join("\n"));
 }
 

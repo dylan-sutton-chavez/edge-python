@@ -1,5 +1,5 @@
 name: JS
-description: The JS host. Deno lint and check, tsc emit to js/dist, then the Deno and Playwright suites.
+description: The JS host. Deno lint and check, tsc emit to js/dist, then its tree and the builtins staged on tmp.
 
 runs:
   using: composite
@@ -35,52 +35,8 @@ runs:
         deno run -A npm:typescript@5.9.3/tsc -p tsconfig.json
         deno run -A npm:typescript@5.9.3/tsc -p tsconfig.worker.json
 
-    - name: Upload js/dist
-      uses: actions/upload-artifact@v7
+    # The Deno and Playwright suites run in the test job, against this tree on tmp.
+    - name: Stage on tmp
+      uses: ./.github/actions/upload
       with:
-        name: js_dist
-        path: js/dist
-        retention-days: 1
-
-    # Test against this run's compiler, not the deployed CDN copy.
-    - name: Download compiler wasm
-      uses: actions/download-artifact@v8
-      with:
-        name: compiler_wasm
-        path: target/wasm32-unknown-unknown/release/
-
-    - name: Download std wasm
-      uses: actions/download-artifact@v8
-      with:
-        pattern: dist-*
-        path: std_dist/
-        merge-multiple: true
-
-    # The harness serves each std from its release dir, the same layout a local build leaves.
-    - name: Place std wasm
-      shell: bash
-      run: |
-        for f in std_dist/*.wasm; do
-          p=$(basename "$f" .wasm)
-          mkdir -p "std/$p/target/wasm32-unknown-unknown/release"
-          cp "$f" "std/$p/target/wasm32-unknown-unknown/release/$p.wasm"
-        done
-
-    # A 150MB Chromium, cached so only the first run pays the download.
-    - name: Cache Playwright browsers
-      uses: actions/cache@v6
-      with:
-        path: ~/.cache/ms-playwright
-        key: playwright-${{ runner.os }}-chromium
-
-    # --with-deps installs the OS libs Chromium needs on Linux.
-    - name: Install Chromium
-      shell: bash
-      run: deno run -A npm:playwright install --with-deps chromium
-
-    # The Deno suite proves the host runs with no browser, the Playwright one drives Chromium.
-    - name: Test
-      shell: bash
-      run: |
-        deno test --allow-all js/tests/deno.test.js
-        deno test --allow-all js/tests/js.test.js
+        part: js
