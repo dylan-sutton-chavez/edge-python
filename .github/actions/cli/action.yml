@@ -27,8 +27,8 @@ runs:
           curl -fsSL --retry 3 "$EDGE_CDN_BASE/std/$p.wasm" -o "_inputs/std/$p.wasm"
         done
         curl -fsSL --retry 3 https://github.com/bytecodealliance/StarlingMonkey/releases/download/starlingmonkey-v0.3.0/starling.wasm -o _inputs/starling.wasm
-        if command -v sha256sum >/dev/null; then check="sha256sum -c"; else check="shasum -a 256 -c"; fi
-        echo "b5707b9d97164e0c29e471844a9ccdd81c445a5d379a9299ae2ee7a9dab3aabe  _inputs/starling.wasm" | $check
+        # macOS ships a BSD sha256sum whose -c takes a digest, shasum reads a checklist everywhere.
+        echo "b5707b9d97164e0c29e471844a9ccdd81c445a5d379a9299ae2ee7a9dab3aabe  _inputs/starling.wasm" | shasum -a 256 -c
         echo "EDGE_COMPILER_WASM=$GITHUB_WORKSPACE/_inputs/compiler-cli.wasm" >> "$GITHUB_ENV"
         echo "EDGE_STD_DIR=$GITHUB_WORKSPACE/_inputs/std" >> "$GITHUB_ENV"
         echo "EDGE_STARLING_WASM=$GITHUB_WORKSPACE/_inputs/starling.wasm" >> "$GITHUB_ENV"

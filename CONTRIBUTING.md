@@ -48,7 +48,7 @@ do (cd std/$p && cargo build --release --target wasm32-unknown-unknown)
 done
 (cd js && deno run -A npm:typescript@5.9.3/tsc -p tsconfig.json && deno run -A npm:typescript@5.9.3/tsc -p tsconfig.worker.json)
 curl -fsSL https://github.com/bytecodealliance/StarlingMonkey/releases/download/starlingmonkey-v0.3.0/starling.wasm -o target/starling.wasm
-echo "b5707b9d97164e0c29e471844a9ccdd81c445a5d379a9299ae2ee7a9dab3aabe  target/starling.wasm" | sha256sum -c
+echo "b5707b9d97164e0c29e471844a9ccdd81c445a5d379a9299ae2ee7a9dab3aabe  target/starling.wasm" | shasum -a 256 -c
 (cd cli && cargo build) # before the stage, which ships its js-runtime artifact
 cd infra && npm ci && npm run stage -- ../_cdn && npm run cdn:local -- ../_cdn # keep it running
 ```

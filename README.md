@@ -4,8 +4,6 @@
       <img width="300" src="site/public/banner.svg" alt="Edge Python Logo">
     </picture>
   </a>
-  <br/><br/>
-  <a href="https://github.com/dylan-sutton-chavez/edge-python/actions/workflows/main.yml"><img src="https://github.com/dylan-sutton-chavez/edge-python/actions/workflows/main.yml/badge.svg" alt="CI / CD"></a>
 </div>
 
 <br/>
