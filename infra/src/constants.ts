@@ -16,6 +16,10 @@ export const SITE_URL = `https://${SITE_DOMAIN}`
 export const CDN_URL = `https://${CDN_DOMAIN}`
 export const EMAIL_FROM = `no-reply@${SITE_DOMAIN}`
 
+// Inbound mail lives on the apex whatever the environment, it is a person and not a deployment.
+export const CONTACT_EMAIL = `dylan@${ZONE}`
+export const CONTACT_FORWARD_TO = 'c.sutton.dylan@gmail.com'
+
 // tmp is only a CDN, each CI run stages under its prefix and expires in a day.
 export const TMP_BUCKET = `${RESOURCE_HASH}-tmp-cdn`
 export const TMP_CDN_DOMAIN = `cdn.tmp.${ZONE}`
