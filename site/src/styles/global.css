@@ -26,6 +26,8 @@
 
   --link: #2563EB;
   --danger: #C1301F;
+  --notice: #FBF3DB;
+  --notice-fg: #2C2B28;
   --scrim: #3d3d3c46;
 }
 
@@ -52,6 +54,8 @@
 
   --link: #3B82F6;
   --danger: #E15647;
+  --notice: #3B3324;
+  --notice-fg: #E9E3D6;
   --scrim: #08080652;
 }
 
@@ -91,6 +95,8 @@
 
   --color-link: var(--link);
   --color-danger: var(--danger);
+  --color-notice: var(--notice);
+  --color-notice-fg: var(--notice-fg);
   --color-scrim: var(--scrim);
 
   --font-mono: var(--font-jetbrains-mono);

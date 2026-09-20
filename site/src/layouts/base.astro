@@ -31,6 +31,10 @@ const { title, description = 'Packages for Edge Python, pinned by sha256.', gap 
   </script>
 </head>
 <body class="bg-page text-fg flex min-h-screen flex-col has-[dialog:modal]:overflow-hidden">
+  <p class="bg-notice text-notice-fg border-b border-line px-3 py-1.5 text-center text-2xs">
+    The package registry is still being built. The <a href="/docs" class="underline">docs</a> are live, everything else is a preview.
+  </p>
+
   <Header />
   <SignIn />
   <main class:list={['p-3.5 w-full max-w-[1200px] mx-auto my-2 text-base flex flex-col', GAPS[gap], className]}>
