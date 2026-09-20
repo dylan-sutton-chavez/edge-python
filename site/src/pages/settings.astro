@@ -6,6 +6,7 @@ import Icon from '../components/ui/icon.astro'
 import Sheet from '../components/ui/sheet.astro'
 import Profile from '../components/settings/profile.astro'
 import Account from '../components/settings/account.astro'
+import Tokens from '../components/settings/tokens.astro'
 import { linkedProviders } from '../lib/server/users'
 
 const { user } = Astro.locals
@@ -15,11 +16,19 @@ if (!user.handle) return Astro.redirect('/?welcome')
 type Item = { label: string; icon: ComponentProps<typeof Icon>['name'] }
 
 const groups: { label: string; items: Item[] }[] = [
-  { label: 'Personal', items: [{ label: 'Profile', icon: 'user' }, { label: 'Account', icon: 'mailbox' }] }
+  { label: 'Personal', items: [{ label: 'Profile', icon: 'user' }, { label: 'Account', icon: 'mailbox' }] },
+  { label: 'Publishing', items: [{ label: 'Tokens', icon: 'key' }] }
 ]
 
 const items = groups.flatMap((group) => group.items)
 const linked = await linkedProviders(env.DB, user.id)
+
+// Placeholders so the token states are reviewable, delete them with the API.
+const tokens = [
+  { id: 'placeholder-1', name: 'laptop', created: 'Sep 12, 2026', used: '2 days ago' },
+  { id: 'placeholder-2', name: 'CI', created: 'Aug 30, 2026', used: null }
+]
+const fresh = 'edge_pat_7q2vJ4nR8xKmT1sYdW6bZpA3cL9eH5uG'
 
 const current = 'Profile'
 
@@ -96,6 +105,7 @@ const row = 'flex items-center gap-2 w-full px-4 py-1.5 text-left hover:bg-line-
         <div data-view={item.label} hidden={item.label !== current}>
           {item.label === 'Profile' && <Profile user={user} />}
           {item.label === 'Account' && <Account user={user} linked={linked} />}
+          {item.label === 'Tokens' && <Tokens tokens={tokens} fresh={fresh} />}
         </div>
       ))}
     </section>

@@ -1,0 +1,156 @@
+---
+import Icon from '../ui/icon.astro'
+
+export type Token = { id: string; name: string; created: string; used: string | null }
+
+interface Props {
+  tokens: Token[]
+  fresh?: string
+}
+
+const { tokens, fresh } = Astro.props
+
+const action = 'underline text-fg-hint transition'
+---
+
+<div class="flex flex-col gap-6">
+  <div>
+    <h2 class="text-md">Tokens</h2>
+    <p class="text-fg-hint mt-0.5">What the CLI publishes with. Treat them like passwords.</p>
+  </div>
+
+  <section class="flex flex-col gap-2">
+    <h3 class="ml-4">Your tokens</h3>
+
+    <div class="bg-page border border-line-strong rounded-2xl overflow-hidden">
+      <ul class="divide-y divide-line-strong">
+        {tokens.map((token) => (
+          <li class="flex items-center gap-3 px-4 py-3">
+            <Icon name="key" size="lg" class="shrink-0 text-fg-subtle" />
+
+            <div class="min-w-0 flex-1">
+              <p class="truncate">{token.name}</p>
+              <p class="truncate text-2xs text-fg-hint">Created {token.created}, {token.used ? `last used ${token.used}` : 'never used'}</p>
+            </div>
+
+            <div class="shrink-0 flex items-center gap-3 text-xs">
+              <button type="button" data-rotate={token.id} class:list={[action, 'hover:text-fg']}>Rotate</button>
+              <button type="button" data-revoke={token.id} class:list={[action, 'hover:text-danger']}>Revoke</button>
+            </div>
+          </li>
+        ))}
+
+        <li>
+          <button type="button" data-add class="flex w-full items-center justify-center gap-2 px-4 py-3 text-fg-hint transition hover:bg-surface hover:text-fg">
+            <Icon name="close" size="sm" class="rotate-45" />
+            <span>Create new</span>
+          </button>
+
+          <form data-new-token hidden class="flex items-center gap-3 px-4 py-3">
+            <Icon name="key" size="lg" class="shrink-0 text-fg-subtle" />
+
+            <input
+              name="token-name"
+              placeholder="Name"
+              autocomplete="off"
+              maxlength="40"
+              required
+              class="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-fg-placeholder"
+            />
+
+            <div class="shrink-0 flex items-center gap-3 text-xs">
+              <button type="submit" class:list={[action, 'hover:text-fg']}>Generate</button>
+              <button type="button" data-cancel class:list={[action, 'hover:text-fg']}>Cancel</button>
+            </div>
+          </form>
+        </li>
+      </ul>
+    </div>
+
+    <p class="ml-4 text-2xs text-fg-hint">Rotate keeps the name and issues a new secret, revoke takes it out for good.</p>
+  </section>
+
+  <section class="flex flex-col gap-2">
+    <h3 class="ml-4">Using it</h3>
+
+    <div class="bg-page border border-line-strong rounded-2xl p-4">
+      <pre class="m-0 overflow-auto whitespace-pre font-mono text-xs leading-code [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">export EDGE_TOKEN=edge_pat_...
+edge build
+edge publish app.edge</pre>
+    </div>
+
+    <p class="ml-4 text-2xs text-fg-hint">Both run at the project root, build packs the .edge and publish uploads it.</p>
+  </section>
+</div>
+
+<dialog data-token-dialog aria-labelledby="token-title" class="outline-none backdrop:bg-scrim backdrop:backdrop-blur-[1px] m-auto w-[calc(100%-1.75rem)] max-w-[520px] bg-transparent text-fg">
+  <section class="bg-page border border-line-strong rounded-2xl p-6 flex flex-col gap-5 text-sm">
+    <div class="flex flex-col gap-1">
+      <div class="flex items-center">
+        <h2 id="token-title" class="text-base font-semibold">Please copy this token</h2>
+
+        <button type="button" data-token-close aria-label="Close" class="ml-auto text-fg-hint hover:text-fg transition">
+          <Icon name="close" size="sm" />
+        </button>
+      </div>
+
+      <p class="text-fg-faint">It is shown this one time. Store it somewhere safe before you close this.</p>
+    </div>
+
+    <div class="flex items-center gap-3 rounded-2xl border border-line-emphasis bg-surface px-4 py-2">
+      <code data-secret class="min-w-0 flex-1 truncate font-mono text-xs">{fresh}</code>
+
+      <button type="button" data-copy class="shrink-0 flex items-center gap-1.5 text-2xs text-fg-hint transition hover:text-fg-muted">
+        <Icon name="file" size="2xs" /><span data-copy-label>Copy</span>
+      </button>
+    </div>
+  </section>
+</dialog>
+
+<script>
+  const RESET = 1200
+
+  const dialog = document.querySelector<HTMLDialogElement>('[data-token-dialog]')
+  const add = document.querySelector<HTMLButtonElement>('[data-add]')
+  const form = document.querySelector<HTMLFormElement>('[data-new-token]')
+  const input = form?.querySelector('input')
+
+  // The row turns into the token it is about to make, then goes back to being a button.
+  const naming = (on: boolean) => {
+    if (!add || !form) return
+    add.hidden = on
+    form.hidden = !on
+    if (on) input?.focus()
+    else form.reset()
+  }
+
+  add?.addEventListener('click', () => naming(true))
+  form?.querySelector('[data-cancel]')?.addEventListener('click', () => naming(false))
+
+  // Create, rotate and revoke reach the server once the token API exists.
+  form?.addEventListener('submit', (event) => {
+    event.preventDefault()
+    naming(false)
+    dialog?.showModal()
+  })
+
+  document.querySelector('[data-token-close]')?.addEventListener('click', () => dialog?.close())
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  document.querySelector('[data-copy]')?.addEventListener('click', async () => {
+    const label = document.querySelector<HTMLElement>('[data-copy-label]')
+    const secret = document.querySelector<HTMLElement>('[data-secret]')
+    if (!label || !secret) return
+
+    try {
+      await navigator.clipboard.writeText(secret.textContent ?? '')
+      label.textContent = 'Copied'
+    } catch {
+      label.textContent = "Couldn't copy"
+    }
+
+    clearTimeout(timer)
+    timer = setTimeout(() => { label.textContent = 'Copy' }, RESET)
+  })
+</script>
