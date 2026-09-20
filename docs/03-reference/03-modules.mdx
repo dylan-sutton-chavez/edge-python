@@ -13,7 +13,7 @@ A module is one of three kinds, and its artifact decides which. All three use th
 |---|---|---|
 | Code module | `.py` | Its top level runs once at startup, and its exports live on a module object shared by every importer. |
 | Native module | `.wasm` | A plugin over the [ABI](/docs/reference/abi). A host can also register bindings of this kind through the `Resolver` trait. |
-| JS module | `.js`, `.mjs` | Plain ESM the JS host runs on the page's main thread, see [JS module](#js-module). |
+| JS module | `.js`, `.mjs` | Plain ESM the JS host runs on the page's main thread and the CLI runs in StarlingMonkey, see [JS module](#js-module). |
 
 Any other extension is sniffed. A file that starts with the wasm magic bytes is a native module, anything else is Python source.
 
@@ -99,7 +99,7 @@ error: integrity check failed for 'https://example.com/utils.py'
  got sha256-36e4838513e46116f258c86b494eaa826d64fa0a9abdf36e8720a31b3d2862e2
 ```
 
-Only `sha256` is supported. Other prefixes fail with `unrecognized integrity fragment`. The JS host checks the pin in its fetch layer and refuses one on a `.js` or `.mjs` module, which the page imports itself and cannot hash. The CLI checks the pin on every module it downloads or reads from disk, `.wasm` plugins included, and does not read it on the official URLs it serves from inside the binary, the standard packages and the `time`, `network`, and `actor` libraries.
+Only `sha256` is supported. Other prefixes fail with `unrecognized integrity fragment`. The JS host checks the pin in its fetch layer and refuses one on a `.js` or `.mjs` module, which the page imports itself and cannot hash. The CLI checks the pin on every module it downloads or reads from disk, `.wasm` plugins and JavaScript modules included, where the pin covers the module's entry file. It does not read the pin on the standard package URLs it serves from inside the binary.
 
 In a browser the JS host additionally caches every fetched module in IndexedDB, in a `cas` store (hash to bytes) and a `lockfile` store (spec to hash). Repeat runs make no network requests. If a locked URL later serves different bytes, the run fails with an `integrity drift` error showing both digests. `clearCache()` on the worker wipes both stores. Without IndexedDB, as in Deno, fetched modules stay in memory for the worker's lifetime and no lockfile is kept. The CLI does the same on disk, see [The CLI](#the-cli).
 
@@ -131,9 +131,9 @@ The official libraries each have their own page. Standard packages:
 
 System libraries:
 
-- [dom](/docs/system-libraries/dom), [network](/docs/system-libraries/network), [storage](/docs/system-libraries/storage), [time](/docs/system-libraries/time), [actor](/docs/system-libraries/actor)
+- [dom](/docs/system-libraries/dom), [network](/docs/system-libraries/network), [storage](/docs/system-libraries/storage), [time](/docs/system-libraries/time)
 
-None of them resolves on its own. A project declares each one it uses in `imports`, and `edge add` writes the entry. A standard package points at `https://cdn.edgepython.com/std/<name>.wasm` (`test` ships as `test.py`), a JavaScript library at `https://cdn.edgepython.com/js/builtins/<name>/index.js`, and `dom` at its facade `https://cdn.edgepython.com/js/builtins/dom/entry.py`. Where each one runs follows from that artifact, a `.wasm` or `.py` runs inside the engine and a `.js` on the JS host's main thread. The JS host fetches those URLs and caches them. The CLI resolves the standard package URLs to the copies embedded in the binary and the `time`, `network`, and `actor` URLs to its Rust implementations, so the same manifest serves both hosts and needs no network in the CLI. A page that drives `createWorker` directly passes the same entries through `imports`, or a `mainThreadModules` object for an in-page module.
+None of them resolves on its own. A project declares each one it uses in `imports`, and `edge add` writes the entry. A standard package points at `https://cdn.edgepython.com/std/<name>.wasm` (`test` ships as `test.py`), a JavaScript library at `https://cdn.edgepython.com/js/builtins/<name>/index.js`, and `dom` at its facade `https://cdn.edgepython.com/js/builtins/dom/entry.py`. Where each one runs follows from that artifact, a `.wasm` or `.py` runs inside the engine and a `.js` on the JS host's main thread or in the CLI's [JavaScript runtime](#javascript-in-the-cli). The JS host fetches those URLs and caches them. The CLI resolves the standard package URLs to the copies embedded in the binary and downloads the JavaScript libraries once into its cache, so the same manifest serves both hosts. A page that drives `createWorker` directly passes the same entries through `imports`, or a `mainThreadModules` object for an in-page module.
 
 ```json
 {
@@ -173,7 +173,7 @@ Three delivery paths, by decreasing reach:
 |---|---|---|---|
 | CDN wasm | Publish a `.wasm`, the JS host loads it by URL | Rust with `wasm-pdk`, or Zig, C, AssemblyScript | Transit values only |
 | System capability | A custom `compiler.wasm` plus a matching host | Rust, or any wasm32 target, inside the embedder | Transit values plus host services (DOM, FS, crypto) |
-| JS module | Plain ESM declared in `imports` by URL, run on the JS host's main thread | JavaScript | Transit values plus the host globals, `window` and `document` in a browser |
+| JS module | Plain ESM declared in `imports` by URL, run on the JS host's main thread or in the CLI's StarlingMonkey | JavaScript | Transit values plus the host globals, `window` and `document` in a browser |
 
 Transit values are `None`, `bool`, `int` (128-bit), `float`, `str`, `bytes`, and nested `list` / `dict`. The exact wire tags are in the [ABI](/docs/reference/abi).
 
@@ -234,31 +234,45 @@ export const dom = ({ pushEvent }) => {
 
 Handlers take decoded JS values and return plain JS values. Opaque objects like DOM nodes model as integer IDs into a registry the handlers own, the `alloc` pattern above. The per-call cost is a `postMessage` round trip, invisible at UI rate. The official JavaScript libraries in `js/builtins` are reference implementations. `mainThreadModules` registers an object the page already holds. The same module shipped as a file is an ordinary `imports` entry, `{ "imports": { "dom": "./dom.js" } }` in `edge.json` or the same map passed to `createWorker`, and the host imports the ESM on first use.
 
-A module that reaches a browser global loads anywhere and fails where the global is missing. In a JavaScript runtime without a page, the first `dom` call raises `module 'dom' needs 'document', missing in this runtime` in the calling coroutine, the runtime's own error surfaced by the host, and the same shape covers any module and any missing global. `frame()` there rejects the run with `frame() needs requestAnimationFrame, missing in this runtime`, and `createWorker` without Web Workers throws `createWorker needs Worker, missing in this runtime`.
+A module that reaches a browser global loads anywhere and fails where the global is missing. In a JavaScript runtime without a page, the first `dom` call raises `module 'dom' needs 'document', missing in this runtime` in the calling coroutine, the runtime's own error surfaced by the host, and the same shape covers any module and any missing global, the CLI included. `frame()` there rejects the run with `frame() needs requestAnimationFrame, missing in this runtime`, and `createWorker` without Web Workers throws `createWorker needs Worker, missing in this runtime`.
 
 ## The CLI
 
-`edge run`, `edge repl`, `edge test`, and `edge actor` run the engine the JS host loads, a `compiler.wasm` built from the same source for speed, precompiled for the host machine and executed under wasmtime. No browser, no server, millisecond startup. The CLI runs no JavaScript, so a module it cannot run fails at compile time, before any code runs, and a parked `frame()` reports `requires a browser` at run time. Everything runs under the [sandbox limits](/docs/reference/limits-and-errors) with a real wall clock, so `sleep()` and timeouts wait in real time.
+`edge run`, `edge repl`, `edge test`, and `edge actor` run the engine the JS host loads, a `compiler.wasm` built from the same source for speed, precompiled for the host machine and executed under wasmtime. No browser, no server, millisecond startup. JavaScript modules run in StarlingMonkey beside the engine, see [JavaScript in the CLI](#javascript-in-the-cli), and a parked `frame()` reports `frame() needs requestAnimationFrame, missing in this runtime`. Everything runs under the [sandbox limits](/docs/reference/limits-and-errors) with a real wall clock, so `sleep()` and timeouts wait in real time.
 
 ### Module resolution
 
-Relative imports load from disk relative to the importing file, dotted imports from the nearest `edge.json` dir. Bare names go through the `edge.json` walk-up, nothing resolves without an entry. Manifest URLs download once into `~/.cache/edge/modules` (`$XDG_CACHE_HOME` is honored) with a 64 MB cap. A downloaded file is pinned by a `.lock` sidecar holding its SHA-256, and later runs refuse on drift until you remove the cache entry. A remote `edge.json` that answered 404 is remembered as absent, so later runs skip the request.
+Relative imports load from disk relative to the importing file, dotted imports from the nearest `edge.json` dir. Bare names go through the `edge.json` walk-up, nothing resolves without an entry. Manifest URLs download once into `~/.cache/edge/modules` (`$XDG_CACHE_HOME` is honored) with a 64 MB cap, and a JavaScript module brings the files it imports with relative specifiers. A downloaded file is pinned by a `.lock` sidecar holding its SHA-256, and later runs refuse on drift until you remove the cache entry. A remote `edge.json` that answered 404 is remembered as absent, so later runs skip the request.
 
 The standard packages are built into the binary. The official CDN URLs that `edge add` writes (`https://cdn.edgepython.com/std/<name>.wasm`, `test.py` for `test`) resolve to the embedded copies with no network, so one manifest serves both hosts.
 
-The CLI implements the official builtins that can run without a browser. An `imports` entry under `https://cdn.edgepython.com/js/builtins/<name>/` maps to its Rust implementation of `time`, `network`, or `actor`. `time` carries the clocks and the calendar functions, always UTC (there is no timezone database, so `tzname()` is `"UTC"`). `network` exposes `fetch(url, options_json?)` returning `{id, ok, status, headers, body}`, plus `fetch_text` and `fetch_json`, each suspending the coroutine until the response lands, and the WebSocket and Server-Sent Events calls, which stream their events through `receive()`. `abort_request` is the one name it lacks. `actor` is the message passing of an [actor pool](/docs/reference/actors). The builtins it lacks are the ones that need a browser.
-
 A `.wasm` plugin from disk or a URL loads like the standard packages. The CLI compiles it with Cranelift on first use and keeps the machine code in `~/.cache/edge/plugins`, keyed by the file's hash, so later runs skip the compile.
 
-Every module the CLI cannot run fails at compile time, at the import that names it, with ` (via <importer>)` appended when another module reached it.
+A module that fails to load fails at compile time, at the import that names it, with ` (via <importer>)` appended when another module reached it.
 
 | Module | Message |
 |---|---|
-| `dom`, `storage` | `module 'dom' requires a browser` |
-| Any other JavaScript module | `module 'charts' is JavaScript, the CLI cannot run it` |
 | A `.so` or `.dylib` | `module 'fastmath' is not supported, ship a .wasm` |
 | A `.wasm` that does not load | `module 'fastmath' is not a valid plugin, <reason>` |
-| `actor`, `network`, or a plugin in an [eval group](#untrusted-code) | `module 'network' is not available to untrusted eval runs` |
+| A JavaScript module that throws while loading | `module 'charts' failed to load, Error: <message>` |
+| A JavaScript module that imports above its directory | `module 'charts' imports '../x.js' from outside its directory` |
+| A plugin, or a URL off the official CDN, in an [eval group](#untrusted-code) | `module 'fastmath' is not available to untrusted eval runs` |
+
+### JavaScript in the CLI
+
+The CLI runs every `.js` and `.mjs` module in [StarlingMonkey](https://github.com/bytecodealliance/StarlingMonkey), SpiderMonkey compiled to a WebAssembly component, under the same wasmtime that runs the engine. It is the only JavaScript engine the CLI has. Each module gets its own runtime, started on first import and shared by every program of one process that imports it, and calls, Promises and `pushEvent` behave as they do in the JS host. A module's console output goes to stdout, `console.log` lines as written and the other levels behind their name, such as `Warn: `.
+
+A module runs from a read-only copy of its directory, the entry and every file it reaches through `./` or `../` imports. It cannot import a bare package or a URL, and it sees no environment variables and no files outside that copy.
+
+The runtime has the Web APIs a server-side worker has, `fetch` with streams and `AbortController`, `setTimeout` and `setInterval`, `TextEncoder` and `TextDecoder`, `URL`, `crypto`, `performance`, `structuredClone`, `atob` and `btoa`. It has no `Intl`, `WebSocket`, `EventSource`, `MessageChannel`, `URLPattern` or `WebAssembly`, and nothing that belongs to a page, such as `document`, `window`, `localStorage` or `indexedDB`. Its time zone is always UTC. A module that reaches a missing global fails at that call with the JS host's text, so for the official libraries
+
+- `time` runs, except `tzname()`, which raises `module 'time' needs 'Intl', missing in this runtime`, and `localtime` equals `gmtime`,
+- `network` runs `fetch`, `fetch_text`, `fetch_json`, `abort_request` and the Server-Sent Events calls, while `ws_open` raises `module 'network' needs 'WebSocket', missing in this runtime`,
+- `storage` and `dom` import and raise at their first call, `module 'storage' needs 'localStorage', missing in this runtime`.
+
+The runtime is not part of the binary. The first JavaScript import downloads it once from `https://cdn.edgepython.com/js-runtime/<sha256>.cwasm`, precompiled for the platform, about 9 MB compressed and 30 MB on disk. The CLI checks the bytes against the SHA-256 built into the binary and keeps them in `~/.cache/edge/js-runtime`, and later runs load them in a few milliseconds. An `.edge` packed from a project that declares a JavaScript module carries its own copy, which a run prefers over the cache and the download, so a packed app stays offline. When no copy is at hand and the download fails, the import fails with `module 'time' needs the JavaScript runtime, fetching '<url>' failed, <reason>`.
+
+A runtime's memory is capped at 1 GiB, or at the run's own cap when that is lower, and allocating past it raises `out of memory` in the calling coroutine. A call that does not answer within 30 seconds, or before an eval run's deadline, stops the runtime with `module 'x' did not answer within 30 s`, and the next call starts a fresh one.
 
 ### Run flags
 
@@ -273,7 +287,7 @@ Without `--save-state`, a script parked on a wait the engine cannot serve prints
 
 ### Untrusted code
 
-Code you do not trust goes to an [eval group](/docs/reference/actors#untrusted-code), where each message runs in a fresh wasm instance with a memory cap and a ten second wall-clock deadline. A bundle that carries its own `edge.json` resolves through it, any other message through the pool's manifest, and either way `actor`, `network`, and `.wasm` plugins are refused.
+Code you do not trust goes to an [eval group](/docs/reference/actors#untrusted-code), where each message runs in a fresh wasm instance with a memory cap and a ten second wall-clock deadline. A bundle that carries its own `edge.json` resolves through it, any other message through the pool's manifest. Either way `.wasm` plugins are refused, remote modules load only from `https://cdn.edgepython.com/`, and the JavaScript runtime has no network, so `network.fetch` fails with `NetworkError when attempting to fetch resource`. `send()` has no scheduler there.
 
 ### Building from source
 
@@ -283,7 +297,7 @@ cargo wasm                                                              # compil
 cd cli && cargo build --release                                         # embeds them precompiled
 ```
 
-`cli/build.rs` reads the artifacts from those paths, or from `EDGE_COMPILER_WASM` and `EDGE_STD_DIR`, and fetches nothing.
+The build also needs the pinned StarlingMonkey release in `target/starling.wasm`, or at the path `EDGE_STARLING_WASM` names, see `CONTRIBUTING.md` for the command. `cli/build.rs` reads the artifacts from those paths, or from `EDGE_COMPILER_WASM` and `EDGE_STD_DIR`, fetches nothing, and precompiles StarlingMonkey into the artifact the binary later downloads by hash.
 
 ## See also
 

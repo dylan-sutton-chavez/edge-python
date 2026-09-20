@@ -20,6 +20,9 @@ unsafe extern "C" {
 
     /* Wall clock in nanoseconds, without it the VM falls back to a deterministic virtual clock for tests. */
     pub(super) fn host_now_ns() -> u64;
+
+    /* Hands `send(group, body)` to the host scheduler, non-zero means this host has none. */
+    pub(super) fn host_send(group_ptr: *const u8, group_len: u32, body_ptr: *const u8, body_len: u32) -> i32;
 }
 
 pub(super) fn stream_print(s: &str) {
@@ -29,6 +32,10 @@ pub(super) fn stream_print(s: &str) {
 /* `set_time_hook` wants a `fn() -> u64`, so the unsafe import is wrapped like `stream_print`. */
 pub(super) fn now_ns_host() -> u64 {
     unsafe { host_now_ns() }
+}
+
+pub(super) fn send_host(group: &str, body: &str) -> bool {
+    unsafe { host_send(group.as_ptr(), group.len() as u32, body.as_ptr(), body.len() as u32) == 0 }
 }
 
 /* dlmalloc keeps alloc and free O(1), the old free-list allocator degraded linearly on large live heaps. */

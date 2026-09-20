@@ -17,7 +17,7 @@ inputs:
 runs:
   using: composite
   steps:
-    # cli/build.rs embeds this run's speed build of compiler.wasm and std packages, read back from tmp.
+    # cli/build.rs embeds the speed compiler and std from tmp, and precompiles the pinned StarlingMonkey.
     - name: Fetch the build inputs
       shell: bash
       run: |
@@ -26,8 +26,12 @@ runs:
         for p in json re math struct; do
           curl -fsSL --retry 3 "$EDGE_CDN_BASE/std/$p.wasm" -o "_inputs/std/$p.wasm"
         done
+        curl -fsSL --retry 3 https://github.com/bytecodealliance/StarlingMonkey/releases/download/starlingmonkey-v0.3.0/starling.wasm -o _inputs/starling.wasm
+        if command -v sha256sum >/dev/null; then check="sha256sum -c"; else check="shasum -a 256 -c"; fi
+        echo "b5707b9d97164e0c29e471844a9ccdd81c445a5d379a9299ae2ee7a9dab3aabe  _inputs/starling.wasm" | $check
         echo "EDGE_COMPILER_WASM=$GITHUB_WORKSPACE/_inputs/compiler-cli.wasm" >> "$GITHUB_ENV"
         echo "EDGE_STD_DIR=$GITHUB_WORKSPACE/_inputs/std" >> "$GITHUB_ENV"
+        echo "EDGE_STARLING_WASM=$GITHUB_WORKSPACE/_inputs/starling.wasm" >> "$GITHUB_ENV"
 
     - name: Toolchain (lint)
       if: inputs.mode == 'lint'
@@ -91,7 +95,7 @@ runs:
         case "$TARGET" in *windows*) bin=edge.exe ;; esac
         tar -C "target/$TARGET/release" -czf "edge-$TARGET.tar.gz" "$bin"
 
-    # The tarball and the install scripts land under cli/ in this run's tmp tree.
+    # The tarball and the install scripts land under cli/, the precompiled runtime under js-runtime/.
     - name: Stage on tmp
       if: inputs.mode == 'release'
       uses: ./.github/actions/upload

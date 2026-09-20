@@ -189,6 +189,8 @@ pub struct VM<'a> {
     /* True when the last `output` entry is an unterminated line (print(end="") left it open). */
     pub(crate) output_open: bool,
     pub print_hook: Option<fn(&str)>,
+    /* Host scheduler handoff for `send()`, unset or false raises the missing scheduler error. */
+    pub send_hook: Option<fn(&str, &str) -> bool>,
     pub input_buffer: Vec<String>,
     pub event_queue: Vec<Val>,
     pub strict_input: bool,
@@ -249,6 +251,7 @@ impl<'a> VM<'a> {
             output: Vec::new(),
             output_open: false,
             print_hook: None,
+            send_hook: None,
             input_buffer: Vec::new(),
             event_queue: Vec::new(),
             observed_impure: Vec::new(),

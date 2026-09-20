@@ -588,4 +588,19 @@ impl<'a> VM<'a> {
         }
         Ok(())
     }
+
+    /* `send(group, body)` hands one message to the host's actor scheduler, the counterpart of `receive()`. */
+    pub fn call_send(&mut self) -> Result<(), VmErr> {
+        let body = self.pop()?;
+        let group = self.pop()?;
+        let group = self.str_of(group, "send() expects a str at argument 1")?;
+        let body = self.str_of(body, "send() expects a str at argument 2")?;
+        match self.send_hook {
+            Some(hook) if hook(&group, &body) => {
+                self.push(Val::none());
+                Ok(())
+            }
+            _ => Err(VmErr::Runtime("send() needs an actor scheduler, missing in this runtime")),
+        }
+    }
 }

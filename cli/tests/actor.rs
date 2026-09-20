@@ -5,6 +5,15 @@ use std::time::Duration;
 
 const BIN: &str = env!("CARGO_BIN_EXE_edge");
 
+/* The edge binary with a private cache, JavaScript modules resolve through the local CDN. */
+fn edge() -> Command {
+    let base = std::env::var("EDGE_CDN_BASE").unwrap_or_else(|_| panic!("set EDGE_CDN_BASE (npm run cdn:local in infra)"));
+    let cache = std::env::temp_dir().join(format!("edge-actor-cache-{}", std::process::id()));
+    let mut cmd = Command::new(BIN);
+    cmd.env("EDGE_CDN_BASE", base).env("XDG_CACHE_HOME", cache);
+    cmd
+}
+
 // A case file, expect is the assertion, publish and listen drive the live-server cases.
 #[derive(serde::Deserialize)]
 struct Case {
@@ -83,7 +92,7 @@ fn actor_cases_match_their_expected_output() {
 
 // A batch pool runs to completion, its stdout lines are the result.
 fn run_batch(path: &std::path::Path) -> Vec<String> {
-    let out = Command::new(BIN).args(["actor", path.to_str().unwrap()]).stdin(Stdio::null()).output().unwrap();
+    let out = edge().args(["actor", path.to_str().unwrap()]).stdin(Stdio::null()).output().unwrap();
     String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect()
 }
 
@@ -97,7 +106,7 @@ fn run_server(path: &std::path::Path, listen: &str, case: &Case) -> (Vec<String>
     // The groups resolve actor through the manifest beside the yml, so it travels along.
     std::fs::copy(path.with_file_name("edge.json"), scratch.join("edge.json")).unwrap();
 
-    let mut child = Command::new(BIN).args(["actor", manifest.to_str().unwrap()]).stdin(Stdio::null()).stdout(Stdio::piped()).spawn().unwrap();
+    let mut child = edge().args(["actor", manifest.to_str().unwrap()]).stdin(Stdio::null()).stdout(Stdio::piped()).spawn().unwrap();
     if let Some(mut sock) = connect(addr) {
         for line in &case.publish {
             let _ = writeln!(sock, "{line}");
@@ -191,7 +200,7 @@ fn eval_group_runs_a_bundled_project_over_the_wire() {
     let manifest = scratch.join("actor.yml");
     std::fs::write(&manifest, "runtime:\n  listen: tcp://127.0.0.1:7811\ngroups:\n  runners:\n    eval: true\n").unwrap();
 
-    let mut child = Command::new(BIN).args(["actor", manifest.to_str().unwrap()]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    let mut child = edge().args(["actor", manifest.to_str().unwrap()]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
     let mut sock = connect("127.0.0.1:7811").expect("ingress never came up");
     let _ = writeln!(sock, "{line}");
     let _ = sock.flush();

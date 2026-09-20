@@ -1,5 +1,4 @@
 mod actor;
-mod builtins;
 mod cmd;
 mod host;
 mod manifest;
@@ -7,8 +6,6 @@ mod pack;
 /// Minimalist terminal output, plain text only, no colors.
 mod ui;
 mod wasm_cache;
-// RFC 6455 codec, shared with the websocket echo fixture in tests/run.rs.
-mod ws;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};

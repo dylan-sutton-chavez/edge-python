@@ -3,7 +3,6 @@ groups:
   dispatcher:
     replicas: 1
     code: |
-      from actor import send
       receive()
       i = 0
       while i < 3000:
@@ -14,7 +13,6 @@ groups:
   workers:
     replicas: 8
     code: |
-      from actor import send
       m = receive()
       send("sink", m)
   sink:

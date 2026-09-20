@@ -1,19 +1,20 @@
-use super::{read, read_u32, rt, stage, unstage, write, write_u32, Completion, Deferred, Exports, Native, State};
-use crate::builtins;
+use super::js::Called;
+use super::{read, read_u32, rt, stage, unstage, write, write_u32, Exports, Native, State};
 use anyhow::{anyhow, Result};
-use compiler::abi::WireValue;
 use wasmtime::{Caller, Linker};
 
 // The RUNTIME error kind of the ABI.
 pub const ERR_RUNTIME: i32 = 2;
 
-/* The four `env` imports compiler.wasm declares, bound to the store state. */
+/* The five `env` imports compiler.wasm declares, bound to the store state. */
 pub fn link(linker: &mut Linker<State>) -> Result<()> {
     linker
         .func_wrap("env", "host_print", |mut caller: Caller<'_, State>, ptr: i32, len: i32| {
             let ex = exports(&caller);
             let text = String::from_utf8_lossy(&read(&mut caller, ex.memory, ptr, len)).into_owned();
-            (caller.data_mut().print)(&text);
+            if let Ok(mut print) = caller.data().print.lock() {
+                print(&text);
+            }
         })
         .map_err(|e| anyhow!("{e}"))?;
     linker
@@ -35,6 +36,20 @@ pub fn link(linker: &mut Linker<State>) -> Result<()> {
         })
         .map_err(|e| anyhow!("{e}"))?;
     linker
+        .func_wrap("env", "host_send", |mut caller: Caller<'_, State>, group_ptr: i32, group_len: i32, body_ptr: i32, body_len: i32| -> i32 {
+            let ex = exports(&caller);
+            let group = String::from_utf8_lossy(&read(&mut caller, ex.memory, group_ptr, group_len)).into_owned();
+            let body = String::from_utf8_lossy(&read(&mut caller, ex.memory, body_ptr, body_len)).into_owned();
+            match caller.data_mut().outbox.as_mut() {
+                Some(outbox) => {
+                    outbox.push((group, body));
+                    0
+                }
+                None => 1,
+            }
+        })
+        .map_err(|e| anyhow!("{e}"))?;
+    linker
         .func_wrap("env", "host_call_native", |mut caller: Caller<'_, State>, id: i32, call_id: i32, argv_ptr: i32, argc: i32, out_ptr: i32| -> wasmtime::Result<i32> {
             call_native(&mut caller, id, call_id, argv_ptr, argc, out_ptr)
         })
@@ -46,7 +61,7 @@ fn exports(caller: &Caller<'_, State>) -> Exports {
     caller.data().exports.clone().expect("compiler exports bound before any host call")
 }
 
-/* Dispatches one extern call, plugins get staged argv, capabilities get decoded values. */
+/* Dispatches one extern call, plugins get staged argv, JavaScript exports get decoded values. */
 fn call_native(caller: &mut Caller<'_, State>, id: i32, call_id: i32, argv_ptr: i32, argc: i32, out_ptr: i32) -> wasmtime::Result<i32> {
     let ex = exports(caller);
     let Some(native) = caller.data().natives.get(id as usize).cloned() else {
@@ -77,8 +92,8 @@ fn call_native(caller: &mut Caller<'_, State>, id: i32, call_id: i32, argv_ptr: 
             }
             Ok(status)
         }
-        Native::Capability { module, name, deferred } => {
-            // The trailing kwargs slot is dropped, capabilities take positional values.
+        Native::Js { runtime, name } => {
+            // The trailing kwargs slot is dropped, JavaScript exports take positional values.
             let raw = read(caller, ex.memory, argv_ptr, (argc - 1).max(0) * 4);
             let mut args = Vec::with_capacity(raw.len() / 4);
             for handle in raw.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)) {
@@ -90,75 +105,29 @@ fn call_native(caller: &mut Caller<'_, State>, id: i32, call_id: i32, argv_ptr: 
                     }
                 }
             }
-            if module == "actor" {
-                return send(caller, &ex, &args, out_ptr);
-            }
-            if module == "network" && matches!(name.as_str(), "ws_open" | "sse_open") {
-                return open_stream(caller, &ex, &name, &args, out_ptr);
-            }
-            if deferred {
-                caller.data_mut().deferred.push(Deferred { id: call_id as u32, module, name, args });
-                return Ok(2);
-            }
-            let result = builtins::call(module, &name, &args).and_then(|value| rt::encode(caller, &ex, &value));
-            match result {
-                Ok(handle) => {
+            let state = caller.data_mut();
+            let (slot, deadline) = (state.slot, state.deadline);
+            let called = match (state.events.clone(), state.js.get_mut(runtime)) {
+                (Some(events), Some(js)) => js.call(slot, &name, args, events, call_id as u32, deadline),
+                _ => Err(format!("{name} has no interpreter to answer")),
+            };
+            match called.and_then(|called| match called {
+                Called::Value(value) => rt::encode(caller, &ex, &value).map(Some),
+                Called::Pending => Ok(None),
+            }) {
+                Ok(Some(handle)) => {
                     write_u32(caller, ex.memory, out_ptr, handle);
                     Ok(0)
+                }
+                Ok(None) => {
+                    caller.data_mut().deferred.push(call_id as u32);
+                    Ok(2)
                 }
                 Err(e) => {
                     throw(caller, &ex, &e);
                     Ok(1)
                 }
             }
-        }
-    }
-}
-
-/* actor.send queues a message on the outbox the scheduler drains after the step. */
-fn send(caller: &mut Caller<'_, State>, ex: &Exports, args: &[WireValue], out_ptr: i32) -> wasmtime::Result<i32> {
-    let text = |i: usize| match args.get(i) {
-        Some(WireValue::Bytes(b)) => Ok(String::from_utf8_lossy(b).into_owned()),
-        _ => Err(format!("actor.send expects a str at argument {}", i + 1)),
-    };
-    match text(0).and_then(|group| text(1).map(|body| (group, body))) {
-        Ok(message) => caller.data_mut().outbox.push(message),
-        Err(e) => {
-            throw(caller, ex, &e);
-            return Ok(1);
-        }
-    }
-    match rt::encode(caller, ex, &WireValue::None) {
-        Ok(handle) => {
-            write_u32(caller, ex.memory, out_ptr, handle);
-            Ok(0)
-        }
-        Err(e) => {
-            throw(caller, ex, &e);
-            Ok(1)
-        }
-    }
-}
-
-/* A stream returns its handle at once, its thread then feeds events to the calling interpreter. */
-fn open_stream(caller: &mut Caller<'_, State>, ex: &Exports, name: &str, args: &[WireValue], out_ptr: i32) -> wasmtime::Result<i32> {
-    let Some((tx, token)) = caller.data().events.clone().and_then(|e| Some((e.tx, e.streams.upgrade()?))) else {
-        throw(caller, ex, &format!("network.{name} has no interpreter to deliver events to"));
-        return Ok(1);
-    };
-    let emit: builtins::network::Emit = Box::new(move |line| {
-        // The token lives as long as the stream, its count is how many streams remain open.
-        let _open = &token;
-        let _ = tx.send(Completion::Event(line));
-    });
-    match builtins::network::open(name, args, emit).and_then(|value| rt::encode(caller, ex, &value)) {
-        Ok(handle) => {
-            write_u32(caller, ex.memory, out_ptr, handle);
-            Ok(0)
-        }
-        Err(e) => {
-            throw(caller, ex, &e);
-            Ok(1)
         }
     }
 }

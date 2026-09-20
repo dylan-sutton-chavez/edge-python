@@ -1,13 +1,12 @@
-use super::{read, resolver, rt, stage, unstage, wt, Events, Exports, Host, MemoryCap, Project, Sink, State};
-use crate::builtins;
+use super::{now_ns, read, resolver, rt, stage, unstage, wt, Exports, Host, MemoryCap, Project, Sink, State, TICK_NS};
 use anyhow::{anyhow, bail, Result};
 use compiler::abi::WireValue;
 use compiler::vm::Limits;
 use std::cell::{RefCell, RefMut};
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
-use std::sync::mpsc::{channel, Receiver};
-use std::sync::Arc;
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use wasmtime::{ResourceLimiter, Store};
 
@@ -25,18 +24,10 @@ pub enum Status {
     Preempted,
 }
 
-/* A host call the compiler parked on, answered later by id. */
-pub struct Deferred {
-    pub id: u32,
-    pub module: &'static str,
-    pub name: String,
-    pub args: Vec<WireValue>,
-}
-
 pub enum Completion {
     Value { id: u32, value: WireValue },
     Error { id: u32, msg: String },
-    // A stream capability's event, the script reads it through receive().
+    // An event a JavaScript module pushed, the script reads it through receive().
     Event(String),
 }
 
@@ -60,14 +51,17 @@ impl Host {
     pub fn instance(self: &Rc<Self>, sink: Sink, project: Project, deadline: Option<u64>, memory: Option<usize>) -> Result<Rc<RefCell<Instance>>> {
         let state = State {
             exports: None,
-            print: sink,
+            print: Arc::new(Mutex::new(sink)),
             natives: Vec::new(),
             fetched: HashMap::new(),
             registered: HashMap::new(),
             deferred: Vec::new(),
-            outbox: Vec::new(),
+            outbox: None,
             limiter: MemoryCap { max: memory.unwrap_or(usize::MAX) },
+            slot: 0,
             events: None,
+            deadline: deadline.map(|ticks| now_ns().saturating_add(ticks.saturating_mul(TICK_NS))),
+            js: Vec::new(),
         };
         let mut store = Store::new(&self.runtime.engine, state);
         store.limiter(|s: &mut State| &mut s.limiter as &mut dyn ResourceLimiter);
@@ -106,6 +100,11 @@ impl Instance {
         self.slots
     }
 
+    /* Lets send() reach the scheduler, only pool instances drain the outbox. */
+    pub fn accept_sends(&mut self) {
+        self.store.data_mut().outbox.get_or_insert_with(Vec::new);
+    }
+
     pub fn poisoned(&self) -> bool {
         self.poisoned
     }
@@ -118,7 +117,7 @@ impl Instance {
         })
     }
 
-    fn select(&mut self, slot: u32, events: &Events) -> Result<()> {
+    fn select(&mut self, slot: u32, events: &Sender<Completion>) -> Result<()> {
         if self.poisoned {
             bail!("the interpreter instance trapped");
         }
@@ -130,8 +129,10 @@ impl Instance {
             self.selected = slot;
             self.store.data_mut().events = None;
         }
-        if self.store.data().events.is_none() {
-            self.store.data_mut().events = Some(events.clone());
+        let state = self.store.data_mut();
+        state.slot = slot;
+        if state.events.is_none() {
+            state.events = Some(events.clone());
         }
         Ok(())
     }
@@ -209,6 +210,28 @@ impl Instance {
         self.register_pair(spec, joined.as_bytes(), |store, ex, (s, sl), (p, pl)| ex.register_native_module.call(store, (s, sl, p, pl, base as i32)))
     }
 
+    /* Starts the JavaScript runtime for `spec` and registers the exports its factory returns. */
+    pub(super) fn register_js(&mut self, spec: &str, label: &str, entry: String, tree: super::js::Tree) -> Result<(), String> {
+        if let Some((base, names)) = self.store.data().registered.get(spec).cloned() {
+            return self.register_native(spec, &names, base);
+        }
+        let pre = self.host.runtime.js_pre().map_err(|e| format!("module '{label}' needs the JavaScript runtime, {e}"))?;
+        let engine = self.host.runtime.engine.clone();
+        let state = self.store.data_mut();
+        let events = state.events.clone().ok_or_else(|| format!("module '{label}' has no interpreter to bind"))?;
+        let scope = super::js::Scope { printer: state.print.clone(), memory: state.limiter.max, offline: self.project.untrusted };
+        let mut js = super::js::JsRuntime::new(label, entry, tree, pre, engine, scope);
+        let names = js.bind(state.slot, events, state.deadline)?;
+        let runtime = state.js.len();
+        state.js.push(js);
+        let base = state.natives.len();
+        for name in &names {
+            state.natives.push(super::Native::Js { runtime, name: name.clone() });
+        }
+        state.registered.insert(spec.to_string(), (base, names.clone()));
+        self.register_native(spec, &names, base)
+    }
+
     // Stages a spec and a payload for one registration call, both freed once it returns.
     fn register_pair(&mut self, spec: &str, payload: &[u8], call: impl FnOnce(&mut Store<State>, &Exports, (i32, i32), (i32, i32)) -> wasmtime::Result<()>) -> Result<(), String> {
         let s = stage(&mut self.store, &self.ex, spec.as_bytes()).map_err(|e| e.to_string())?;
@@ -225,12 +248,10 @@ impl Instance {
 pub struct Vm {
     inst: Rc<RefCell<Instance>>,
     slot: u32,
-    events: Events,
-    // One strong ref here plus one per open stream.
-    streams: Arc<()>,
+    events: Sender<Completion>,
     rx: Receiver<Completion>,
     // Calls this interpreter parked on, moved out of the shared store after every step.
-    parked: Vec<Deferred>,
+    parked: Vec<u32>,
     inflight: usize,
     buffered: VecDeque<String>,
 }
@@ -242,6 +263,9 @@ impl Drop for Vm {
         }
         if let Ok(mut inst) = self.inst.try_borrow_mut() {
             inst.slots -= 1;
+            for js in inst.store.data_mut().js.iter_mut() {
+                js.unbind(self.slot);
+            }
             if !inst.poisoned {
                 let Instance { store, ex, selected, .. } = &mut *inst;
                 let _ = ex.vm_drop.call(&mut *store, self.slot as i32);
@@ -257,10 +281,8 @@ impl Drop for Vm {
 
 impl Vm {
     fn on(inst: Rc<RefCell<Instance>>, slot: u32) -> Vm {
-        let (tx, rx) = channel();
-        let streams = Arc::new(());
-        let events = Events { tx, streams: Arc::downgrade(&streams) };
-        Vm { inst, slot, events, streams, rx, parked: Vec::new(), inflight: 0, buffered: VecDeque::new() }
+        let (events, rx) = channel();
+        Vm { inst, slot, events, rx, parked: Vec::new(), inflight: 0, buffered: VecDeque::new() }
     }
 
     /* Keeps what the step just parked on, before another slot of the instance runs. */
@@ -417,26 +439,25 @@ impl Vm {
         state.natives.clear();
         state.registered.clear();
         state.deferred.clear();
+        state.js.clear();
         drop(inst);
         self.parked.clear();
         Ok(())
     }
 
-    /* Hands the calls the last step parked on to their worker threads. */
+    /* Moves the parked calls into the in-flight count, each answer arrives as a completion. */
     pub fn dispatch(&mut self) {
-        for call in std::mem::take(&mut self.parked) {
-            builtins::spawn(call, self.events.tx.clone());
-            self.inflight += 1;
-        }
+        self.inflight += std::mem::take(&mut self.parked).len();
     }
 
     pub fn inflight(&self) -> usize {
         self.inflight
     }
 
-    /* Streams still open, each may push another event into receive(). */
+    /* Work a bound JavaScript module still has pending, each piece may push another event into receive(). */
     pub fn streams(&self) -> usize {
-        Arc::strong_count(&self.streams) - 1
+        let inst = self.inst.borrow();
+        inst.store.data().js.iter().filter(|js| js.is_bound(self.slot)).map(|js| js.activity()).sum()
     }
 
     /* Blocks for the next completion, then injects every one that arrived, the count delivered. */
@@ -491,9 +512,9 @@ impl Vm {
         Ok(())
     }
 
-    /* Everything actor.send queued during the last step. */
+    /* Everything send() queued since the last take. */
     pub fn take_sends(&mut self) -> Vec<(String, String)> {
-        std::mem::take(&mut self.inst.borrow_mut().store.data_mut().outbox)
+        self.inst.borrow_mut().store.data_mut().outbox.as_mut().map(std::mem::take).unwrap_or_default()
     }
 }
 

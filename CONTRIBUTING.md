@@ -33,7 +33,6 @@ A Cargo workspace at the repo root holds the engine, `abi`, `pdk`, `skill` and `
 cargo wasm # local release .wasm (CI ships a further size-optimised build)
 cargo build --release # host .rlib + cdylib for Rust embedders
 cargo test --release # run the compiler test suite
-cargo test -p skill # run every executable cell of skill/SKILL.md through the CLI
 ```
 
 Each `std/*` package builds its own `.wasm` with `cargo build --release --target wasm32-unknown-unknown` run inside the package folder. The folder name is the package name, and Rust-keyword crates rename the artifact (`struct` builds `edge_struct.wasm`). `std/test` is pure Edge Python (`src/entry.py`) and needs no build. Each package's corpus is `<name>/<name>.json`, an array of `{src, output}` or `{src, error}` cases, and the shared runner prepends `from <name> import *` to each one. To add a std package, create `std/<name>/` with the crate (or `src/entry.py` for a script-only package) plus its corpus. No harness edits needed.
@@ -48,6 +47,9 @@ for p in json re math struct
 do (cd std/$p && cargo build --release --target wasm32-unknown-unknown)
 done
 (cd js && deno run -A npm:typescript@5.9.3/tsc -p tsconfig.json && deno run -A npm:typescript@5.9.3/tsc -p tsconfig.worker.json)
+curl -fsSL https://github.com/bytecodealliance/StarlingMonkey/releases/download/starlingmonkey-v0.3.0/starling.wasm -o target/starling.wasm
+echo "b5707b9d97164e0c29e471844a9ccdd81c445a5d379a9299ae2ee7a9dab3aabe  target/starling.wasm" | sha256sum -c
+(cd cli && cargo build) # before the stage, which ships its js-runtime artifact
 cd infra && npm ci && npm run stage -- ../_cdn && npm run cdn:local -- ../_cdn # keep it running
 ```
 
@@ -56,12 +58,13 @@ export EDGE_CDN_BASE=http://127.0.0.1:8788
 deno run -A npm:playwright install --with-deps chromium # once
 deno test --allow-all js/tests/
 deno test --allow-all std/harness/ # STDPKG=<name> narrows to one package
-(cd js/builtins && SYSPKG=<actor|dom|network|storage|time> deno test --allow-all --node-modules-dir=none tests/)
+(cd js/builtins && SYSPKG=<dom|network|storage|time> deno test --allow-all --node-modules-dir=none tests/)
 cargo build --release --target wasm32-unknown-unknown -p slugify-mod
 (cd cli && cargo test)
+cargo test -p skill # run every executable cell of skill/SKILL.md through the CLI
 ```
 
-`cli/` embeds `compiler.wasm` and the std `.wasm` files at build time, so build them first or point `EDGE_COMPILER_WASM` and `EDGE_STD_DIR` at copies. Nothing is fetched at build time. Releases embed the speed build from `cargo wasm-cli` instead of the size build the browser gets. The `edge build --web` cases fetch the JS host and the packages from `EDGE_CDN_BASE`, so no test reaches the production CDN.
+`cli/` embeds `compiler.wasm` and the std `.wasm` files at build time, so build them first or point `EDGE_COMPILER_WASM` and `EDGE_STD_DIR` at copies. It also precompiles the pinned StarlingMonkey from `target/starling.wasm`, or from the file `EDGE_STARLING_WASM` names, into `cli/target/<profile>/js-runtime/<sha256>.cwasm`. The binary keeps only that hash and downloads the artifact from `EDGE_CDN_BASE` on the first JavaScript import, which is why the CLI builds before the stage. Nothing is fetched at build time. Releases embed the speed build from `cargo wasm-cli` instead of the size build the browser gets. The `edge build --web` cases fetch the JS host and the packages from `EDGE_CDN_BASE`, so no test reaches the production CDN.
 
 Coverage-guided fuzzing of the lex, parse and VM pipeline lives in [`fuzz/`](fuzz/), built on [cargo-afl](https://github.com/rust-fuzz/afl.rs) (AFL++) and running on stable Rust. Commands, the parallel and container campaigns, and crash triage are in [Fuzzing](https://edgepython.com/docs/implementation/fuzzing).
 

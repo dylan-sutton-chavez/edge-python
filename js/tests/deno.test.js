@@ -57,13 +57,14 @@ Deno.test("deno: a browser module loads and names the Web API it lacks", async (
     if (!out.includes("module 'dom' needs 'document', missing in this runtime")) throw new Error(`unexpected output ${JSON.stringify(out)}`);
 });
 
-Deno.test("deno: a declared actor compiles and its send says it needs the CLI", async () => {
-    const engine = await boot("actor", ["actor"]);
+Deno.test("deno: send() names the actor scheduler it lacks", async () => {
+    const engine = await boot("send", []);
     const lines = [];
-    const caught = await engine.run({ src: "from actor import send\ntry:\n    send('g', 'x')\nexcept RuntimeError as e:\n    print(e)", baseUrl }, (t) => lines.push(t));
-    if (caught.out !== "" || lines.join("").trim() !== "actor.send needs the CLI") throw new Error(`unexpected ${JSON.stringify([caught.out, lines])}`);
-    const { out } = await engine.run({ src: "from actor import send\nsend('g', 'x')", baseUrl });
-    if (!out.includes("actor.send needs the CLI") || !out.includes("<input>:2:1")) throw new Error(`unexpected output ${JSON.stringify(out)}`);
+    const missing = "send() needs an actor scheduler, missing in this runtime";
+    const caught = await engine.run({ src: "try:\n    send('g', 'x')\nexcept RuntimeError as e:\n    print(e)", baseUrl }, (t) => lines.push(t));
+    if (caught.out !== "" || lines.join("").trim() !== missing) throw new Error(`unexpected ${JSON.stringify([caught.out, lines])}`);
+    const { out } = await engine.run({ src: "send('g', 'x')", baseUrl });
+    if (!out.includes(missing) || !out.includes("<input>:1:1")) throw new Error(`unexpected output ${JSON.stringify(out)}`);
 });
 
 Deno.test("deno: a leftover system section is refused", async () => {

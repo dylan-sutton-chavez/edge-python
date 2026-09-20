@@ -1,5 +1,4 @@
-use super::{plugins, Instance, Native};
-use crate::builtins;
+use super::{cache_root, cdn, js, plugins, Instance, ORIGIN};
 use compiler::modules::{dir_of, join_relative, parse_integrity, parse_manifest, scan_imports, walk_up_dirs, ImportSpec};
 use compiler::util::sha256::{hex_encode, sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -10,8 +9,6 @@ use std::rc::Rc;
 // The pure Edge Python test package, embedded at build time.
 const TEST_PY: &str = include_str!("../../../std/test/src/entry.py");
 const TEST_SPEC: &str = "https://cdn.edgepython.com/std/test.py";
-// Official JavaScript libraries, a spec under it runs on the Rust twin when the CLI has one.
-const JS_BUILTINS_BASE: &str = "https://cdn.edgepython.com/js/builtins/";
 // How a fetch error reads when the server says the file does not exist.
 const ABSENT: &str = "not found on the server";
 // Bounds a runaway download, the largest module is well under a megabyte.
@@ -98,12 +95,8 @@ impl<'a> Walk<'a> {
                 }
                 continue;
             }
-            if let Some(name) = official_js(&spec) {
-                self.twin(&spec, name);
-                continue;
-            }
             match extension(&spec) {
-                "js" | "mjs" => self.refuse(&spec, "is JavaScript, the CLI cannot run it"),
+                "js" | "mjs" => self.javascript(&spec),
                 "so" | "dylib" => self.refuse(&spec, "is not supported, ship a .wasm"),
                 ext => match self.fetch(&spec) {
                     // A .wasm spec is a plugin, past .py the wasm magic marks one too.
@@ -167,34 +160,48 @@ impl<'a> Walk<'a> {
         }
     }
 
-    /* Registers an official JavaScript library's Rust twin under its spec, the rest need a browser. */
-    fn twin(&mut self, spec: &str, name: &str) {
-        let Some((module, exports)) = builtins::exports(name) else {
-            self.refuse(spec, "requires a browser");
-            return;
+    /* A JavaScript module and the files its relative imports reach, run by the JavaScript runtime. */
+    fn javascript(&mut self, spec: &str) {
+        let (name, via) = self.origins.get(spec).cloned().unwrap_or_else(|| (target(spec).to_string(), None));
+        let registered = match self.js_tree(spec, &name) {
+            Ok((entry, tree)) => self.inst.register_js(spec, &name, entry, tree),
+            Err(e) => Err(e),
         };
-        if self.project.untrusted && matches!(module, "actor" | "network") {
-            self.refuse(spec, "is not available to untrusted eval runs");
-            return;
-        }
-        let known = self.inst.store.data().registered.get(spec).cloned();
-        let (base, names) = match known {
-            Some(entry) => entry,
-            None => {
-                let state = self.inst.store.data_mut();
-                let base = state.natives.len();
-                let mut names = Vec::new();
-                for (export, deferred) in exports {
-                    names.push(export.to_string());
-                    state.natives.push(Native::Capability { module, name: export.to_string(), deferred });
-                }
-                state.registered.insert(spec.to_string(), (base, names.clone()));
-                (base, names)
+        if let Err(msg) = registered {
+            let via = via.map(|v| format!(" (via {v})")).unwrap_or_default();
+            if let Err(e) = self.inst.register_error(spec, &format!("{msg}{via}")) {
+                self.failures.push(e);
             }
-        };
-        if let Err(e) = self.inst.register_native(spec, &names, base) {
-            self.failures.push(e);
         }
+    }
+
+    /* The entry path inside the tree plus every file, each fetched beside the entry. */
+    fn js_tree(&mut self, spec: &str, name: &str) -> Result<(String, js::Tree), String> {
+        let url = target(spec);
+        let (base, entry) = match url.rsplit_once('/') {
+            Some((base, entry)) => (format!("{base}/"), entry.to_string()),
+            None => (String::new(), url.to_string()),
+        };
+        let first = self.fetch(spec)?.ok_or_else(|| format!("could not read module '{url}'"))?;
+        let mut queue = vec![(entry.clone(), Some(first))];
+        let mut seen = HashSet::new();
+        let mut tree = Vec::new();
+        while let Some((rel, bytes)) = queue.pop() {
+            if !seen.insert(rel.clone()) {
+                continue;
+            }
+            let bytes = match bytes {
+                Some(bytes) => bytes,
+                None => self.fetch(&format!("{base}{rel}"))?.ok_or_else(|| format!("could not read module '{base}{rel}'"))?,
+            };
+            for dep in js::imports(&String::from_utf8_lossy(&bytes)) {
+                let clean = dep.split(['?', '#']).next().unwrap_or(dep);
+                let file = js::join(&rel, clean).ok_or_else(|| format!("module '{name}' imports '{dep}' from outside its directory"))?;
+                queue.push((file, None));
+            }
+            tree.push((rel, bytes));
+        }
+        Ok((entry, tree))
     }
 
     /* Why a module cannot load here, raised at its import and named as its importer wrote it. */
@@ -343,11 +350,18 @@ impl<'a> Walk<'a> {
         if target == TEST_SPEC {
             return Ok(Some(TEST_PY.as_bytes().to_vec()));
         }
-        let bytes = if let Some(files) = &self.project.bundle {
-            // Bundle paths are plain, a joined spec may still carry the importer's leading dot.
-            files.get(target.strip_prefix("./").unwrap_or(target)).cloned()
+        let packed = self.project.bundle.as_ref().map(|files| files.get(target.strip_prefix("./").unwrap_or(target)).cloned());
+        let bytes = if let Some(Some(bytes)) = packed {
+            Some(bytes)
         } else if target.contains("://") {
+            // An untrusted run reads remote modules from the official origin only.
+            if self.project.untrusted && !target.starts_with(&format!("{ORIGIN}/")) {
+                return Err(format!("module '{target}' is not available to untrusted eval runs"));
+            }
             Some(fetch_cached(target, pin)?)
+        } else if packed.is_some() {
+            // Bundle paths are plain, a joined spec may still carry the importer's leading dot.
+            None
         } else {
             match std::fs::read(target) {
                 Ok(bytes) => Some(bytes),
@@ -364,11 +378,6 @@ impl<'a> Walk<'a> {
     }
 }
 
-/* The library an official JavaScript spec belongs to, its facade and modules alike. */
-fn official_js(spec: &str) -> Option<&str> {
-    target(spec).strip_prefix(JS_BUILTINS_BASE)?.split('/').next().filter(|n| !n.is_empty())
-}
-
 fn target(spec: &str) -> &str {
     spec.split_once('#').map_or(spec, |(t, _)| t)
 }
@@ -380,6 +389,11 @@ fn extension(spec: &str) -> &str {
     file.rsplit_once('.').map_or("", |(_, ext)| ext)
 }
 
+/* Official packages the binary already carries, so neither a bundle nor a run fetches them. */
+pub fn built_in(spec: &str) -> bool {
+    target(spec) == TEST_SPEC || std_name(spec).is_some()
+}
+
 /* An official std spec names a built-in package, the fragment is left to the caller. */
 fn std_name(spec: &str) -> Option<&'static str> {
     let name = target(spec).strip_prefix(plugins::STD_BASE)?.strip_suffix(".wasm")?;
@@ -389,7 +403,7 @@ fn std_name(spec: &str) -> Option<&'static str> {
 /* A remote manifest, None when it is absent, a 404 leaves a `.missing` marker in the cache. */
 fn fetch_manifest(url: &str) -> Option<Vec<u8>> {
     let dir = cache_dir().ok()?;
-    let marker = dir.join(format!("{}.missing", hex_encode(&sha256(url.as_bytes()))));
+    let marker = dir.join(format!("{}.missing", hex_encode(&sha256(cdn(url).as_bytes()))));
     if marker.exists() {
         return None;
     }
@@ -408,7 +422,9 @@ fn fetch_manifest(url: &str) -> Option<Vec<u8>> {
 fn fetch_cached(url: &str, expected: Option<[u8; 32]>) -> Result<Vec<u8>, String> {
     let dir = cache_dir()?;
     let ext = url.rsplit('.').next().unwrap_or("bin");
-    let file = dir.join(format!("{}.{ext}", hex_encode(&sha256(url.as_bytes()))));
+    // Keyed by the address actually fetched, so a staging origin never fills a production entry.
+    let source = cdn(url);
+    let file = dir.join(format!("{}.{ext}", hex_encode(&sha256(source.as_bytes()))));
     let lock = file.with_extension(format!("{ext}.lock"));
     if file.exists() {
         let bytes = std::fs::read(&file).map_err(|e| format!("cannot read cached '{url}': {e}"))?;
@@ -419,7 +435,7 @@ fn fetch_cached(url: &str, expected: Option<[u8; 32]>) -> Result<Vec<u8>, String
             Err(_) => {}
         }
     }
-    let mut resp = ureq::get(url).call().map_err(|e| match e {
+    let mut resp = ureq::get(&source).call().map_err(|e| match e {
         ureq::Error::StatusCode(404 | 410) => format!("fetching '{url}': {ABSENT}"),
         e => format!("fetching '{url}': {e}"),
     })?;
@@ -451,9 +467,5 @@ fn check_pin(spec: &str, bytes: &[u8], locked: Option<String>, expected: Option<
 }
 
 fn cache_dir() -> Result<PathBuf, String> {
-    if let Ok(x) = std::env::var("XDG_CACHE_HOME") {
-        return Ok(PathBuf::from(x).join("edge").join("modules"));
-    }
-    let home = std::env::var("HOME").map_err(|_| "cannot locate a cache dir (no HOME)".to_string())?;
-    Ok(PathBuf::from(home).join(".cache").join("edge").join("modules"))
+    Ok(cache_root()?.join("modules"))
 }

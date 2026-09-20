@@ -18,6 +18,8 @@ fn edge_binary() -> String {
 
 #[test]
 fn skill_md() {
+    // The cells import JavaScript libraries, which every suite reads from a staged CDN.
+    assert!(std::env::var("EDGE_CDN_BASE").is_ok(), "set EDGE_CDN_BASE (npm run cdn:local in infra)");
     let edge = edge_binary();
     let doc = concat!(env!("CARGO_MANIFEST_DIR"), "/SKILL.md");
     let out = Command::new(env!("CARGO_BIN_EXE_skill"))

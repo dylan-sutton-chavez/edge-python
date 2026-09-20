@@ -85,7 +85,7 @@ export async function run(
 
       const timeout = new Promise<never>((_, reject) => {
         timer = setTimeout(
-          () => reject(new Error(`Run exceeded ${TIMEOUT_MS / 1000}s — worker terminated`)),
+          () => reject(new Error(`Run exceeded ${TIMEOUT_MS / 1000}s, worker terminated`)),
           TIMEOUT_MS
         )
       })

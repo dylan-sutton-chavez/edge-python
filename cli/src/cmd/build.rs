@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
+use crate::host::{built_in, cdn, js};
 use crate::pack::{Bundle, Entry};
 use compiler::modules::{parse_integrity, scan_imports, ImportSpec};
 use compiler::util::sha256::sha256;
@@ -14,7 +15,12 @@ const STANDALONE_MAGIC: &[u8] = b"EDGESFX\x01";
 
 /* Packs the project as a standalone binary, this exe with the bundle and a trailer appended. */
 pub fn standalone(manifest_path: &Path, out: PathBuf) -> Result<()> {
-    let bundle = collect_bundle(manifest_path)?;
+    let (mut bundle, javascript) = collect_bundle(manifest_path)?;
+    let files = bundle.files.len();
+    if javascript {
+        let bytes = js::runtime_bytes().map_err(|e| anyhow!(e))?;
+        bundle.files.push(Entry { path: js::RUNTIME_KEY.to_string(), bytes });
+    }
     let exe = std::env::current_exe().context("locating the edge binary")?;
     let mut image = fs::read(&exe).with_context(|| format!("reading {}", exe.display()))?;
     let payload = bundle.encode();
@@ -24,14 +30,14 @@ pub fn standalone(manifest_path: &Path, out: PathBuf) -> Result<()> {
     fs::write(&out, &image).with_context(|| format!("writing {}", out.display()))?;
     make_executable(&out)?;
     let run = out.display();
-    crate::ui::packed(&out, bundle.files.len(), image.len() as u64,
+    crate::ui::packed(&out, files, image.len() as u64,
         &format!("run  ./{run}   flags  --save-state --restore-state --preempt --events"));
     Ok(())
 }
 
 /* Packs the project as a lightweight .package for a pool that already has the CLI. */
 pub fn bundle(manifest_path: &Path, out: PathBuf) -> Result<()> {
-    let bundle = collect_bundle(manifest_path)?;
+    let (bundle, _) = collect_bundle(manifest_path)?;
     let payload = bundle.encode();
     fs::write(&out, &payload).with_context(|| format!("writing {}", out.display()))?;
     let run = out.display();
@@ -40,14 +46,14 @@ pub fn bundle(manifest_path: &Path, out: PathBuf) -> Result<()> {
     Ok(())
 }
 
-/* Reads every project .py plus its edge.json into a bundle, std resolves by name at run time. */
-fn collect_bundle(manifest_path: &Path) -> Result<Bundle> {
+/* Reads the project scripts, its edge.json and every url module it declares into a bundle. */
+fn collect_bundle(manifest_path: &Path) -> Result<(Bundle, bool)> {
     let project = match manifest_path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
         _ => PathBuf::from("."),
     };
     let scripts = collect_scripts(&project, Path::new(""));
-    if scripts.is_empty() {
+    if !scripts.iter().any(|s| s.extension().and_then(|e| e.to_str()) == Some("py")) {
         return Err(anyhow!("no .py files found under {}", project.display()));
     }
     let mut files = Vec::new();
@@ -55,10 +61,63 @@ fn collect_bundle(manifest_path: &Path) -> Result<Bundle> {
         let rel = s.strip_prefix(&project).unwrap_or(s).to_string_lossy().replace('\\', "/");
         files.push(Entry { path: rel, bytes: fs::read(s).with_context(|| format!("reading {}", s.display()))? });
     }
+    let mut javascript = false;
     if manifest_path.exists() {
         files.push(Entry { path: "edge.json".to_string(), bytes: fs::read(manifest_path)? });
+        let manifest = Manifest::load(manifest_path)?;
+        javascript = vendor_bundle(&manifest, &mut files)?;
     }
-    Ok(Bundle { entry: find_entry(&scripts, &project), files })
+    Ok((Bundle { entry: find_entry(&scripts, &project), files }, javascript))
+}
+
+/* Carries each declared url module and the files it reaches, keyed by the address it answers. */
+fn vendor_bundle(manifest: &Manifest, files: &mut Vec<Entry>) -> Result<bool> {
+    let javascript = manifest.imports.values().any(|spec| {
+        let path = spec.split(['?', '#']).next().unwrap_or(spec);
+        matches!(path.rsplit('.').next(), Some("js" | "mjs"))
+    });
+    let mut seen = HashSet::new();
+    for (name, spec) in manifest.imports.iter().filter(|(_, spec)| spec.contains("://")) {
+        let (url, pin) = parse_integrity(spec).map_err(|e| anyhow!(e))?;
+        if built_in(url) {
+            continue;
+        }
+        let path = url.split('?').next().unwrap_or(url);
+        let (base, entry) = path.rsplit_once('/').ok_or_else(|| anyhow!("'{url}' names no file"))?;
+        let bytes = read_package(url)?.ok_or_else(|| anyhow!("fetching {url}: not found"))?;
+        if pin.is_some_and(|want| sha256(&bytes) != want) {
+            bail!("integrity check failed for '{url}'");
+        }
+        if url != path {
+            // A query belongs to the address a run asks for, so the packed copy answers it.
+            files.push(Entry { path: url.to_string(), bytes: bytes.clone() });
+        }
+        carry_tree(base, entry, bytes, &mut seen, files).with_context(|| format!("bundling '{name}'"))?;
+    }
+    Ok(javascript)
+}
+
+/* Walks `entry` with everything it imports, each file stored under its own url. */
+fn carry_tree(base: &str, entry: &str, bytes: Vec<u8>, seen: &mut HashSet<String>, files: &mut Vec<Entry>) -> Result<()> {
+    let mut queue = vec![(entry.to_string(), Some(bytes), true)];
+    while let Some((rel, bytes, required)) = queue.pop() {
+        let url = format!("{base}/{rel}");
+        if !seen.insert(url.clone()) {
+            continue;
+        }
+        let bytes = match bytes.map_or_else(|| read_package(&url), |b| Ok(Some(b)))? {
+            Some(bytes) => bytes,
+            None if required => bail!("fetching {url}: not found"),
+            None => continue,
+        };
+        for (spec, needed) in file_deps(&rel, &bytes)? {
+            let clean = spec.split(['?', '#']).next().unwrap_or(&spec);
+            let dep = js::join(&rel, clean).ok_or_else(|| anyhow!("'{url}' imports '{spec}' from outside its directory"))?;
+            queue.push((dep, None, needed));
+        }
+        files.push(Entry { path: url, bytes });
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -115,7 +174,6 @@ fn trailer_payload(path: &Path) -> Option<Vec<u8>> {
 }
 
 // Production layout we mirror into dist/js/ and dist/.
-const ORIGIN: &str = "https://cdn.edgepython.com";
 const JS_BASE: &str = "https://cdn.edgepython.com/js/";
 const COMPILER_WASM: &str = "https://cdn.edgepython.com/compiler.wasm";
 const JS_FILES: &[&str] = &[
@@ -204,7 +262,7 @@ fn vendor_js(out_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Walk the project for `.py` files, skipping hidden dirs and the output directory itself.
+/// Walk the project for `.py` and JavaScript files, skipping hidden dirs and the output directory itself.
 fn collect_scripts(project: &Path, out_dir: &Path) -> Vec<PathBuf> {
     let mut scripts = Vec::new();
     let out_dir = fs::canonicalize(out_dir).unwrap_or_else(|_| out_dir.to_path_buf());
@@ -227,7 +285,7 @@ fn walk(dir: &Path, out_dir: &Path, found: &mut Vec<PathBuf>) {
         }
         if path.is_dir() {
             walk(&path, out_dir, found);
-        } else if path.extension().and_then(|e| e.to_str()) == Some("py") {
+        } else if matches!(path.extension().and_then(|e| e.to_str()), Some("py" | "js" | "mjs")) {
             found.push(path);
         }
     }
@@ -267,7 +325,7 @@ fn vendor_tree(base: &str, entry: &str, bytes: Vec<u8>, out_dir: &Path, dest: &s
         };
         for (spec, needed) in file_deps(&rel, &bytes)? {
             let clean = spec.split(['?', '#']).next().unwrap_or(&spec);
-            let dep = join(&rel, clean).ok_or_else(|| anyhow!("'{url}' imports '{spec}' from outside its directory, which a web build cannot vendor"))?;
+            let dep = js::join(&rel, clean).ok_or_else(|| anyhow!("'{url}' imports '{spec}' from outside its directory, which a web build cannot vendor"))?;
             queue.push((dep, None, needed));
         }
         write_under(out_dir, &format!("{dest}/{rel}"), &bytes)?;
@@ -280,7 +338,7 @@ fn file_deps(rel: &str, bytes: &[u8]) -> Result<Vec<(String, bool)>> {
     let text = String::from_utf8_lossy(bytes);
     let ext = Path::new(rel).extension().and_then(|e| e.to_str()).unwrap_or("");
     Ok(match ext {
-        "js" | "mjs" => js_imports(&text).into_iter().map(|spec| (spec.to_string(), true)).collect(),
+        "js" | "mjs" => js::imports(&text).into_iter().map(|spec| (spec.to_string(), true)).collect(),
         "json" => {
             let manifest: serde_json::Value = serde_json::from_str(&text).with_context(|| format!("parsing {rel}"))?;
             let imports = manifest.get("imports").and_then(|i| i.as_object()).into_iter().flatten();
@@ -304,56 +362,12 @@ fn file_deps(rel: &str, bytes: &[u8]) -> Result<Vec<(String, bool)>> {
     })
 }
 
-/* Relative specifiers after `from` or `import`, the static imports and re-exports of an ES module. */
-fn js_imports(src: &str) -> Vec<&str> {
-    let mut found = Vec::new();
-    for keyword in ["from", "import"] {
-        for (at, _) in src.match_indices(keyword) {
-            if src[..at].chars().next_back().is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | '$' | '.')) {
-                continue;
-            }
-            let rest = src[at + keyword.len()..].trim_start();
-            let Some(quote) = rest.chars().next().filter(|c| matches!(c, '"' | '\'')) else { continue };
-            let Some(end) = rest[1..].find(quote) else { continue };
-            let spec = &rest[1..1 + end];
-            if spec.starts_with("./") || spec.starts_with("../") {
-                found.push(spec);
-            }
-        }
-    }
-    found
-}
-
-/* Resolves `spec` against the vendored file `from`, None when it climbs out of the package directory. */
-fn join(from: &str, spec: &str) -> Option<String> {
-    let mut parts: Vec<&str> = from.split('/').collect();
-    parts.pop();
-    for seg in spec.split('/') {
-        match seg {
-            "" | "." => {}
-            ".." => {
-                parts.pop()?;
-            }
-            seg => parts.push(seg),
-        }
-    }
-    Some(parts.join("/"))
-}
-
 /* A package file's bytes, None when the host has no such file. */
 fn read_package(url: &str) -> Result<Option<Vec<u8>>> {
     match ureq::get(&cdn(url)).call() {
         Ok(mut resp) => Ok(Some(resp.body_mut().read_to_vec().map_err(|e| anyhow!("reading {url}: {e}"))?)),
         Err(ureq::Error::StatusCode(404)) => Ok(None),
         Err(e) => Err(anyhow!("fetching {url}: {e}")),
-    }
-}
-
-// Tests and staging serve the official origin from EDGE_CDN_BASE, production never sets it.
-fn cdn(url: &str) -> String {
-    match (url.strip_prefix(ORIGIN), std::env::var("EDGE_CDN_BASE")) {
-        (Some(path), Ok(base)) => format!("{}{path}", base.trim_end_matches('/')),
-        _ => url.to_string(),
     }
 }
 
@@ -366,7 +380,7 @@ fn write_under(root: &Path, rel: &str, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Copy each `.py` preserving its path under the project root.
+/// Copy each script preserving its path under the project root.
 fn copy_scripts(scripts: &[PathBuf], project: &Path, out_dir: &Path) -> Result<usize> {
     let mut count = 0usize;
     for s in scripts {
@@ -390,7 +404,8 @@ fn find_entry(scripts: &[PathBuf], project: &Path) -> String {
         }
     }
     scripts
-        .first()
+        .iter()
+        .find(|s| s.extension().and_then(|e| e.to_str()) == Some("py"))
         .and_then(rel)
         .unwrap_or_else(|| "main.py".to_string())
 }

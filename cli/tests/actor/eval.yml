@@ -25,10 +25,10 @@ post:
   - path: "/eval/runners"
     body: "print('answered over http')"
     expect: "{\"ok\":true,\"stdout\":\"answered over http\\n\"}"
-  # A snippet resolves through the group's edge.json, and actor stays closed to untrusted code.
+  # A snippet has no scheduler to send through, send() names what it lacks.
   - path: "/eval/runners"
-    body: "from actor import send"
-    expect: "\"ok\":false,\"error\":\"error: module 'actor' is not available to untrusted eval runs"
+    body: "send('g', 'x')"
+    expect: "send() needs an actor scheduler, missing in this runtime"
   # A declared module that grants no I/O works in a snippet.
   - path: "/eval/runners"
     body: "import time\nprint(callable(time.time))"
@@ -37,3 +37,7 @@ post:
   - path: "/eval/runners"
     body: "from time import sleep\nprint('a')\nawait sleep(0.2)\nprint('b')"
     expect: "{\"ok\":true,\"stdout\":\"a\\nb\\n\"}"
+  # A snippet's JavaScript runtime is offline, so a fetch fails before it leaves the host.
+  - path: "/eval/runners"
+    body: "from network import fetch_text\nprint(fetch_text('http://127.0.0.1:9789/stats'))"
+    expect: "\"ok\":false,\"error\":\"error: RuntimeError: NetworkError when attempting to fetch resource"

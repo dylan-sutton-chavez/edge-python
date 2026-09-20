@@ -9,5 +9,7 @@ pub fn base() -> Config {
     cfg.memory_reservation(4 << 30);
     cfg.memory_guard_size(32 << 20);
     cfg.memory_init_cow(true);
+    // The JavaScript runtime is a component, so the precompile and the host both enable the model.
+    cfg.wasm_component_model(true);
     cfg
 }

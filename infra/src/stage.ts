@@ -45,7 +45,18 @@ const STAGERS: Record<Part, (out: string) => void> = {
   cli(out) {
     for (const script of ['install.sh', 'uninstall.sh']) copy(join(REPO_DIR, 'cli/setup', script), join(out, 'cli', script))
     for (const file of readdirSync(join(REPO_DIR, 'cli')).filter((name) => /^edge-.+\.tar\.gz$/.test(name))) copy(join(REPO_DIR, 'cli', file), join(out, 'cli', file))
+    // Each build leaves its precompiled JavaScript runtime in <profile>/js-runtime, named by its hash.
+    for (const dir of runtime_dirs(join(REPO_DIR, 'cli/target'))) {
+      for (const file of readdirSync(dir).filter((name) => name.endsWith('.cwasm'))) copy(join(dir, file), join(out, 'js-runtime', file))
+    }
   }
+}
+
+// Profile dirs of host builds sit one level down, cross builds sit under their target triple.
+function runtime_dirs(target: string) {
+  if (!existsSync(target)) return []
+  const levels = [target, ...readdirSync(target, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => join(target, e.name))]
+  return levels.flatMap((dir) => readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => join(dir, e.name, 'js-runtime'))).filter((dir) => existsSync(dir))
 }
 
 export function stage(out: string, parts: readonly Part[] = PARTS) {

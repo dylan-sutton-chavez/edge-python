@@ -6,7 +6,7 @@ use alloc::{boxed::Box, rc::Rc, string::{String, ToString}};
 use core::ptr::NonNull;
 use crate::s;
 
-use super::{ModuleEntry, PausedRun, CHUNK_CACHE, now_ns_host, stream_print, with_runtime, with_slot, write_out, write_out_bytes};
+use super::{ModuleEntry, PausedRun, CHUNK_CACHE, now_ns_host, send_host, stream_print, with_runtime, with_slot, write_out, write_out_bytes};
 use super::resolver::WasmHostResolver;
 use crate::bridge::{self, BridgeState, VmGuard, safe_bytes, safe_str_owned};
 
@@ -95,6 +95,7 @@ fn boot_vm(chunk: Rc<SSAChunk>, limits: Limits) -> VM<'static> {
     });
     let mut vm = VM::with_limits(chunk_static, limits);
     vm.print_hook = Some(stream_print);
+    vm.send_hook = Some(send_host);
     vm.set_time_hook(now_ns_host);
     vm.set_preempt_interval(preempt);
     vm

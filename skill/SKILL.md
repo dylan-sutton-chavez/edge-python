@@ -18,8 +18,7 @@ This document is self-verifying and its examples follow the cells v1 grammar. A 
     "dom": "https://cdn.edgepython.com/js/builtins/dom/entry.py",
     "storage": "https://cdn.edgepython.com/js/builtins/storage/index.js",
     "network": "https://cdn.edgepython.com/js/builtins/network/index.js",
-    "time": "https://cdn.edgepython.com/js/builtins/time/index.js",
-    "actor": "https://cdn.edgepython.com/js/builtins/actor/index.js"
+    "time": "https://cdn.edgepython.com/js/builtins/time/index.js"
   }
 }
 ```
@@ -101,11 +100,11 @@ Three mutually exclusive modes.
 
 | Mode | Default output | Artifact |
 |---|---|---|
-| `edge build` | `app.edge` | Standalone binary, runs anywhere with nothing installed |
+| `edge build` | `app.edge` | Standalone binary, runs offline on the same OS and CPU with nothing installed |
 | `edge build --bundle` | `app.package` | Raw bundle for hosts and pools that already have `edge` |
 | `edge build --web` | `dist/` | Browser distribution with the vendored JS host and packages |
 
-`--out <path>` overrides the default. The bundle contains every `.py` under the project plus `edge.json`, and the entry is `main.py`, `app.py` or `index.py` when present. An `.edge` binary accepts only the snapshot flags `--save-state`, `--restore-state`, `--preempt` and `--events`.
+`--out <path>` overrides the default. The bundle contains every `.py`, `.js` and `.mjs` under the project plus `edge.json`, together with each module the manifest declares by URL and the files it imports. An `.edge` for a project with a JavaScript module also carries the precompiled runtime, about 26 MB, so it runs offline. The entry is `main.py`, `app.py` or `index.py` when present. An `.edge` binary accepts only the snapshot flags `--save-state`, `--restore-state`, `--preempt` and `--events`.
 
 ### edge actor
 
@@ -121,7 +120,8 @@ Interactive removal of the binary and PATH entries.
 |---|---|
 | `EDGE_STD_DIR` | Directory holding the std `.wasm` files the CLI build embeds |
 | `EDGE_COMPILER_WASM` | Path to `compiler.wasm` for the CLI build |
-| `EDGE_CDN_BASE` | Serve the official CDN origin from another base for `edge build --web`, used by tests and staging |
+| `EDGE_STARLING_WASM` | Path to the pinned StarlingMonkey `starling.wasm` the CLI build precompiles |
+| `EDGE_CDN_BASE` | Serve the official CDN origin from another base for module downloads, the JavaScript runtime and `edge build --web`, used by tests and staging |
 
 ## The Python delta
 
@@ -275,7 +275,7 @@ from lib.helpers import slugify as sl
 
 Not supported. `from . import x` and any form of dynamic import.
 
-Bare names resolve through `edge.json`, walking up from the importing file with the nearest manifest winning. The manifest maps each name to a path or URL under `imports`, and `extends` may name a parent manifest. The artifact decides the kind, `.py` is a code module, `.wasm` a native plugin and `.js` a JavaScript module the JS host runs on the page's main thread, so a manifest never classifies a package. A leftover `system` section fails with `edge.json at '<path>': move the system entries into imports`.
+Bare names resolve through `edge.json`, walking up from the importing file with the nearest manifest winning. The manifest maps each name to a path or URL under `imports`, and `extends` may name a parent manifest. The artifact decides the kind, `.py` is a code module, `.wasm` a native plugin and `.js` a JavaScript module, which the JS host runs on the page's main thread and the CLI in StarlingMonkey, so a manifest never classifies a package. A leftover `system` section fails with `edge.json at '<path>': move the system entries into imports`.
 
 ```json
 {
@@ -287,7 +287,7 @@ Bare names resolve through `edge.json`, walking up from the importing file with 
 }
 ```
 
-The official names `json`, `re`, `math`, `struct`, `test`, `dom`, `network`, `storage`, `time` and `actor` resolve only when declared, `edge add <name>` writes each entry, and an undeclared name fails at compile time with `module '<name>' is not provided by this host and no edge.json declares it`, and the CLI adds a `help:` line with the `edge add` command for an official name. The CLI keeps the std packages inside the binary and maps the official `time`, `network` and `actor` URLs to its built-in modules, so a declared official package needs no network there. Modules are singletons with shared mutable state, an import cycle raises `RuntimeError` at startup, and inside an imported module `__name__` is its canonical spec so `if __name__ == "__main__":` blocks are skipped on import. `import_module(name)` looks up a module already bound by a plain `import` in scope.
+The official names `json`, `re`, `math`, `struct`, `test`, `dom`, `network`, `storage` and `time` resolve only when declared, `edge add <name>` writes each entry, and an undeclared name fails at compile time with `module '<name>' is not provided by this host and no edge.json declares it`, and the CLI adds a `help:` line with the `edge add` command for an official name. The CLI keeps the std packages inside the binary, so they need no network there, and downloads each JavaScript module once into its cache. Modules are singletons with shared mutable state, an import cycle raises `RuntimeError` at startup, and inside an imported module `__name__` is its canonical spec so `if __name__ == "__main__":` blocks are skipped on import. `import_module(name)` looks up a module already bound by a plain `import` in scope.
 
 ## Builtins
 
@@ -562,6 +562,7 @@ The primitives are builtins, no import needed.
 | `cancel(coro)` | Delivers `CancelledError` at the next tick, uncatchable, runs `finally` |
 | `frame()` | Suspends until the next browser render frame |
 | `receive()` | Parks until a host event or actor message arrives |
+| `send(group, body)` | Hands a string to an actor group, raises `RuntimeError` outside an actor pool |
 
 ```python
 async def slow():
@@ -709,35 +710,47 @@ PASS - division by zero raises
 
 ## System modules
 
-Four system libraries plus the actor module, each declared with `edge add <name>`. Availability differs by host. The CLI implements the ones that can run without a browser, so importing `dom` or `storage` there is a compile-time error reading `requires a browser`, any other JavaScript module fails with `is JavaScript, the CLI cannot run it`, and in a JavaScript runtime without a page the first `dom` or `storage` call raises `module 'dom' needs 'document', missing in this runtime`.
+Four system libraries, each declared with `edge add <name>`. All four are JavaScript modules. The JS host runs them on the page's main thread, the CLI in StarlingMonkey, a runtime it downloads once on the first JavaScript import. That runtime has `fetch`, streams, timers, `crypto` and `URL`, but no `Intl`, `WebSocket` or page globals, and it is always UTC. A module that reaches a missing global fails at that call with `module 'network' needs 'WebSocket', missing in this runtime`, the same text a JavaScript runtime without a page gives for `dom` and `storage`.
 
 | Module | CLI | JS host |
 |---|---|---|
-| `time` | Built into the binary, always UTC | JavaScript module, IANA timezone |
-| `network` | Built into the binary, no `abort_request`, no CORS | JavaScript module, CORS applies in a browser |
-| `storage` | Fails with `requires a browser` | JavaScript module, browser only |
-| `dom` | Fails with `requires a browser` | JavaScript module behind a Python facade, browser only |
-| `actor` | Built into the binary, see actors | A CDN stub, `send` throws `actor.send needs the CLI` at the first call |
+| `time` | Runs, always UTC, `tzname()` raises for lack of `Intl` | Runs, IANA timezone |
+| `network` | `fetch` family and SSE, `ws_*` raises for lack of `WebSocket`, no CORS | Runs, CORS applies in a browser |
+| `storage` | Imports, the first call raises for lack of `localStorage` | Browser only |
+| `dom` | Imports, the first call raises for lack of `document` | Behind a Python facade, browser only |
 
 ### time
 
-`time()`, `time_ns()`, `monotonic()`, `monotonic_ns()`, `perf_counter()`, `perf_counter_ns()`, and a suspending `sleep(secs)`. `gmtime` and `localtime` return a JSON string of the nine struct_time fields, decode it with `json.loads`. `mktime`, `strftime`, `strptime`, `asctime` and `ctime` convert between forms. `timezone()`, `altzone()`, `daylight()` and `tzname()` are calls. The CLI has no timezone database, `tzname()` is always `"UTC"` and `localtime` equals `gmtime`.
+`time()`, `time_ns()`, `monotonic()`, `monotonic_ns()`, `perf_counter()`, `perf_counter_ns()`, and a suspending `sleep(secs)`. `gmtime` and `localtime` return a JSON string of the nine struct_time fields, decode it with `json.loads`. `mktime`, `strftime`, `strptime`, `asctime` and `ctime` convert between forms. `timezone()`, `altzone()`, `daylight()` and `tzname()` are calls. The CLI is always UTC, so `localtime` equals `gmtime` there.
 
 ```python
-from time import tzname, time
+import json
+from time import gmtime, time
 
-print(tzname())
+print(json.loads(gmtime(0))[:3])
 print(type(time()).__name__)
 ```
 
 ```text Output
-UTC
+[1970, 1, 1]
 float
+```
+
+The CLI's runtime has no `Intl`, so `tzname()` raises there.
+
+```python
+from time import tzname
+
+print(tzname())
+```
+
+```text Error
+module 'time' needs 'Intl', missing in this runtime
 ```
 
 ### network
 
-`fetch(url[, options_json])` returns a JSON string with `id`, `ok`, `status`, `headers` and `body`. `fetch_text` and `fetch_json` return the body directly and raise on non-2xx responses. All three suspend until the response arrives. WebSockets use `ws_open`, `ws_send`, `ws_close` and `ws_state`, SSE uses `sse_open`, `sse_close` and `sse_state`, and both stream events through `receive()` as JSON payloads with a `type` field. In the JS host `abort_request(id)` also cancels an in-flight request, the one name the CLI lacks.
+`fetch(url[, options_json])` returns a JSON string with `id`, `ok`, `status`, `headers` and `body`. `fetch_text` and `fetch_json` return the body directly and raise on non-2xx responses. All three suspend until the response arrives. WebSockets use `ws_open`, `ws_send`, `ws_close` and `ws_state`, SSE uses `sse_open`, `sse_close` and `sse_state`, and both stream events through `receive()` as JSON payloads with a `type` field. `abort_request(id)` cancels an in-flight request. SSE runs on every host, WebSockets need the runtime's `WebSocket`, so in the CLI `ws_open` raises `module 'network' needs 'WebSocket', missing in this runtime`.
 
 ```python
 from network import fetch_json
@@ -748,7 +761,7 @@ items = json.loads(data)
 
 ### storage
 
-Browser only. Synchronous key-value access through `local_get`, `local_set`, `local_remove`, `local_clear`, `local_keys` and the `session_*` twins, values are strings so encode structured data with `json.dumps`. IndexedDB through suspending calls, `idb_open`, `idb_put`, `idb_get`, `idb_delete`, `idb_keys` and `idb_close`.
+Browser only, elsewhere the first call raises `module 'storage' needs 'localStorage', missing in this runtime`. Synchronous key-value access through `local_get`, `local_set`, `local_remove`, `local_clear`, `local_keys` and the `session_*` twins, values are strings so encode structured data with `json.dumps`. IndexedDB through suspending calls, `idb_open`, `idb_put`, `idb_get`, `idb_delete`, `idb_keys` and `idb_close`.
 
 ```python
 import storage
@@ -759,7 +772,7 @@ print(storage.local_get("k"))
 
 ### dom
 
-Browser only. Handles are opaque ints, multi-result queries return CSV strings of handles, structured results return JSON strings, and async results arrive through `receive()`. The surface covers selection and traversal (`query`, `query_all`, `closest`, `parent`, `children`, siblings), creation and mutation (`create_element`, `append_child`, `insert_before`, `remove`, `replace_children`, `clone_node`), content and attributes (`get_text`, `set_text`, `get_html`, `set_html`, `get_attribute`, `set_attribute`, class and data helpers), style and layout (`set_style`, `rect`, `scroll_top`, `focus`), events (`bind_event`, `unbind_event`, `dispatch_event`, `click`), forms and files, observers, animations, media and platform dialogs. A `batch()` context manager buffers the mutating calls and applies them with one host call on exit.
+Browser only, in the CLI the first call raises `module '_dom' needs 'document', missing in this runtime`. Handles are opaque ints, multi-result queries return CSV strings of handles, structured results return JSON strings, and async results arrive through `receive()`. The surface covers selection and traversal (`query`, `query_all`, `closest`, `parent`, `children`, siblings), creation and mutation (`create_element`, `append_child`, `insert_before`, `remove`, `replace_children`, `clone_node`), content and attributes (`get_text`, `set_text`, `get_html`, `set_html`, `get_attribute`, `set_attribute`, class and data helpers), style and layout (`set_style`, `rect`, `scroll_top`, `focus`), events (`bind_event`, `unbind_event`, `dispatch_event`, `click`), forms and files, observers, animations, media and platform dialogs. A `batch()` context manager buffers the mutating calls and applies them with one host call on exit.
 
 ```python
 import dom
@@ -794,7 +807,7 @@ Each group picks exactly one of `run`, `code` or `eval: true`. Without `listen:`
 
 ### The trusted model
 
-Actors keep state between messages, pick work up with the `receive()` builtin and forward with `send` from the `actor` module, strings only, never blocking. The `edge.json` beside `actor.yml` declares `actor` like any module.
+Actors keep state between messages, pick work up with the `receive()` builtin and forward with the `send(group, body)` builtin, strings only, never blocking, and neither needs an import.
 
 ```yml actor
 groups:
@@ -812,7 +825,7 @@ got hello
 
 ### The untrusted model
 
-`eval: true` groups compile each message as its own program in a fresh wasm instance with its own memory, capped by the group's `heap` limit and a 256 MiB reservation, and cut off after ten seconds of wall-clock time by a deadline the host enforces from outside. No state survives between messages. A bundle that carries its own `edge.json` resolves through it, any other message through the pool's manifest, and either way `actor`, `network` and `.wasm` plugins are refused, so untrusted code cannot send, reach the network or load modules from disk. A `code` or `run` group is trusted instead, it keeps state, can send and can use `network`, so reach for `eval` when the code is not yours.
+`eval: true` groups compile each message as its own program in a fresh wasm instance with its own memory, capped by the group's `heap` limit and a 256 MiB reservation, and cut off after ten seconds of wall-clock time by a deadline the host enforces from outside. No state survives between messages. A bundle that carries its own `edge.json` resolves through it, any other message through the pool's manifest. Either way `.wasm` plugins are refused, remote modules load only from `https://cdn.edgepython.com/`, the JavaScript runtime has no network and `send()` has no scheduler, so untrusted code cannot send, reach the network or load modules from disk. A `code` or `run` group is trusted instead, it keeps state, can send and can use `network`, so reach for `eval` when the code is not yours.
 
 ```yml untrusted
 groups:

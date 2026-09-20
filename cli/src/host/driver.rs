@@ -82,7 +82,10 @@ pub fn run(file: Option<&Path>, code: Option<&str>, opts: &RunOpts) -> Result<i3
 pub fn run_bundle(payload: &[u8], opts: &RunOpts) -> Result<i32> {
     let bundle = crate::pack::Bundle::decode(payload).map_err(|e| anyhow!("corrupt bundle: {e}"))?;
     let entry = bundle.entry.clone();
-    let files = bundle.into_files();
+    let mut files = bundle.into_files();
+    if let Some(bytes) = files.remove(super::js::RUNTIME_KEY) {
+        super::js::use_packed(bytes);
+    }
     let src = files.get(&entry).map(|b| String::from_utf8_lossy(b).into_owned()).ok_or_else(|| anyhow!("bundle entry '{entry}' is missing"))?;
     let project = Project::bundle(files, dir_of(&entry), false);
     let mut vm = host()?.vm(stdout_sink(), project, None, None)?;
@@ -189,10 +192,10 @@ pub(super) fn sleep_until(deadline: u64) {
     }
 }
 
-/* The park report, a wait that needs a browser says so, a servable one names its flag. */
+/* The park report, a render frame names the missing Web API, a servable wait names its flag. */
 pub fn suspend_message(what: &str) -> String {
     match what {
-        "a render frame" => "script suspended awaiting a render frame, requires a browser".to_string(),
+        "a render frame" => "script suspended awaiting a render frame, frame() needs requestAnimationFrame, missing in this runtime".to_string(),
         "an event" => "script suspended awaiting an event (wire --events <file>)".to_string(),
         s => format!("script suspended awaiting {s}, nothing can resume it here"),
     }

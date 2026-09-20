@@ -17,6 +17,7 @@ export interface CompilerEnv {
     host_call_native(id: number, call_id: number, argv_ptr: number, argc: number, out_ptr: number): number
     host_now_ns(): bigint
     host_fetch_bytes(specPtr: number, specLen: number, hashPtr: number, outLenPtr: number): number
+    host_send(groupPtr: number, groupLen: number, bodyPtr: number, bodyLen: number): number
 }
 
 export interface MakeCompilerEnvOpts {
@@ -29,7 +30,7 @@ export interface MakeCompilerEnvOpts {
     captureHostCall?: (id: number, call: DeferredHostCall) => void
 }
 
-/* The `env.*` imports the compiler declares (host_print, host_call_native, host_fetch_bytes, host_now_ns), wired to closure-captured engine state. */
+/* The `env.*` imports the compiler declares (host_print, host_call_native, host_fetch_bytes, host_now_ns, host_send), wired to closure-captured engine state. */
 export function makeCompilerEnv({ getExports, onLine, fetchedSources, lockfile, integrityActive, rt, captureHostCall }: MakeCompilerEnvOpts): CompilerEnv {
     const readStr = (ptr: number, len: number) => TD.decode(new Uint8Array(getExports().memory.buffer, ptr, len));
     const setU32 = (ptr: number, v: number) => new DataView(getExports().memory.buffer).setUint32(ptr, v, true);
@@ -126,6 +127,9 @@ export function makeCompilerEnv({ getExports, onLine, fetchedSources, lockfile, 
             setU32(outLenPtr, bytes.length);
             return ptr;
         },
+
+        /* No actor scheduler lives in a page or a worker, so send() raises its missing-scheduler error. */
+        host_send: () => 1,
     };
 }
 

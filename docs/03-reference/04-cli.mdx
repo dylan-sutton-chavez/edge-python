@@ -5,7 +5,7 @@ description: "The edge CLI: run, serve, repl, test, init, package management, bu
 
 # Command line interface
 
-The `edge` CLI runs on macOS, Linux, and WSL. It embeds the engine the JS host loads, a `compiler.wasm` built from the same source for speed and precompiled for the host machine, executed under wasmtime, so `run`, `repl`, `test`, and `actor` start in milliseconds with no browser and no server behind them. Scripts that need a browser (`dom`, `storage`, `frame()`) or import another JavaScript module belong to the JS host, see [The CLI](/docs/reference/modules#the-cli) for what each host resolves.
+The `edge` CLI runs on macOS, Linux, and WSL. It embeds the engine the JS host loads, a `compiler.wasm` built from the same source for speed and precompiled for the host machine, executed under wasmtime, so `run`, `repl`, `test`, and `actor` start in milliseconds with no browser and no server behind them. JavaScript modules run in StarlingMonkey, a runtime the CLI downloads once on the first JavaScript import, and scripts that need a browser (`dom`, `storage`, `frame()`) belong to the JS host, see [JavaScript in the CLI](/docs/reference/modules#javascript-in-the-cli) for what runs where.
 
 ```bash
 edge run app.py        # run a script, a .edge, or stdin
@@ -120,7 +120,7 @@ $ edge init my-app
 
 ## `edge add` / `edge remove`: package management
 
-Edits [`edge.json`](/docs/reference/modules#edgejson) by name. The CLI knows the official packages (`json`, `re`, `math`, `struct`, `test`, `dom`, `network`, `storage`, `time`, `actor`), so you never paste URLs. Every entry goes to `imports` and points at the package on the CDN, a `.wasm` for the standard packages (`test` is `test.py`), an `index.js` for the JavaScript libraries, and the `entry.py` facade for `dom`. Each line prints the name and the URL it wrote. The full catalog is in [Modules](/docs/reference/modules#standard-packages).
+Edits [`edge.json`](/docs/reference/modules#edgejson) by name. The CLI knows the official packages (`json`, `re`, `math`, `struct`, `test`, `dom`, `network`, `storage`, `time`), so you never paste URLs. Every entry goes to `imports` and points at the package on the CDN, a `.wasm` for the standard packages (`test` is `test.py`), an `index.js` for the JavaScript libraries, and the `entry.py` facade for `dom`. Each line prints the name and the URL it wrote. The full catalog is in [Modules](/docs/reference/modules#standard-packages).
 
 ```text
 $ edge add math network
@@ -140,17 +140,17 @@ Packs the project and its imports into one artifact, in one of three modes for t
 
 | Command | Output | Runs on |
 |---------|--------|---------|
-| `edge build` | a standalone `.edge` binary | any host of the same OS, nothing installed |
+| `edge build` | a standalone `.edge` binary | any host of the same OS and CPU, offline, nothing installed |
 | `edge build --bundle` | a lightweight `.package` | a host that already has `edge`, or a pool |
 | `edge build --web` | a self-contained `dist/` | any browser |
 
-The default `.edge` is this `edge` binary with the project appended, so `./app.edge` runs it directly and it honors the run flags `--save-state`, `--restore-state`, `--preempt`, and `--events`. The `.package` carries only the code and its custom imports, since `edge` is already present where it lands. `--web` vendors the JS host under `dist/js/` with `compiler.wasm` beside it, then every declared module together with what it needs from the same origin (its relative JavaScript and Python imports and a sibling `edge.json`), and rewrites `edge.json` to the vendored paths, so the `dist/` works offline, `dom` and `network` included. The CLI resolves the official std entries to its embedded copies, so an `.edge` or `.package` needs no network for them.
+The default `.edge` is this `edge` binary with the project appended, so `./app.edge` runs it directly and it honors the run flags `--save-state`, `--restore-state`, `--preempt`, and `--events`. The `.package` carries only the code and its custom imports, since `edge` is already present where it lands. `--web` vendors the JS host under `dist/js/` with `compiler.wasm` beside it, then every declared module together with what it needs from the same origin (its relative JavaScript and Python imports and a sibling `edge.json`), and rewrites `edge.json` to the vendored paths, so the `dist/` works offline, `dom` and `network` included. The CLI resolves the official std entries to its embedded copies, so an `.edge` or `.package` needs no network for them. Both carry every module the manifest declares by URL, with the files it imports beside it, so `time` and a third-party package travel with the project. An `.edge` for a project that declares a JavaScript module also carries the precompiled JavaScript runtime, around 26 MB, which is why the artifact below is larger than the binary. A run prefers that copy, then the cache, then the download, so a packed app never needs the network. A `.package` leaves the runtime out, since the `edge` that runs it brings its own.
 
 ```text
 $ edge build
 
-  packed app.edge (3 files)
-  10.43 MB
+  packed app.edge (2 files)
+  11.54 MB
 
   run  ./app.edge   flags  --save-state --restore-state --preempt --events
 ```
@@ -165,7 +165,7 @@ Runs many edge-python programs as cooperative actors over a few threads, describ
 edge actor actor.yml
 ```
 
-Groups resolve their imports through the `edge.json` beside `actor.yml`, or the one `--manifest` names, so a group that does `from actor import send` needs `actor` declared there.
+Groups resolve their imports through the `edge.json` beside `actor.yml`, or the one `--manifest` names. Sending needs no import, `send()` is a builtin.
 
 ## `edge uninstall`
 

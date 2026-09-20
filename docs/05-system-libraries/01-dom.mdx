@@ -5,7 +5,7 @@ description: "The browser DOM, from element queries to observers and animations.
 
 # dom (browser)
 
-`dom` wraps the browser DOM. It is a JavaScript module that needs a browser, it runs on the main thread where `document` and `window` live. Declare it with `edge add dom`, an `imports` entry pointing at the facade `https://cdn.edgepython.com/js/builtins/dom/entry.py`, and import it by bare name. The CLI rejects it at compile time with `module 'dom' requires a browser`, see [The CLI](/docs/reference/modules#the-cli). A JavaScript runtime without a page loads it and fails at the first call with `module 'dom' needs 'document', missing in this runtime`, raised in the calling coroutine.
+`dom` wraps the browser DOM. It is a JavaScript module that needs a browser, it runs on the main thread where `document` and `window` live. Declare it with `edge add dom`, an `imports` entry pointing at the facade `https://cdn.edgepython.com/js/builtins/dom/entry.py`, and import it by bare name. A JavaScript runtime without a page loads it and fails at the first call with `module 'dom' needs 'document', missing in this runtime`, raised in the calling coroutine. The CLI loads it the same way and names the JavaScript half behind the facade, `module '_dom' needs 'document', missing in this runtime`, see [JavaScript in the CLI](/docs/reference/modules#javascript-in-the-cli).
 
 The engine runs in a Web Worker, so each call crosses over `postMessage` and the script sees a synchronous call. Handlers that return a Promise suspend the calling coroutine and compose with `gather`, see [Async](/docs/language/async).
 

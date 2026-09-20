@@ -6,7 +6,6 @@ groups:
       heap: 65536
       preempt: 500
     code: |
-      from actor import send
       msg = receive()
       send("transform", msg + "-ingested")
     seed:
@@ -14,7 +13,6 @@ groups:
   transform:
     replicas: 1
     code: |
-      from actor import send
       msg = receive()
       send("sink", msg + "-transformed")
   sink:

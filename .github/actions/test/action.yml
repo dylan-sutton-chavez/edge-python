@@ -6,7 +6,7 @@ inputs:
     description: "js | std | builtins"
     required: true
   capability:
-    description: "actor | dom | network | storage | time (builtins only)"
+    description: "dom | network | storage | time (builtins only)"
     required: false
     default: ""
 

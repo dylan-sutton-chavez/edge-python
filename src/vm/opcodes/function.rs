@@ -20,7 +20,7 @@ fn constructor_native(name: &str) -> Option<super::super::types::NativeFnId> {
 fn native_is_impure(id: super::super::types::NativeFnId) -> bool {
     use super::super::types::NativeFnId::*;
     matches!(id,
-        Print | Input | Receive | Sleep // I/O + scheduler
+        Print | Input | Receive | SendMsg | Sleep // I/O + scheduler
         | SetAttr | DelAttr // mutation
         | GetAttr | HasAttr // attr access can run getters
         | Run | ImportModule // arbitrary execution / import
@@ -976,6 +976,7 @@ impl<'a> VM<'a> {
             Sleep => self.call_sleep(),
             Frame => self.call_frame(),
             Receive => self.call_receive(),
+            SendMsg => self.call_send(),
             Map => self.call_map(argc, chunk, slots),
             Filter => self.call_filter(chunk, slots),
             Iter => self.call_iter(argc, chunk, slots),

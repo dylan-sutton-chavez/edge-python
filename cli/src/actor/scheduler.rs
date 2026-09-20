@@ -343,6 +343,7 @@ impl GroupState {
         }
         let project = Project::disk(&self.dir, self.manifest.as_deref());
         let inst = self.ctx.host.instance(sink_for(&self.ctx.out), project, None, None)?;
+        inst.borrow_mut().accept_sends();
         let vm = Instance::slot(&inst)?;
         self.instances.push(inst);
         Ok(vm)

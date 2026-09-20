@@ -115,9 +115,6 @@ jobs:
             suite: js
           - entry: std
             suite: std
-          - entry: builtins-actor
-            suite: builtins
-            capability: actor
           - entry: builtins-dom
             suite: builtins
             capability: dom

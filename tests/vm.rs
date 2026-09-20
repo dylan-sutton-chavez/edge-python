@@ -21,6 +21,28 @@ mod test {
         // Events pushed one-at-a-time after each PendingEvent yield (host-resume path).
         #[serde(default)]
         interactive_events: Vec<String>,
+        // Present installs a scheduler hook, the (group, body) pairs send() handed over.
+        #[serde(default)]
+        sends: Option<Vec<(String, String)>>,
+    }
+
+    std::thread_local! {
+        static SENT: std::cell::RefCell<Vec<(String, String)>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    fn record_send(group: &str, body: &str) -> bool {
+        SENT.with(|s| s.borrow_mut().push((group.to_string(), body.to_string())));
+        true
+    }
+
+    // Installs the recording hook when the case expects sends, clearing what an earlier case left.
+    fn hook_sends(vm: &mut VM, case: &Case) {
+        SENT.with(|s| s.borrow_mut().clear());
+        if case.sends.is_some() { vm.send_hook = Some(record_send); }
+    }
+
+    fn sent() -> Vec<(String, String)> {
+        SENT.with(|s| s.borrow().clone())
     }
 
     /* Sets iterate in hash order, so canonicalize a set/frozenset line by sorting its elements. Assumes scalar elements with no nested ", ". Non-sets pass through. */
@@ -79,6 +101,7 @@ mod test {
             compiler::vm::optimizer::constant_fold(&mut chunk);
             let mut vm = VM::with_limits(&chunk, Limits::sandbox());
             vm.input_buffer = case.input.clone();
+            hook_sends(&mut vm, &case);
             for evt in &case.events { vm.push_event(evt).expect("push_event"); }
             let result = drive(&mut vm, &case.interactive_events);
 
@@ -87,6 +110,9 @@ mod test {
                 Ok(_obj) => {
                     if normalize(&vm.output) != normalize(&case.output) {
                         failures.push(format!("OUTPUT {:?}\n   got {:?}\n   want {:?}", case.src, vm.output, case.output));
+                    }
+                    if let Some(want) = &case.sends && &sent() != want {
+                        failures.push(format!("SENDS {:?}\n   got {:?}\n   want {:?}", case.src, sent(), want));
                     }
                 }
                 Err(e) => match &case.error {
@@ -145,6 +171,7 @@ mod test {
 
             let mut vm = VM::with_limits(&chunk, Limits::sandbox());
             vm.input_buffer = case.input.clone();
+            hook_sends(&mut vm, &case);
             for evt in &case.events { vm.push_event(evt).expect("push_event"); }
             let expects_input_error = case.input.is_empty() && (case.src.contains("input(") || case.src.contains("input ("));
 
@@ -152,6 +179,7 @@ mod test {
                 Ok(_) => {
                     assert!(!expects_input_error, "expected input() to error under strict mode for: {:?}", case.src);
                     assert_eq!(normalize(&vm.output), normalize(&case.output), "output mismatch on: {:?}", case.src);
+                    if let Some(want) = &case.sends { assert_eq!(&sent(), want, "sends mismatch on: {:?}", case.src); }
                 }
                 Err(e) => match &case.error {
                     Some(expected) => assert!(e.to_string().contains(expected.as_str()), "wrong error on {:?}: got '{}', expected '{}'", case.src, e, expected),

@@ -1,7 +1,4 @@
 mod common;
-// The CLI's RFC 6455 codec, the websocket echo fixture frames with it.
-#[path = "../src/ws.rs"]
-mod ws;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -155,7 +152,7 @@ struct CorpusCase {
     error: Option<String>,
 }
 
-/* The network fixture the corpus points at, canned http, three sse events and a ws echo. */
+/* The network fixture the corpus points at, canned http and the event streams of the shared corpus. */
 fn spawn_fixture() -> u16 {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
     let port = listener.local_addr().expect("tcp addr").port();
@@ -167,53 +164,65 @@ fn spawn_fixture() -> u16 {
     port
 }
 
+// Parts written one at a time, one splits a CRLF, as the browser suite's mock sends them.
+const SSE_FIELDS: [&str; 6] = [
+    "\u{FEFF}data: bom first\n\n",
+    ": a comment\r",
+    "\nevent: ping\r\ndata: skipped\r\n\r\n",
+    "id: 7\rdata: first line\rdata: second line\r\r",
+    "data:no space\nretry: 5000\n\n",
+    "id\ndata: after empty id\n\n",
+];
+
 fn serve(mut stream: std::net::TcpStream) {
-    use ws::{accept_key, encode_frame, parse_frame};
     use std::io::{BufRead, Read, Write};
     let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
     let mut line = String::new();
     let _ = reader.read_line(&mut line);
     let path = line.split_whitespace().nth(1).unwrap_or("/").to_string();
-    let mut key = None;
+    let mut last_event_id = None;
     loop {
         let mut header = String::new();
         if reader.read_line(&mut header).is_err() || header == "\r\n" || header.is_empty() {
             break;
         }
         if let Some((name, value)) = header.split_once(':')
-            && name.eq_ignore_ascii_case("sec-websocket-key")
+            && name.eq_ignore_ascii_case("last-event-id")
         {
-            key = Some(value.trim().to_string());
+            last_event_id = Some(value.trim().to_string());
         }
     }
     let http = |body: &str| format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
-    match (path.as_str(), key) {
-        ("/text", _) => drop(stream.write_all(http("hello from mock").as_bytes())),
-        ("/json", _) => drop(stream.write_all(http("{\"ok\":true}").as_bytes())),
-        ("/sse", _) => {
-            let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n\r\n");
+    let events = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
+    // An event stream stays open until the client goes away.
+    let mut hold = || while matches!(reader.read(&mut [0u8; 64]), Ok(n) if n > 0) {};
+    match path.as_str() {
+        "/text" => drop(stream.write_all(http("hello from mock").as_bytes())),
+        "/json" => drop(stream.write_all(http("{\"ok\":true}").as_bytes())),
+        "/sse" => {
+            let _ = stream.write_all(events.as_bytes());
             for i in 1..=3 {
                 let _ = stream.write_all(format!("id: {i}\ndata: event {i}\n\n").as_bytes());
             }
-            // The stream stays open until the client goes away.
-            while matches!(reader.read(&mut [0u8; 64]), Ok(n) if n > 0) {}
+            hold();
         }
-        ("/ws", Some(key)) => {
-            let _ = write!(stream, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n", accept_key(&key));
-            let (mut buf, mut chunk) = (Vec::new(), [0u8; 4096]);
-            while let Ok(n @ 1..) = reader.read(&mut chunk) {
-                buf.extend_from_slice(&chunk[..n]);
-                while let Some((opcode, payload, used)) = parse_frame(&buf) {
-                    buf.drain(..used);
-                    let reply = match opcode {
-                        0x8 => return drop(stream.write_all(&encode_frame(0x8, &payload, None))),
-                        0x9 => encode_frame(0xA, &payload, None),
-                        _ => encode_frame(opcode, &payload, None),
-                    };
-                    let _ = stream.write_all(&reply);
-                }
+        "/sse-fields" => {
+            let _ = stream.write_all(events.as_bytes());
+            for part in SSE_FIELDS {
+                let _ = stream.write_all(part.as_bytes());
+                let _ = stream.flush();
+                std::thread::sleep(std::time::Duration::from_millis(10));
             }
+            hold();
         }
+        // The first connection ends after one event, the retry echoes the Last-Event-ID it carried.
+        "/sse-reconnect" => match last_event_id {
+            None => drop(stream.write_all(format!("{events}retry: 250\nid: 41\ndata: first\n\n").as_bytes())),
+            Some(last) => {
+                let _ = stream.write_all(format!("{events}data: last={last}\n\n").as_bytes());
+                hold();
+            }
+        },
         _ => drop(stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")),
     }
 }
@@ -221,9 +230,10 @@ fn serve(mut stream: std::net::TcpStream) {
 // Runs every shared builtins corpus against the CLI, mirroring the JS host cases.
 #[test]
 fn builtin_corpora_mirror_the_web_api() {
+    common::cdn_base().unwrap_or_else(|e| panic!("{e}"));
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/cases/builtins");
     let port = spawn_fixture();
-    let (base, ws_base) = (format!("http://127.0.0.1:{port}"), format!("ws://127.0.0.1:{port}"));
+    let base = format!("http://127.0.0.1:{port}");
     let mut failures = Vec::new();
     let mut ran = 0;
     for entry in std::fs::read_dir(dir).unwrap() {
@@ -236,7 +246,7 @@ fn builtin_corpora_mirror_the_web_api() {
         for (i, case) in cases.iter().enumerate() {
             ran += 1;
             let scratch = scratch(&format!("{cap}-corpus"));
-            let src = case.src.replace("{BASE}", &base).replace("{WS_BASE}", &ws_base);
+            let src = case.src.replace("{BASE}", &base);
             // The JS host harness prepends the same star import, bare names resolve to the module exports.
             std::fs::write(scratch.join("edge.json"), manifest(&[&cap])).unwrap();
             std::fs::write(scratch.join("main.py"), format!("from {cap} import *\n{src}\n")).unwrap();
@@ -497,6 +507,7 @@ mod engine_corpus {
 
     #[test]
     fn engine_corpus() {
+        crate::common::cdn_base().unwrap_or_else(|e| panic!("{e}"));
         let cases: Vec<Case> = serde_json::from_str(include_str!("engine.json")).expect("engine.json parse");
         let (base, log) = fixture();
         let mut failures = Vec::new();

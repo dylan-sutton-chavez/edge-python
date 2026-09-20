@@ -39,6 +39,13 @@ mod test {
         // Run on a huge budget so preempts don't ride the budget check.
         #[serde(default)]
         unmetered: bool,
+        // Present means send() reaches a scheduler, this corpus only needs it accepted.
+        #[serde(default)]
+        sends: Option<Vec<(String, String)>>,
+    }
+
+    fn accept_send(_group: &str, _body: &str) -> bool {
+        true
     }
 
     struct Run {
@@ -64,6 +71,7 @@ mod test {
     fn fresh(case: &Case, interval: usize) -> VM<'static> {
         let mut vm = VM::with_limits(parse_static(&case.src), limits_for(case));
         vm.set_preempt_interval(interval);
+        if case.sends.is_some() { vm.send_hook = Some(accept_send); }
         vm
     }
 

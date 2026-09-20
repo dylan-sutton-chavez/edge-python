@@ -1,9 +1,5 @@
 [
   {
-    "src": "h = sse_open('{BASE}/sse', 'e')\nseen = []\nwhile len(seen) < 3:\n    ev = receive()\n    if '\"type\":\"message\"' in ev:\n        seen.append(ev)\nopen_state = sse_state(h)\nsse_close(h)\nprint('event 1' in seen[0], 'event 3' in seen[2], open_state == 1)",
-    "output": ["True True True"]
-  },
-  {
     "src": "sock = ws_open('{WS_BASE}/ws', 'echo')\ngot = None\nwhile True:\n    ev = receive()\n    if '\"type\":\"open\"' in ev:\n        ws_send(sock, 'hello')\n    elif '\"type\":\"message\"' in ev:\n        got = 'hello' in ev\n        ws_close(sock)\n    elif '\"type\":\"close\"' in ev:\n        break\nprint(got)",
     "output": ["True"]
   }

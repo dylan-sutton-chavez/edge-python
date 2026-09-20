@@ -19,6 +19,19 @@ struct Case {
     #[serde(default)] fails: Option<Vec<String>>,
     #[serde(default)] creates: Vec<String>,
     #[serde(default)] contains: BTreeMap<String, String>,
+    // A second command in the same dir, the way a packed artifact runs itself.
+    #[serde(default)] then: Option<Step>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Step {
+    bin: String,
+    #[serde(default)] run: Vec<String>,
+    #[serde(default)] env: BTreeMap<String, String>,
+    #[serde(default)] stdout: Vec<String>,
+    #[serde(default)] stderr: Vec<String>,
+    #[serde(default)] fails: Option<Vec<String>>,
 }
 
 /// JSON-driven CLI suite, each case in `cli.json` is one tempdir plus one spawn of the `edge` binary.
@@ -36,16 +49,18 @@ fn plugin_suite() {
 fn suite(json: &str) {
     let cases: Vec<Case> = serde_json::from_str(json).expect("case file parse");
     let bin = env!("CARGO_BIN_EXE_edge");
+    // One cache per suite, so no case touches the real one and the runtime downloads once.
+    let cache = tempfile::tempdir().expect("suite cache dir");
     let mut failed = vec![];
     for c in &cases {
-        if let Err(e) = check(bin, c) {
+        if let Err(e) = check(bin, c, cache.path()) {
             failed.push(format!("[edge {}] {e}", c.run.join(" ")));
         }
     }
     assert!(failed.is_empty(), "\n{}", failed.join("\n"));
 }
 
-fn check(bin: &str, c: &Case) -> Result<(), String> {
+fn check(bin: &str, c: &Case, cache: &std::path::Path) -> Result<(), String> {
     let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
     for (p, v) in &c.given {
         let path = dir.path().join(p);
@@ -58,33 +73,48 @@ fn check(bin: &str, c: &Case) -> Result<(), String> {
         if let Some(d) = path.parent() { let _ = std::fs::create_dir_all(d); }
         std::fs::copy(&from, path).map_err(|e| format!("fixture {}: {e}, build it first", from.display()))?;
     }
-    let mut cmd = Command::new(bin);
-    if c.run.iter().any(|arg| arg == "--web") {
-        cmd.env("EDGE_CDN_BASE", common::cdn_base()?);
+    let want = Expect { stdout: &c.stdout, stderr: &c.stderr, fails: c.fails.as_deref() };
+    run(bin, &c.run, &c.env, dir.path(), cache, &c.stdin, want)?;
+    for f in &c.creates { if !dir.path().join(f).exists() { return Err(format!("file missing: {f}")); } }
+    for (f, n) in &c.contains {
+        let t = std::fs::read_to_string(dir.path().join(f)).map_err(|e| e.to_string())?;
+        if !t.contains(n) { return Err(format!("{f} missing {n:?}; got: {t}")); }
     }
-    let mut child = cmd.args(&c.run).current_dir(&dir).envs(&c.env)
+    if let Some(s) = &c.then {
+        let want = Expect { stdout: &s.stdout, stderr: &s.stderr, fails: s.fails.as_deref() };
+        run(&s.bin, &s.run, &s.env, dir.path(), cache, "", want).map_err(|e| format!("[then {}] {e}", s.bin))?;
+    }
+    Ok(())
+}
+
+// What one command must print and whether it must fail.
+struct Expect<'a> {
+    stdout: &'a [String],
+    stderr: &'a [String],
+    fails: Option<&'a [String]>,
+}
+
+fn run(bin: &str, args: &[String], env: &BTreeMap<String, String>, dir: &std::path::Path, cache: &std::path::Path, stdin: &str, want: Expect) -> Result<(), String> {
+    let mut cmd = Command::new(bin);
+    cmd.env("EDGE_CDN_BASE", common::cdn_base()?).env("XDG_CACHE_HOME", cache);
+    let mut child = cmd.args(args).current_dir(dir).envs(env)
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
         .spawn().map_err(|e| e.to_string())?;
-    if !c.stdin.is_empty() {
-        child.stdin.as_mut().unwrap().write_all(c.stdin.as_bytes()).map_err(|e| e.to_string())?;
+    if !stdin.is_empty() {
+        child.stdin.as_mut().unwrap().write_all(stdin.as_bytes()).map_err(|e| e.to_string())?;
     }
     drop(child.stdin.take()); // close stdin so the process sees EOF
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
     let so = String::from_utf8_lossy(&out.stdout);
     let se = String::from_utf8_lossy(&out.stderr);
     let exit = out.status.code().unwrap_or(-1);
-    let want_fail = c.fails.is_some();
+    let want_fail = want.fails.is_some();
     if (exit != 0) != want_fail {
         return Err(format!("exit {exit}; want {}; stderr: {se}", if want_fail { "non-zero" } else { "0" }));
     }
-    for n in c.stderr.iter().chain(c.fails.iter().flatten()) {
+    for n in want.stderr.iter().chain(want.fails.into_iter().flatten()) {
         if !se.contains(n.as_str()) { return Err(format!("stderr missing {n:?}; got: {se}")); }
     }
-    for n in &c.stdout { if !so.contains(n) { return Err(format!("stdout missing {n:?}; got: {so}")); } }
-    for f in &c.creates { if !dir.path().join(f).exists() { return Err(format!("file missing: {f}")); } }
-    for (f, n) in &c.contains {
-        let t = std::fs::read_to_string(dir.path().join(f)).map_err(|e| e.to_string())?;
-        if !t.contains(n) { return Err(format!("{f} missing {n:?}; got: {t}")); }
-    }
+    for n in want.stdout { if !so.contains(n) { return Err(format!("stdout missing {n:?}; got: {so}")); } }
     Ok(())
 }

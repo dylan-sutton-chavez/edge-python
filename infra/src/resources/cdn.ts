@@ -19,8 +19,8 @@ const TYPES: Record<string, string> = {
 // Paths carry no version, so every object revalidates against its ETag.
 export const CACHE = 'public, max-age=0, must-revalidate'
 
-// The compiler is the one large text-like payload, served pre-compressed at brotli 11.
-const BROTLI = new Set(['compiler.wasm'])
+// The compiler and the JavaScript runtime are the large payloads, stored brotli encoded.
+const encoded = (key: string) => key === 'compiler.wasm' || key.startsWith('js-runtime/')
 
 // Build inputs later CI jobs read from tmp, promote never ships them.
 export const INTERNAL = '_build/'
@@ -87,15 +87,16 @@ export function cdn_objects(tree: string): CdnObject[] {
   return walk(tree)
     .map((file) => {
       const key = relative(tree, file).split(sep).join('/')
-      return { key, file, type: TYPES[extname(key)] ?? 'application/octet-stream', encoding: BROTLI.has(key) ? 'br' : null }
+      return { key, file, type: TYPES[extname(key)] ?? 'application/octet-stream', encoding: encoded(key) ? 'br' : null }
     })
     .sort((a, b) => a.key.localeCompare(b.key))
 }
 
-// The bytes an object stores, the compiler goes up brotli encoded.
+// The bytes an object stores, a runtime of tens of megabytes compresses at a quicker level.
 export function object_bytes(object: CdnObject) {
   const bytes = readFileSync(object.file)
-  return object.encoding === 'br' ? brotliCompressSync(bytes, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } }) : bytes
+  const quality = bytes.length > 8 << 20 ? 9 : 11
+  return object.encoding === 'br' ? brotliCompressSync(bytes, { params: { [constants.BROTLI_PARAM_QUALITY]: quality } }) : bytes
 }
 
 // Keys keep their slashes in the request path, the way wrangler sends them.

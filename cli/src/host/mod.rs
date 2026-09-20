@@ -1,21 +1,24 @@
 pub mod config;
 pub mod driver;
 mod env;
+pub mod js;
 mod plugins;
 mod resolver;
 mod rt;
 mod vm;
 
-pub use resolver::Project;
-pub use vm::{Completion, Deferred, Instance, Status, Vm};
+pub use resolver::{built_in, Project};
+pub use vm::{Completion, Instance, Status, Vm};
 
 use anyhow::{anyhow, Result};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::{Arc, Mutex, OnceLock};
 use wasmtime::{AsContextMut, Engine, Instance as Wasm, InstancePre, Linker, Memory, Module, ResourceLimiter, Store, TypedFunc};
+use wasmtime_wasi_http::p2::bindings::sync::ProxyPre;
 
 const COMPILER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/compiler.cwasm"));
 // Each std package is deserialized the first time a program imports it.
@@ -25,6 +28,29 @@ const STD: [(&str, &[u8]); 4] = [
     ("math", include_bytes!(concat!(env!("OUT_DIR"), "/math.cwasm"))),
     ("struct", include_bytes!(concat!(env!("OUT_DIR"), "/struct.cwasm"))),
 ];
+
+// The official origin every package url starts with.
+pub const ORIGIN: &str = "https://cdn.edgepython.com";
+
+// The epoch ticker's period, an untrusted deadline counts these.
+pub const TICK_NS: u64 = 100_000_000;
+
+/* Tests and staging serve the official origin from EDGE_CDN_BASE, production never sets it. */
+pub fn cdn(url: &str) -> String {
+    match (url.strip_prefix(ORIGIN), std::env::var("EDGE_CDN_BASE")) {
+        (Some(path), Ok(base)) => format!("{}{path}", base.trim_end_matches('/')),
+        _ => url.to_string(),
+    }
+}
+
+/* The per-user edge cache, modules and the JavaScript runtime live under it. */
+pub fn cache_root() -> Result<PathBuf, String> {
+    if let Ok(x) = std::env::var("XDG_CACHE_HOME") {
+        return Ok(PathBuf::from(x).join("edge"));
+    }
+    let home = std::env::var("HOME").map_err(|_| "cannot locate a cache dir (no HOME)".to_string())?;
+    Ok(PathBuf::from(home).join(".cache").join("edge"))
+}
 
 // Wall-clock ns, the base every PendingTimer deadline is minted against.
 pub fn now_ns() -> u64 {
@@ -38,6 +64,9 @@ pub fn wt<T>(r: wasmtime::Result<T>) -> Result<T> {
 
 pub type Sink = Box<dyn FnMut(&str) + Send>;
 
+// A sink shared with the JavaScript runtime threads, whose console output lands beside print().
+pub type Printer = Arc<Mutex<Sink>>;
+
 // Registered module specs, each to the native table slice it occupies.
 pub type Registered = HashMap<String, (usize, Vec<String>)>;
 
@@ -49,13 +78,26 @@ pub struct Runtime {
     pub engine: Engine,
     compiler: Module,
     std: [OnceLock<Module>; 4],
+    // The JavaScript runtime, loaded on the first JavaScript import and retried after a failure.
+    js: Mutex<Option<ProxyPre<js::JsState>>>,
 }
 
 impl Runtime {
     pub fn new() -> Result<Arc<Runtime>> {
         let engine = wt(Engine::new(&config::base()))?;
         let compiler = wt(unsafe { Module::deserialize(&engine, COMPILER) })?;
-        Ok(Arc::new(Runtime { engine, compiler, std: Default::default() }))
+        Ok(Arc::new(Runtime { engine, compiler, std: Default::default(), js: Mutex::new(None) }))
+    }
+
+    /* StarlingMonkey ready to instantiate, fetched from the CDN the first time any process needs it. */
+    pub fn js_pre(&self) -> Result<ProxyPre<js::JsState>, String> {
+        let mut slot = self.js.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(pre) = slot.as_ref() {
+            return Ok(pre.clone());
+        }
+        let pre = js::load(&self.engine)?;
+        *slot = Some(pre.clone());
+        Ok(pre)
     }
 
     /* A std package's module, None for a name that is not built in. */
@@ -68,12 +110,12 @@ impl Runtime {
         Ok(Some(self.std[i].get_or_init(|| module)))
     }
 
-    /* Advances the engine epoch every 100 ms so untrusted deadlines fire. */
+    /* Advances the engine epoch every tick so untrusted deadlines fire. */
     pub fn start_ticker(self: &Arc<Self>) {
         let runtime = self.clone();
         std::thread::spawn(move || {
             loop {
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                std::thread::sleep(std::time::Duration::from_nanos(TICK_NS));
                 runtime.engine.increment_epoch();
             }
         });
@@ -137,10 +179,10 @@ pub enum Native {
         free: Option<TypedFunc<(i32, i32), ()>>,
         memory: Memory,
     },
-    Capability {
-        module: &'static str,
+    // An export of a JavaScript module, answered by that module's runtime.
+    Js {
+        runtime: usize,
         name: String,
-        deferred: bool,
     },
 }
 
@@ -159,25 +201,24 @@ impl ResourceLimiter for MemoryCap {
     }
 }
 
-/* Where a stream capability delivers events, the selected interpreter's channel. */
-#[derive(Clone)]
-pub struct Events {
-    pub tx: Sender<Completion>,
-    // Each open stream upgrades this to a strong ref, the interpreter counts them.
-    pub streams: Weak<()>,
-}
-
 /* Everything the host functions reach through the store, shared by the instance's slots. */
 pub struct State {
     pub exports: Option<Exports>,
-    pub print: Sink,
+    pub print: Printer,
     pub natives: Vec<Native>,
     pub fetched: HashMap<String, Vec<u8>>,
     pub registered: Registered,
-    pub deferred: Vec<Deferred>,
-    pub outbox: Vec<(String, String)>,
+    // Ids of host calls parked since the last dispatch, each answer arrives as a completion.
+    pub deferred: Vec<u32>,
+    // Messages send() handed over, None outside an actor pool where no scheduler drains them.
+    pub outbox: Option<Vec<(String, String)>>,
     pub limiter: MemoryCap,
-    pub events: Option<Events>,
+    // The selected slot and the channel its completions and events reach it through.
+    pub slot: u32,
+    pub events: Option<Sender<Completion>>,
+    // Wall-clock ns an untrusted run must finish by, host-side waits honor it too.
+    pub deadline: Option<u64>,
+    pub js: Vec<js::JsRuntime>,
 }
 
 /* The compiler exports the host drives, bound once per instance. */

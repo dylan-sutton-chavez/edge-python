@@ -26,40 +26,86 @@
     "steps": [{ "run": ["run", "main.py"], "exit": 1, "stderr": ["--> main.py:2:1"], "stderr_bytes": 2000000 }]
   },
   {
-    "name": "a browser library fails at its import",
+    "name": "a browser library fails where it touches a missing Web API",
     "given": {
       "edge.json": "{ \"imports\": { \"storage\": \"https://cdn.edgepython.com/js/builtins/storage/index.js\", \"dom\": \"https://cdn.edgepython.com/js/builtins/dom/entry.py\" } }\n",
-      "st.py": "x = 1\nimport storage\n",
-      "dm.py": "x = 1\nfrom dom import body\n"
+      "st.py": "from storage import local_get\nprint('imported')\nlocal_get('k')\n",
+      "dm.py": "from dom import body\nbody()\n"
     },
     "steps": [
-      { "run": ["run", "st.py"], "exit": 1, "stderr": ["error: module 'storage' requires a browser\n", "--> <input>:2:8", "2 | import storage"] },
-      { "run": ["run", "dm.py"], "exit": 1, "stderr": ["error: module 'dom' requires a browser\n", "--> <input>:2:6"] }
+      { "run": ["run", "st.py"], "exit": 1, "stdout": ["imported"], "stderr": ["module 'storage' needs 'localStorage', missing in this runtime", "--> st.py:3:1"] },
+      { "run": ["run", "dm.py"], "exit": 1, "stderr": ["module '_dom' needs 'document', missing in this runtime", "--> dm.py:2:1"] }
     ]
   },
   {
-    "name": "a JavaScript or native module fails at its import",
+    "name": "a native module fails at its import",
     "given": {
-      "edge.json": "{ \"imports\": { \"w\": \"./w.js\", \"s\": \"./s.so\" } }\n",
-      "w.js": "export default () => ({});\n",
+      "edge.json": "{ \"imports\": { \"s\": \"./s.so\" } }\n",
       "s.so": "",
-      "w.py": "x = 1\nimport w\n",
       "s.py": "x = 1\nimport s\n"
     },
     "steps": [
-      { "run": ["run", "w.py"], "exit": 1, "stderr": ["error: module 'w' is JavaScript, the CLI cannot run it\n", "--> <input>:2:8"] },
       { "run": ["run", "s.py"], "exit": 1, "stderr": ["error: module 's' is not supported, ship a .wasm\n", "--> <input>:2:8"] }
     ]
   },
   {
-    "name": "a refusal reached through another module names that importer",
+    "name": "a JavaScript module that fails to load names its importer",
     "given": {
       "edge.json": "{ \"imports\": { \"lib\": \"./lib.py\", \"widget\": \"./widget.js\" } }\n",
-      "widget.js": "export default () => ({});\n",
+      "widget.js": "const title = document.title;\nexport default () => ({});\n",
       "lib.py": "import widget\n",
       "main.py": "import lib\n"
     },
-    "steps": [{ "run": ["run", "main.py"], "exit": 1, "stderr": ["module 'widget' is JavaScript, the CLI cannot run it (via lib)\n", "--> <input>:1:8"] }]
+    "steps": [{ "run": ["run", "main.py"], "exit": 1, "stderr": ["module 'widget' needs 'document', missing in this runtime (via lib)\n", "--> <input>:1:8"] }]
+  },
+  {
+    "name": "a JavaScript module and its relative imports run in the CLI",
+    "given": {
+      "edge.json": "{ \"imports\": { \"calc\": \"./calc/index.js\" } }\n",
+      "calc/index.js": "import { double } from './math.js';\nexport default () => ({ twice: (n) => double(n), later: async (n) => double(n) + 1, echo: (v) => v });\n",
+      "calc/math.js": "export const double = (n) => n * 2;\n",
+      "main.py": "import calc\nprint(calc.twice(21))\nprint(calc.later(20))\nprint(calc.echo({'a': [1, 2.5, None, True, 'x']}))\n"
+    },
+    "steps": [{ "run": ["run", "main.py"], "stdout": ["42\n41\n{'a': [1, 2.5, None, True, 'x']}\n"] }]
+  },
+  {
+    "name": "an event a JavaScript module pushes reaches receive()",
+    "given": {
+      "edge.json": "{ \"imports\": { \"ev\": \"./ev.mjs\" } }\n",
+      "ev.mjs": "export default (ctx) => ({ ping: (m) => { setTimeout(() => ctx.pushEvent('pong ' + m), 20); } });\n",
+      "main.py": "import ev\nev.ping('x')\nprint(receive())\n"
+    },
+    "steps": [{ "run": ["run", "main.py"], "stdout": ["pong x\n"] }]
+  },
+  {
+    "name": "a Web API the runtime lacks fails at the call",
+    "given": {
+      "edge.json": "{ \"imports\": { \"network\": \"https://cdn.edgepython.com/js/builtins/network/index.js\", \"time\": \"https://cdn.edgepython.com/js/builtins/time/index.js\" } }\n",
+      "ws.py": "from network import ws_open\nws_open('ws://127.0.0.1:1/', 'm')\n",
+      "tz.py": "from time import tzname\nprint(tzname())\n"
+    },
+    "steps": [
+      { "run": ["run", "ws.py"], "exit": 1, "stderr": ["module 'network' needs 'WebSocket', missing in this runtime", "--> ws.py:2:1"] },
+      { "run": ["run", "tz.py"], "exit": 1, "stderr": ["module 'time' needs 'Intl', missing in this runtime", "--> tz.py:2:1"] }
+    ]
+  },
+  {
+    "name": "a JavaScript module that throws while loading fails its import",
+    "given": {
+      "edge.json": "{ \"imports\": { \"bad\": \"./bad.js\" } }\n",
+      "bad.js": "throw new Error('boom');\n",
+      "main.py": "x = 1\nimport bad\n"
+    },
+    "steps": [{ "run": ["run", "main.py"], "exit": 1, "stderr": ["module 'bad' failed to load, Error: boom", "--> <input>:2:8"] }]
+  },
+  {
+    "name": "a pinned JavaScript module with other bytes fails its import",
+    "given": {
+      "edge.json": "{ \"imports\": { \"w\": \"./w.js#sha256-0000000000000000000000000000000000000000000000000000000000000000\" } }\n",
+      "w.js": "export default () => ({});\n",
+      "main.py": "import w\n"
+    },
+    "steps": [{ "run": ["run", "main.py"], "exit": 1, "stderr": ["integrity check failed for './w.js'", "--> <input>:1:8"] }]
   },
   {
     "name": "an undeclared official name says how to declare it",
@@ -85,16 +131,16 @@
   {
     "name": "a single-shot pool delivers every message",
     "given": {
-      "edge.json": "{ \"imports\": { \"actor\": \"https://cdn.edgepython.com/js/builtins/actor/index.js\" } }\n",
-      "pool.yml": "runtime:\n  max_actors: 1000000\ngroups:\n  dispatcher:\n    seed: [\"go\"]\n    code: |\n      from actor import send\n      receive()\n      i = 0\n      while i < 20000:\n          send(\"workers\", str(i))\n          i = i + 1\n  workers:\n    replicas: 1000000\n    code: |\n      m = receive()\n      print(\"ok\", m)\n"
+      "edge.json": "{}\n",
+      "pool.yml": "runtime:\n  max_actors: 1000000\ngroups:\n  dispatcher:\n    seed: [\"go\"]\n    code: |\n      receive()\n      i = 0\n      while i < 20000:\n          send(\"workers\", str(i))\n          i = i + 1\n  workers:\n    replicas: 1000000\n    code: |\n      m = receive()\n      print(\"ok\", m)\n"
     },
     "steps": [{ "run": ["actor", "pool.yml"], "lines": { "ok ": 20000 } }]
   },
   {
     "name": "thousands of actors share the std packages",
     "given": {
-      "edge.json": "{ \"imports\": { \"actor\": \"https://cdn.edgepython.com/js/builtins/actor/index.js\", \"json\": \"https://cdn.edgepython.com/std/json.wasm\", \"re\": \"https://cdn.edgepython.com/std/re.wasm\", \"math\": \"https://cdn.edgepython.com/std/math.wasm\", \"struct\": \"https://cdn.edgepython.com/std/struct.wasm\" } }\n",
-      "pool.yml": "runtime:\n  max_actors: 1000000\ngroups:\n  dispatcher:\n    seed: [\"go\"]\n    code: |\n      from actor import send\n      receive()\n      i = 0\n      while i < 3000:\n          send(\"workers\", str(i))\n          i = i + 1\n  workers:\n    replicas: 1000000\n    code: |\n      import json, re, math, struct\n      m = receive()\n      print(\"ok\", json.dumps([m]), math.floor(2.5), struct.calcsize(\"i\"))\n"
+      "edge.json": "{ \"imports\": { \"json\": \"https://cdn.edgepython.com/std/json.wasm\", \"re\": \"https://cdn.edgepython.com/std/re.wasm\", \"math\": \"https://cdn.edgepython.com/std/math.wasm\", \"struct\": \"https://cdn.edgepython.com/std/struct.wasm\" } }\n",
+      "pool.yml": "runtime:\n  max_actors: 1000000\ngroups:\n  dispatcher:\n    seed: [\"go\"]\n    code: |\n      receive()\n      i = 0\n      while i < 3000:\n          send(\"workers\", str(i))\n          i = i + 1\n  workers:\n    replicas: 1000000\n    code: |\n      import json, re, math, struct\n      m = receive()\n      print(\"ok\", json.dumps([m]), math.floor(2.5), struct.calcsize(\"i\"))\n"
     },
     "steps": [{ "run": ["actor", "pool.yml"], "lines": { "ok [\"": 3000 } }]
   }

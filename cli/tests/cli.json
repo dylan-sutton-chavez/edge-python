@@ -44,12 +44,6 @@
   },
   {
     "given": { "edge.json": "{}\n" },
-    "run": ["add", "actor"],
-    "stdout": ["+ actor      https://cdn.edgepython.com/js/builtins/actor/index.js"],
-    "contains": { "edge.json": "\"imports\": {\n    \"actor\": \"https://cdn.edgepython.com/js/builtins/actor/index.js\"" }
-  },
-  {
-    "given": { "edge.json": "{}\n" },
     "run": ["add", "foo=https://example.com/foo.wasm"],
     "contains": { "edge.json": "example.com/foo.wasm" }
   },
@@ -310,28 +304,33 @@
   {
     "given": {
       "edge.json": "{ \"imports\": { \"dom\": \"https://cdn.edgepython.com/js/builtins/dom/entry.py\" } }\n",
-      "main.py": "import dom\n"
+      "main.py": "import dom\ndom.body()\n"
     },
     "run": ["run", "main.py"],
-    "fails": ["error: module 'dom' requires a browser\n"]
+    "fails": ["module '_dom' needs 'document', missing in this runtime"]
+  },
+  {
+    "given": { "main.py": "await frame()\n" },
+    "run": ["run", "main.py"],
+    "fails": ["frame() needs requestAnimationFrame, missing in this runtime"]
   },
   {
     "given": {
       "edge.json": "{ \"imports\": { \"storage\": \"https://cdn.edgepython.com/js/builtins/storage/index.js\" } }\n",
-      "main.py": "import storage\n"
+      "main.py": "import storage\nstorage.local_get('k')\n"
     },
     "run": ["run", "main.py"],
-    "fails": ["error: module 'storage' requires a browser\n"]
+    "fails": ["module 'storage' needs 'localStorage', missing in this runtime"]
   },
   {
     "given": {
       "edge.json": "{ \"imports\": { \"lib\": \"./lib.py\", \"widget\": \"./widget.js\" } }\n",
-      "widget.js": "export default () => ({});\n",
-      "lib.py": "import widget\n",
+      "widget.js": "export default () => ({ name: () => 'widget' });\n",
+      "lib.py": "import widget\nprint(widget.name())\n",
       "main.py": "import lib\n"
     },
     "run": ["run", "main.py"],
-    "fails": ["error: module 'widget' is JavaScript, the CLI cannot run it (via lib)\n"]
+    "stdout": ["widget"]
   },
   {
     "given": {
@@ -361,11 +360,12 @@
   },
   {
     "given": {
-      "edge.json": "{ \"imports\": { \"x\": \"https://example.com/x.mjs\" } }\n",
-      "main.py": "import x\n"
+      "edge.json": "{ \"imports\": { \"x\": \"./x.mjs\" } }\n",
+      "x.mjs": "export default { answer: () => 42 };\n",
+      "main.py": "import x\nprint(x.answer())\n"
     },
     "run": ["run", "main.py"],
-    "fails": ["module 'x' is JavaScript, the CLI cannot run it"]
+    "stdout": ["42"]
   },
   {
     "given": {
@@ -391,6 +391,47 @@
     "run": ["build", "--web"],
     "creates": ["dist/vendor/network/index.js", "dist/vendor/network/http.js", "dist/vendor/network/ws.js", "dist/vendor/network/sse.js", "dist/vendor/network/state.js", "dist/vendor/dom/entry.py", "dist/vendor/dom/edge.json", "dist/vendor/dom/index.js", "dist/vendor/dom/tree.js", "dist/vendor/dom/state.js"],
     "contains": { "dist/edge.json": "\"dom\": \"./vendor/dom/entry.py\",\n    \"network\": \"./vendor/network/index.js\"" }
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"time\": \"https://cdn.edgepython.com/js/builtins/time/index.js\" } }\n",
+      "main.py": "from time import time\nprint(\"packed\", time() > 0)\n"
+    },
+    "run": ["build"],
+    "stdout": ["packed app.edge"],
+    "creates": ["app.edge"],
+    "then": {
+      "bin": "./app.edge",
+      "env": { "EDGE_CDN_BASE": "http://127.0.0.1:1", "XDG_CACHE_HOME": "empty-cache" },
+      "stdout": ["packed True"]
+    }
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"m\": \"./m.js\" } }\n",
+      "m.js": "export default () => ({ hi: () => \"hello\" })\n",
+      "main.py": "from m import hi\nprint(hi())\n"
+    },
+    "run": ["build"],
+    "creates": ["app.edge"],
+    "then": {
+      "bin": "./app.edge",
+      "env": { "EDGE_CDN_BASE": "http://127.0.0.1:1", "XDG_CACHE_HOME": "empty-cache" },
+      "stdout": ["hello"]
+    }
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"json\": \"https://cdn.edgepython.com/std/json.wasm\" } }\n",
+      "main.py": "import json\nprint(json.dumps({\"n\": 1}))\n"
+    },
+    "run": ["build"],
+    "stdout": ["packed app.edge (2 files)"],
+    "then": {
+      "bin": "./app.edge",
+      "env": { "EDGE_CDN_BASE": "http://127.0.0.1:1", "XDG_CACHE_HOME": "empty-cache" },
+      "stdout": ["{\"n\":1}"]
+    }
   },
   {
     "given": {

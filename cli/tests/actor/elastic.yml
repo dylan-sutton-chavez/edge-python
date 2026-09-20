@@ -6,7 +6,6 @@ groups:
   dispatcher:
     replicas: 1
     code: |
-      from actor import send
       receive()
       i = 0
       while i < 5:

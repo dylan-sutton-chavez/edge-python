@@ -15,7 +15,15 @@ path = "src/main.rs"
 # The engine crate as a library, manifest parsing and sha256 pinning.
 edge-python = { path = ".." }
 # Runs the precompiled compiler.wasm, Cranelift compiles the third party plugins a project declares.
-wasmtime = { version = "48", default-features = false, features = ["runtime", "std", "cranelift"] }
+wasmtime = { version = "48", default-features = false, features = ["runtime", "std", "cranelift", "component-model"] }
+# WASI and outgoing HTTP for the StarlingMonkey component that runs JavaScript modules.
+wasmtime-wasi = "48"
+wasmtime-wasi-http = "48"
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+bytes = "1"
+tokio = { version = "1", features = ["sync", "io-util"] }
 clap = { version = "4", features = ["derive"] }
 tiny_http = "0.12"
 serde = { version = "1", features = ["derive"] }
@@ -25,19 +33,16 @@ serde_yaml_ng = "0.10"
 anyhow = "1"
 # Line editor + history for `edge repl`.
 rustyline = "17.0.0"
-# HTTPS for URL imports, `edge build` vendoring and the network module.
+# HTTPS for URL imports, `edge build` vendoring and the JavaScript runtime download.
 ureq = { version = "3", features = ["brotli"] }
-# TLS for wss sockets, the same rustls build and roots ureq already links.
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-webpki-roots = "1"
 # Stable actor keys that survive removal, so the scheduler queues never dangle.
 slab = "0.4"
 # A unique temp file for the uninstall script, a predictable path invites symlink squatting.
 tempfile = "3"
 
 [build-dependencies]
-# Precompiles compiler.wasm and the std packages for the build target, never shipped.
-wasmtime = { version = "48", default-features = false, features = ["runtime", "cranelift", "all-arch", "std"] }
+# Precompiles compiler.wasm, the std packages and the JavaScript runtime for the build target.
+wasmtime = { version = "48", default-features = false, features = ["runtime", "cranelift", "all-arch", "std", "component-model"] }
 
 [profile.release]
 opt-level = "z"

@@ -16,7 +16,19 @@
     "output": ["True True True"]
   },
   {
-    "src": "sock = ws_open('{WS_BASE}/ws', 'echo')\ngot = None\nwhile True:\n    ev = receive()\n    if '\"type\":\"open\"' in ev:\n        ws_send(sock, 'hello')\n    elif '\"type\":\"message\"' in ev:\n        got = 'hello' in ev\n        ws_close(sock)\n    elif '\"type\":\"close\"' in ev:\n        break\nprint(got)",
-    "output": ["True"]
+    "src": "h = sse_open('{BASE}/sse-fields', 'f')\nmsgs = []\nwhile len(msgs) < 4:\n    ev = receive()\n    if '\"type\":\"message\"' in ev:\n        msgs.append(ev)\nsse_close(h)\nprint('\"data\":\"bom first\"}' in msgs[0])\nprint('\"data\":\"first line\\\\nsecond line\",\"event_id\":\"7\"' in msgs[1])\nprint('\"data\":\"no space\",\"event_id\":\"7\"' in msgs[2])\nprint('\"data\":\"after empty id\"}' in msgs[3], 'skipped' in ''.join(msgs))",
+    "output": ["True", "True", "True", "True False"]
+  },
+  {
+    "src": "h = sse_open('{BASE}/sse-reconnect', 'r')\nseen = []\nwhile 'resumed' not in seen:\n    ev = receive()\n    if '\"type\":\"error\"' in ev:\n        seen.append('error' if '\"state\":0' in ev else 'error closed')\n    elif 'last=41' in ev:\n        seen.append('resumed')\n    elif '\"type\":\"message\"' in ev:\n        seen.append('message')\n    elif '\"type\":\"open\"' in ev:\n        seen.append('open')\nsse_close(h)\nprint(seen)",
+    "output": ["['open', 'message', 'error', 'open', 'resumed']"]
+  },
+  {
+    "src": "r = sse_open('{BASE}/sse-reconnect', 'r')\nwhile '\"type\":\"error\"' not in receive():\n    pass\nsse_close(r)\nawait sleep(0.6)\nd = sse_open('{BASE}/sse', 'd')\nseen = []\nwhile len(seen) < 3:\n    ev = receive()\n    if '\"msg\":\"r\"' in ev:\n        seen.append('late')\n    elif '\"type\":\"message\"' in ev:\n        seen.append('d')\nsse_close(d)\ntry:\n    sse_state(r)\nexcept Exception as e:\n    print('invalid sse handle' in str(e))\nprint(seen)",
+    "output": ["True", "['d', 'd', 'd']"]
+  },
+  {
+    "src": "h = sse_open('{BASE}/text', 'x')\nev = receive()\nprint('\"type\":\"error\"' in ev, '\"state\":2' in ev, sse_state(h))\nsse_close(h)",
+    "output": ["True True 2"]
   }
 ]

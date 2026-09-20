@@ -237,7 +237,7 @@ async def animate(node):
 
 ## receive
 
-`receive()` pops the oldest message from the host event queue. When the queue is empty it parks the coroutine until the host pushes one (`pushEvent` from JS, `run_push_event` in the ABI). Messages are arbitrary strings, DOM event names from `bind_event` or anything the embedder sends. A parked `receive()` is also a natural pause point for [snapshots](/docs/language/snapshots).
+`receive()` pops the oldest message from the host event queue. When the queue is empty it parks the coroutine until the host pushes one (`pushEvent` from JS, `run_push_event` in the ABI). Messages are arbitrary strings, DOM event names from `bind_event` or anything the embedder sends. A parked `receive()` is also a natural pause point for [snapshots](/docs/language/snapshots). Inside an [actor pool](/docs/reference/actors) its counterpart `send(group, body)` hands a string to another group.
 
 ```python
 async def main():
