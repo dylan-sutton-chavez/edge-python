@@ -43,7 +43,7 @@ runs:
       if: inputs.mode == 'lint'
       uses: Swatinem/rust-cache@v2
       with:
-        workspaces: cli -> cli/target
+        workspaces: cli -> target
 
     - name: Clippy and check
       if: inputs.mode == 'lint'
@@ -69,7 +69,7 @@ runs:
       if: inputs.mode == 'release'
       uses: Swatinem/rust-cache@v2
       with:
-        workspaces: cli -> cli/target
+        workspaces: cli -> target
         key: ${{ inputs.target }}
 
     - name: Build release
@@ -110,7 +110,7 @@ runs:
       if: inputs.mode == 'test'
       uses: Swatinem/rust-cache@v2
       with:
-        workspaces: cli -> cli/target
+        workspaces: cli -> target
 
     # The plugin suite in plugins.json loads this pdk/example build from the root target dir.
     - name: Build the plugin fixture

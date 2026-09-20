@@ -19,9 +19,11 @@ runs:
         targets: wasm32-unknown-unknown
         components: clippy
 
+    # rust-cache drops binaries installed during the job, so take the prebuilt one.
     - name: Install cargo-shear
-      shell: bash
-      run: cargo install cargo-shear --locked
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-shear@1.13.4
 
     # Detects declared but unused dependencies across the workspace.
     - name: Shear

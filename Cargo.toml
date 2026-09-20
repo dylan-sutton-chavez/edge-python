@@ -74,3 +74,7 @@ strip = true
 [profile.cli]
 inherits = "release"
 opt-level = 3
+
+# The VM corpora run the interpreter, unoptimized they take seventeen times longer.
+[profile.dev]
+opt-level = 2
