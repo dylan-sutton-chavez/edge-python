@@ -34,7 +34,7 @@ const MAX_RUNTIME_MEMORY: usize = 1 << 30;
 // A runtime counts as active this long after its last change, timers often follow a closed body.
 const SETTLE_NS: u64 = 250_000_000;
 // Where a packed artifact stores the runtime, beside the project files it carries.
-pub const RUNTIME_KEY: &str = ".edge/js-runtime.cwasm";
+pub const RUNTIME_KEY: &str = "js-runtime.cwasm";
 
 static PACKED: OnceLock<Vec<u8>> = OnceLock::new();
 

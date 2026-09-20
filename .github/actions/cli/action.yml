@@ -91,9 +91,7 @@ runs:
       env:
         TARGET: ${{ inputs.target }}
       run: |
-        bin=edge
-        case "$TARGET" in *windows*) bin=edge.exe ;; esac
-        tar -C "target/$TARGET/release" -czf "edge-$TARGET.tar.gz" "$bin"
+        tar -C "target/$TARGET/release" -czf "edge-$TARGET.tar.gz" edge
 
     # The tarball and the install scripts land under cli/, the precompiled runtime under js-runtime/.
     - name: Stage on tmp

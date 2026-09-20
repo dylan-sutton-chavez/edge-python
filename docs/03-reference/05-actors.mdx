@@ -119,7 +119,7 @@ An `eval` group runs code it does not trust. Each incoming message is compiled a
 
 A `code` or `run` group runs code you trust. It keeps state between messages, can send, and can reach `network`, with the metered limits as the only cap, so keep third-party code out of it and reach for `eval` instead.
 
-For a project, `edge build --bundle` packs it into a `.package`, and a client sends it base64-encoded behind an `EDGEPKG:` marker. The actor validates it and serves its files to the compiler from memory, so an untrusted bundle never touches the disk.
+For a project, `edge build` packs it into a `.edge`, and a client sends it base64-encoded behind an `EDGEPKG:` marker. The actor validates it and serves its files to the compiler from memory, so an untrusted bundle never touches the disk.
 
 ```yaml
 groups:
@@ -161,6 +161,6 @@ sink: raw-ingested-transformed
 
 ## See also
 
-- [CLI](/docs/reference/cli) for `edge actor` and `edge build --bundle`.
+- [CLI](/docs/reference/cli) for `edge actor` and `edge build`.
 - [Async](/docs/language/async) for the cooperative scheduler each actor runs on.
 - [Snapshots](/docs/language/snapshots) for freezing and resuming a single run.

@@ -341,25 +341,25 @@ fn quoted_imports_are_not_found() {
     assert_eq!(code, 1);
 }
 
-/* edge build packs a project into a standalone .edge that runs on its own, imports and all. */
+/* edge build --app packs a project into a binary that runs on its own, imports and all. */
 #[test]
-fn standalone_edge_runs_the_packed_project() {
+fn standalone_binary_runs_the_packed_project() {
     let dir = scratch("standalone");
     std::fs::create_dir_all(dir.join("lib")).unwrap();
     std::fs::write(dir.join("lib/util.py"), "def greet():\n    return \"packed\"\n").unwrap();
     std::fs::write(dir.join("edge.json"), "{ \"imports\": { \"util\": \"./lib/util.py\" } }\n").unwrap();
     std::fs::write(dir.join("main.py"), "import util\nprint(util.greet())\n").unwrap();
 
-    let (_, err, code) = run_in(&dir, &["build", "--out", "app.edge"], None);
+    let (_, err, code) = run_in(&dir, &["build", "--app", "--out", "app"], None);
     assert_eq!(code, 0, "build stderr was: {err}");
 
-    let app = dir.join("app.edge");
+    let app = dir.join("app");
     let out = Command::new(&app).current_dir(&dir).stdin(Stdio::null()).output().unwrap();
     assert_eq!(String::from_utf8_lossy(&out.stdout), "packed\n");
     assert_eq!(out.status.code().unwrap_or(-1), 0);
 }
 
-/* edge run accepts a packed .edge, matching a direct ./app.edge invocation. */
+/* edge run accepts a packed .edge, the artifact edge build writes by default. */
 #[test]
 fn run_accepts_a_packed_edge() {
     let dir = scratch("run-edge");
@@ -371,14 +371,14 @@ fn run_accepts_a_packed_edge() {
     assert_eq!(code, 0);
 }
 
-/* edge build --bundle writes a lightweight .package carrying the project tree. */
+/* edge build writes a portable .edge carrying the project tree. */
 #[test]
-fn bundle_writes_a_package_file() {
+fn build_writes_an_edge_bundle() {
     let dir = scratch("bundle");
     std::fs::write(dir.join("main.py"), "print(\"hi\")\n").unwrap();
-    let (_, err, code) = run_in(&dir, &["build", "--bundle", "--out", "app.package"], None);
+    let (_, err, code) = run_in(&dir, &["build", "--out", "app.edge"], None);
     assert_eq!(code, 0, "build stderr was: {err}");
-    let bytes = std::fs::read(dir.join("app.package")).unwrap();
+    let bytes = std::fs::read(dir.join("app.edge")).unwrap();
     assert!(bytes.starts_with(b"EDGEPKG\x01"), "missing bundle magic");
 }
 

@@ -397,11 +397,11 @@
       "edge.json": "{ \"imports\": { \"time\": \"https://cdn.edgepython.com/js/builtins/time/index.js\" } }\n",
       "main.py": "from time import time\nprint(\"packed\", time() > 0)\n"
     },
-    "run": ["build"],
-    "stdout": ["packed app.edge"],
-    "creates": ["app.edge"],
+    "run": ["build", "--app"],
+    "stdout": ["packed app"],
+    "creates": ["app"],
     "then": {
-      "bin": "./app.edge",
+      "bin": "./app",
       "env": { "EDGE_CDN_BASE": "http://127.0.0.1:1", "XDG_CACHE_HOME": "empty-cache" },
       "stdout": ["packed True"]
     }
@@ -412,10 +412,10 @@
       "m.js": "export default () => ({ hi: () => \"hello\" })\n",
       "main.py": "from m import hi\nprint(hi())\n"
     },
-    "run": ["build"],
-    "creates": ["app.edge"],
+    "run": ["build", "--app"],
+    "creates": ["app"],
     "then": {
-      "bin": "./app.edge",
+      "bin": "./app",
       "env": { "EDGE_CDN_BASE": "http://127.0.0.1:1", "XDG_CACHE_HOME": "empty-cache" },
       "stdout": ["hello"]
     }
@@ -425,13 +425,22 @@
       "edge.json": "{ \"imports\": { \"json\": \"https://cdn.edgepython.com/std/json.wasm\" } }\n",
       "main.py": "import json\nprint(json.dumps({\"n\": 1}))\n"
     },
-    "run": ["build"],
-    "stdout": ["packed app.edge (2 files)"],
+    "run": ["build", "--app"],
+    "stdout": ["packed app (2 files)"],
     "then": {
-      "bin": "./app.edge",
+      "bin": "./app",
       "env": { "EDGE_CDN_BASE": "http://127.0.0.1:1", "XDG_CACHE_HOME": "empty-cache" },
       "stdout": ["{\"n\":1}"]
     }
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"json\": \"https://cdn.edgepython.com/std/json.wasm\" } }\n",
+      "main.py": "import json\nprint(json.dumps({\"n\": 1}))\n"
+    },
+    "run": ["build"],
+    "stdout": ["packed app.edge (2 files)"],
+    "creates": ["app.edge"]
   },
   {
     "given": {

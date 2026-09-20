@@ -9,7 +9,7 @@ The `edge` CLI runs on macOS, Linux, and WSL. It embeds the engine the JS host l
 
 ```bash
 edge run app.py        # run a script, a .edge, or stdin
-edge build             # pack a standalone .edge (--bundle, --web)
+edge build             # pack a portable .edge (--app, --web)
 edge actor actor.yml # run a pool of cooperative actors
 edge serve             # dev server with live reload
 edge repl              # interactive shell
@@ -50,7 +50,7 @@ error: ZeroDivisionError: division by zero
 
 `raise SystemExit(code)` with no argument or an integer exits cleanly with that code and no traceback. A string argument surfaces as a regular error and exits 1.
 
-With no path, `edge run` reads the script from piped stdin (`cat app.py | edge run`) and errors when stdin is a terminal. `-c <code>` runs inline code instead (`edge run -c 'print(1)'`). With a path or `-c`, piped stdin instead feeds [`input()`](/docs/reference/builtins) one line per call. A packed `.edge` or `.package` also runs here, `edge run app.edge` unpacks and runs it exactly as `./app.edge` would.
+With no path, `edge run` reads the script from piped stdin (`cat app.py | edge run`) and errors when stdin is a terminal. `-c <code>` runs inline code instead (`edge run -c 'print(1)'`). With a path or `-c`, piped stdin instead feeds [`input()`](/docs/reference/builtins) one line per call. A packed `.edge` or an app binary also runs here, `edge run app.edge` unpacks and runs it exactly as `./app` would.
 
 Flags: `--events`, `--save-state`, `--restore-state`, and `--preempt`, see [run flags](/docs/reference/modules#run-flags).
 
@@ -140,22 +140,22 @@ Packs the project and its imports into one artifact, in one of three modes for t
 
 | Command | Output | Runs on |
 |---------|--------|---------|
-| `edge build` | a standalone `.edge` binary | any host of the same OS and CPU, offline, nothing installed |
-| `edge build --bundle` | a lightweight `.package` | a host that already has `edge`, or a pool |
+| `edge build` | a portable `.edge` | a host that already has `edge`, or a pool |
+| `edge build --app` | a standalone binary | any host of the same OS and CPU, offline, nothing installed |
 | `edge build --web` | a self-contained `dist/` | any browser |
 
-The default `.edge` is this `edge` binary with the project appended, so `./app.edge` runs it directly and it honors the run flags `--save-state`, `--restore-state`, `--preempt`, and `--events`. The `.package` carries only the code and its custom imports, since `edge` is already present where it lands. `--web` vendors the JS host under `dist/js/` with `compiler.wasm` beside it, then every declared module together with what it needs from the same origin (its relative JavaScript and Python imports and a sibling `edge.json`), and rewrites `edge.json` to the vendored paths, so the `dist/` works offline, `dom` and `network` included. The CLI resolves the official std entries to its embedded copies, so an `.edge` or `.package` needs no network for them. Both carry every module the manifest declares by URL, with the files it imports beside it, so `time` and a third-party package travel with the project. An `.edge` for a project that declares a JavaScript module also carries the precompiled JavaScript runtime, around 26 MB, which is why the artifact below is larger than the binary. A run prefers that copy, then the cache, then the download, so a packed app never needs the network. A `.package` leaves the runtime out, since the `edge` that runs it brings its own.
+The default `.edge` carries only the code and its custom imports, since `edge` is already present where it lands. `--app` appends the project to this `edge` binary, so `./app` runs it directly and it honors the run flags `--save-state`, `--restore-state`, `--preempt`, and `--events`. `--web` vendors the JS host under `dist/js/` with `compiler.wasm` beside it, then every declared module together with what it needs from the same origin (its relative JavaScript and Python imports and a sibling `edge.json`), and rewrites `edge.json` to the vendored paths, so the `dist/` works offline, `dom` and `network` included. The CLI resolves the official std entries to its embedded copies, so neither artifact needs the network for them. Both carry every module the manifest declares by URL, with the files it imports beside it, so `time` and a third-party package travel with the project. An app binary for a project that declares a JavaScript module also carries the precompiled JavaScript runtime, around 26 MB. A run prefers that copy, then the cache, then the download, so a packed app never needs the network. An `.edge` leaves the runtime out, since the `edge` that runs it brings its own.
 
 ```text
 $ edge build
 
   packed app.edge (2 files)
-  11.54 MB
+  0.15 KB
 
-  run  ./app.edge   flags  --save-state --restore-state --preempt --events
+  run  edge run app.edge   or send it to an actor eval group
 ```
 
-Flags: `--out <path>` (mode-specific default), `--bundle`, `--web`.
+Flags: `--out <path>` (mode-specific default), `--app`, `--web`.
 
 ## `edge actor`: actor pool
 

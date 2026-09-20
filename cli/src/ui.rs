@@ -62,7 +62,8 @@ pub fn build_report(dir: &std::path::Path, js_files: usize, packages: usize, scr
 pub fn packed(out: &std::path::Path, files: usize, size: u64, hint: &str) {
     println!();
     println!("  packed {} ({files} files)", out.display());
-    println!("  {:.2} MB", size as f64 / 1_000_000.0);
+    let (scaled, unit) = if size < 1_000_000 { (size as f64 / 1_000.0, "KB") } else { (size as f64 / 1_000_000.0, "MB") };
+    println!("  {scaled:.2} {unit}");
     println!();
     println!("  {hint}");
 }

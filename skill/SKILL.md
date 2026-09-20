@@ -42,7 +42,7 @@ cd myapp
 edge add json          # declare each package the code imports
 edge run main.py       # run the entry point
 edge test              # discover and run every *_test.py
-edge build             # pack a standalone ./app.edge binary
+edge build             # pack a portable ./app.edge bundle
 ```
 
 Piping a script works too, which is how the cells of this document run.
@@ -65,7 +65,7 @@ Bare `edge` prints help and exits 0. `edge -v` prints the version. `Ctrl+C` exit
 
 ### edge run
 
-`edge run [file]` executes a `.py` script, a packed `.edge` binary or a `.package` bundle, auto-detected by content. With no file it reads the script from stdin. A bare `edge run` in a terminal with no pipe errors. `edge run -c 'print(1)'` runs inline code instead of a file or stdin, and piped stdin then feeds `input()`.
+`edge run [file]` executes a `.py` script, a packed `.edge` bundle or an app binary, auto-detected by content. With no file it reads the script from stdin. A bare `edge run` in a terminal with no pipe errors. `edge run -c 'print(1)'` runs inline code instead of a file or stdin, and piped stdin then feeds `input()`.
 
 Run flags.
 
@@ -100,11 +100,11 @@ Three mutually exclusive modes.
 
 | Mode | Default output | Artifact |
 |---|---|---|
-| `edge build` | `app.edge` | Standalone binary, runs offline on the same OS and CPU with nothing installed |
-| `edge build --bundle` | `app.package` | Raw bundle for hosts and pools that already have `edge` |
+| `edge build` | `app.edge` | Raw bundle for hosts and pools that already have `edge` |
+| `edge build --app` | `app` | Standalone binary, runs offline on the same OS and CPU with nothing installed |
 | `edge build --web` | `dist/` | Browser distribution with the vendored JS host and packages |
 
-`--out <path>` overrides the default. The bundle contains every `.py`, `.js` and `.mjs` under the project plus `edge.json`, together with each module the manifest declares by URL and the files it imports. An `.edge` for a project with a JavaScript module also carries the precompiled runtime, about 26 MB, so it runs offline. The entry is `main.py`, `app.py` or `index.py` when present. An `.edge` binary accepts only the snapshot flags `--save-state`, `--restore-state`, `--preempt` and `--events`.
+`--out <path>` overrides the default. The bundle contains every `.py`, `.js` and `.mjs` under the project plus `edge.json`, together with each module the manifest declares by URL and the files it imports. An app binary for a project with a JavaScript module also carries the precompiled runtime, about 26 MB, so it runs offline. The entry is `main.py`, `app.py` or `index.py` when present. An app binary accepts only the snapshot flags `--save-state`, `--restore-state`, `--preempt` and `--events`.
 
 ### edge actor
 
@@ -838,7 +838,7 @@ groups:
 42
 ```
 
-With `listen:` the actor accepts one `<group> <body>` line per TCP message and exposes an HTTP control endpoint, `GET /stats`, `POST /pub/<group>` and `POST /eval/<group>` for eval groups. Untrusted bundles arrive as base64 `.package` payloads behind an `EDGEPKG:` marker and run from memory in a fresh instance.
+With `listen:` the actor accepts one `<group> <body>` line per TCP message and exposes an HTTP control endpoint, `GET /stats`, `POST /pub/<group>` and `POST /eval/<group>` for eval groups. Untrusted bundles arrive as base64 `.edge` payloads behind an `EDGEPKG:` marker and run from memory in a fresh instance.
 
 ## Semantics that surprise Python programmers
 

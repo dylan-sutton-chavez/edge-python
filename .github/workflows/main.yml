@@ -83,14 +83,7 @@ jobs:
             mode: release
             target: x86_64-apple-darwin
             runner: macos-15
-          - entry: x86_64-pc-windows-msvc
-            mode: release
-            target: x86_64-pc-windows-msvc
-            runner: windows-latest
-            experimental: true
     runs-on: ${{ matrix.runner }}
-    # A red Windows build is reported without blocking the Unix releases behind it.
-    continue-on-error: ${{ matrix.experimental == true }}
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

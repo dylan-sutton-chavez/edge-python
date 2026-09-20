@@ -21,7 +21,7 @@ Usage  edge <command> [options]
 
 Commands
   run <file|.edge>   Run a script, a .edge, stdin or -c <code>
-  build              Pack a standalone .edge  (--bundle, --web)
+  build              Pack a portable .edge  (--app, --web)
   actor <file>       Run an actor pool from actor.yml
   serve              Dev server with live reload
   repl               Interactive shell
@@ -51,7 +51,7 @@ struct Cli {
 enum Cmd {
     /// Run a script.
     Run {
-        /// Script, packed .edge or .package, or stdin when omitted.
+        /// Script, a packed .edge, an app binary, or stdin when omitted.
         file: Option<PathBuf>,
         /// Run this code inline instead of a file or stdin.
         #[arg(short = 'c', conflicts_with = "file")]
@@ -106,17 +106,17 @@ enum Cmd {
         /// Package names to remove.
         pkgs: Vec<String>,
     },
-    /// Pack the app, a standalone binary by default, --bundle for a pool, --web for the browser.
+    /// Pack the project, a portable .edge by default, --app for a binary, --web for the browser.
     Build {
-        /// Output path, defaults to app.edge, app.package, or dist/ per mode.
+        /// Output path, defaults to app.edge, app, or dist/ per mode.
         #[arg(long)]
         out: Option<PathBuf>,
-        /// Vendor the JS host into dist/ instead of a standalone artifact.
+        /// Vendor the JS host into dist/ instead of a packed artifact.
         #[arg(long)]
         web: bool,
-        /// Emit a lightweight .package for a pool that already ships the CLI.
+        /// Emit a standalone binary that runs with nothing installed.
         #[arg(long)]
-        bundle: bool,
+        app: bool,
     },
     /// Remove the edge binary and its PATH entry.
     Uninstall,
@@ -128,7 +128,7 @@ enum Cmd {
 }
 
 fn main() -> Result<()> {
-    // A standalone .edge carries its project, run that instead of parsing subcommands.
+    // A standalone binary carries its project, run that instead of parsing subcommands.
     if let Some(payload) = cmd::build::embedded_payload() {
         let result = run_embedded(&payload);
         if let Err(e) = result {
@@ -173,13 +173,13 @@ fn main() -> Result<()> {
             })
         }
         Cmd::Repl => cmd::repl::run(cli.manifest.as_deref()),
-        Cmd::Build { out, web, bundle } => {
+        Cmd::Build { out, web, app } => {
             if web {
                 cmd::build::run(&manifest_path, out.unwrap_or_else(|| PathBuf::from("dist")))
-            } else if bundle {
-                cmd::build::bundle(&manifest_path, out.unwrap_or_else(|| PathBuf::from("app.package")))
+            } else if app {
+                cmd::build::standalone(&manifest_path, out.unwrap_or_else(|| PathBuf::from("app")))
             } else {
-                cmd::build::standalone(&manifest_path, out.unwrap_or_else(|| PathBuf::from("app.edge")))
+                cmd::build::bundle(&manifest_path, out.unwrap_or_else(|| PathBuf::from("app.edge")))
             }
         }
         Cmd::Uninstall => cmd::uninstall::run(),
@@ -194,7 +194,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// The run flags a standalone .edge understands, mirroring `edge run`.
+/// The run flags a standalone binary understands, mirroring `edge run`.
 #[derive(Parser)]
 #[command(name = "edge-app", disable_help_flag = true)]
 struct Embedded {
@@ -208,7 +208,7 @@ struct Embedded {
     events: Option<PathBuf>,
 }
 
-/// Runs the project embedded in this standalone .edge, honoring the run flags.
+/// Runs the project embedded in this standalone binary, honoring the run flags.
 fn run_embedded(payload: &[u8]) -> Result<()> {
     let flags = Embedded::parse();
     let opts = RunOpts {

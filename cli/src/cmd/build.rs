@@ -35,7 +35,7 @@ pub fn standalone(manifest_path: &Path, out: PathBuf) -> Result<()> {
     Ok(())
 }
 
-/* Packs the project as a lightweight .package for a pool that already has the CLI. */
+/* Packs the project as a portable .edge for any host that already has the CLI. */
 pub fn bundle(manifest_path: &Path, out: PathBuf) -> Result<()> {
     let (bundle, _) = collect_bundle(manifest_path)?;
     let payload = bundle.encode();
@@ -138,7 +138,7 @@ pub fn embedded_payload() -> Option<Vec<u8>> {
     trailer_payload(&std::env::current_exe().ok()?)
 }
 
-/* Bundle carried by a file, either a raw .package or a standalone .edge with a trailer. */
+/* Bundle carried by a file, either a raw .edge or a standalone binary with a trailer. */
 pub fn file_payload(path: &Path) -> Option<Vec<u8>> {
     let mut head = [0u8; 8];
     if let Ok(mut f) = fs::File::open(path) {
