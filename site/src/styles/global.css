@@ -115,6 +115,16 @@ input[type="search"]::-webkit-search-cancel-button {
   appearance: none;
 }
 
+details { interpolate-size: allow-keywords; }
+
+details::details-content {
+  block-size: 0;
+  overflow-y: clip;
+  transition: block-size 200ms, content-visibility 200ms allow-discrete;
+}
+
+details[open]::details-content { block-size: auto; }
+
 .prose {
   display: flex;
   flex-direction: column;
@@ -183,4 +193,5 @@ input[type="search"]::-webkit-search-cancel-button {
 
 @media (prefers-reduced-motion: reduce) {
   .spinner { animation-duration: 2.4s; }
+  details::details-content { transition: none; }
 }

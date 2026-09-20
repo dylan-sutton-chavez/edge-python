@@ -71,21 +71,3 @@ const chevron = 'rotate-90 text-fg-hint transition-transform group-open/section:
     ))}
   </div>
 </Sheet>
-
-<style>
-  details {
-    interpolate-size: allow-keywords;
-  }
-
-  details::details-content {
-    block-size: 0;
-    overflow-y: clip;
-    transition: block-size 200ms, content-visibility 200ms allow-discrete;
-  }
-
-  details[open]::details-content { block-size: auto; }
-
-  @media (prefers-reduced-motion: reduce) {
-    details::details-content { transition: none; }
-  }
-</style>

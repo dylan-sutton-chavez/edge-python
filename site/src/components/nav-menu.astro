@@ -2,7 +2,7 @@
 import Icon from './ui/icon.astro'
 import Sheet from './ui/sheet.astro'
 
-type Entry = { label: string; href: string }
+type Entry = { label: string; href: string; match?: string }
 
 interface Props {
   current: string
@@ -11,19 +11,34 @@ interface Props {
 
 const links: { label: string; pages: Entry[] }[] = [
   { label: 'Explore', pages: [{ label: 'Community', href: '/' }] },
-  { label: 'Docs', pages: [{ label: 'Overview', href: '/docs' }] }
+  {
+    label: 'Docs',
+    pages: [
+      { label: 'Getting started', href: '/docs/getting-started/introduction', match: '/docs/getting-started' },
+      { label: 'Language', href: '/docs/language/syntax', match: '/docs/language' },
+      { label: 'Reference', href: '/docs/reference/builtins', match: '/docs/reference' },
+      { label: 'Standard packages', href: '/docs/standard-packages/json', match: '/docs/standard-packages' },
+      { label: 'System libraries', href: '/docs/system-libraries/dom', match: '/docs/system-libraries' },
+      { label: 'Implementation', href: '/docs/implementation/design', match: '/docs/implementation' }
+    ]
+  }
 ]
 
 const { current, class: className } = Astro.props
 
-// A section page like /docs/quickstart/overview still belongs to the /docs entry.
-const at = (href: string) => current === href || (href !== '/' && current.startsWith(`${href}/`))
+// An entry links to its first page but owns every page under its folder.
+const at = (page: Entry) => {
+  const root = page.match ?? page.href
+  return current === root || (root !== '/' && current.startsWith(`${root}/`))
+}
 
-const here = links.find((link) => link.pages.some((page) => at(page.href)))
+const here = links.find((link) => link.pages.some(at))
 
 const item = 'px-2 sm:px-3 py-1 rounded-full flex items-center gap-1 shrink-0 whitespace-nowrap transition focus-visible:ring-1 focus-visible:ring-line-emphasis focus-visible:outline-none'
 const row = 'block px-4 py-1.5 hover:bg-line-strong transition'
 const sheetRow = 'flex items-center gap-2 w-full px-4 py-1.5 text-left hover:bg-line-strong transition'
+const summary = 'flex items-center gap-1 px-4 py-1.5 list-none cursor-pointer select-none transition text-2xs text-fg-subtle hover:text-fg [&::-webkit-details-marker]:hidden'
+const chevron = 'rotate-90 text-fg-hint transition-transform group-open/section:-rotate-90'
 ---
 
 <nav aria-label="Main" class:list={['flex items-center gap-1 sm:gap-2', className]}>
@@ -48,7 +63,7 @@ const sheetRow = 'flex items-center gap-2 w-full px-4 py-1.5 text-left hover:bg-
             <ul class="bg-surface border border-line rounded-2xl py-3 text-xs">
               {link.pages.map((page) => (
                 <li>
-                  <a href={page.href} aria-current={at(page.href) ? 'page' : undefined} class:list={[row, at(page.href) ? 'bg-line-strong text-fg' : 'text-fg-subtle hover:text-fg']}>{page.label}</a>
+                  <a href={page.href} aria-current={at(page) ? 'page' : undefined} class:list={[row, at(page) ? 'bg-line-strong text-fg' : 'text-fg-subtle hover:text-fg']}>{page.label}</a>
                 </li>
               ))}
             </ul>
@@ -64,19 +79,22 @@ const sheetRow = 'flex items-center gap-2 w-full px-4 py-1.5 text-left hover:bg-
       <Icon name="next" size="sm" class="rotate-90 text-fg-subtle transition-transform group-has-[[data-sheet]:popover-open]:-rotate-90" />
     </button>
 
-    <div class="space-y-3 text-sm">
+    <div class="space-y-1 text-sm">
       {links.map((link) => (
-        <div>
-          <span class="block px-4 text-2xs text-fg-subtle">{link.label}</span>
+        <details name="main-sheet" open={link === (here ?? links[0])} class="group/section">
+          <summary class={summary}>
+            <span>{link.label}</span>
+            <Icon name="next" size="sm" class={chevron} />
+          </summary>
 
-          <ul class="mt-1">
+          <ul class="pb-2">
             {link.pages.map((page) => (
               <li>
-                <a href={page.href} aria-current={at(page.href) ? 'page' : undefined} class:list={[sheetRow, at(page.href) && 'bg-line-strong']}>{page.label}</a>
+                <a href={page.href} aria-current={at(page) ? 'page' : undefined} class:list={[sheetRow, at(page) && 'bg-line-strong']}>{page.label}</a>
               </li>
             ))}
           </ul>
-        </div>
+        </details>
       ))}
     </div>
   </Sheet>
