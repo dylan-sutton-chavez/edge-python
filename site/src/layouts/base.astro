@@ -41,5 +41,26 @@ const { title, description = 'Packages for Edge Python, pinned by sha256.', gap 
     <slot />
   </main>
   <Footer />
+
+  <script>
+    // Sticky elements rest where they start, measured from the header so the banner never counts.
+    const header = document.querySelector('header')
+
+    const place = (el: HTMLElement) => {
+      el.style.top = ''
+      if (!header || getComputedStyle(el).position !== 'sticky') return
+
+      const gap = el.getBoundingClientRect().top + scrollY - (header.offsetTop + header.offsetHeight)
+      el.style.setProperty('--sticky-top', `${header.offsetHeight + gap}px`)
+      el.style.setProperty('--sticky-gap', `${gap}px`)
+      el.style.top = 'var(--sticky-top)'
+    }
+
+    const placeAll = () => document.querySelectorAll<HTMLElement>('[data-sticky]').forEach(place)
+
+    placeAll()
+    document.fonts.ready.then(placeAll)
+    addEventListener('resize', placeAll)
+  </script>
 </body>
 </html>

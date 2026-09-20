@@ -19,7 +19,7 @@ const summary = 'flex items-center gap-1 px-4 py-1.5 list-none cursor-pointer se
 const chevron = 'rotate-90 text-fg-hint transition-transform group-open/section:-rotate-90'
 ---
 
-<aside class="hidden lg:block w-[260px] shrink-0 space-y-1 text-sm sticky top-[81px] self-start max-h-[calc(100dvh-95px)] overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+<aside data-sticky class="hidden lg:block w-[260px] shrink-0 space-y-1 text-sm sticky self-start max-h-[calc(100dvh-var(--sticky-top)-var(--sticky-gap))] overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
   {sections.map((section) => (
     <details name="docs-aside" open={holds(section)} class="group/section">
       <summary class={summary}>
