@@ -5,6 +5,7 @@
     "**/*"
   ],
   "exclude": [
-    "dist"
+    "dist",
+    "tests/browser.js"
   ]
 }

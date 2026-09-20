@@ -1,5 +1,5 @@
 name: Site
-description: The Astro site on Workers, checked, built and walked through its route corpus on every run.
+description: The Astro site on Workers, checked, built, walked through its route corpus and measured in three engines.
 
 runs:
   using: composite
@@ -32,3 +32,25 @@ runs:
       shell: bash
       working-directory: site
       run: npm test
+
+    - name: Setup Deno
+      uses: denoland/setup-deno@v2
+      with:
+        deno-version: v2.x
+
+    # Three engines this time, cached so only the first run pays the download.
+    - name: Cache Playwright browsers
+      uses: actions/cache@v6
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-engines
+
+    - name: Install browsers
+      shell: bash
+      run: deno run -A npm:playwright install --with-deps chromium firefox webkit
+
+    # The same screens measured in each engine, geometry compared rather than pixels.
+    - name: Browsers
+      shell: bash
+      working-directory: site
+      run: npm run test:browser

@@ -15,7 +15,8 @@
     "preview": "npm run config && astro preview",
     "deploy": "npm run build && wrangler deploy",
     "check": "npm run types && astro check --minimumSeverity warning",
-    "test": "npm run db:local && tsx tests/run.ts"
+    "test": "npm run db:local && tsx tests/run.ts",
+    "test:browser": "deno run -A --node-modules-dir=none tests/browser.js"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^14.3.2",
