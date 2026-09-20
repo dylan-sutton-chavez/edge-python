@@ -1,4 +1,4 @@
-use super::{cache_root, cdn, js, plugins, Instance, ORIGIN};
+use super::{cache_root, cdn, get, js, plugins, Instance, ORIGIN};
 use compiler::modules::{dir_of, join_relative, parse_integrity, parse_manifest, scan_imports, walk_up_dirs, ImportSpec};
 use compiler::util::sha256::{hex_encode, sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -435,12 +435,12 @@ fn fetch_cached(url: &str, expected: Option<[u8; 32]>) -> Result<Vec<u8>, String
             Err(_) => {}
         }
     }
-    let mut resp = ureq::get(&source).call().map_err(|e| match e {
-        ureq::Error::StatusCode(404 | 410) => format!("fetching '{url}': {ABSENT}"),
-        e => format!("fetching '{url}': {e}"),
+    let mut resp = get(&source).map_err(|e| match e {
+        ureq::Error::StatusCode(404 | 410) => format!("fetching '{source}': {ABSENT}"),
+        e => format!("fetching '{source}': {e}"),
     })?;
     let mut bytes = Vec::new();
-    resp.body_mut().as_reader().take(MAX_FETCH_BYTES).read_to_end(&mut bytes).map_err(|e| format!("reading '{url}': {e}"))?;
+    resp.body_mut().as_reader().take(MAX_FETCH_BYTES).read_to_end(&mut bytes).map_err(|e| format!("reading '{source}': {e}"))?;
     let got = check_pin(url, &bytes, None, expected)?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("creating cache dir: {e}"))?;
     // Temp plus rename keeps a truncated download out of the shared cache.

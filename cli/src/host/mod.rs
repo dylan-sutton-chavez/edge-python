@@ -35,11 +35,38 @@ pub const ORIGIN: &str = "https://cdn.edgepython.com";
 // The epoch ticker's period, an untrusted deadline counts these.
 pub const TICK_NS: u64 = 100_000_000;
 
+// A build pulls dozens of files, one reset among them should not end it.
+const ATTEMPTS: usize = 3;
+
 /* Tests and staging serve the official origin from EDGE_CDN_BASE, production never sets it. */
 pub fn cdn(url: &str) -> String {
     match (url.strip_prefix(ORIGIN), std::env::var("EDGE_CDN_BASE")) {
         (Some(path), Ok(base)) => format!("{}{path}", base.trim_end_matches('/')),
         _ => url.to_string(),
+    }
+}
+
+/* Retries a hiccup with a growing pause, anything that describes the resource comes straight back. */
+pub fn get(source: &str) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {
+    let mut pause = std::time::Duration::from_millis(200);
+
+    for _ in 1..ATTEMPTS {
+        match ureq::get(source).call() {
+            Err(e) if again(&e) => std::thread::sleep(pause),
+            done => return done,
+        }
+        pause *= 3;
+    }
+
+    ureq::get(source).call()
+}
+
+/* A reset or an overloaded server may answer next time, a 404 already answered. */
+fn again(error: &ureq::Error) -> bool {
+    match error {
+        ureq::Error::StatusCode(code) => *code == 429 || *code >= 500,
+        ureq::Error::Io(_) | ureq::Error::Timeout(_) | ureq::Error::ConnectionFailed | ureq::Error::Protocol(_) => true,
+        _ => false,
     }
 }
 

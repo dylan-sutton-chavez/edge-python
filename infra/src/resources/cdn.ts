@@ -77,7 +77,7 @@ async function until_live(domain: string, timeout_ms = 10 * 60_000) {
   }
 }
 
-export const ensure_dev_cdn = () => ensure_bucket(BUCKET, CDN_DOMAIN)
+export const ensure_site_cdn = () => ensure_bucket(BUCKET, CDN_DOMAIN)
 export const ensure_tmp_cdn = () => ensure_bucket(TMP_BUCKET, TMP_CDN_DOMAIN, TMP_EXPIRY_SECONDS)
 
 export function cdn_objects(tree: string): CdnObject[] {

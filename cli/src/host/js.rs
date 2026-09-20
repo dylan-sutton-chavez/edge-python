@@ -100,7 +100,7 @@ fn fetch_runtime(path: &Path) -> Result<(), String> {
 }
 
 fn download(url: &str, path: &Path) -> Result<(), String> {
-    let mut resp = ureq::get(url).call().map_err(|e| e.to_string())?;
+    let mut resp = crate::host::get(url).map_err(|e| e.to_string())?;
     let mut bytes = Vec::new();
     resp.body_mut().as_reader().take(MAX_RUNTIME_BYTES).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
     if hex_encode(&sha256(&bytes)) != JS_RUNTIME_SHA256 {

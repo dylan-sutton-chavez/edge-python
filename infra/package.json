@@ -12,7 +12,8 @@
     "stage": "tsx src/stage.ts",
     "upload": "tsx src/upload.ts",
     "promote": "tsx src/promote.ts",
-    "cdn:local": "tsx src/local.ts"
+    "cdn:local": "tsx src/local.ts",
+    "test": "node --import tsx --test src/*.test.ts"
   },
   "dependencies": {
     "cloudflare": "^7.1.0"

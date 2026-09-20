@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
-use crate::host::{built_in, cdn, js};
+use crate::host::{built_in, cdn, get, js};
 use crate::pack::{Bundle, Entry};
 use compiler::modules::{parse_integrity, scan_imports, ImportSpec};
 use compiler::util::sha256::sha256;
@@ -252,7 +252,7 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
 fn vendor_js(out_dir: &Path) -> Result<()> {
     for rel in JS_FILES {
         let url = format!("{JS_BASE}{rel}");
-        let bytes = fetch(&url).with_context(|| format!("fetching {url}"))?;
+        let bytes = fetch(&url)?;
         let path = out_dir.join("js").join(rel);
         if let Some(p) = path.parent() {
             fs::create_dir_all(p)?;
@@ -364,10 +364,12 @@ fn file_deps(rel: &str, bytes: &[u8]) -> Result<Vec<(String, bool)>> {
 
 /* A package file's bytes, None when the host has no such file. */
 fn read_package(url: &str) -> Result<Option<Vec<u8>>> {
-    match ureq::get(&cdn(url)).call() {
-        Ok(mut resp) => Ok(Some(resp.body_mut().read_to_vec().map_err(|e| anyhow!("reading {url}: {e}"))?)),
+    // Report the address actually requested, a staging origin is where a failure needs looking at.
+    let source = cdn(url);
+    match get(&source) {
+        Ok(mut resp) => Ok(Some(resp.body_mut().read_to_vec().map_err(|e| anyhow!("reading {source}: {e}"))?)),
         Err(ureq::Error::StatusCode(404)) => Ok(None),
-        Err(e) => Err(anyhow!("fetching {url}: {e}")),
+        Err(e) => Err(anyhow!("fetching {source}: {e}")),
     }
 }
 
@@ -429,8 +431,9 @@ fn index_html(entry: &str) -> String {
 }
 
 fn fetch(url: &str) -> Result<Vec<u8>> {
-    let mut resp = ureq::get(&cdn(url)).call().map_err(|e| anyhow!("HTTP error: {e}"))?;
-    resp.body_mut().read_to_vec().map_err(|e| anyhow!("reading body: {e}"))
+    let source = cdn(url);
+    let mut resp = get(&source).map_err(|e| anyhow!("fetching {source}: {e}"))?;
+    resp.body_mut().read_to_vec().map_err(|e| anyhow!("reading {source}: {e}"))
 }
 
 #[cfg(test)]

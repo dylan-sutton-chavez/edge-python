@@ -3,22 +3,28 @@ import { fileURLToPath } from 'node:url'
 // Fixed forever and never tied to a human-facing name.
 export const RESOURCE_HASH = '506cf1'
 
-export const ENV = 'dev'
+export const ENV = process.env.EDGE_ENV === 'prod' ? 'prod' : 'dev'
 export const ZONE = 'edgepython.com'
 
-export const WORKER = `${RESOURCE_HASH}-${ENV}`
-export const DB_NAME = `${WORKER}-db`
-export const BUCKET = `${WORKER}-cdn`
+// Every name one environment owns, exported so a test can hold dev and prod side by side.
+export function names(env: string) {
+  const worker = `${RESOURCE_HASH}-${env}`
+  const site = env === 'prod' ? ZONE : `${env}.${ZONE}`
 
-export const SITE_DOMAIN = `${ENV}.${ZONE}`
-export const CDN_DOMAIN = `cdn.${ENV}.${ZONE}`
+  return { worker, db: `${worker}-db`, bucket: `${worker}-cdn`, site, cdn: `cdn.${site}` }
+}
+
+const OWN = names(ENV)
+
+export const WORKER = OWN.worker
+export const DB_NAME = OWN.db
+export const BUCKET = OWN.bucket
+
+export const SITE_DOMAIN = OWN.site
+export const CDN_DOMAIN = OWN.cdn
 export const SITE_URL = `https://${SITE_DOMAIN}`
 export const CDN_URL = `https://${CDN_DOMAIN}`
 export const EMAIL_FROM = `no-reply@${SITE_DOMAIN}`
-
-// Inbound mail lives on the apex whatever the environment, it is a person and not a deployment.
-export const CONTACT_EMAIL = `dylan@${ZONE}`
-export const CONTACT_FORWARD_TO = 'c.sutton.dylan@gmail.com'
 
 // tmp is only a CDN, each CI run stages under its prefix and expires in a day.
 export const TMP_BUCKET = `${RESOURCE_HASH}-tmp-cdn`

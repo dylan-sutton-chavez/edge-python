@@ -1,6 +1,6 @@
 name: CI / CD
 
-# Builds stage into this run's tmp CDN prefix, tests read it back, promote ships it to dev.
+# Builds stage into this run's tmp CDN prefix, tests read it back, main ships to dev and a tag to prod.
 
 on:
   push:
@@ -147,10 +147,31 @@ jobs:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/site
 
+  # Typechecks the deploy scripts and proves dev and prod can never name the same resource.
+  infra:
+    name: Infra
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: site/.node-version
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install
+        working-directory: infra
+        run: npm ci
+
+      - name: Check
+        working-directory: infra
+        run: npm run check && npm test
+
   # Main pushes only, the tested tmp tree and the site ship together to dev.
   promote:
     name: Promote
-    needs: [test, site]
+    needs: [test, site, infra]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04
     env:
@@ -161,6 +182,24 @@ jobs:
       OAUTH_GITHUB_SECRET: ${{ secrets.DEV_OAUTH_GITHUB_SECRET }}
       OAUTH_GOOGLE_ID: ${{ secrets.DEV_OAUTH_GOOGLE_ID }}
       OAUTH_GOOGLE_SECRET: ${{ secrets.DEV_OAUTH_GOOGLE_SECRET }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/promote
+
+  # A v tag ships the same tested tree to production, no Access gate and its own OAuth apps.
+  ship:
+    name: Ship
+    needs: [test, site, infra]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-26.04
+    env:
+      EDGE_ENV: prod
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      OAUTH_GITHUB_ID: ${{ secrets.PROD_OAUTH_GITHUB_ID }}
+      OAUTH_GITHUB_SECRET: ${{ secrets.PROD_OAUTH_GITHUB_SECRET }}
+      OAUTH_GOOGLE_ID: ${{ secrets.PROD_OAUTH_GOOGLE_ID }}
+      OAUTH_GOOGLE_SECRET: ${{ secrets.PROD_OAUTH_GOOGLE_SECRET }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/promote
