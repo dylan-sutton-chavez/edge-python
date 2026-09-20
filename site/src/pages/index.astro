@@ -3,6 +3,7 @@ import Base from '../layouts/base.astro'
 import Icon from '../components/ui/icon.astro'
 import Field from '../components/ui/field.astro'
 import PackageCard from '../components/package-card.astro'
+import Agent from '../components/agent.astro'
 import { packages } from '../data/packages'
 
 const guides = [
@@ -15,6 +16,11 @@ const scopes = [
   { label: 'system', current: false },
   { label: 'community', current: false }
 ]
+
+// Publishing needs a token, so signed out the same button opens the sign-in dialog.
+const { user } = Astro.locals
+
+const outline = 'flex items-center gap-2 transition border border-line text-fg-hint px-4 py-1 rounded-full hover:text-fg'
 ---
 
 <Base>
@@ -27,11 +33,18 @@ const scopes = [
       </div>
 
       <div class="order-3 sm:order-2 basis-full sm:basis-auto sm:ml-auto flex items-center gap-3 text-sm">
-        <a href="/publish" class="flex items-center gap-2 transition border border-line text-fg-hint px-4 py-1 rounded-full hover:text-fg">
-          <Icon name="create" />
-          Publish
-        </a>
-        <button type="button" class="flex items-center gap-2 transition bg-fg text-page hover:bg-solid-hover border border-transparent px-4 py-1 rounded-full">
+        {user ? (
+          <a href="/settings#tokens" class={outline}>
+            <Icon name="create" />
+            Publish
+          </a>
+        ) : (
+          <button type="button" data-signin-open class={outline}>
+            <Icon name="create" />
+            Publish
+          </button>
+        )}
+        <button type="button" data-dialog-open="agent" class="flex items-center gap-2 transition bg-fg text-page hover:bg-solid-hover border border-transparent px-4 py-1 rounded-full">
           <Icon name="agent" />
           Connect an agent
         </button>
@@ -80,5 +93,7 @@ const scopes = [
       </ul>
     </section>
   </div>
+
+  <Agent />
 </Base>
 

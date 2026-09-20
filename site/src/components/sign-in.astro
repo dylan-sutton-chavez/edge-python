@@ -1,6 +1,7 @@
 ---
 import Icon from './ui/icon.astro'
 import Field from './ui/field.astro'
+import Dialog from './ui/dialog.astro'
 import Avatar from './ui/avatar.astro'
 import { ICONS, PALETTES } from '../lib/account/avatar'
 import { isConfigured } from '../lib/server/oauth'
@@ -24,20 +25,7 @@ const brand = 'col-start-1 row-start-1 flex items-center gap-2.5 transition grou
 const spinner = 'col-start-1 row-start-1 spinner transition opacity-0 group-data-[busy]:opacity-100'
 ---
 
-<dialog data-signin data-step="providers" aria-labelledby="signin-title" class="outline-none backdrop:bg-scrim backdrop:backdrop-blur-[1px] m-auto w-[calc(100%-1.75rem)] max-w-[520px] bg-transparent text-fg">
-  <section class="bg-page border border-line-strong rounded-2xl p-6 flex flex-col gap-7 text-sm">
-    <div class="flex flex-col gap-1">
-      <div class="flex items-center">
-        <h2 id="signin-title" data-title class="text-base font-semibold">Sign In</h2>
-
-        <button type="button" data-signin-close aria-label="Close" class="ml-auto text-fg-hint hover:text-fg transition">
-          <Icon name="close" size="sm" />
-        </button>
-      </div>
-
-      <p data-subtitle class="text-fg-faint">Sign in to publish packages and pin them by sha256.</p>
-    </div>
-
+<Dialog id="signin" title="Sign In" subtitle="Sign in to publish packages and pin them by sha256." gap="gap-7" data-signin data-step="providers">
     <div data-panels class="grid items-start overflow-hidden transition-[height] motion-reduce:transition-none">
       <div data-panel="providers" data-active class:list={[panel, 'space-y-7']}>
         {providers.length > 0 && (
@@ -134,8 +122,7 @@ const spinner = 'col-start-1 row-start-1 spinner transition opacity-0 group-data
         </span>
       </button>
     </div>
-  </section>
-</dialog>
+</Dialog>
 
 <style>
   [data-panel] {

@@ -146,6 +146,11 @@ const row = 'flex items-center gap-2 w-full px-4 py-1.5 text-left hover:bg-line-
     if (name) select(name)
   })
 
-  // Coming back from connecting a provider lands on /settings#account.
-  if (location.hash === '#account') select('Account')
+  // A link can name its panel, /settings#tokens from the home or #account after connecting a provider.
+  const wanted = location.hash.slice(1).toLowerCase()
+  const panel = [...(root?.querySelectorAll<HTMLElement>('[data-view]') ?? [])]
+    .map((view) => view.dataset.view!)
+    .find((name) => name.toLowerCase() === wanted)
+
+  if (panel) select(panel)
 </script>

@@ -1,5 +1,6 @@
 ---
 import Icon from '../ui/icon.astro'
+import Dialog from '../ui/dialog.astro'
 
 export type Token = { id: string; name: string; created: string; used: string | null }
 
@@ -83,34 +84,20 @@ edge publish app.edge</pre>
   </section>
 </div>
 
-<dialog data-token-dialog aria-labelledby="token-title" class="outline-none backdrop:bg-scrim backdrop:backdrop-blur-[1px] m-auto w-[calc(100%-1.75rem)] max-w-[520px] bg-transparent text-fg">
-  <section class="bg-page border border-line-strong rounded-2xl p-6 flex flex-col gap-5 text-sm">
-    <div class="flex flex-col gap-1">
-      <div class="flex items-center">
-        <h2 id="token-title" class="text-base font-semibold">Please copy this token</h2>
+<Dialog id="token" title="Please copy this token" subtitle="It is shown this one time. Store it somewhere safe before you close this.">
+  <div class="flex items-center gap-3 rounded-2xl border border-line-emphasis bg-surface px-4 py-2">
+    <code data-secret class="min-w-0 flex-1 truncate font-mono text-xs">{fresh}</code>
 
-        <button type="button" data-token-close aria-label="Close" class="ml-auto text-fg-hint hover:text-fg transition">
-          <Icon name="close" size="sm" />
-        </button>
-      </div>
-
-      <p class="text-fg-faint">It is shown this one time. Store it somewhere safe before you close this.</p>
-    </div>
-
-    <div class="flex items-center gap-3 rounded-2xl border border-line-emphasis bg-surface px-4 py-2">
-      <code data-secret class="min-w-0 flex-1 truncate font-mono text-xs">{fresh}</code>
-
-      <button type="button" data-copy class="shrink-0 flex items-center gap-1.5 text-2xs text-fg-hint transition hover:text-fg-muted">
-        <Icon name="file" size="2xs" /><span data-copy-label>Copy</span>
-      </button>
-    </div>
-  </section>
-</dialog>
+    <button type="button" data-copy class="shrink-0 flex items-center gap-1.5 text-2xs text-fg-hint transition hover:text-fg-muted">
+      <Icon name="file" size="2xs" /><span data-copy-label>Copy</span>
+    </button>
+  </div>
+</Dialog>
 
 <script>
   const RESET = 1200
 
-  const dialog = document.querySelector<HTMLDialogElement>('[data-token-dialog]')
+  const dialog = document.querySelector<HTMLDialogElement>('[data-dialog="token"]')
   const add = document.querySelector<HTMLButtonElement>('[data-add]')
   const form = document.querySelector<HTMLFormElement>('[data-new-token]')
   const input = form?.querySelector('input')
@@ -133,8 +120,6 @@ edge publish app.edge</pre>
     naming(false)
     dialog?.showModal()
   })
-
-  document.querySelector('[data-token-close]')?.addEventListener('click', () => dialog?.close())
 
   let timer: ReturnType<typeof setTimeout> | undefined
 

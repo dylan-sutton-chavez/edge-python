@@ -157,14 +157,6 @@ export function createSignIn(dialog: HTMLDialogElement) {
   find('[data-restart]').addEventListener('click', () => go('providers'))
   find('[data-back]').addEventListener('click', () => go(PROFILE[PROFILE.indexOf(current()) - 1]!))
 
-  find('[data-signin-close]').addEventListener('click', () => dialog.close())
-
-  let inside = false
-  dialog.addEventListener('mousedown', (event) => { inside = event.target !== dialog })
-  dialog.addEventListener('click', (event) => {
-    if (event.target === dialog && !inside) dialog.close()
-  })
-
   const observer = new ResizeObserver(() => { if (dialog.open) fit() })
   panels.forEach((panel) => observer.observe(panel))
 

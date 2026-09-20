@@ -1,0 +1,48 @@
+---
+import Icon from './ui/icon.astro'
+import Dialog from './ui/dialog.astro'
+
+// A mock briefing until the real one is generated, the two package endpoints do not exist yet.
+const briefing = `
+Edge Python is a sandboxed Python subset that compiles to bytecode and runs on a VM, in the browser as WebAssembly or through the edge CLI.
+Install the CLI with curl -fsSL https://cdn.edgepython.com/cli/install.sh | sh
+Read ./SKILL.md first, it is the full reference and every example in it is executable.
+Nothing resolves unless edge.json declares it, so run edge add <name> before importing.
+Search packages with GET https://edgepython.com/api/packages?q=<name>
+Read one of them with GET https://edgepython.com/api/packages/<name>
+Pack and ship with edge build, then edge publish app.edge
+`
+---
+
+<Dialog id="agent" title="Connect an agent" subtitle="Copy and paste this into your agent session.">
+  <div class="rounded-2xl border border-line-emphasis bg-surface overflow-hidden p-4">
+    <pre data-briefing class="-m-4 p-4 overflow-auto whitespace-pre font-mono text-xs leading-code [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{briefing}</pre>
+  </div>
+
+  <button type="button" data-agent-copy class="flex items-center justify-center gap-2 px-4 py-2 rounded-full transition bg-fg text-page hover:bg-solid-hover border border-transparent">
+    <Icon name="file" size="sm" /><span data-agent-copy-label>Copy</span>
+  </button>
+</Dialog>
+
+<script>
+  const RESET = 1200
+
+  const briefing = document.querySelector<HTMLElement>('[data-briefing]')
+  const label = document.querySelector<HTMLElement>('[data-agent-copy-label]')
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  document.querySelector('[data-agent-copy]')?.addEventListener('click', async () => {
+    if (!briefing || !label) return
+
+    try {
+      await navigator.clipboard.writeText(briefing.textContent ?? '')
+      label.textContent = 'Copied'
+    } catch {
+      label.textContent = "Couldn't copy"
+    }
+
+    clearTimeout(timer)
+    timer = setTimeout(() => { label.textContent = 'Copy' }, RESET)
+  })
+</script>
