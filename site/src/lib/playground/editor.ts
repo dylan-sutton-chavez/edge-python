@@ -253,6 +253,12 @@ export function createEditor(options: EditorOptions) {
   const style = getComputedStyle(input)
   const lineHeight = parseFloat(style.lineHeight)
 
+  // The padding bleeds the code to the card edges, so the caret cannot use it.
+  const gutter = () => ({
+    x: parseFloat(style.paddingLeft) + parseFloat(style.paddingRight),
+    y: parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+  })
+
   // Monospace, so one probe gives the advance width every column shares.
   const measure = () => {
     const probe = document.createElement('span')
@@ -273,7 +279,7 @@ export function createEditor(options: EditorOptions) {
 
   const resize = () => {
     const lines = input.value.split('\n').length
-    input.style.height = `${Math.min(Math.max(lines, minLines), maxLines) * lineHeight}px`
+    input.style.height = `${Math.min(Math.max(lines, minLines), maxLines) * lineHeight + gutter().y}px`
   }
 
   const render = () => {
@@ -290,17 +296,17 @@ export function createEditor(options: EditorOptions) {
     const row = before.split('\n').length - 1
     const column = caret - (before.lastIndexOf('\n') + 1)
 
+    const { x: padX, y: padY } = gutter()
+    const height = input.clientHeight - padY
+    const width = input.clientWidth - padX
+
     const top = row * lineHeight
     if (top < input.scrollTop) input.scrollTop = top
-    else if (top + lineHeight > input.scrollTop + input.clientHeight) {
-      input.scrollTop = top + lineHeight - input.clientHeight
-    }
+    else if (top + lineHeight > input.scrollTop + height) input.scrollTop = top + lineHeight - height
 
     const left = column * columnWidth
     if (left < input.scrollLeft) input.scrollLeft = Math.max(0, left - columnWidth * 2)
-    else if (left + columnWidth > input.scrollLeft + input.clientWidth) {
-      input.scrollLeft = left + columnWidth * 2 - input.clientWidth
-    }
+    else if (left + columnWidth > input.scrollLeft + width) input.scrollLeft = left + columnWidth * 2 - width
 
     render()
   }

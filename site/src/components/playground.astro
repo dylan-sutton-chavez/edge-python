@@ -17,18 +17,18 @@ const { code, name, output = '', placeholder, minLines = 1, maxLines = 5, output
 const rows = Math.min(Math.max(code.split('\n').length, minLines), maxLines)
 
 const panel = 'bg-panel rounded-2xl mb-6'
-const card = 'bg-page border border-line-strong rounded-2xl p-4'
+const card = 'bg-page border border-line-strong rounded-2xl overflow-hidden p-4'
 const footer = 'flex items-center justify-between py-3 px-[17px] text-2xs text-fg-hint'
 ---
 
 <div data-playground data-cdn={env.CDN} data-min={minLines} data-max={maxLines} data-expected={output}>
   <div class={panel}>
     <div class:list={[card, 'text-xs']}>
-      <div class="relative font-mono leading-code">
-        <pre aria-hidden="true" class="pointer-events-none absolute inset-0 m-0 overflow-hidden whitespace-pre font-mono leading-code"><code data-view class="[&_span]:text-(--shiki-light) dark:[&_span]:text-(--shiki-dark)"></code></pre>
+      <div class="relative -m-4 font-mono leading-code">
+        <pre aria-hidden="true" class="pointer-events-none absolute inset-0 m-0 overflow-hidden whitespace-pre p-4 font-mono leading-code"><code data-view class="[&_span]:text-(--shiki-light) dark:[&_span]:text-(--shiki-dark)"></code></pre>
         <textarea
           data-input name={name} rows={rows} placeholder={placeholder} spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="Edge Python source"
-          class="relative block w-full resize-none overflow-auto whitespace-pre border-0 bg-transparent p-0 font-mono leading-code text-transparent caret-fg outline-none placeholder:text-fg-placeholder selection:bg-link/30 selection:text-transparent [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{code}</textarea>
+          class="relative block w-full resize-none overflow-auto whitespace-pre border-0 bg-transparent p-4 font-mono leading-code text-transparent caret-fg outline-none placeholder:text-fg-placeholder selection:bg-link/30 selection:text-transparent [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{code}</textarea>
       </div>
     </div>
 
@@ -44,8 +44,8 @@ const footer = 'flex items-center justify-between py-3 px-[17px] text-2xs text-f
     <div class:list={[card, 'text-sm']}>
       <pre
         data-output
-        class="m-0 overflow-auto whitespace-pre font-mono leading-code [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        style={`min-height:calc(${minLines} * var(--leading-code));max-height:calc(${outputMaxLines} * var(--leading-code))`}
+        class="-m-4 p-4 overflow-auto whitespace-pre font-mono leading-code [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        style={`min-height:calc(${minLines} * var(--leading-code) + 2rem);max-height:calc(${outputMaxLines} * var(--leading-code) + 2rem)`}
       >{output}</pre>
     </div>
 

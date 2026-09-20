@@ -50,7 +50,7 @@ const spinner = 'col-start-1 row-start-1 spinner transition opacity-0 group-data
         <fieldset class="min-w-0 flex flex-col gap-2">
           <legend class="text-fg-subtle mb-2">Glyph</legend>
 
-          <div data-glyphs class="flex gap-2 overflow-x-auto py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:w-fit sm:grid-cols-9 sm:overflow-visible">
+          <div data-glyphs class="-mx-4 flex gap-2 overflow-x-auto px-4 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:grid sm:w-fit sm:grid-cols-9 sm:overflow-visible sm:px-0">
             {glyphs.map((icon) => (
               <label class:list={[marked, 'shrink-0']}>
                 <input type="radio" name="icon" value={icon} checked={icon === avatar.icon} aria-label={`Icon ${icon}`} class="sr-only" />

@@ -11,10 +11,10 @@ const { 'data-language': language, class: className, style, ...attrs } = Astro.p
 ---
 
 <div data-code class="bg-panel rounded-2xl mb-6">
-  <div class="bg-page border border-line-strong rounded-2xl p-4 text-xs">
+  <div class="bg-page border border-line-strong rounded-2xl overflow-hidden p-4 text-xs">
     <pre
       {...attrs}
-      class:list={['m-0 overflow-auto whitespace-pre font-mono leading-code [scrollbar-width:none] [&::-webkit-scrollbar]:hidden', className]}
+      class:list={['-m-4 p-4 overflow-auto whitespace-pre font-mono leading-code [scrollbar-width:none] [&::-webkit-scrollbar]:hidden', className]}
     ><slot /></pre>
   </div>
 
