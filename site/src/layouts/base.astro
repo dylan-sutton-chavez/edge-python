@@ -15,15 +15,30 @@ interface Props {
 }
 
 const { title, description = 'Packages for Edge Python, pinned by sha256.', gap = 'sm', class: className } = Astro.props
+
+// A preview reads absolute addresses, and a query string never names a different page.
+const heading = title ? `${title} on Edge Python` : 'Edge Python'
+const page = new URL(Astro.url.pathname, Astro.url).href
+const card = new URL('/og.png', Astro.url).href
 ---
 
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>{title ? `${title} on Edge Python` : 'Edge Python'}</title>
+  <title>{heading}</title>
   <meta name="description" content={description} />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Edge Python" />
+  <meta property="og:title" content={heading} />
+  <meta property="og:description" content={description} />
+  <meta property="og:url" content={page} />
+  <meta property="og:image" content={card} />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
   <Font cssVariable="--font-inter" preload />
   <Font cssVariable="--font-jetbrains-mono" />
   <script is:inline>

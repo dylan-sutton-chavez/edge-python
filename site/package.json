@@ -11,7 +11,8 @@
     "types": "npm run config && wrangler types",
     "db:local": "npm run config && tsx db/local.ts",
     "dev": "npm run db:local && astro dev",
-    "build": "npm run config && astro build",
+    "card": "tsx scripts/card.ts",
+    "build": "npm run config && npm run card && astro build",
     "preview": "npm run config && astro preview",
     "deploy": "npm run build && wrangler deploy",
     "check": "npm run types && astro check --minimumSeverity warning",
@@ -30,6 +31,7 @@
   "devDependencies": {
     "@astrojs/check": "0.9.10",
     "@types/node": "^22.20.3",
+    "sharp": "^0.35.4",
     "tsx": "^4.23.13",
     "typescript": "^6.0.3",
     "wrangler": "^4.134.0"

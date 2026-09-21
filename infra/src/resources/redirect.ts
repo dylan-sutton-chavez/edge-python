@@ -51,7 +51,7 @@ export async function ensure_redirect(zone: string, from: string, to: string) {
   } catch (error) {
     const denied = (error as { status?: number }).status === 403
     throw new Error(denied
-      ? `The API token cannot manage redirect rules on "${zone}". Give it the zone permission for dynamic redirects. ${error}`
+      ? `CLOUDFLARE_API_TOKEN cannot write redirect rules on "${zone}". Add the "Single Redirect" zone permission with edit access. ${error}`
       : `Redirecting "${from}" to "${to}" failed. ${error}`)
   }
 }

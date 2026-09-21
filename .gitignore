@@ -57,3 +57,6 @@ _micropython/
 
 # deno writes lockfiles on the fly when running npm packages
 **/deno.lock
+
+# the social card is rasterized from src/assets/og.svg on every build
+site/public/og.png
