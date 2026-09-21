@@ -46,7 +46,7 @@ pub fn bundle(manifest_path: &Path, out: PathBuf) -> Result<()> {
     Ok(())
 }
 
-/* Reads the project scripts, its edge.json and every url module it declares into a bundle. */
+/* Reads the project scripts, its notices, its edge.json and every url module it declares into a bundle. */
 fn collect_bundle(manifest_path: &Path) -> Result<(Bundle, bool)> {
     let project = match manifest_path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
@@ -56,8 +56,9 @@ fn collect_bundle(manifest_path: &Path) -> Result<(Bundle, bool)> {
     if !scripts.iter().any(|s| s.extension().and_then(|e| e.to_str()) == Some("py")) {
         return Err(anyhow!("no .py files found under {}", project.display()));
     }
+    let notices = collect_notices(&project);
     let mut files = Vec::new();
-    for s in &scripts {
+    for s in scripts.iter().chain(&notices) {
         let rel = s.strip_prefix(&project).unwrap_or(s).to_string_lossy().replace('\\', "/");
         files.push(Entry { path: rel, bytes: fs::read(s).with_context(|| format!("reading {}", s.display()))? });
     }
@@ -68,6 +69,23 @@ fn collect_bundle(manifest_path: &Path) -> Result<(Bundle, bool)> {
         javascript = vendor_bundle(&manifest, &mut files)?;
     }
     Ok((Bundle { entry: find_entry(&scripts, &project), files }, javascript))
+}
+
+/* The readme and licenses at the project root, sorted so two builds of a tree agree. */
+fn collect_notices(project: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(project) else { return Vec::new() };
+    let mut found: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.is_file() && is_notice(p)).collect();
+    found.sort();
+    found
+}
+
+/* `README.md` or `LICENSE` with any extension, never one the script walk already carries. */
+fn is_notice(path: &Path) -> bool {
+    if matches!(path.extension().and_then(|e| e.to_str()), Some("py" | "js" | "mjs")) {
+        return false;
+    }
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    name.eq_ignore_ascii_case("README.md") || name.split('.').next().is_some_and(|s| s.eq_ignore_ascii_case("LICENSE"))
 }
 
 /* Carries each declared url module and the files it reaches, keyed by the address it answers. */
@@ -485,6 +503,27 @@ mod tests {
         let out_dir = project.join("sub/..").join("dist");
         let scripts = collect_scripts(project, &out_dir);
         assert_eq!(scripts, paths(&[project.join("main.py").to_str().unwrap()]));
+    }
+
+    #[test]
+    fn a_bundle_carries_the_root_readme_and_licenses() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path();
+        fs::write(project.join("main.py"), "print(1)").unwrap();
+        fs::write(project.join("README.md"), "# app").unwrap();
+        fs::write(project.join("LICENSE"), "bare").unwrap();
+        fs::write(project.join("LICENSE.txt"), "Apache").unwrap();
+        // A license that is itself a script is carried once, by the walk.
+        fs::write(project.join("LICENSE.py"), "pass").unwrap();
+        fs::write(project.join("NOTES.md"), "not a notice").unwrap();
+        fs::create_dir(project.join("sub")).unwrap();
+        fs::write(project.join("sub/README.md"), "nested").unwrap();
+        let (bundle, javascript) = collect_bundle(&project.join("edge.json")).unwrap();
+        let mut paths: Vec<&str> = bundle.files.iter().map(|f| f.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(paths, ["LICENSE", "LICENSE.py", "LICENSE.txt", "README.md", "main.py"]);
+        assert_eq!(bundle.entry, "main.py");
+        assert!(!javascript);
     }
 
     #[test]

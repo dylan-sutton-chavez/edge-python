@@ -444,6 +444,18 @@
   },
   {
     "given": {
+      "edge.json": "{ \"imports\": {} }\n",
+      "main.py": "print(\"hello\")\n",
+      "README.md": "# app\n",
+      "LICENSE.txt": "Apache-2.0\n",
+      "NOTES.md": "not a notice\n"
+    },
+    "run": ["build"],
+    "stdout": ["packed app.edge (4 files)"],
+    "creates": ["app.edge"]
+  },
+  {
+    "given": {
       "edge.json": "{ \"imports\": { \"json\": \"https://cdn.edgepython.com/std/json.wasm\" } }\n",
       "main.py": "import json\nprint(json.dumps({\"a\": [1, True, None]}))\n"
     },

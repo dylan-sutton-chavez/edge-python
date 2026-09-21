@@ -104,7 +104,7 @@ Three mutually exclusive modes.
 | `edge build --app` | `app` | Standalone binary, runs offline on the same OS and CPU with nothing installed |
 | `edge build --web` | `dist/` | Browser distribution with the vendored JS host and packages |
 
-`--out <path>` overrides the default. The bundle contains every `.py`, `.js` and `.mjs` under the project plus `edge.json`, together with each module the manifest declares by URL and the files it imports. An app binary for a project with a JavaScript module also carries the precompiled runtime, about 26 MB, so it runs offline. The entry is `main.py`, `app.py` or `index.py` when present. An app binary accepts only the snapshot flags `--save-state`, `--restore-state`, `--preempt` and `--events`.
+`--out <path>` overrides the default. The bundle contains every `.py`, `.js` and `.mjs` under the project plus `edge.json`, the `README.md` and any `LICENSE` at the project root, together with each module the manifest declares by URL and the files it imports. An app binary for a project with a JavaScript module also carries the precompiled runtime, about 26 MB, so it runs offline. The entry is `main.py`, `app.py` or `index.py` when present. An app binary accepts only the snapshot flags `--save-state`, `--restore-state`, `--preempt` and `--events`.
 
 ### edge actor
 
