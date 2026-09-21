@@ -275,7 +275,7 @@ from lib.helpers import slugify as sl
 
 Not supported. `from . import x` and any form of dynamic import.
 
-Bare names resolve through `edge.json`, walking up from the importing file with the nearest manifest winning. The manifest maps each name to a path or URL under `imports`, and `extends` may name a parent manifest. The artifact decides the kind, `.py` is a code module, `.wasm` a native plugin and `.js` a JavaScript module, which the JS host runs on the page's main thread and the CLI in StarlingMonkey, so a manifest never classifies a package. A leftover `system` section fails with `edge.json at '<path>': move the system entries into imports`. `name`, `version`, `description` and `docs` are the registry fields, ignored by the compiler and shape-checked by the CLI, and an author and a date are not among them since a publish reads those from the account.
+Bare names resolve through `edge.json`, walking up from the importing file with the nearest manifest winning. The manifest maps each name to a path or URL under `imports`, and `extends` may name a parent manifest. The artifact decides the kind, `.py` is a code module, `.wasm` a native plugin and `.js` a JavaScript module, which the JS host runs on the page's main thread and the CLI in StarlingMonkey, so a manifest never classifies a package. A leftover `system` section fails with `edge.json at '<path>': move the system entries into imports`. `name`, `version`, `description`, `repository` and `docs` are the registry fields, ignored by the compiler and shape-checked by the CLI. Only what nothing else supplies belongs there, so an author and a date come from the publishing account and the license is read from the packed `LICENSE` file.
 
 ```json
 {

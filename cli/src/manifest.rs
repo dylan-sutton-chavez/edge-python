@@ -19,6 +19,8 @@ pub struct Manifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docs: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub imports: BTreeMap<String, String>,
@@ -68,6 +70,11 @@ impl Manifest {
                 bail!("edge.json at '{at}': description is {len} characters, the cap is {MAX_DESCRIPTION}");
             }
         }
+        if let Some(repository) = &self.repository
+            && !linked(repository)
+        {
+            bail!("edge.json at '{at}': repository '{repository}' must be an https url a listing can link");
+        }
         Ok(())
     }
 
@@ -93,6 +100,12 @@ fn named(name: &str) -> bool {
         && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
+/* An address a listing can open, so an ssh remote or a bare host is refused. */
+fn linked(url: &str) -> bool {
+    let Some(host) = url.strip_prefix("https://") else { return false };
+    !host.is_empty() && url.len() <= 256 && !url.contains(char::is_whitespace)
+}
+
 /* Three numeric parts, no prerelease tags, so an ordering never depends on how a tag sorts. */
 fn versioned(version: &str) -> bool {
     let parts: Vec<&str> = version.split('.').collect();
@@ -113,9 +126,10 @@ mod tests {
 
     #[test]
     fn the_registry_fields_round_trip() {
-        let m = load(r#"{ "name": "slugify", "version": "0.1.0", "description": "Turn text into a slug.", "docs": "./docs" }"#).unwrap();
+        let m = load(r#"{ "name": "slugify", "version": "0.1.0", "description": "Turn text into a slug.", "repository": "https://github.com/x/slugify", "docs": "./docs" }"#).unwrap();
         assert_eq!(m.name.as_deref(), Some("slugify"));
         assert_eq!(m.version.as_deref(), Some("0.1.0"));
+        assert_eq!(m.repository.as_deref(), Some("https://github.com/x/slugify"));
         assert_eq!(m.docs.as_deref(), Some("./docs"));
     }
 
@@ -136,6 +150,10 @@ mod tests {
             (r#"{ "version": "1.0.0-rc1" }"#, "must be major.minor.patch"),
             (r#"{ "description": "  " }"#, "description is empty"),
             (r#"{ "description": "Turn absolutely any text that you have into a tidy url slug fast." }"#, "the cap is 60"),
+            (r#"{ "repository": "git@github.com:x/slugify.git" }"#, "must be an https url"),
+            (r#"{ "repository": "http://github.com/x/slugify" }"#, "must be an https url"),
+            (r#"{ "repository": "github.com/x/slugify" }"#, "must be an https url"),
+            (r#"{ "repository": "https://" }"#, "must be an https url"),
         ] {
             let Err(e) = load(body) else { panic!("{body} should be refused") };
             let err = format!("{e:#}");
