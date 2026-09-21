@@ -13,7 +13,8 @@ const docs = sections.flatMap((section) => section.docs)
 
 const first = docs[0]
 if (!first) return new Response(null, { status: 404 })
-if (!Astro.params.slug) return Astro.redirect(`/docs/${first.slug}`)
+// Permanent, so the links people write to /docs count towards the page it opens.
+if (!Astro.params.slug) return Astro.redirect(`/docs/${first.slug}`, 301)
 
 const doc = docs.find((each) => each.slug === Astro.params.slug)
 if (!doc) return Astro.rewrite('/404')

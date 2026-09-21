@@ -3,7 +3,7 @@
     "name": "pages",
     "steps": [
       { "path": "/", "status": 200, "contains": ["<h1"] },
-      { "path": "/docs", "status": 302, "location": "/docs/getting-started/introduction" },
+      { "path": "/docs", "status": 301, "location": "/docs/getting-started/introduction" },
       { "path": "/docs/nope/nope", "status": 404 },
       { "path": "/nobody-here", "status": 404, "contains": ["Not found"] },
       { "path": "/settings", "status": 302, "location": "/" }
