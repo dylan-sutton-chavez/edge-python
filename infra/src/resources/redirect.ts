@@ -34,31 +34,24 @@ export async function ensure_redirect(zone: string, from: string, to: string) {
     }
   }
 
-  // Rulesets are their own permission, so say which one rather than leak a bare 403.
+  // Reaches the one phase instead of listing every ruleset, so the narrow permission is enough.
   try {
-    let ruleset = null
-    for await (const each of client.rulesets.list({ zone_id: id })) {
-      if (each.phase === PHASE && each.kind === 'zone') ruleset = each
-    }
+    const entry = await client.rulesets.phases.get(PHASE, { zone_id: id }).catch((error) => {
+      if ((error as { status?: number }).status === 404) return null
+      throw error
+    })
 
-    if (!ruleset) {
-      console.log(`Creating the redirect ruleset on "${zone}"...`)
-      await client.rulesets.create({ zone_id: id, kind: 'zone', name: 'Redirects', phase: PHASE, rules: [rule] })
-      return
-    }
-
-    const current = await client.rulesets.get(ruleset.id, { zone_id: id })
-    if (current.rules?.some((each) => each.expression === expression)) {
+    if (entry?.rules?.some((each) => each.expression === expression)) {
       console.log(`Redirect for "${from}" already in place.`)
       return
     }
 
     console.log(`Redirecting "${from}" to "${to}"...`)
-    await client.rulesets.rules.create(ruleset.id, { zone_id: id, ...rule })
+    await client.rulesets.phases.update(PHASE, { zone_id: id, rules: [...(entry?.rules ?? []), rule] })
   } catch (error) {
     const denied = (error as { status?: number }).status === 403
     throw new Error(denied
-      ? `The API token cannot manage redirect rules on "${zone}". Give it the zone permission that covers dynamic redirects. ${error}`
+      ? `The API token cannot manage redirect rules on "${zone}". Give it the zone permission for dynamic redirects. ${error}`
       : `Redirecting "${from}" to "${to}" failed. ${error}`)
   }
 }

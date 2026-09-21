@@ -1,0 +1,42 @@
+---
+import Base from '../layouts/base.astro'
+import Icon from '../components/ui/icon.astro'
+
+const ways = [
+  { icon: 'boxes', label: 'Packages', detail: 'Everything published, pinned by sha256', href: '/' },
+  { icon: 'file', label: 'Docs', detail: 'The language, the CLI and the packages', href: '/docs' }
+] as const
+
+// A rewrite renders this page without Astro deciding the status, so the page owns it.
+Astro.response.status = 404
+---
+
+<Base title="Not found" description="Nothing is published at this address.">
+  <div class="flex w-full flex-col gap-9">
+    <div>
+      <h1 class="text-xl font-semibold">Not found</h1>
+      <p class="text-fg-hint mt-1">Nothing is published at this address. It may have moved, or it may never have existed.</p>
+    </div>
+
+    <section class="flex flex-col gap-2">
+      <h2 class="ml-4">Try one of these</h2>
+
+      <ul class="bg-page border border-line-strong rounded-2xl overflow-hidden divide-y divide-line-strong">
+        {ways.map((way) => (
+          <li>
+            <a href={way.href} class="group flex items-center gap-3 px-4 py-3 transition hover:bg-surface focus-visible:outline-none focus-visible:bg-surface">
+              <Icon name={way.icon} class="shrink-0 text-fg-subtle" />
+
+              <div class="min-w-0 flex-1">
+                <p class="text-sm">{way.label}</p>
+                <p class="truncate text-2xs text-fg-hint">{way.detail}</p>
+              </div>
+
+              <Icon name="arrow" size="sm" class="shrink-0 text-fg-hint opacity-0 -translate-x-1 transition group-hover:opacity-100 group-hover:translate-x-0 group-focus-visible:opacity-100 group-focus-visible:translate-x-0" />
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
+  </div>
+</Base>
