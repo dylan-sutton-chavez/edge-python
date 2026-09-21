@@ -62,11 +62,20 @@ const card = new URL('/og.png', Astro.url).href
     // Sticky elements rest where they start, measured from the header so the banner never counts.
     const header = document.querySelector('header')
 
+    // A stuck header reports its scrolled offset, so read where it would sit on its own.
+    const headerBottom = () => {
+      const was = header!.style.position
+      header!.style.position = 'static'
+      const bottom = header!.offsetTop + header!.offsetHeight
+      header!.style.position = was
+      return bottom
+    }
+
     const place = (el: HTMLElement) => {
       el.style.top = ''
       if (!header || getComputedStyle(el).position !== 'sticky') return
 
-      const gap = el.getBoundingClientRect().top + scrollY - (header.offsetTop + header.offsetHeight)
+      const gap = el.getBoundingClientRect().top + scrollY - headerBottom()
       el.style.setProperty('--sticky-top', `${header.offsetHeight + gap}px`)
       el.style.setProperty('--sticky-gap', `${gap}px`)
       el.style.top = 'var(--sticky-top)'

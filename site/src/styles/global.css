@@ -106,7 +106,8 @@
 .avatar-moss { --av-bg: #7F9C7A; --av-dark: #1F3A26; --av-light: #E8F0E4; }
 .avatar-sky { --av-bg: #8AA2C4; --av-dark: #1E2F4F; --av-light: #E6ECF5; }
 
-html { scrollbar-width: none; }
+/* The header stays stuck at the top, so an anchor has to land below it. */
+html { scrollbar-width: none; scroll-padding-top: 80px; }
 html::-webkit-scrollbar { display: none; }
 
 body { font-family: var(--font-inter); }
