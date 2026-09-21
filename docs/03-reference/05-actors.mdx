@@ -115,7 +115,11 @@ groups:
 
 ## Untrusted code
 
-An `eval` group runs code it does not trust. Each incoming message is compiled and run in a fresh wasm instance with its own linear memory, capped by the group's `heap` limit inside the interpreter and by a 256 MiB reservation outside it, and cut off after ten seconds of wall-clock time by a deadline the host enforces from outside the instance, so a runaway loop or a long native operation ends even where the interpreter cannot yield. Nothing survives between messages, the instance is dropped when the run ends. A bundle that carries its own `edge.json` resolves through it, any other message through the pool's manifest. Either way `.wasm` plugins are refused, remote modules load only from `https://cdn.edgepython.com/`, a JavaScript module's runtime has no network and shares the run's deadline, and `send()` has no scheduler to reach, so untrusted code cannot send to other groups, reach the network, or load modules from disk. `network` imports there, and every fetch fails with `NetworkError when attempting to fetch resource`.
+An `eval` group runs code it does not trust. Each incoming message is compiled and run in a fresh wasm instance with its own linear memory, capped by the group's `heap` limit inside the interpreter and by a 256 MiB reservation outside it. A deadline the host enforces from outside the instance cuts the run off after ten seconds of wall-clock time, so a runaway loop or a long native operation ends even where the interpreter cannot yield.
+
+Nothing survives between messages, the instance is dropped when the run ends. A bundle that carries its own `edge.json` resolves through it, any other message through the pool's manifest.
+
+Either way `.wasm` plugins are refused, remote modules load only from `https://cdn.edgepython.com/`, a JavaScript module's runtime has no network and shares the run's deadline, and `send()` has no scheduler to reach. So untrusted code cannot send to other groups, reach the network, or load modules from disk. `network` imports there, and every fetch fails with `NetworkError when attempting to fetch resource`.
 
 A `code` or `run` group runs code you trust. It keeps state between messages, can send, and can reach `network`, with the metered limits as the only cap, so keep third-party code out of it and reach for `eval` instead.
 

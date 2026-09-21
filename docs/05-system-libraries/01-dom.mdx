@@ -5,11 +5,17 @@ description: "The browser DOM, from element queries to observers and animations.
 
 # dom (browser)
 
-`dom` wraps the browser DOM. It is a JavaScript module that needs a browser, it runs on the main thread where `document` and `window` live. Declare it with `edge add dom`, an `imports` entry pointing at the facade `https://cdn.edgepython.com/js/builtins/dom/entry.py`, and import it by bare name. A JavaScript runtime without a page loads it and fails at the first call with `module 'dom' needs 'document', missing in this runtime`, raised in the calling coroutine. The CLI loads it the same way and names the JavaScript half behind the facade, `module '_dom' needs 'document', missing in this runtime`, see [JavaScript in the CLI](/docs/reference/modules#javascript-in-the-cli).
+`dom` wraps the browser DOM. It is a JavaScript module that needs a browser, it runs on the main thread where `document` and `window` live. Declare it with `edge add dom`, an `imports` entry pointing at the facade `https://cdn.edgepython.com/js/builtins/dom/entry.py`, and import it by bare name.
+
+A JavaScript runtime without a page loads it and fails at the first call with `module 'dom' needs 'document', missing in this runtime`, raised in the calling coroutine. The CLI loads it the same way and names the JavaScript half behind the facade, `module '_dom' needs 'document', missing in this runtime`, see [JavaScript in the CLI](/docs/reference/modules#javascript-in-the-cli).
 
 The engine runs in a Web Worker, so each call crosses over `postMessage` and the script sees a synchronous call. Handlers that return a Promise suspend the calling coroutine and compose with `gather`, see [Async](/docs/language/async).
 
-Importing `dom` gives you a script-level facade over the internal `_dom` module that adds opt-in mutation batching. Inside a `batch()` block, mutators buffer locally and the block exit applies them with one host call. `pending()` counts buffered ops and `flush()` applies them early. Handles are opaque integers. Multi-result queries return CSV strings of handles. Structured returns are JSON strings, parse them with [json](/docs/standard-packages/json). Async results (events, file reads, observer entries, animation finishes) arrive through `receive()` carrying a correlation handle. Detaching a node sweeps its handles, event bindings, and animations. `bind_global_error(msg)` routes async DOM callback errors to `receive()` instead of the browser console. The full handler inventory, by group:
+Importing `dom` gives you a script-level facade over the internal `_dom` module that adds opt-in mutation batching. Inside a `batch()` block, mutators buffer locally and the block exit applies them with one host call. `pending()` counts buffered ops and `flush()` applies them early.
+
+Handles are opaque integers. Multi-result queries return CSV strings of handles, and structured returns are JSON strings, parse them with [json](/docs/standard-packages/json). Async results (events, file reads, observer entries, animation finishes) arrive through `receive()` carrying a correlation handle.
+
+Detaching a node sweeps its handles, event bindings, and animations. `bind_global_error(msg)` routes async DOM callback errors to `receive()` instead of the browser console. The full handler inventory, by group:
 
 - Selection and traversal: `query`, `query_all`, `closest`, `matches`, `body`, `active_element`, `parent`, `children`, `first_child`, `last_child`, `next_sibling`, `prev_sibling`, `tag_name`.
 - Creation and mutation: `create_element`, `create_element_ns`, `append_child`, `insert_before`, `remove`, `replace_children`, `clone_node`.

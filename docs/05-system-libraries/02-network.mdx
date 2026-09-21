@@ -7,7 +7,13 @@ description: "HTTP fetch, WebSocket, and Server-Sent Events."
 
 `network` is HTTP, WebSocket, and Server-Sent Events from scripts. Declare it with `edge add network` and import it by bare name. The same module runs in every host, in a browser, in a JS runtime such as Deno or Workers, and in the CLI, see [The CLI](/docs/reference/modules#the-cli).
 
-The surface is `fetch`, `fetch_text`, `fetch_json`, `abort_request`, plus WebSocket (`ws_open`, `ws_send`, `ws_close`, `ws_state`) and Server-Sent Events (`sse_open`, `sse_close`, `sse_state`). HTTP calls suspend until the response arrives. `fetch` returns the full response as a JSON string with `id`, `ok`, `status`, `headers`, and `body`, and `abort_request(id)` cancels an in-flight request. `fetch_text` returns the body as a string and `fetch_json` does the same for you to parse with `json.loads`. Both raise on a non-2xx status. All three take an optional second argument, a JSON options string (a `RequestInit`). WebSocket and SSE connections open with a `msg` tag and stream events through `receive()`, with payload `type` values `open`, `message`, `close`, and `error`. Binary WebSocket frames surface as `binary: true` only. In the browser a cross-origin target must return `Access-Control-Allow-Origin` or the call raises, and CORS does not apply in other hosts.
+The surface is `fetch`, `fetch_text`, `fetch_json`, `abort_request`, plus WebSocket (`ws_open`, `ws_send`, `ws_close`, `ws_state`) and Server-Sent Events (`sse_open`, `sse_close`, `sse_state`). HTTP calls suspend until the response arrives.
+
+`fetch` returns the full response as a JSON string with `id`, `ok`, `status`, `headers`, and `body`, and `abort_request(id)` cancels an in-flight request. `fetch_text` returns the body as a string and `fetch_json` does the same for you to parse with `json.loads`. Both raise on a non-2xx status. All three take an optional second argument, a JSON options string (a `RequestInit`).
+
+WebSocket and SSE connections open with a `msg` tag and stream events through `receive()`, with payload `type` values `open`, `message`, `close`, and `error`. Binary WebSocket frames surface as `binary: true` only.
+
+In the browser a cross-origin target must return `Access-Control-Allow-Origin` or the call raises, and CORS does not apply in other hosts.
 
 SSE is built on `fetch` streaming, so it works in every host. It reconnects the way `EventSource` does, waiting the stream's `retry` time and sending `Last-Event-ID`. An `error` event carries `state` 0 while it reconnects and 2 when the response is not an event stream, which stops it for good. Only unnamed events reach `receive()`, as with the `message` listener of `EventSource`, and `event_id` is the last id the stream sent.
 

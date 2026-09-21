@@ -30,7 +30,11 @@ from utils import *                            # every export becomes a flat nam
 
 Name lists can span lines inside parentheses, with an optional trailing comma.
 
-Dots map to directories and the `.py` suffix is implicit. A leading dot anchors the spec at the importing file, a dotted name anchors at the nearest `edge.json` directory, and a plain name must be declared in `edge.json`. That includes the official packages, nothing resolves without a manifest entry, and `edge add <name>` writes the entry for each official name. The CLI keeps embedded copies of the standard packages, so their entries need no network there. Two forms do not work: `from . import x` (Edge has no packages, so a bare dot names nothing) and dynamic imports (no `__import__`, no `importlib`, and the module set is fixed per compilation).
+Dots map to directories and the `.py` suffix is implicit. A leading dot anchors the spec at the importing file, a dotted name anchors at the nearest `edge.json` directory, and a plain name must be declared in `edge.json`.
+
+That includes the official packages, nothing resolves without a manifest entry, and `edge add <name>` writes the entry for each official name. The CLI keeps embedded copies of the standard packages, so their entries need no network there.
+
+Two forms do not work. `from . import x` names nothing, because Edge has no packages for a bare dot to reach. Dynamic imports are absent too, there is no `__import__` and no `importlib`, and the module set is fixed per compilation.
 
 ## Module semantics
 
@@ -138,7 +142,11 @@ System libraries:
 
 - [dom](/docs/system-libraries/dom), [network](/docs/system-libraries/network), [storage](/docs/system-libraries/storage), [time](/docs/system-libraries/time)
 
-None of them resolves on its own. A project declares each one it uses in `imports`, and `edge add` writes the entry. A standard package points at `https://cdn.edgepython.com/std/<name>.wasm` (`test` ships as `test.py`), a JavaScript library at `https://cdn.edgepython.com/js/builtins/<name>/index.js`, and `dom` at its facade `https://cdn.edgepython.com/js/builtins/dom/entry.py`. Where each one runs follows from that artifact, a `.wasm` or `.py` runs inside the engine and a `.js` on the JS host's main thread or in the CLI's [JavaScript runtime](#javascript-in-the-cli). The JS host fetches those URLs and caches them. The CLI resolves the standard package URLs to the copies embedded in the binary and downloads the JavaScript libraries once into its cache, so the same manifest serves both hosts. A page that drives `createWorker` directly passes the same entries through `imports`, or a `mainThreadModules` object for an in-page module.
+None of them resolves on its own. A project declares each one it uses in `imports`, and `edge add` writes the entry. A standard package points at `https://cdn.edgepython.com/std/<name>.wasm` (`test` ships as `test.py`), a JavaScript library at `https://cdn.edgepython.com/js/builtins/<name>/index.js`, and `dom` at its facade `https://cdn.edgepython.com/js/builtins/dom/entry.py`.
+
+Where each one runs follows from that artifact. A `.wasm` or `.py` runs inside the engine, a `.js` on the JS host's main thread or in the CLI's [JavaScript runtime](#javascript-in-the-cli).
+
+The JS host fetches those URLs and caches them. The CLI resolves the standard package URLs to the copies embedded in the binary and downloads the JavaScript libraries once into its cache, so the same manifest serves both hosts. A page that drives `createWorker` directly passes the same entries through `imports`, or a `mainThreadModules` object for an in-page module.
 
 ```json
 {
@@ -275,7 +283,9 @@ The runtime has the Web APIs a server-side worker has, `fetch` with streams and 
 - `network` runs `fetch`, `fetch_text`, `fetch_json`, `abort_request` and the Server-Sent Events calls, while `ws_open` raises `module 'network' needs 'WebSocket', missing in this runtime`,
 - `storage` and `dom` import and raise at their first call, `module 'storage' needs 'localStorage', missing in this runtime`.
 
-The runtime is not part of the binary. The first JavaScript import downloads it once from `https://cdn.edgepython.com/js-runtime/<sha256>.cwasm`, precompiled for the platform, about 9 MB compressed and 30 MB on disk. The CLI checks the bytes against the SHA-256 built into the binary and keeps them in `~/.cache/edge/js-runtime`, and later runs load them in a few milliseconds. An app binary packed from a project that declares a JavaScript module carries its own copy, which a run prefers over the cache and the download, so a packed app stays offline. When no copy is at hand and the download fails, the import fails with `module 'time' needs the JavaScript runtime, fetching '<url>' failed, <reason>`.
+The runtime is not part of the binary. The first JavaScript import downloads it once from `https://cdn.edgepython.com/js-runtime/<sha256>.cwasm`, precompiled for the platform, about 9 MB compressed and 30 MB on disk. The CLI checks the bytes against the SHA-256 built into the binary and keeps them in `~/.cache/edge/js-runtime`, and later runs load them in a few milliseconds.
+
+An app binary packed from a project that declares a JavaScript module carries its own copy, which a run prefers over the cache and the download, so a packed app stays offline. When no copy is at hand and the download fails, the import fails with `module 'time' needs the JavaScript runtime, fetching '<url>' failed, <reason>`.
 
 A runtime's memory is capped at 1 GiB, or at the run's own cap when that is lower, and allocating past it raises `out of memory` in the calling coroutine. A call that does not answer within 30 seconds, or before an eval run's deadline, stops the runtime with `module 'x' did not answer within 30 s`, and the next call starts a fresh one.
 

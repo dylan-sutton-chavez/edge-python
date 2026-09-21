@@ -68,7 +68,11 @@ Collection triggers when `live >= gc_threshold` or `alloc_count >= max(live / 4,
 
 A plain `def` inside a coroutine that calls a yielding builtin gets its state (`ip`, slots, stack and iterator deltas) snapshotted as a `SyncFrame` and pushed on the enclosing coroutine's `sync_frames`, innermost last. Resume walks this stack inside-out before re-entering the outer body, so each helper's return value lands at its original `Call` site. An error escaping a helper re-raises at that same site, so the caller's handlers and the traceback notes match a run that never suspended.
 
-`vm.run()` wraps the module body as an implicit coroutine, so top-level statements suspend like `async def` bodies. Dispatch is single-driver. `top_loop` is the only place that picks coroutines. `run`, `gather`, `with_timeout`, `await`, and calling a coroutine value push targets to the scheduler, park the caller in `CoroState::WaitingForChildren`, and yield. The `WaitKind` picks the finalize behavior. `Run(target)` returns the target's value, `Gather` returns the list of results, `Timeout` enforces a deadline. When children finish, the outer's saved stack placeholder is spliced with the result and the outer is marked ready. A child's error, a timeout or a failed host call marks it `CoroState::Raising` instead, and the next resume raises the error at the park point, so handlers and the traceback position follow the normal path.
+`vm.run()` wraps the module body as an implicit coroutine, so top-level statements suspend like `async def` bodies. Dispatch is single-driver. `top_loop` is the only place that picks coroutines.
+
+`run`, `gather`, `with_timeout`, `await`, and calling a coroutine value push targets to the scheduler, park the caller in `CoroState::WaitingForChildren`, and yield. The `WaitKind` picks the finalize behavior. `Run(target)` returns the target's value, `Gather` returns the list of results, `Timeout` enforces a deadline.
+
+When children finish, the outer's saved stack placeholder is spliced with the result and the outer is marked ready. A child's error, a timeout or a failed host call marks it `CoroState::Raising` instead, and the next resume raises the error at the park point, so handlers and the traceback position follow the normal path.
 
 Coroutines carry their own `try`/`except` frames across yields. On entry the stored frames are denormalised onto the live exception stack and renormalised on yield-save, so `try: run(coro) except E:` catches a child's raise across multiple resume cycles.
 
@@ -80,7 +84,11 @@ Coroutines carry their own `try`/`except` frames across yields. On entry the sto
 
 Preemption supplies the parked state when a program never suspends on its own. `set_preempt_interval(n)` makes the dispatch loop sample a counter at loop back-edges and raise the ordinary yield path every `n` hits, leaving the coroutine ready while `top_loop` returns `Preempted`. Sampling is gated on a per-frame `frame_safe` flag that only the dispatch `Call` path and the scheduler step ever set, so native re-entry is unpreemptible by default and a new re-entrant path inherits that default instead of silently corrupting a blob.
 
-Chunk-derived tables (bytecode, name pools, the extern table) are not stored. They come from the re-parse, so only dynamic state crosses the wire. Restore runs in two passes because hashing reads the heap. First every slot is materialised (sets and frozensets land empty), then a rehash pass rebuilds dict indexes and fills the sets, and `rebuild_mro` recomputes each class linearization. IC and memoisation caches start empty and warm lazily. `Extern` handles resolve by name against the re-parsed chunk's extern table. Host-side resources such as in-flight host calls and DOM handles are not part of the snapshot. `state_globals` and `state_stack` introspect a parked run without resuming it.
+Chunk-derived tables (bytecode, name pools, the extern table) are not stored. They come from the re-parse, so only dynamic state crosses the wire.
+
+Restore runs in two passes because hashing reads the heap. First every slot is materialised (sets and frozensets land empty), then a rehash pass rebuilds dict indexes and fills the sets, and `rebuild_mro` recomputes each class linearization. IC and memoisation caches start empty and warm lazily, and `Extern` handles resolve by name against the re-parsed chunk's extern table.
+
+Host-side resources such as in-flight host calls and DOM handles are not part of the snapshot. `state_globals` and `state_stack` introspect a parked run without resuming it.
 
 See [Snapshots](/docs/language/snapshots) for the host-facing feature and the [ABI](/docs/reference/abi#snapshot-exports) for the exports and blob layout.
 

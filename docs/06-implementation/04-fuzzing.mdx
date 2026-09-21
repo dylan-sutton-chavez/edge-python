@@ -69,7 +69,9 @@ Note that plain `docker compose down` keeps named volumes. Only `down -v` delete
 
 ## Resuming and rebuilds
 
-Reusing the same `out/` resumes the campaign. AFL recalibrates the saved queue before fuzzing, so `execs` sits at 0 for a while. Resume is only safe when the target binary is unchanged. After a rebuild, the saved coverage map no longer matches the new binary. With `AFL_AUTORESUME=1` (which `deploy.sh` sets) the instances do not abort cleanly. They stall recalibrating the inherited queue, which can be tens of thousands of entries from a long prior campaign. While they grind through it, `cargo afl whatsup` reports them as dead with `execs` and run time at 0 and shows the stale coverage percentage from the previous session. That looks like a crash but is just resume over a changed binary.
+Reusing the same `out/` resumes the campaign. AFL recalibrates the saved queue before fuzzing, so `execs` sits at 0 for a while. Resume is only safe when the target binary is unchanged, since after a rebuild the saved coverage map no longer matches it.
+
+With `AFL_AUTORESUME=1` (which `deploy.sh` sets) the instances do not abort cleanly. They stall recalibrating the inherited queue, which can be tens of thousands of entries from a long prior campaign. While they grind through it, `cargo afl whatsup` reports them as dead with `execs` and run time at 0 and shows the stale coverage percentage from the previous session. That looks like a crash but is just resume over a changed binary.
 
 `deploy.sh` guards against this. After the build it sha1-sums the instrumented binary and compares the hash to `out/.binary-hash`. On a mismatch it forces `FRESH=1` and wipes `out/` before launching. A bare `cargo afl fuzz` has no such guard, so after a rebuild always start fresh yourself with `rm -rf out`.
 
