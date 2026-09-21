@@ -11,7 +11,7 @@ export function names(env: string) {
   const worker = `${RESOURCE_HASH}-${env}`
   const site = env === 'prod' ? ZONE : `${env}.${ZONE}`
 
-  return { worker, db: `${worker}-db`, bucket: `${worker}-cdn`, site, cdn: `cdn.${site}` }
+  return { worker, db: `${worker}-db`, bucket: `${worker}-cdn`, site, www: `www.${site}`, cdn: `cdn.${site}` }
 }
 
 const OWN = names(ENV)
@@ -21,6 +21,7 @@ export const DB_NAME = OWN.db
 export const BUCKET = OWN.bucket
 
 export const SITE_DOMAIN = OWN.site
+export const WWW_DOMAIN = OWN.www
 export const CDN_DOMAIN = OWN.cdn
 export const SITE_URL = `https://${SITE_DOMAIN}`
 export const CDN_URL = `https://${CDN_DOMAIN}`
