@@ -16,8 +16,7 @@
     "preview": "npm run config && astro preview",
     "deploy": "npm run build && wrangler deploy",
     "check": "npm run types && astro check --minimumSeverity warning",
-    "test": "npm run db:local && tsx tests/run.ts",
-    "test:browser": "deno run -A --node-modules-dir=none tests/browser.js"
+    "test": "npm run db:local && playwright test"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^14.3.2",
@@ -30,6 +29,7 @@
   },
   "devDependencies": {
     "@astrojs/check": "0.9.10",
+    "@playwright/test": "^1.63.0",
     "@types/node": "^22.20.3",
     "sharp": "^0.35.4",
     "tsx": "^4.23.13",

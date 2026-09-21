@@ -60,3 +60,7 @@ _micropython/
 
 # the social card is rasterized from src/assets/og.svg on every build
 site/public/og.png
+
+# playwright writes these per run, the report only survives a failure in CI
+site/test-results/
+site/playwright-report/
