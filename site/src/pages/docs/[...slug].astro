@@ -18,10 +18,11 @@ if (!Astro.params.slug) return Astro.redirect(`/docs/${first.slug}`)
 const doc = docs.find((each) => each.slug === Astro.params.slug)
 if (!doc) return Astro.rewrite('/404')
 
-const { Content } = await render(entries.find((each) => each.id === doc.id)!)
+const entry = entries.find((each) => each.id === doc.id)!
+const { Content } = await render(entry)
 ---
 
-<Base title={doc.title} gap="lg" class="flex-1">
+<Base title={doc.title} description={entry.data.description} gap="lg" class="flex-1">
   <div class="flex flex-col lg:flex-row gap-3 flex-1 min-h-0">
     <DocsNav sections={sections} current={doc} />
 

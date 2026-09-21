@@ -8,13 +8,13 @@ import { avatarFor } from '../../lib/account/avatar'
 import { packages } from '../../data/packages'
 
 const found = await userByHandle(env.DB, Astro.params.user ?? '')
-if (!found) return new Response(null, { status: 404 })
+if (!found) return Astro.rewrite('/404')
 
 const user = publicUser(found)
 const own = packages.filter((each) => each.author.handle === user.handle)
 ---
 
-<Base title={user.name ?? `@${user.handle}`} gap="lg">
+<Base title={user.name ?? `@${user.handle}`} description={`Packages published by @${user.handle} on Edge Python.`} gap="lg">
   <div class="flex flex-col items-start">
     <Avatar {...(user.avatar ?? avatarFor(user.id))} size="xl" label={`@${user.handle}`} />
 
