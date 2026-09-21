@@ -1,4 +1,4 @@
-import { random } from './crypto'
+import { random } from '../crypto'
 import type { Avatar, Palette } from '../account/avatar'
 import type { Me } from '../account/auth'
 

@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro'
 import { authorizeUrl, isConfigured, isProvider } from '../../../lib/server/oauth'
-import { random } from '../../../lib/server/crypto'
+import { random } from '../../../lib/crypto'
 
 export const GET: APIRoute = async ({ params, cookies, redirect }) => {
   if (!isProvider(params.provider)) return new Response('Unknown provider', { status: 404 })

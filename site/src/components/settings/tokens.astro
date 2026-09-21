@@ -2,14 +2,13 @@
 import Icon from '../ui/icon.astro'
 import Dialog from '../ui/dialog.astro'
 
-export type Token = { id: string; name: string; created: string; used: string | null }
+export type Token = { id: string; name: string; created: string; used: string | null; stops: string | null }
 
 interface Props {
   tokens: Token[]
-  fresh?: string
 }
 
-const { tokens, fresh } = Astro.props
+const { tokens } = Astro.props
 
 const action = 'underline text-fg-hint transition'
 ---
@@ -26,16 +25,20 @@ const action = 'underline text-fg-hint transition'
     <div class="bg-page border border-line-strong rounded-2xl overflow-hidden">
       <ul class="divide-y divide-line-strong">
         {tokens.map((token) => (
-          <li class="flex items-center gap-3 px-4 py-3">
+          <li class="flex items-center gap-3 px-4 py-3" data-token={token.id} data-name={token.name}>
             <Icon name="key" size="lg" class="shrink-0 text-fg-subtle" />
 
             <div class="min-w-0 flex-1">
               <p class="truncate">{token.name}</p>
-              <p class="truncate text-2xs text-fg-hint">Created {token.created}, {token.used ? `last used ${token.used}` : 'never used'}</p>
+              <p class="truncate text-2xs text-fg-hint">
+                {token.stops
+                  ? `Replaced, stops working ${token.stops}`
+                  : `Created ${token.created}, ${token.used ? `last used ${token.used}` : 'never used'}`}
+              </p>
             </div>
 
             <div class="shrink-0 flex items-center gap-3 text-xs">
-              <button type="button" data-rotate={token.id} class:list={[action, 'hover:text-fg']}>Rotate</button>
+              {!token.stops && <button type="button" data-rotate={token.id} class:list={[action, 'hover:text-fg']}>Rotate</button>}
               <button type="button" data-revoke={token.id} class:list={[action, 'hover:text-danger']}>Revoke</button>
             </div>
           </li>
@@ -68,7 +71,8 @@ const action = 'underline text-fg-hint transition'
       </ul>
     </div>
 
-    <p class="ml-4 text-2xs text-fg-hint">Rotate keeps the name and issues a new secret, revoke takes it out for good.</p>
+    <p data-error hidden class="ml-4 text-2xs text-danger"></p>
+    <p class="ml-4 text-2xs text-fg-hint">Rotate issues a new secret and leaves the old one working for a day, so a deploy has time to catch up. Revoke takes one out right away.</p>
   </section>
 
   <section class="flex flex-col gap-2">
@@ -86,7 +90,7 @@ edge publish app.edge</pre>
 
 <Dialog id="token" title="Please copy this token" subtitle="It is shown this one time. Store it somewhere safe before you close this.">
   <div class="flex items-center gap-3 rounded-2xl border border-line-emphasis bg-surface px-4 py-2">
-    <code data-secret class="min-w-0 flex-1 truncate font-mono text-xs">{fresh}</code>
+    <code data-secret class="min-w-0 flex-1 truncate font-mono text-xs"></code>
 
     <button type="button" data-copy class="shrink-0 flex items-center gap-1.5 text-2xs text-fg-hint transition hover:text-fg-muted">
       <Icon name="file" size="2xs" /><span data-copy-label>Copy</span>
@@ -95,9 +99,13 @@ edge publish app.edge</pre>
 </Dialog>
 
 <script>
+  import { createToken, revokeToken } from '../../lib/account/tokens'
+
   const RESET = 1200
 
   const dialog = document.querySelector<HTMLDialogElement>('[data-dialog="token"]')
+  const secretText = document.querySelector<HTMLElement>('[data-secret]')
+  const error = document.querySelector<HTMLElement>('[data-error]')
   const add = document.querySelector<HTMLButtonElement>('[data-add]')
   const form = document.querySelector<HTMLFormElement>('[data-new-token]')
   const input = form?.querySelector('input')
@@ -111,25 +119,90 @@ edge publish app.edge</pre>
     else form.reset()
   }
 
+  const complain = (reason: string) => {
+    if (!error) return
+    error.textContent = reason
+    error.hidden = false
+  }
+
+  // Closing the dialog reloads, so the list shows the new token and any clock that just started.
+  const reveal = (token: string) => {
+    if (!secretText || !dialog) return
+    secretText.textContent = token
+    dialog.addEventListener('close', () => location.reload(), { once: true })
+    dialog.showModal()
+  }
+
+  const busy = (button: HTMLButtonElement, on: boolean) => {
+    button.disabled = on
+    button.classList.toggle('opacity-50', on)
+  }
+
   add?.addEventListener('click', () => naming(true))
   form?.querySelector('[data-cancel]')?.addEventListener('click', () => naming(false))
 
-  // Create, rotate and revoke reach the server once the token API exists.
-  form?.addEventListener('submit', (event) => {
+  form?.addEventListener('submit', async (event) => {
     event.preventDefault()
+    error && (error.hidden = true)
+
+    const name = input?.value.trim()
+    if (!name) return
+
     naming(false)
-    dialog?.showModal()
+
+    try {
+      reveal(await createToken(name))
+    } catch (problem) {
+      complain((problem as Error).message)
+    }
   })
+
+  // A rotation is a create that names the token it replaces, so the old one keeps working for its last day.
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-rotate]')) {
+    button.addEventListener('click', async () => {
+      const row = button.closest<HTMLElement>('[data-token]')
+      const name = row?.dataset.name
+      const id = button.dataset.rotate
+      if (!name || !id) return
+
+      error && (error.hidden = true)
+      busy(button, true)
+
+      try {
+        reveal(await createToken(name, id))
+      } catch (problem) {
+        complain((problem as Error).message)
+        busy(button, false)
+      }
+    })
+  }
+
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-revoke]')) {
+    button.addEventListener('click', async () => {
+      const id = button.dataset.revoke
+      if (!id) return
+
+      error && (error.hidden = true)
+      busy(button, true)
+
+      try {
+        await revokeToken(id)
+        location.reload()
+      } catch (problem) {
+        complain((problem as Error).message)
+        busy(button, false)
+      }
+    })
+  }
 
   let timer: ReturnType<typeof setTimeout> | undefined
 
   document.querySelector('[data-copy]')?.addEventListener('click', async () => {
     const label = document.querySelector<HTMLElement>('[data-copy-label]')
-    const secret = document.querySelector<HTMLElement>('[data-secret]')
-    if (!label || !secret) return
+    if (!label || !secretText) return
 
     try {
-      await navigator.clipboard.writeText(secret.textContent ?? '')
+      await navigator.clipboard.writeText(secretText.textContent ?? '')
       label.textContent = 'Copied'
     } catch {
       label.textContent = "Couldn't copy"

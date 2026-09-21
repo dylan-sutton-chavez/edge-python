@@ -1,5 +1,5 @@
 import type { AstroCookies } from 'astro'
-import { random, sha256 } from './crypto'
+import { random, sha256 } from '../crypto'
 import type { User } from './users'
 
 const COOKIE = '__Host-session'

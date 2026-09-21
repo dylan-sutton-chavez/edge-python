@@ -100,10 +100,14 @@ test.describe('oauth without secrets', () => {
 })
 
 // The local email binding writes every message it sends, so the code is read rather than guessed.
-async function mailedCode(request: APIRequestContext, email: string) {
+async function mailedCode(request: APIRequestContext, email: string, from?: string) {
   const before = globSync(join(MAILS, '**/*.txt'))
 
-  const started = await request.post('/api/auth/email/start', { data: { email } })
+  // Codes are rate limited per address, so a test that signs in twice arrives from a second one.
+  const started = await request.post('/api/auth/email/start', {
+    data: { email },
+    headers: from ? { 'cf-connecting-ip': from } : undefined
+  })
   expect(await started.json()).toEqual({ ok: true })
 
   await expect.poll(() => globSync(join(MAILS, '**/*.txt')).length).toBe(before.length + 1)
@@ -149,5 +153,93 @@ test.describe('signing in by email', () => {
 
     expect(await (await request.post('/api/auth/signout')).json()).toEqual({ ok: true })
     expect((await request.get('/settings', { maxRedirects: 0 })).headers().location).toBe('/')
+  })
+})
+
+// The browser makes the secret, so a request only ever carries shapes the server can check.
+const b64url = (length: number) =>
+  Array.from({ length }, (_, at) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'[at % 64]).join('')
+
+const SALT = b64url(22)
+const HASH = b64url(43)
+
+async function signIn(request: APIRequestContext, from?: string) {
+  const email = `${unique()}@example.com`
+  const handle = unique()
+
+  await request.post('/api/auth/email/verify', { data: { email, code: await mailedCode(request, email, from) } })
+  await request.patch('/api/me', { data: { handle, name: 'Corpus', avatar: { icon: 1, palette: 'sky' } } })
+
+  return handle
+}
+
+test.describe('publish tokens', () => {
+  test('turns a signed out visitor away', async ({ request }) => {
+    for (const response of [
+      await request.post('/api/me/tokens', { data: { name: 'CI', salt: SALT, hash: HASH } }),
+      await request.delete('/api/me/tokens/whatever')
+    ]) {
+      expect(response.status()).toBe(401)
+      expect(await response.json()).toEqual({ error: 'Not signed in.' })
+    }
+  })
+
+  test('refuses a name or a digest it cannot have produced', async ({ request }) => {
+    await signIn(request)
+
+    const nameless = await request.post('/api/me/tokens', { data: { name: '   ', salt: SALT, hash: HASH } })
+    expect(nameless.status()).toBe(400)
+    expect(await nameless.json()).toEqual({ error: 'Name it in 40 characters or fewer.' })
+
+    for (const bad of [{ salt: 'short', hash: HASH }, { salt: SALT, hash: 'short' }, { salt: SALT, hash: `${HASH.slice(1)}.` }]) {
+      const response = await request.post('/api/me/tokens', { data: { name: 'CI', ...bad } })
+      expect(response.status()).toBe(400)
+      expect(await response.json()).toEqual({ error: 'That token was not generated here.' })
+    }
+  })
+
+  test('creates one, replaces it on a clock, and revokes', async ({ request }) => {
+    await signIn(request)
+
+    const made = await request.post('/api/me/tokens', { data: { name: 'CI', salt: SALT, hash: HASH } })
+    expect(made.status()).toBe(201)
+    const { id } = await made.json()
+    expect(id).toBeTruthy()
+
+    const listed = await (await request.get('/settings')).text()
+    expect(listed).toContain('CI')
+    expect(listed).toContain('never used')
+
+    const replaced = await request.post('/api/me/tokens', { data: { name: 'CI', salt: SALT, hash: HASH, replaces: id } })
+    expect(replaced.status()).toBe(201)
+    const second = (await replaced.json()).id
+    expect(second).not.toBe(id)
+
+    // The replaced token is still live, it just has a day left, which is what keeps a deploy from breaking.
+    const both = await (await request.get('/settings')).text()
+    expect(both).toContain('Replaced, stops working')
+
+    expect(await (await request.delete(`/api/me/tokens/${id}`)).json()).toEqual({ ok: true })
+    expect((await request.delete(`/api/me/tokens/${id}`)).status()).toBe(404)
+    expect(await (await request.delete(`/api/me/tokens/${second}`)).json()).toEqual({ ok: true })
+  })
+
+  test('replacing a token nobody owns finds nothing', async ({ request }) => {
+    await signIn(request)
+
+    const response = await request.post('/api/me/tokens', { data: { name: 'CI', salt: SALT, hash: HASH, replaces: 'nope42' } })
+    expect(response.status()).toBe(404)
+    expect(await response.json()).toEqual({ error: 'No such token.' })
+  })
+
+  test('another account cannot revoke or replace your token', async ({ request }) => {
+    await signIn(request)
+    const { id } = await (await request.post('/api/me/tokens', { data: { name: 'CI', salt: SALT, hash: HASH } })).json()
+
+    await request.post('/api/auth/signout')
+    await signIn(request, '10.0.0.2')
+
+    expect((await request.delete(`/api/me/tokens/${id}`)).status()).toBe(404)
+    expect((await request.post('/api/me/tokens', { data: { name: 'CI', salt: SALT, hash: HASH, replaces: id } })).status()).toBe(404)
   })
 })

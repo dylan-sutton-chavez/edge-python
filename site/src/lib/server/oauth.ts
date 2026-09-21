@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers'
-import { base64url } from './crypto'
+import { base64url } from '../crypto'
 import type { Identity } from './users'
 
 export type Provider = 'github' | 'google'

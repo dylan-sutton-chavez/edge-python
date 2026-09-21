@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro'
 import { env } from 'cloudflare:workers'
-import { digits, random, sha256 } from '../../../../lib/server/crypto'
+import { digits, random, sha256 } from '../../../../lib/crypto'
 import { body, ip, json } from '../../../../lib/server/http'
 import { sendCodeMail } from '../../../../lib/server/mailer'
 

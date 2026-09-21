@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro'
 import { env } from 'cloudflare:workers'
-import { equal, sha256 } from '../../../../lib/server/crypto'
+import { equal, sha256 } from '../../../../lib/crypto'
 import { body, json } from '../../../../lib/server/http'
 import { upsertUser } from '../../../../lib/server/users'
 import { startSession } from '../../../../lib/server/session'

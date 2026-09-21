@@ -8,6 +8,7 @@ import Profile from '../components/settings/profile.astro'
 import Account from '../components/settings/account.astro'
 import Tokens from '../components/settings/tokens.astro'
 import { linkedProviders } from '../lib/server/users'
+import { userTokens } from '../lib/server/tokens'
 
 const { user } = Astro.locals
 if (!user) return Astro.redirect('/')
@@ -23,12 +24,18 @@ const groups: { label: string; items: Item[] }[] = [
 const items = groups.flatMap((group) => group.items)
 const linked = await linkedProviders(env.DB, user.id)
 
-// Placeholders so the token states are reviewable, delete them with the API.
-const tokens = [
-  { id: 'placeholder-1', name: 'laptop', created: 'Sep 12, 2026', used: '2 days ago' },
-  { id: 'placeholder-2', name: 'CI', created: 'Aug 30, 2026', used: null }
-]
-const fresh = 'edge_pat_7q2vJ4nR8xKmT1sYdW6bZpA3cL9eH5uG'
+const held = await userTokens(env.DB, user.id)
+
+const day = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', year: 'numeric' })
+const clock = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+
+const tokens = held.results.map((token) => ({
+  id: token.id,
+  name: token.name,
+  created: day.format(token.created_at),
+  used: token.used_at === null ? null : day.format(token.used_at),
+  stops: token.expires_at === null ? null : clock.format(token.expires_at)
+}))
 
 const current = 'Profile'
 
@@ -105,7 +112,7 @@ const row = 'flex items-center gap-2 w-full px-4 py-1.5 text-left hover:bg-line-
         <div data-view={item.label} hidden={item.label !== current}>
           {item.label === 'Profile' && <Profile user={user} />}
           {item.label === 'Account' && <Account user={user} linked={linked} />}
-          {item.label === 'Tokens' && <Tokens tokens={tokens} fresh={fresh} />}
+          {item.label === 'Tokens' && <Tokens tokens={tokens} />}
         </div>
       ))}
     </section>
