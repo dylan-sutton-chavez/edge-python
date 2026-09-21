@@ -6,6 +6,7 @@
   ],
   "exclude": [
     "dist",
-    "tests/browser.js"
+    "test-results",
+    "playwright-report"
   ]
 }
