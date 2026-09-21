@@ -125,7 +125,7 @@ runs:
       working-directory: cli
       run: |
         case "${{ inputs.suite }}" in
-          engine)  cargo test --test cli --test run -- --skip builtin_corpora_mirror_the_web_api ;;
+          engine)  cargo test --bin edge --test cli --test run -- --skip builtin_corpora_mirror_the_web_api ;;
           network) cargo test --test run builtin_corpora_mirror_the_web_api ;;
           actors)  cargo test --test actor ;;
           skill)   cargo build && (cd ../skill && SKILL_EDGE="$GITHUB_WORKSPACE/cli/target/debug/edge" cargo test) ;;

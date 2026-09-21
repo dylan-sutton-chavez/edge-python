@@ -35,13 +35,13 @@ runs:
           | tar -xz --strip-components=2 -C /usr/local/bin "binaryen-version_121/bin/wasm-opt"
         wasm-opt --version
 
-    # Lint only the cdylib, --all-targets clashes with its panic handler.
-    - name: Clippy
+    # Lint only the cdylib, --all-targets clashes with its panic handler. The tests run on the host.
+    - name: Clippy and test
       shell: bash
       working-directory: std
       run: |
         for p in json re math struct; do
-          (cd "$p" && cargo +stable clippy --release --target wasm32-unknown-unknown -- -D warnings)
+          (cd "$p" && cargo +stable clippy --release --target wasm32-unknown-unknown -- -D warnings && cargo +stable test)
         done
 
     # `test` is pure Edge Python via entry.py with no crate to build.

@@ -456,6 +456,34 @@
   },
   {
     "given": {
+      "edge.json": "{ \"name\": \"slugify\", \"version\": \"0.1.0\", \"description\": \"Turn text into a slug.\", \"docs\": \"./docs\" }\n",
+      "main.py": "print(\"hello\")\n",
+      "docs/01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n```edge-python\nprint(1)\n```\n\n```output\n1\n```\n",
+      "docs/02-reference/01-api.mdx": "---\ntitle: Api\ndescription: Every function.\n---\n\n# Api\n"
+    },
+    "run": ["build"],
+    "stdout": ["packed app.edge (2 files, 2 docs)"],
+    "creates": ["app.edge"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"docs\": \"./docs\" }\n",
+      "main.py": "print(\"hello\")\n",
+      "docs/intro.mdx": "# Intro\n"
+    },
+    "run": ["build"],
+    "fails": ["needs a numeric prefix on every segment"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"description\": \"Turn absolutely any text that you have into a tidy url slug fast.\" }\n",
+      "main.py": "print(\"hello\")\n"
+    },
+    "run": ["build"],
+    "fails": ["the cap is 60"]
+  },
+  {
+    "given": {
       "edge.json": "{ \"imports\": { \"json\": \"https://cdn.edgepython.com/std/json.wasm\" } }\n",
       "main.py": "import json\nprint(json.dumps({\"a\": [1, True, None]}))\n"
     },

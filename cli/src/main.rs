@@ -1,5 +1,7 @@
 mod actor;
 mod cmd;
+/// The docs convention a package ships its pages under, checked at build time.
+mod docs;
 mod host;
 mod manifest;
 mod pack;

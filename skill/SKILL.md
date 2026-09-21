@@ -104,7 +104,7 @@ Three mutually exclusive modes.
 | `edge build --app` | `app` | Standalone binary, runs offline on the same OS and CPU with nothing installed |
 | `edge build --web` | `dist/` | Browser distribution with the vendored JS host and packages |
 
-`--out <path>` overrides the default. The bundle contains every `.py`, `.js` and `.mjs` under the project plus `edge.json`, the `README.md` and any `LICENSE` at the project root, together with each module the manifest declares by URL and the files it imports. An app binary for a project with a JavaScript module also carries the precompiled runtime, about 26 MB, so it runs offline. The entry is `main.py`, `app.py` or `index.py` when present. An app binary accepts only the snapshot flags `--save-state`, `--restore-state`, `--preempt` and `--events`.
+`--out <path>` overrides the default. The bundle contains every `.py`, `.js` and `.mjs` under the project plus `edge.json`, the `README.md` and any `LICENSE` at the project root, together with each module the manifest declares by URL and the files it imports. When `edge.json` declares a `docs` directory, a `.edge` also carries its `.mdx` pages under a reserved `@docs/` prefix, checked against the rendering convention first, and an app binary leaves them out. An app binary for a project with a JavaScript module also carries the precompiled runtime, about 26 MB, so it runs offline. The entry is `main.py`, `app.py` or `index.py` when present. An app binary accepts only the snapshot flags `--save-state`, `--restore-state`, `--preempt` and `--events`.
 
 ### edge actor
 
@@ -275,7 +275,7 @@ from lib.helpers import slugify as sl
 
 Not supported. `from . import x` and any form of dynamic import.
 
-Bare names resolve through `edge.json`, walking up from the importing file with the nearest manifest winning. The manifest maps each name to a path or URL under `imports`, and `extends` may name a parent manifest. The artifact decides the kind, `.py` is a code module, `.wasm` a native plugin and `.js` a JavaScript module, which the JS host runs on the page's main thread and the CLI in StarlingMonkey, so a manifest never classifies a package. A leftover `system` section fails with `edge.json at '<path>': move the system entries into imports`.
+Bare names resolve through `edge.json`, walking up from the importing file with the nearest manifest winning. The manifest maps each name to a path or URL under `imports`, and `extends` may name a parent manifest. The artifact decides the kind, `.py` is a code module, `.wasm` a native plugin and `.js` a JavaScript module, which the JS host runs on the page's main thread and the CLI in StarlingMonkey, so a manifest never classifies a package. A leftover `system` section fails with `edge.json at '<path>': move the system entries into imports`. `name`, `version`, `description` and `docs` are the registry fields, ignored by the compiler and shape-checked by the CLI, and an author and a date are not among them since a publish reads those from the account.
 
 ```json
 {

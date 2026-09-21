@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
+use crate::docs;
 use crate::host::{built_in, cdn, get, js};
 use crate::pack::{Bundle, Entry};
 use compiler::modules::{parse_integrity, scan_imports, ImportSpec};
@@ -15,7 +16,8 @@ const STANDALONE_MAGIC: &[u8] = b"EDGESFX\x01";
 
 /* Packs the project as a standalone binary, this exe with the bundle and a trailer appended. */
 pub fn standalone(manifest_path: &Path, out: PathBuf) -> Result<()> {
-    let (mut bundle, javascript) = collect_bundle(manifest_path)?;
+    // Nobody reads docs out of an executable, so an app binary leaves them behind.
+    let (mut bundle, javascript) = collect_bundle(manifest_path, false)?;
     let files = bundle.files.len();
     if javascript {
         let bytes = js::runtime_bytes().map_err(|e| anyhow!(e))?;
@@ -30,24 +32,25 @@ pub fn standalone(manifest_path: &Path, out: PathBuf) -> Result<()> {
     fs::write(&out, &image).with_context(|| format!("writing {}", out.display()))?;
     make_executable(&out)?;
     let run = out.display();
-    crate::ui::packed(&out, files, image.len() as u64,
+    crate::ui::packed(&out, files, 0, image.len() as u64,
         &format!("run  ./{run}   flags  --save-state --restore-state --preempt --events"));
     Ok(())
 }
 
 /* Packs the project as a portable .edge for any host that already has the CLI. */
 pub fn bundle(manifest_path: &Path, out: PathBuf) -> Result<()> {
-    let (bundle, _) = collect_bundle(manifest_path)?;
+    let (bundle, _) = collect_bundle(manifest_path, true)?;
     let payload = bundle.encode();
     fs::write(&out, &payload).with_context(|| format!("writing {}", out.display()))?;
     let run = out.display();
-    crate::ui::packed(&out, bundle.files.len(), payload.len() as u64,
+    let pages = bundle.files.iter().filter(|f| f.path.starts_with(docs::PREFIX)).count();
+    crate::ui::packed(&out, bundle.files.len() - pages, pages, payload.len() as u64,
         &format!("run  edge run {run}   or send it to an actor eval group"));
     Ok(())
 }
 
 /* Reads the project scripts, its notices, its edge.json and every url module it declares into a bundle. */
-fn collect_bundle(manifest_path: &Path) -> Result<(Bundle, bool)> {
+fn collect_bundle(manifest_path: &Path, with_docs: bool) -> Result<(Bundle, bool)> {
     let project = match manifest_path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
         _ => PathBuf::from("."),
@@ -66,6 +69,13 @@ fn collect_bundle(manifest_path: &Path) -> Result<(Bundle, bool)> {
     if manifest_path.exists() {
         files.push(Entry { path: "edge.json".to_string(), bytes: fs::read(manifest_path)? });
         let manifest = Manifest::load(manifest_path)?;
+        if with_docs {
+            if let Some(clash) = files.iter().find(|f| f.path.starts_with(docs::PREFIX)) {
+                bail!("'{}' takes the prefix the docs are packed under", clash.path);
+            }
+            let pages = docs::collect(&project, manifest.docs.as_deref())?;
+            files.extend(pages.into_iter().map(|(path, bytes)| Entry { path, bytes }));
+        }
         javascript = vendor_bundle(&manifest, &mut files)?;
     }
     Ok((Bundle { entry: find_entry(&scripts, &project), files }, javascript))
@@ -518,12 +528,44 @@ mod tests {
         fs::write(project.join("NOTES.md"), "not a notice").unwrap();
         fs::create_dir(project.join("sub")).unwrap();
         fs::write(project.join("sub/README.md"), "nested").unwrap();
-        let (bundle, javascript) = collect_bundle(&project.join("edge.json")).unwrap();
+        let (bundle, javascript) = collect_bundle(&project.join("edge.json"), true).unwrap();
         let mut paths: Vec<&str> = bundle.files.iter().map(|f| f.path.as_str()).collect();
         paths.sort();
         assert_eq!(paths, ["LICENSE", "LICENSE.py", "LICENSE.txt", "README.md", "main.py"]);
         assert_eq!(bundle.entry, "main.py");
         assert!(!javascript);
+    }
+
+    #[test]
+    fn a_declared_docs_tree_rides_along_and_an_app_leaves_it_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path();
+        fs::write(project.join("main.py"), "print(1)").unwrap();
+        fs::write(project.join("edge.json"), r#"{ "docs": "./docs", "imports": {} }"#).unwrap();
+        fs::create_dir(project.join("docs")).unwrap();
+        fs::write(project.join("docs/01-intro.mdx"), "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n").unwrap();
+        let manifest = project.join("edge.json");
+
+        let (packed, _) = collect_bundle(&manifest, true).unwrap();
+        let mut paths: Vec<&str> = packed.files.iter().map(|f| f.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(paths, ["@docs/01-intro.mdx", "edge.json", "main.py"]);
+
+        let (app, _) = collect_bundle(&manifest, false).unwrap();
+        assert!(app.files.iter().all(|f| !f.path.starts_with(docs::PREFIX)));
+    }
+
+    #[test]
+    fn a_docs_tree_off_the_convention_fails_the_build() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path();
+        fs::write(project.join("main.py"), "print(1)").unwrap();
+        fs::write(project.join("edge.json"), r#"{ "docs": "./docs" }"#).unwrap();
+        fs::create_dir(project.join("docs")).unwrap();
+        fs::write(project.join("docs/intro.mdx"), "# Intro\n").unwrap();
+        let Err(e) = collect_bundle(&project.join("edge.json"), true) else { panic!("an unordered page should fail the build") };
+        let err = format!("{e:#}");
+        assert!(err.contains("needs a numeric prefix"), "{err}");
     }
 
     #[test]

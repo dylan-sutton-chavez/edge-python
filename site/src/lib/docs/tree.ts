@@ -1,9 +1,9 @@
+import { ORDER } from './convention'
+
 export type Doc = { id: string; slug: string; title: string }
 export type Section = { label: string | null; docs: Doc[] }
 
 type Entry = { id: string; data: { title?: string } }
-
-const ORDER = /^\d+[-_]/
 
 const name = (segment: string) => segment.replace(ORDER, '')
 

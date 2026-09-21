@@ -59,9 +59,14 @@ pub fn build_report(dir: &std::path::Path, js_files: usize, packages: usize, scr
 }
 
 /// Closing lines for `edge build`, `hint` names the other modes so they stay discoverable.
-pub fn packed(out: &std::path::Path, files: usize, size: u64, hint: &str) {
+pub fn packed(out: &std::path::Path, files: usize, docs: usize, size: u64, hint: &str) {
     println!();
-    println!("  packed {} ({files} files)", out.display());
+    let pages = match docs {
+        0 => String::new(),
+        1 => ", 1 doc".to_string(),
+        n => format!(", {n} docs"),
+    };
+    println!("  packed {} ({files} files{pages})", out.display());
     let (scaled, unit) = if size < 1_000_000 { (size as f64 / 1_000.0, "KB") } else { (size as f64 / 1_000_000.0, "MB") };
     println!("  {scaled:.2} {unit}");
     println!();

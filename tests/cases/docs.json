@@ -1,0 +1,162 @@
+[
+  {
+    "name": "flat ordered pages",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\nHello.\n",
+      "02-usage.mdx": "---\ntitle: Usage\ndescription: How to use it.\n---\n\n# Usage\n\nMore.\n"
+    }
+  },
+  {
+    "name": "one folder deep",
+    "files": {
+      "01-reference/01-cli.mdx": "---\ntitle: Command line\ndescription: Every command and flag.\n---\n\n# Command line\n"
+    }
+  },
+  {
+    "name": "a playground pair",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n```edge-python\nprint(1)\n```\n\n```output\n1\n```\n"
+    }
+  },
+  {
+    "name": "a runnable fence needs no output",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n```edge-python\nprint(1)\n```\n"
+    }
+  },
+  {
+    "name": "a heading inside a fence is not a heading",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n```python\n# not a heading\n```\n"
+    }
+  },
+  {
+    "name": "a file that is not a page is ignored",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n",
+      "notes.txt": "ignored\n"
+    }
+  },
+  {
+    "name": "an underscore orders a segment too",
+    "files": {
+      "01_intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n"
+    }
+  },
+  {
+    "name": "a key beyond the two required ones is allowed",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\ndraft: true\n---\n\n# Intro\n"
+    }
+  },
+  {
+    "name": "no docs directory",
+    "files": {},
+    "error": "no directory is there"
+  },
+  {
+    "name": "a directory with no pages",
+    "files": { "README.md": "# not a page\n" },
+    "error": "no .mdx pages"
+  },
+  {
+    "name": "two folders deep",
+    "files": {
+      "01-a/02-b/03-c.mdx": "---\ntitle: C\ndescription: Too deep.\n---\n\n# C\n"
+    },
+    "error": "nests deeper than one folder"
+  },
+  {
+    "name": "a page with no numeric prefix",
+    "files": {
+      "intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n"
+    },
+    "error": "needs a numeric prefix"
+  },
+  {
+    "name": "a folder with no numeric prefix",
+    "files": {
+      "reference/01-cli.mdx": "---\ntitle: Cli\ndescription: Every command.\n---\n\n# Cli\n"
+    },
+    "error": "needs a numeric prefix"
+  },
+  {
+    "name": "digits with no separator do not order",
+    "files": {
+      "01intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n"
+    },
+    "error": "needs a numeric prefix"
+  },
+  {
+    "name": "a page with no frontmatter",
+    "files": { "01-intro.mdx": "# Intro\n" },
+    "error": "opens with no frontmatter"
+  },
+  {
+    "name": "frontmatter with no title",
+    "files": { "01-intro.mdx": "---\ndescription: Where to start.\n---\n\n# Intro\n" },
+    "error": "needs both a title and a description"
+  },
+  {
+    "name": "frontmatter with no description",
+    "files": { "01-intro.mdx": "---\ntitle: Intro\n---\n\n# Intro\n" },
+    "error": "needs both a title and a description"
+  },
+  {
+    "name": "frontmatter with an empty description",
+    "files": { "01-intro.mdx": "---\ntitle: Intro\ndescription:\n---\n\n# Intro\n" },
+    "error": "leaves the frontmatter 'description' empty"
+  },
+  {
+    "name": "a frontmatter line that is no key and value",
+    "files": { "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\njust prose\n---\n\n# Intro\n" },
+    "error": "which is no key and value"
+  },
+  {
+    "name": "unterminated frontmatter",
+    "files": { "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n" },
+    "error": "frontmatter unterminated"
+  },
+  {
+    "name": "a page with no heading",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\nJust prose.\n"
+    },
+    "error": "has 0 top-level headings"
+  },
+  {
+    "name": "a page with two headings",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# One\n\n# Two\n"
+    },
+    "error": "has 2 top-level headings"
+  },
+  {
+    "name": "an output block on its own",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n```output\n1\n```\n"
+    },
+    "error": "follows no edge-python block"
+  },
+  {
+    "name": "an output block separated by prose",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n```edge-python\nprint(1)\n```\n\nProse between.\n\n```output\n1\n```\n"
+    },
+    "error": "follows no edge-python block"
+  },
+  {
+    "name": "an output block after a plain fence",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n```python\nprint(1)\n```\n\n```output\n1\n```\n"
+    },
+    "error": "follows no edge-python block"
+  },
+  {
+    "name": "an unterminated fence",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n```edge-python\nprint(1)\n"
+    },
+    "error": "unterminated"
+  }
+]

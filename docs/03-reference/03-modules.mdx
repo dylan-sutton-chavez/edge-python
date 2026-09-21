@@ -54,10 +54,14 @@ __main__
 
 ## edge.json
 
-Bare names resolve through `edge.json`, the only manifest name. Both fields are optional.
+Bare names resolve through `edge.json`, the only manifest name. Every field is optional.
 
 ```json
 {
+  "name": "charts",
+  "version": "0.1.0",
+  "description": "Draw a chart from a list of points.",
+  "docs": "./docs",
   "imports": {
     "utils": "./lib/utils.py",
     "fastmath": "./vendor/fastmath.wasm",
@@ -69,6 +73,7 @@ Bare names resolve through `edge.json`, the only manifest name. Both fields are 
 
 - `imports`: bare name to spec (path or URL). One map holds every module, the artifact behind each spec tells the host whether it is a code module, a native module, or a JS module.
 - `extends`: a directory whose `edge.json` is consulted when a name is not declared locally. Use it for monorepo sub-packages that share the parent's dependencies. Omit it for hermetic libraries. Cycles in the chain fail at compile time.
+- `name`, `version`, `description`, `docs`: what a package carries into a registry. The compiler ignores all four, the CLI checks their shape. A name is lowercase letters, digits and single hyphens starting with a letter, a version is `major.minor.patch` with digits only, a description is one line of 60 characters at most, and `docs` is a relative directory inside the project. An author and a date are not fields here, a publish reads those from the account.
 - A `system` section is rejected with `edge.json at '<path>': move the system entries into imports`, in the compiler, the CLI, and the `<edge-python>` element alike.
 - Other unknown keys are ignored. Values must be strings or objects of strings. Numbers, arrays, and booleans are rejected. Supported string escapes are `\"`, `\\`, `\/`, `\n`, `\t`, `\r`. `\uXXXX` is not supported, so paste UTF-8 literally.
 

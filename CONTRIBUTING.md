@@ -93,6 +93,8 @@ npm test # builds the Worker and drives it in three engines
 
 An `edge-python` code block followed by an `output` block becomes a playground on the real engine, so every example and its output stay a verifiable pair.
 
+A page nests one folder deep at most, carries a numeric prefix on every path segment, opens with a closed frontmatter block holding a `title` and a `description`, and has exactly one top-level heading. `npm run build` refuses a page that breaks any of it, and `edge build` holds a package's own `docs` directory to the same rules. Both read [`site/src/lib/docs/convention.ts`](site/src/lib/docs/convention.ts) and [`cli/src/docs.rs`](cli/src/docs.rs), kept in step by [`tests/cases/docs.json`](tests/cases/docs.json), so a rule changed on one side fails on the other.
+
 ## Infra and CI
 
 `infra/` declares every Cloudflare resource in code and is checked with `npm run check` and `npm test`. `stage` and `cdn:local` run locally. The other scripts deploy and read `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
