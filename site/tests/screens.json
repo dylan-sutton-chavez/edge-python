@@ -1,7 +1,7 @@
 [
   { "name": "home", "path": "/" },
   { "name": "docs", "path": "/docs/getting-started/introduction" },
-  { "name": "profile", "path": "/dylan" },
+  { "name": "profile", "path": "/@dylan" },
   { "name": "nav panel", "path": "/", "click": "[data-nav-trigger]" },
   { "name": "nav sheet", "path": "/", "click": "[popovertarget='main-nav']" },
   { "name": "docs sheet", "path": "/docs/getting-started/introduction", "click": "[popovertarget='docs-nav']" }

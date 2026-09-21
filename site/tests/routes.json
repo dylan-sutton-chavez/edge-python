@@ -40,7 +40,7 @@
       { "path": "/settings", "status": 302, "location": "/?welcome" },
       { "method": "PATCH", "path": "/api/me", "json": { "handle": "dylan", "name": "Corpus", "avatar": { "icon": 1, "palette": "sky" } }, "status": 409, "equals": { "error": "@dylan is already taken." } },
       { "method": "PATCH", "path": "/api/me", "json": { "handle": "{handle}", "name": "Corpus", "avatar": { "icon": 1, "palette": "sky" }, "bio": "hello" }, "status": 200, "contains": ["\"handle\":\"{handle}\""] },
-      { "path": "/{handle}", "status": 200, "contains": ["@{handle}", "hello"] },
+      { "path": "/@{handle}", "status": 200, "contains": ["@{handle}", "hello"] },
       { "path": "/settings", "status": 200 },
       { "path": "/api/health", "status": 200, "equals": { "ok": true, "users": 2 } },
       { "method": "POST", "path": "/api/auth/signout", "status": 200, "equals": { "ok": true } },

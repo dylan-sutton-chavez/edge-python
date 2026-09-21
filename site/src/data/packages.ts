@@ -12,7 +12,7 @@ export const packages: Package[] = [
   {
     name: 'json',
     description: 'JSON parsing and serialization.',
-    href: '/packages/json',
+    href: '/package/json',
     author: { handle: 'dylan', avatar: { icon: 12, palette: 'sky' } },
     downloads: '1.2k'
   }

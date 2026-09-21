@@ -1,3 +1,4 @@
+// Handles live under @, so this list is about names nobody should claim, not about routes.
 export const RESERVED = ['404', 'api', 'docs', 'packages', 'publish', 'settings', 'terms', 'welcome']
 
 export function validateHandle(value: string): string | null {

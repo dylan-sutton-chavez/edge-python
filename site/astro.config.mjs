@@ -6,6 +6,7 @@ import mdx from '@astrojs/mdx'
 import tailwindcss from '@tailwindcss/vite'
 import { unified } from '@astrojs/markdown-remark'
 import { remarkPlayground } from './src/lib/docs/remark-playground'
+import { SITE_URL } from '../infra/src/constants'
 
 // The Cloudflare plugin ends Vite environments, dropping Astro's dev font map, so fonts come from .astro/fonts.
 const devFonts = {
@@ -27,6 +28,7 @@ const devFonts = {
 }
 
 export default defineConfig({
+  site: SITE_URL,
   output: 'server',
   adapter: cloudflare({ imageService: 'passthrough' }),
   session: false,

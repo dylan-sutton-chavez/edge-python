@@ -28,6 +28,7 @@ const card = new URL('/og.png', Astro.url).href
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{heading}</title>
   <meta name="description" content={description} />
+  <link rel="canonical" href={page} />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 
   <meta property="og:type" content="website" />
