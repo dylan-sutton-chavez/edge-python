@@ -92,6 +92,24 @@ export const userByHandle = (db: D1Database, handle: string) => db.prepare('sele
 export const addressOf = async (db: D1Database, userId: string) =>
   (await db.prepare("select provider_id from account where user_id = ? and provider = 'email'").bind(userId).first<{ provider_id: string }>())?.provider_id ?? null
 
+export const addressTaken = async (db: D1Database, email: string) =>
+  Boolean(await db.prepare("select 1 from account where provider = 'email' and provider_id = ?").bind(email).first())
+
+/* Moves where the codes go, one write because the address lives in one place. False when another account holds it. */
+export async function moveAddress(db: D1Database, userId: string, email: string) {
+  try {
+    const done = await db
+      .prepare("update account set provider_id = ? where user_id = ? and provider = 'email'")
+      .bind(email, userId)
+      .run()
+
+    return done.meta.changes > 0
+  } catch {
+    // The primary key refuses an address another account already holds, whoever got there first.
+    return false
+  }
+}
+
 export async function linkedProviders(db: D1Database, userId: string) {
   const { results } = await db.prepare('select provider from account where user_id = ?').bind(userId).all<{ provider: string }>()
   return results.map((row) => row.provider)

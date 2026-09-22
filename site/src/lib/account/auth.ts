@@ -28,3 +28,5 @@ export const saveProfile = (profile: Profile) => call<Public>('/api/me', 'PATCH'
 export const signOut = () => call<{ ok: boolean }>('/api/auth/signout', 'POST')
 export const deleteAccount = (code: string) => call<{ ok: boolean }>('/api/me', 'DELETE', { code })
 export const disconnect = (provider: string) => call<{ ok: boolean }>(`/api/me/accounts/${provider}`, 'DELETE')
+export const startEmailChange = (email: string) => call<{ ok: boolean }>('/api/me/email/start', 'POST', { email })
+export const changeEmail = (email: string, code: string) => call<{ email: string }>('/api/me/email', 'PATCH', { email, code })

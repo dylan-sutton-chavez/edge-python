@@ -301,3 +301,66 @@ test.describe('changing a handle', () => {
     expect(await (await request.get(`/@${held}`)).text()).toContain('still editable')
   })
 })
+
+test.describe('changing an address', () => {
+  test('turns a signed out visitor away', async ({ request }) => {
+    for (const response of [
+      await request.post('/api/me/email/start', { data: { email: 'new@example.com' } }),
+      await request.patch('/api/me/email', { data: { email: 'new@example.com', code: '000000' } })
+    ]) {
+      expect(response.status()).toBe(401)
+      expect(await response.json()).toEqual({ error: 'Not signed in.' })
+    }
+  })
+
+  test('refuses an address that is not one, its own, or one already held', async ({ request }) => {
+    const { email } = await signIn(request)
+
+    const bad = await request.post('/api/me/email/start', { data: { email: 'nope' } })
+    expect(bad.status()).toBe(400)
+
+    const same = await request.post('/api/me/email/start', { data: { email } })
+    expect(same.status()).toBe(409)
+    expect(await same.json()).toEqual({ error: 'That is already your address.' })
+
+    const held = await request.post('/api/me/email/start', { data: { email: 'c.sutton.dylan@gmail.com' } })
+    expect(held.status()).toBe(409)
+    expect(await held.json()).toEqual({ error: 'Another account already uses that address.' })
+  })
+
+  test('needs the code mailed to the new address', async ({ request }) => {
+    await signIn(request)
+
+    const wanted = `${unique()}@example.com`
+    expect(await (await request.post('/api/me/email/start', { data: { email: wanted } })).json()).toEqual({ ok: true })
+
+    const wrong = await request.patch('/api/me/email', { data: { email: wanted, code: '000000' } })
+    expect(wrong.status()).toBe(403)
+    expect(await wrong.json()).toEqual({ error: 'That code is wrong or expired.' })
+  })
+
+  // The old address stops reaching the account, which is the whole point of keeping it in one place.
+  test('moves where the codes go and leaves the old address out', async ({ request }) => {
+    const { email: was, handle } = await signIn(request)
+    const wanted = `${unique()}@example.com`
+
+    const before = globSync(join(MAILS, '**/*.txt'))
+    expect(await (await request.post('/api/me/email/start', { data: { email: wanted } })).json()).toEqual({ ok: true })
+
+    await expect.poll(() => globSync(join(MAILS, '**/*.txt')).length).toBe(before.length + 1)
+    const mail = globSync(join(MAILS, '**/*.txt')).find((each) => !before.includes(each))!
+    const code = readFileSync(mail, 'utf8').match(/\d{6}/)![0]
+
+    expect(await (await request.patch('/api/me/email', { data: { email: wanted, code } })).json()).toEqual({ email: wanted })
+    expect(await (await request.get('/settings')).text()).toContain(wanted)
+
+    await request.post('/api/auth/signout')
+
+    // A code to the address it used to hold opens a fresh account, so it has no handle of its own.
+    const again = await mailedCode(request, was, `10.0.0.${++arrival}`)
+    const back = await request.post('/api/auth/email/verify', { data: { email: was, code: again } })
+
+    expect(await back.json()).toEqual({ ok: true, handle: null })
+    expect((await request.get(`/@${handle}`)).status()).toBe(200)
+  })
+})
