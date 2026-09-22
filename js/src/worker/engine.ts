@@ -8,7 +8,7 @@ import { nativeTable, resetNativeTable } from '../native.ts';
 import type { NativeLoader } from '../native.ts';
 import type { CompilerExports } from '../wasm.ts';
 import type { CacheBackend } from '../cache/types.ts';
-import type { LoadOpts, MainThreadManifest, RunOpts, ExecResult } from '../protocol.ts';
+import type { Limits, LoadOpts, MainThreadManifest, RunOpts, ExecResult } from '../protocol.ts';
 import { errMsg, writeBytes, ERR_RUNTIME } from '../util.ts';
 
 const TE = new TextEncoder();
@@ -46,6 +46,8 @@ const pendingEvents: string[] = [];
 const pendingHostCalls = new Map<number, DeferredHostCall>();
 // Back-edges between preempt yields, 0 disables.
 let preemptEvery = 0;
+// Caps the embedder declared at load, null leaves every run on the sandbox profile.
+let limits: Limits | null = null;
 let pauseRequested = false;
 // True from run entry so mid-boot pause waits.
 let running = false;
@@ -70,10 +72,11 @@ const requireExports = (): CompilerExports => {
 };
 
 /* Engine orchestrator, internal to the Worker. Consumers use `createWorker` in `src/index.ts`. Lifecycle is `load` once -> many `run` cycles -> `dispose`, and each run instantiates the compiler fresh with no state leak. */
-export async function load({ wasmUrl, integrity = true, loaders: loaderUrls = [], imports = null, version = null }: LoadOpts, manifests: MainThreadManifest[] = []): Promise<{ integrityActive: boolean, loadMs: number }> {
+export async function load({ wasmUrl, integrity = true, loaders: loaderUrls = [], imports = null, version = null, limits: caps = null }: LoadOpts, manifests: MainThreadManifest[] = []): Promise<{ integrityActive: boolean, loadMs: number }> {
     if (!wasmUrl) throw new Error('load: wasmUrl is required');
     const t0 = performance.now();
     importsMap = imports;
+    limits = caps;
 
     cache = await openCache(integrity);
     integrityActive = Boolean(integrity) && cache.persistent;
@@ -176,6 +179,11 @@ async function execute({ src, payload, start, entryDir = '', baseUrl = null, onL
         const ptr = writeBytes(exports, inputBytes);
         exports.set_input(ptr, inputBytes.length);
         exports.wasm_free(ptr, Math.max(1, inputBytes.length));
+    }
+
+    // Caps the next run_start or repl_eval, a zero field keeps the sandbox value.
+    if (limits && exports.set_limits) {
+        exports.set_limits(BigInt(limits.heap ?? 0), BigInt(limits.ops ?? 0), BigInt(limits.calls ?? 0));
     }
 
     const t0 = performance.now();

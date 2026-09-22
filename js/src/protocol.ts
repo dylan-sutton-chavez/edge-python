@@ -2,12 +2,20 @@
 
 import type { EdgeValue } from './rt.ts';
 
+/* Caps a run boots under, a field left out keeps the engine's sandbox value. */
+export interface Limits {
+    heap?: number
+    ops?: number
+    calls?: number
+}
+
 export interface LoadOpts {
     wasmUrl?: string
     integrity?: boolean
     loaders?: string[]
     imports?: Record<string, string> | null
     version?: string | null
+    limits?: Limits | null
 }
 
 export interface MainThreadManifest {

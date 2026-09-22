@@ -246,6 +246,16 @@ Deno.test("js: <edge-python> runs the corpus through index.html", async () => {
         if (!(tagged.blobLen > 100)) throw new Error(`preempt via element: implausible blob length ${tagged.blobLen}`);
         if (tagged.out !== "") throw new Error(`preempt via element: run reported ${JSON.stringify(tagged.out)}`);
 
+        // A cap the embedder declares reaches the engine, the sandbox default finishes this loop.
+        const capped = await page.evaluate(async (host) => {
+            const { createWorker } = await import(host);
+            const worker = await createWorker({ wasmUrl: "https://cdn.edgepython.com/compiler.wasm", limits: { ops: 1000 } });
+            const { out } = await worker.run("n = 0\nfor i in range(100000):\n    n = n + 1\nprint(n)");
+            worker.dispose();
+            return out;
+        }, `https://${CDN_HOST}/js/src/index.js`);
+        if (!capped.includes("budget exceeded")) throw new Error(`declared op cap: expected a budget error, got ${JSON.stringify(capped)}`);
+
         // Laziness, only what the corpus imports gets fetched. Declared-but-unused stays untouched.
         if (!reqd("/app/ui.js")) throw new Error("ui was used but ui.js never loaded");
         if (!reqd("json.wasm")) throw new Error("json imported but json.wasm never fetched");

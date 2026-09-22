@@ -1,6 +1,6 @@
 import type { EdgeValue } from './rt.ts';
 import { errMsg, hostCallError } from './util.ts';
-import type { MainThreadManifest, RunOpts, ExecResult, WorkerRequest, WorkerMessage } from './protocol.ts';
+import type { Limits, MainThreadManifest, RunOpts, ExecResult, WorkerRequest, WorkerMessage } from './protocol.ts';
 
 /* A page-side module handed to `mainThreadModules`, either a flat handler map or a factory that receives `{ pushEvent }`. User-supplied handlers have arbitrary signatures, hence `any[]` here. */
 // deno-lint-ignore no-explicit-any
@@ -15,6 +15,7 @@ export interface CreateWorkerOpts {
     integrity?: boolean
     loaders?: string[]
     version?: string | null
+    limits?: Limits | null
 }
 
 export interface WorkerHandle {

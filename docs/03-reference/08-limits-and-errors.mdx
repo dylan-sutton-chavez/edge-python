@@ -7,7 +7,7 @@ description: "Sandbox limits, integer width, error types, and runtime guarantees
 
 ## Sandboxed execution
 
-Every execution is metered, there is no unmetered mode. Both hosts, the JS host and the CLI, run every script under these limits, and `edge actor` groups can override them per field.
+Every execution is metered, there is no unmetered mode. Both hosts, the JS host and the CLI, run every script under these limits, and an embedder overrides them per field, `createWorker` through its `limits` option and `edge actor` through a group's.
 
 | Limit | Value | What hitting it raises |
 |---|---|---|
