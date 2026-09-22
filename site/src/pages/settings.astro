@@ -4,6 +4,7 @@ import { env } from 'cloudflare:workers'
 import Base from '../layouts/base.astro'
 import Icon from '../components/ui/icon.astro'
 import Sheet from '../components/ui/sheet.astro'
+import Confirm from '../components/ui/confirm.astro'
 import Profile from '../components/settings/profile.astro'
 import Account from '../components/settings/account.astro'
 import Tokens from '../components/settings/tokens.astro'
@@ -47,7 +48,7 @@ const row = 'flex items-center gap-2 w-full px-4 py-1.5 text-left hover:bg-line-
   <h1 class="sr-only">Settings</h1>
 
   <div data-settings class="flex flex-col lg:flex-row gap-3 flex-1 min-h-0 text-sm">
-    <aside class="hidden lg:block w-[260px] shrink-0 space-y-4">
+    <aside data-sticky class="hidden lg:block w-[260px] shrink-0 space-y-4 sticky self-start max-h-[calc(100dvh-var(--sticky-top)-var(--sticky-gap))] overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {groups.map((group) => (
         <div>
           <span class="px-4 text-2xs text-fg-subtle">{group.label}</span>
@@ -117,6 +118,9 @@ const row = 'flex items-center gap-2 w-full px-4 py-1.5 text-left hover:bg-line-
       ))}
     </section>
   </div>
+
+  {/* One instance for the page, both the tokens panel and the account panel ask through it. */}
+  <Confirm />
 </Base>
 
 <script>
@@ -146,6 +150,9 @@ const row = 'flex items-center gap-2 w-full px-4 py-1.5 text-left hover:bg-line-
 
     const label = root.querySelector<HTMLElement>('[data-bar-label]')
     if (label) label.textContent = name
+
+    // The panel rides in the url, so a reload after revoking or disconnecting comes back to it.
+    history.replaceState(null, '', `#${name.toLowerCase()}`)
   }
 
   root?.addEventListener('click', (event) => {

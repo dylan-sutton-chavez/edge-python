@@ -163,14 +163,17 @@ const b64url = (length: number) =>
 const SALT = b64url(22)
 const HASH = b64url(43)
 
-async function signIn(request: APIRequestContext, from?: string) {
+// Codes are rate limited per address, so every sign-in arrives from one of its own.
+let arrival = 0
+
+async function signIn(request: APIRequestContext) {
   const email = `${unique()}@example.com`
   const handle = unique()
 
-  await request.post('/api/auth/email/verify', { data: { email, code: await mailedCode(request, email, from) } })
+  await request.post('/api/auth/email/verify', { data: { email, code: await mailedCode(request, email, `10.0.0.${++arrival}`) } })
   await request.patch('/api/me', { data: { handle, name: 'Corpus', avatar: { icon: 1, palette: 'sky' } } })
 
-  return handle
+  return { email, handle }
 }
 
 test.describe('publish tokens', () => {
@@ -237,9 +240,64 @@ test.describe('publish tokens', () => {
     const { id } = await (await request.post('/api/me/tokens', { data: { name: 'CI', salt: SALT, hash: HASH } })).json()
 
     await request.post('/api/auth/signout')
-    await signIn(request, '10.0.0.2')
+    await signIn(request)
 
     expect((await request.delete(`/api/me/tokens/${id}`)).status()).toBe(404)
     expect((await request.post('/api/me/tokens', { data: { name: 'CI', salt: SALT, hash: HASH, replaces: id } })).status()).toBe(404)
+  })
+})
+
+test.describe('deleting an account', () => {
+  test('turns a signed out visitor away', async ({ request }) => {
+    const response = await request.delete('/api/me', { data: { code: '000000' } })
+
+    expect(response.status()).toBe(401)
+    expect(await response.json()).toEqual({ error: 'Not signed in.' })
+  })
+
+  // A live session is not enough, the code proves the mailbox still answers.
+  test('refuses a session without a fresh code', async ({ request }) => {
+    const { handle } = await signIn(request)
+
+    for (const data of [{}, { code: '000000' }]) {
+      const response = await request.delete('/api/me', { data })
+      expect(response.status()).toBe(403)
+      expect(await response.json()).toEqual({ error: 'That code is wrong or expired.' })
+    }
+
+    expect((await request.get(`/@${handle}`)).status()).toBe(200)
+  })
+
+  test('takes the account with the right code and signs the visitor out', async ({ request }) => {
+    const { email, handle } = await signIn(request)
+
+    const code = await mailedCode(request, email, `10.0.0.${++arrival}`)
+    expect(await (await request.delete('/api/me', { data: { code } })).json()).toEqual({ ok: true })
+
+    expect((await request.get('/@' + handle)).status()).toBe(404)
+    expect((await request.get('/settings', { maxRedirects: 0 })).headers().location).toBe('/')
+  })
+})
+
+test.describe('changing a handle', () => {
+  const profile = (handle: string) => ({ handle, name: 'Corpus', avatar: { icon: 1, palette: 'sky' } })
+
+  // Naming yourself at sign-up is free, so the wait only starts once a handle actually moves.
+  test('allows one move and then holds the handle for seven days', async ({ request }) => {
+    await signIn(request)
+
+    const held = unique()
+    const moved = await request.patch('/api/me', { data: profile(held) })
+    expect(moved.status()).toBe(200)
+    expect((await moved.json()).handle).toBe(held)
+
+    const again = await request.patch('/api/me', { data: profile(unique()) })
+    expect(again.status()).toBe(429)
+    expect((await again.json()).error).toMatch(/change your handle again in \d+ days?\./)
+
+    // The rest of the profile still saves while the handle is held.
+    const rest = await request.patch('/api/me', { data: { ...profile(held), bio: 'still editable' } })
+    expect(rest.status()).toBe(200)
+    expect(await (await request.get(`/@${held}`)).text()).toContain('still editable')
   })
 })

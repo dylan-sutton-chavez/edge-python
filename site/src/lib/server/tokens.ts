@@ -35,6 +35,7 @@ export const userTokens = (db: D1Database, userId: string) =>
 export async function createToken(db: D1Database, userId: string, name: string, salt: string, hash: string, replaces?: string) {
   const id = random(6)
   const now = Date.now()
+  const stops = replaces ? now + GRACE : null
 
   const writes = [
     db
@@ -47,13 +48,13 @@ export async function createToken(db: D1Database, userId: string, name: string, 
     writes.push(
       db
         .prepare('update token set expires_at = ? where id = ? and user_id = ? and expires_at is null')
-        .bind(now + GRACE, replaces, userId)
+        .bind(stops, replaces, userId)
     )
   }
 
   await db.batch(writes)
 
-  return id
+  return { id, stops }
 }
 
 export async function revokeToken(db: D1Database, userId: string, id: string) {

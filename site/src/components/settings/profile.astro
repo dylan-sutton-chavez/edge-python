@@ -98,6 +98,7 @@ const spinner = 'col-start-1 row-start-1 spinner transition opacity-0 group-data
 
 <script>
   import { saveProfile } from '../../lib/account/auth'
+  import { confirmed } from '../../lib/account/confirm'
   import { validateHandle } from '../../lib/account/handle'
   import { setError, pending } from '../../lib/account/form'
   import type { Palette } from '../../lib/account/avatar'
@@ -138,6 +139,15 @@ const spinner = 'col-start-1 row-start-1 spinner transition opacity-0 group-data
       const problem = validateHandle(handle.value)
       setError(handle, problem)
       if (problem) return
+
+      // Name, bio and avatar save straight through. A handle is public and reusable, so it asks first.
+      const moved = Boolean(handle.defaultValue) && handle.value !== handle.defaultValue
+
+      if (moved && !(await confirmed({
+        title: `Change your handle to @${handle.value}?`,
+        body: `Links to @${handle.defaultValue} stop working and anyone can take that handle once you let it go. You can change yours again after seven days.`,
+        action: 'Change handle'
+      }))) return
 
       try {
         await pending(form.querySelector<HTMLButtonElement>('button[type="submit"]')!, () => saveProfile({

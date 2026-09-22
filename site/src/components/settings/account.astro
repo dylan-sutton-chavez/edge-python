@@ -16,7 +16,7 @@ const providers = ([
   { id: 'google', name: 'Google', icon: 'google' }
 ] as const).filter(({ id }) => isConfigured(id) || linked.includes(id))
 
-const card = 'bg-page border border-line-strong rounded-2xl p-4'
+const card = 'bg-page border border-line-strong p-4'
 ---
 
 <div class="flex flex-col gap-6">
@@ -28,8 +28,8 @@ const card = 'bg-page border border-line-strong rounded-2xl p-4'
   <section class="flex flex-col gap-2">
     <h3 class="ml-4">Email</h3>
 
-    <div class:list={[card, 'flex items-center gap-3']}>
-      <Icon name="mailbox" size="lg" class="shrink-0 text-fg-subtle" />
+    <div class:list={[card, 'rounded-2xl flex items-center gap-3']}>
+      <Icon name="mail" size="lg" class="shrink-0 text-fg-subtle" />
       <span class="min-w-0 flex-1 truncate font-mono text-xs">{user.email}</span>
     </div>
 
@@ -42,7 +42,7 @@ const card = 'bg-page border border-line-strong rounded-2xl p-4'
     <div class="bg-page border border-line-strong rounded-2xl overflow-hidden">
       <ul class="divide-y divide-line-strong">
         <li class="flex items-center gap-3 px-4 py-3">
-          <Icon name="key" size="lg" class="shrink-0 text-fg-subtle" />
+          <Icon name="glasses" size="lg" class="shrink-0 text-fg-subtle" />
 
           <div class="min-w-0 flex-1">
             <p>Email code</p>
@@ -77,10 +77,10 @@ const card = 'bg-page border border-line-strong rounded-2xl p-4'
   <section class="flex flex-col gap-2">
     <h3 class="ml-4">Delete account</h3>
 
-    <div class:list={[card, 'flex flex-col gap-4 sm:flex-row sm:items-center']}>
+    <div class:list={[card, 'rounded-2xl flex flex-col gap-4 sm:flex-row sm:items-center']}>
       <p class="min-w-0 flex-1 text-fg-muted">Your profile and sign-in methods go with it. This cannot be undone.</p>
 
-      <button type="button" data-delete class="shrink-0 text-sm flex items-center gap-2 transition border border-line text-fg-hint px-4 py-1 rounded-full hover:text-danger">
+      <button type="button" data-delete data-email={user.email} class="shrink-0 text-sm flex items-center gap-2 transition border border-line text-fg-hint px-4 py-1 rounded-full hover:text-danger">
         <Icon name="trash" />Delete
       </button>
     </div>
@@ -88,7 +88,8 @@ const card = 'bg-page border border-line-strong rounded-2xl p-4'
 </div>
 
 <script>
-  import { deleteAccount, disconnect } from '../../lib/account/auth'
+  import { deleteAccount, disconnect, sendCode } from '../../lib/account/auth'
+  import { confirmedWithCode } from '../../lib/account/confirm'
 
   document.querySelectorAll<HTMLButtonElement>('[data-disconnect]').forEach((button) => {
     button.addEventListener('click', async () => {
@@ -97,10 +98,32 @@ const card = 'bg-page border border-line-strong rounded-2xl p-4'
     })
   })
 
-  document.querySelector('[data-delete]')?.addEventListener('click', async () => {
-    if (!confirm('Delete your account? This cannot be undone.')) return
+  // A live session is not enough to end an account, so a fresh code has to come back from the mailbox first.
+  document.querySelector<HTMLButtonElement>('[data-delete]')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget as HTMLButtonElement
+    const email = button.dataset.email
+    if (!email) return
 
-    await deleteAccount()
-    location.replace('/')
+    button.disabled = true
+
+    try {
+      await sendCode(email)
+
+      const code = await confirmedWithCode({
+        title: 'Delete your account?',
+        body: 'Your profile, your sign-in methods and your publish tokens go with it. Nothing here comes back.',
+        action: 'Delete account'
+      })
+
+      if (code) {
+        await deleteAccount(code)
+        location.replace('/')
+        return
+      }
+    } catch (problem) {
+      alert((problem as Error).message)
+    }
+
+    button.disabled = false
   })
 </script>

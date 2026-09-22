@@ -11,6 +11,8 @@ interface Props {
 const { tokens } = Astro.props
 
 const action = 'underline text-fg-hint transition'
+const note = (token: Token) =>
+  token.stops ? `Replaced, stops working ${token.stops}` : `Created ${token.created}, ${token.used ? `last used ${token.used}` : 'never used'}`
 ---
 
 <div class="flex flex-col gap-6">
@@ -22,29 +24,26 @@ const action = 'underline text-fg-hint transition'
   <section class="flex flex-col gap-2">
     <h3 class="ml-4">Your tokens</h3>
 
-    <div class="bg-page border border-line-strong rounded-2xl overflow-hidden">
-      <ul class="divide-y divide-line-strong">
+    {/* On its own the row is a button, so it reads as a pill until there are tokens to hold. */}
+    <div data-card class:list={['bg-page border border-line-strong overflow-hidden', tokens.length ? 'rounded-2xl' : 'rounded-full']}>
+      <ul data-list class="divide-y divide-line-strong">
         {tokens.map((token) => (
           <li class="flex items-center gap-3 px-4 py-3" data-token={token.id} data-name={token.name}>
             <Icon name="key" size="lg" class="shrink-0 text-fg-subtle" />
 
             <div class="min-w-0 flex-1">
               <p class="truncate">{token.name}</p>
-              <p class="truncate text-2xs text-fg-hint">
-                {token.stops
-                  ? `Replaced, stops working ${token.stops}`
-                  : `Created ${token.created}, ${token.used ? `last used ${token.used}` : 'never used'}`}
-              </p>
+              <p data-note class="truncate text-2xs text-fg-hint">{note(token)}</p>
             </div>
 
             <div class="shrink-0 flex items-center gap-3 text-xs">
-              {!token.stops && <button type="button" data-rotate={token.id} class:list={[action, 'hover:text-fg']}>Rotate</button>}
-              <button type="button" data-revoke={token.id} class:list={[action, 'hover:text-danger']}>Revoke</button>
+              {!token.stops && <button type="button" data-rotate class:list={[action, 'hover:text-fg']}>Rotate</button>}
+              <button type="button" data-revoke class:list={[action, 'hover:text-danger']}>Revoke</button>
             </div>
           </li>
         ))}
 
-        <li>
+        <li data-new>
           <button type="button" data-add class="flex w-full items-center justify-center gap-2 px-4 py-3 text-fg-hint transition hover:bg-surface hover:text-fg">
             <Icon name="close" size="sm" class="rotate-45" />
             <span>Create new</span>
@@ -88,6 +87,23 @@ edge publish app.edge</pre>
   </section>
 </div>
 
+{/* One copy of a row's markup, cloned for a token the page did not render. */}
+<template data-row>
+  <li class="flex items-center gap-3 px-4 py-3">
+    <Icon name="key" size="lg" class="shrink-0 text-fg-subtle" />
+
+    <div class="min-w-0 flex-1">
+      <p data-row-name class="truncate"></p>
+      <p data-note class="truncate text-2xs text-fg-hint"></p>
+    </div>
+
+    <div class="shrink-0 flex items-center gap-3 text-xs">
+      <button type="button" data-rotate class:list={[action, 'hover:text-fg']}>Rotate</button>
+      <button type="button" data-revoke class:list={[action, 'hover:text-danger']}>Revoke</button>
+    </div>
+  </li>
+</template>
+
 <Dialog id="token" title="Please copy this token" subtitle="It is shown this one time. Store it somewhere safe before you close this.">
   <div class="flex items-center gap-3 rounded-2xl border border-line-emphasis bg-surface px-4 py-2">
     <code data-secret class="min-w-0 flex-1 truncate font-mono text-xs"></code>
@@ -100,9 +116,17 @@ edge publish app.edge</pre>
 
 <script>
   import { createToken, revokeToken } from '../../lib/account/tokens'
+  import { confirmed } from '../../lib/account/confirm'
 
   const RESET = 1200
 
+  const DAY = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', year: 'numeric' })
+  const CLOCK = new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+
+  const card = document.querySelector<HTMLElement>('[data-card]')
+  const list = document.querySelector<HTMLElement>('[data-list]')
+  const template = document.querySelector<HTMLTemplateElement>('[data-row]')
+  const blank = document.querySelector<HTMLElement>('[data-new]')
   const dialog = document.querySelector<HTMLDialogElement>('[data-dialog="token"]')
   const secretText = document.querySelector<HTMLElement>('[data-secret]')
   const error = document.querySelector<HTMLElement>('[data-error]')
@@ -125,12 +149,39 @@ edge publish app.edge</pre>
     error.hidden = false
   }
 
-  // Closing the dialog reloads, so the list shows the new token and any clock that just started.
+  const clear = () => error && (error.hidden = true)
+
   const reveal = (token: string) => {
     if (!secretText || !dialog) return
     secretText.textContent = token
-    dialog.addEventListener('close', () => location.reload(), { once: true })
     dialog.showModal()
+  }
+
+  /* A pill while the row stands alone, a card once it has tokens above it. */
+  function shape() {
+    const holds = (list?.querySelectorAll('[data-token]').length ?? 0) > 0
+    card?.classList.toggle('rounded-2xl', holds)
+    card?.classList.toggle('rounded-full', !holds)
+  }
+
+  /* A token the server just made, placed newest first the way the page orders them. */
+  function addRow(id: string, name: string) {
+    const row = template?.content.firstElementChild?.cloneNode(true) as HTMLElement | undefined
+    if (!row || !list || !blank) return
+
+    row.dataset.token = id
+    row.dataset.name = name
+    row.querySelector('[data-row-name]')!.textContent = name
+    row.querySelector('[data-note]')!.textContent = `Created ${DAY.format(Date.now())}, never used`
+
+    list.insertBefore(row, list.firstElementChild === blank ? blank : list.firstElementChild)
+    shape()
+  }
+
+  /* The token a replacement pushed out, still working until its clock runs down. */
+  function markReplaced(row: HTMLElement, stops: number) {
+    row.querySelector('[data-note]')!.textContent = `Replaced, stops working ${CLOCK.format(stops)}`
+    row.querySelector('[data-rotate]')?.remove()
   }
 
   const busy = (button: HTMLButtonElement, on: boolean) => {
@@ -143,7 +194,7 @@ edge publish app.edge</pre>
 
   form?.addEventListener('submit', async (event) => {
     event.preventDefault()
-    error && (error.hidden = true)
+    clear()
 
     const name = input?.value.trim()
     if (!name) return
@@ -151,49 +202,54 @@ edge publish app.edge</pre>
     naming(false)
 
     try {
-      reveal(await createToken(name))
+      const made = await createToken(name)
+      addRow(made.id, name)
+      reveal(made.token)
     } catch (problem) {
       complain((problem as Error).message)
     }
   })
 
-  // A rotation is a create that names the token it replaces, so the old one keeps working for its last day.
-  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-rotate]')) {
-    button.addEventListener('click', async () => {
-      const row = button.closest<HTMLElement>('[data-token]')
-      const name = row?.dataset.name
-      const id = button.dataset.rotate
-      if (!name || !id) return
+  // Delegated, so a row the page never rendered answers the same as one it did.
+  list?.addEventListener('click', async (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button')
+    const row = button?.closest<HTMLElement>('[data-token]')
+    if (!button || !row) return
 
-      error && (error.hidden = true)
-      busy(button, true)
+    const id = row.dataset.token
+    const name = row.dataset.name
+    if (!id || !name) return
 
-      try {
-        reveal(await createToken(name, id))
-      } catch (problem) {
-        complain((problem as Error).message)
-        busy(button, false)
-      }
-    })
-  }
+    // Revoking is the only one without a way back, rotating leaves the old token a day.
+    const revoking = 'revoke' in button.dataset
 
-  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-revoke]')) {
-    button.addEventListener('click', async () => {
-      const id = button.dataset.revoke
-      if (!id) return
+    if (revoking && !(await confirmed({
+      title: `Revoke ${name}?`,
+      body: 'Anything publishing with this token stops working right away, and it cannot be brought back.',
+      action: 'Revoke token'
+    }))) return
 
-      error && (error.hidden = true)
-      busy(button, true)
+    clear()
+    busy(button, true)
 
-      try {
+    try {
+      if (revoking) {
         await revokeToken(id)
-        location.reload()
-      } catch (problem) {
-        complain((problem as Error).message)
-        busy(button, false)
+        row.remove()
+        shape()
+        return
       }
-    })
-  }
+
+      // A rotation is a create that names what it replaces, so the old row stays and starts a clock.
+      const made = await createToken(name, id)
+      addRow(made.id, name)
+      if (made.stops !== null) markReplaced(row, made.stops)
+      reveal(made.token)
+    } catch (problem) {
+      complain((problem as Error).message)
+      busy(button, false)
+    }
+  })
 
   let timer: ReturnType<typeof setTimeout> | undefined
 

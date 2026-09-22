@@ -14,10 +14,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
   if (!salt || !hash || !wellFormed(salt, hash)) return json({ error: 'That token was not generated here.' }, 400)
 
   const held = await userTokens(env.DB, locals.user.id)
+  const replaced = replaces ? held.results.find((token) => token.id === replaces) : undefined
 
   // A replacement is net zero once the old token's day runs out, so only a plain create meets the cap.
   if (!replaces && held.results.length >= MAX_TOKENS) return json({ error: `You can hold ${MAX_TOKENS} tokens at a time.` }, 409)
-  if (replaces && !held.results.some((token) => token.id === replaces)) return json({ error: 'No such token.' }, 404)
+  if (replaces && !replaced) return json({ error: 'No such token.' }, 404)
+  if (replaced && replaced.expires_at !== null) return json({ error: 'That token is already on its way out.' }, 409)
 
-  return json({ id: await createToken(env.DB, locals.user.id, trimmed, salt, hash, replaces) }, 201)
+  return json(await createToken(env.DB, locals.user.id, trimmed, salt, hash, replaces), 201)
 }

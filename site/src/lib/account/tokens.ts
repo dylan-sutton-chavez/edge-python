@@ -17,15 +17,15 @@ async function call<T>(path: string, method: string, data?: unknown): Promise<T>
   return response.json() as Promise<T>
 }
 
-/* The secret is born here and only its hash leaves, so no server sees it even once. Pass `replaces` to make this a replacement, which starts the old token's last day. */
+/* The secret is born here and only its hash leaves, so no server sees it even once. Pass `replaces` to make this a replacement, and `stops` comes back as the moment the old token gives out. */
 export async function createToken(name: string, replaces?: string) {
   const secret = random(32)
   const salt = random(16)
   const hash = await sha256(salt + secret)
 
-  const { id } = await call<{ id: string }>('/api/me/tokens', 'POST', { name, salt, hash, replaces })
+  const { id, stops } = await call<{ id: string; stops: number | null }>('/api/me/tokens', 'POST', { name, salt, hash, replaces })
 
-  return `${PREFIX}${id}.${secret}`
+  return { id, stops, token: `${PREFIX}${id}.${secret}` }
 }
 
 export const revokeToken = (id: string) => call<{ ok: boolean }>(`/api/me/tokens/${id}`, 'DELETE')
