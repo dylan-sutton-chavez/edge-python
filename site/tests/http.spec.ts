@@ -2,7 +2,7 @@ import { globSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test, expect, type APIRequestContext } from '@playwright/test'
-import { MAILS, arriving, mailedCode, mintToken, unique } from './helpers'
+import { MAILS, arriving, mailedCode, mintToken, sent, unique } from './helpers'
 
 const DOCS = fileURLToPath(new URL('../../docs/', import.meta.url))
 
@@ -363,10 +363,12 @@ test.describe('publishing', () => {
   const naming = () => `p${unique()}`.toLowerCase().replace(/[^a-z0-9-]/g, '')
 
   const send = (request: APIRequestContext, token: string, name: string, version: string) =>
-    request.post('/api/publish', {
-      headers: { authorization: `Bearer ${token}` },
-      multipart: { manifest: JSON.stringify({ name, version }), artifact }
-    })
+    sent(() =>
+      request.post('/api/publish', {
+        headers: { authorization: `Bearer ${token}` },
+        multipart: { manifest: JSON.stringify({ name, version }), artifact }
+      })
+    )
 
   test('refuses anything without a live token', async ({ request }) => {
     for (const token of ['', 'edge_pat_nope.nope', 'not-a-token']) {

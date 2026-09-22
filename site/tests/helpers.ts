@@ -1,7 +1,7 @@
 import { globSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { expect, type APIRequestContext, type BrowserContext } from '@playwright/test'
+import { expect, type APIRequestContext, type APIResponse, type BrowserContext } from '@playwright/test'
 import { random, sha256 } from '../src/lib/crypto'
 
 export const MAILS = fileURLToPath(new URL('../.wrangler/tmp/email/', import.meta.url))
@@ -12,14 +12,22 @@ export const unique = () => `${Date.now().toString(36)}${Math.random().toString(
 let arrival = 0
 export const arriving = () => `10.0.0.${++arrival}`
 
+/* Sends again when the dev server drops the connection mid-flight, which wrangler only retries for GET and HEAD. Nothing reached the worker, so nothing can be applied twice. */
+export async function sent(send: () => Promise<APIResponse>) {
+  const first = await send()
+  return first.status() < 500 ? first : send()
+}
+
 /* The local email binding writes every message it sends, so the code is read rather than guessed. */
 export async function mailedCode(request: APIRequestContext, email: string, from?: string) {
   const before = globSync(join(MAILS, '**/*.txt'))
 
-  const started = await request.post('/api/auth/email/start', {
-    data: { email },
-    headers: from ? { 'cf-connecting-ip': from } : undefined
-  })
+  const started = await sent(() =>
+    request.post('/api/auth/email/start', {
+      data: { email },
+      headers: from ? { 'cf-connecting-ip': from } : undefined
+    })
+  )
   expect(await started.json()).toEqual({ ok: true })
 
   await expect.poll(() => globSync(join(MAILS, '**/*.txt')).length).toBe(before.length + 1)
