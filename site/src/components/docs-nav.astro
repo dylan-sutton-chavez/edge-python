@@ -6,11 +6,12 @@ import type { Doc, Section } from '../lib/docs/tree'
 interface Props {
   sections: Section[]
   current: Doc
+  base?: string
 }
 
-const { sections, current } = Astro.props
+const { sections, current, base = '/docs' } = Astro.props
 
-const href = (doc: Doc) => `/docs/${doc.slug}`
+const href = (doc: Doc) => `${base}/${doc.slug}`
 const holds = (section: Section) => section.docs.some((doc) => doc.id === current.id)
 
 const pill = 'block w-full px-4 py-1.5 rounded-full text-left'

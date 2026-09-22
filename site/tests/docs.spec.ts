@@ -13,6 +13,14 @@ async function below(page: Page, target: string) {
   expect(top.y, `${target} sits under the header`).toBeGreaterThanOrEqual(bar.y + bar.height)
 }
 
+// Sitting under the header is not enough, an aside pinned where it was born floated mid screen instead.
+async function clears(page: Page) {
+  const box = (await aside(page).boundingBox())!
+  const bar = (await header(page).boundingBox())!
+
+  return Math.round(box.y - (bar.y + bar.height))
+}
+
 test('marks the open page in the aside', async ({ page }) => {
   await page.goto(PAGE)
 
@@ -29,6 +37,23 @@ test('leaves the aside pinned below the header while scrolling', async ({ page }
 
   await expect(aside(page)).toBeInViewport()
   await below(page, 'aside[data-sticky]')
+})
+
+// The gap belongs to the page, so a route that opens with content above the aside pins it just the same.
+test('pins the aside to the header wherever the aside starts', async ({ page }) => {
+  const gaps: number[] = []
+
+  for (const route of [PAGE, '/package/json']) {
+    await page.goto(route)
+    await page.mouse.wheel(0, 600)
+    await page.waitForTimeout(300)
+
+    await expect(aside(page), route).toBeInViewport()
+    gaps.push(await clears(page))
+  }
+
+  expect(gaps[0], 'the docs aside clears the header by a small margin').toBeLessThan(60)
+  expect(gaps[1], 'a package page clears it by the same margin').toBe(gaps[0])
 })
 
 // Landing on an anchor scrolls before any script runs, which is where the placement used to break.
