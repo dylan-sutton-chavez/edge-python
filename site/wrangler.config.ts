@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import type { Unstable_RawConfig as Config } from 'wrangler'
-import { WORKER, SITE_DOMAIN, SITE_URL, CDN_URL, DB_NAME, EMAIL_FROM } from '../infra/src/constants'
+import { WORKER, SITE_DOMAIN, SITE_URL, CDN_URL, DB_NAME, BUCKET, EMAIL_FROM } from '../infra/src/constants'
 
 const LOCAL_DATABASE_ID = '00000000-0000-4000-8000-000000000000'
 
@@ -35,10 +35,13 @@ const config: Config = {
   routes: [{ pattern: SITE_DOMAIN, custom_domain: true }],
   vars: { SITE: SITE_URL, CDN: CDN_URL, EMAIL_FROM },
   d1_databases: [{ binding: 'DB', database_name: DB_NAME, database_id: database_id(), migrations_dir: 'db/migrations' }],
+  r2_buckets: [{ binding: 'CDN_BUCKET', bucket_name: BUCKET }],
   send_email: [{ name: 'EMAIL' }],
   ratelimits: [
     { name: 'OTP_IP', namespace_id: '1001', simple: { limit: 5, period: 60 } },
-    { name: 'OTP_EMAIL', namespace_id: '1002', simple: { limit: 3, period: 60 } }
+    { name: 'OTP_EMAIL', namespace_id: '1002', simple: { limit: 3, period: 60 } },
+    { name: 'PUBLISH_NAME', namespace_id: '1003', simple: { limit: 2, period: 60 } },
+    { name: 'PUBLISH_VERSION', namespace_id: '1004', simple: { limit: 30, period: 60 } }
   ]
 }
 

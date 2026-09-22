@@ -54,3 +54,23 @@ create table token (
 
 create index token_user on token(user_id);
 create index token_expiry on token(expires_at);
+
+create table package (
+  name text primary key check (name = lower(name)),
+  user_id text references user(id) on delete set null,
+  created_at integer not null
+) strict;
+
+create index package_user on package(user_id);
+
+create table version (
+  package text not null references package(name),
+  version text not null,
+  digest text not null,
+  size integer not null,
+  published_at integer not null,
+  yanked_at integer,
+  primary key (package, version)
+) strict;
+
+create index version_package on version(package);

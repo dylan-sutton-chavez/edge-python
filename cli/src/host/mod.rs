@@ -38,6 +38,14 @@ pub const TICK_NS: u64 = 100_000_000;
 // A build pulls dozens of files, one reset among them should not end it.
 const ATTEMPTS: usize = 3;
 
+pub const SITE: &str = "https://edgepython.com";
+
+/* The registry endpoint for `path`, which tests and staging move with EDGE_SITE_BASE. */
+pub fn site(path: &str) -> String {
+    let base = std::env::var("EDGE_SITE_BASE").unwrap_or_else(|_| SITE.to_string());
+    format!("{}{path}", base.trim_end_matches('/'))
+}
+
 /* Tests and staging serve the official origin from EDGE_CDN_BASE, production never sets it. */
 pub fn cdn(url: &str) -> String {
     match (url.strip_prefix(ORIGIN), std::env::var("EDGE_CDN_BASE")) {

@@ -8,6 +8,12 @@ export async function sha256(text: string) {
   return base64url(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))))
 }
 
+// Hex, because an integrity pin is written `#sha256-<64 hex chars>`.
+export async function sha256hex(bytes: Uint8Array) {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as BufferSource))
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
 export function equal(a: string, b: string) {
   if (a.length !== b.length) return false
 

@@ -43,6 +43,7 @@ edge add json          # declare each package the code imports
 edge run main.py       # run the entry point
 edge test              # discover and run every *_test.py
 edge build             # pack a portable ./app.edge bundle
+edge publish app.edge  # send it to the registry
 ```
 
 Piping a script works too, which is how the cells of this document run.
@@ -88,7 +89,7 @@ A persistent interpreter across prompts. Imports, definitions and mutations surv
 
 ### edge init, edge add, edge remove
 
-`edge init [name]` scaffolds `main.py`, an empty `edge.json` and `index.html`, with `--bare` skipping the HTML. `edge add json network` writes one `imports` entry per official package, its CDN URL (`dom` points at its `entry.py` facade), and prints each name with the URL it wrote. `edge add foo=<url>` registers a custom URL, also under `imports`, since each host tells a `.py`, `.wasm` or `.js` module apart by the artifact. `edge add` keeps `extends` and any other key already there. `edge remove` deletes entries. Unknown names abort the whole command before any write.
+`edge init [name]` scaffolds `main.py`, an empty `edge.json` and `index.html`, with `--bare` skipping the HTML. `edge add json network` writes one `imports` entry per official package, its CDN URL (`dom` points at its `entry.py` facade), and prints each name with the URL it wrote. `edge add foo=<url>` registers a custom URL, also under `imports`, since each host tells a `.py`, `.wasm` or `.js` module apart by the artifact. `edge add` keeps `extends` and any other key already there. `edge remove` deletes entries. A name the official catalog does not know is looked up in the registry, and the entry it writes carries that version's digest as a `#sha256-` fragment, so the bytes are pinned. Unknown names abort the whole command before any write.
 
 ### edge serve
 
@@ -105,6 +106,10 @@ Three mutually exclusive modes.
 | `edge build --web` | `dist/` | Browser distribution with the vendored JS host and packages |
 
 `--out <path>` overrides the default. The bundle contains every `.py`, `.js` and `.mjs` under the project plus `edge.json`, the `README.md` and any `LICENSE` at the project root, together with each module the manifest declares by URL and the files it imports. When `edge.json` declares a `docs` directory, a `.edge` also carries its `.mdx` pages under a reserved `@docs/` prefix, checked against the rendering convention first, and an app binary leaves them out. An app binary for a project with a JavaScript module also carries the precompiled runtime, about 26 MB, so it runs offline. The entry is `main.py`, `app.py` or `index.py` when present. An app binary accepts only the snapshot flags `--save-state`, `--restore-state`, `--preempt` and `--events`.
+
+### edge publish
+
+`edge publish app.edge` uploads a `.edge` packed by `edge build`, reading `EDGE_TOKEN` for a token made at `/settings#tokens`. The `name` and `version` come from the `edge.json` inside the bundle, so the artifact carries what it publishes as, and the pages under `@docs/` travel beside it for the site to render. A name is first come and permanent, a version is never overwritten, and the artifact is stored exactly as packed, so the registry never reads the bundle format.
 
 ### edge actor
 

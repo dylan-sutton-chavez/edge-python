@@ -2,6 +2,7 @@ import { globSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, type APIRequestContext, type BrowserContext } from '@playwright/test'
+import { random, sha256 } from '../src/lib/crypto'
 
 export const MAILS = fileURLToPath(new URL('../.wrangler/tmp/email/', import.meta.url))
 
@@ -37,4 +38,16 @@ export async function signedIn(context: BrowserContext) {
   await context.request.patch('/api/me', { data: { handle, name: 'Corpus', avatar: { icon: 1, palette: 'sky' } } })
 
   return { email, handle }
+}
+
+/* A usable token, minted the way the browser does so the secret exists only here. */
+export async function mintToken(request: APIRequestContext, name = 'ci') {
+  const secret = random(32)
+  const salt = random(16)
+  const hash = await sha256(salt + secret)
+
+  const made = await request.post('/api/me/tokens', { data: { name, salt, hash } })
+  expect(made.status()).toBe(201)
+
+  return `edge_pat_${(await made.json()).id}.${secret}`
 }

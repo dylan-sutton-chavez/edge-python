@@ -1,8 +1,27 @@
 use anyhow::{anyhow, bail, Result};
 use std::path::Path;
 
+use crate::host::{get, site};
 use crate::manifest::{registry, Manifest};
 use crate::ui;
+
+/* The newest version of a published package, pinned to the digest the registry reports, so a build fails if those bytes ever change. */
+fn published(name: &str) -> Result<String> {
+    let source = site(&format!("/api/packages/{name}"));
+
+    let mut response = get(&source).map_err(|e| match e {
+        ureq::Error::StatusCode(404) => anyhow!("unknown package '{name}'; give a url with {name}=<url>"),
+        other => anyhow!("asking the registry about '{name}': {other}"),
+    })?;
+
+    let text = response.body_mut().read_to_string().map_err(|e| anyhow!("reading {source}: {e}"))?;
+    let answer: serde_json::Value = serde_json::from_str(&text).map_err(|e| anyhow!("parsing {source}: {e}"))?;
+
+    let url = answer.get("url").and_then(|v| v.as_str()).ok_or_else(|| anyhow!("the registry sent no url for '{name}'"))?;
+    let digest = answer.get("digest").and_then(|v| v.as_str()).ok_or_else(|| anyhow!("the registry sent no digest for '{name}'"))?;
+
+    Ok(format!("{url}#sha256-{digest}"))
+}
 
 pub fn add(path: &Path, pkgs: &[String]) -> Result<()> {
     if pkgs.is_empty() {
@@ -15,9 +34,11 @@ pub fn add(path: &Path, pkgs: &[String]) -> Result<()> {
             let (name, url_override) = parse_spec(spec);
             let url = match url_override {
                 Some(u) => u,
-                None => registry(name)
-                    .ok_or_else(|| anyhow!("unknown package '{name}'; give a url with {name}=<url>"))?
-                    .to_string(),
+                // An official name resolves offline, anything else is looked up in the registry.
+                None => match registry(name) {
+                    Some(official) => official.to_string(),
+                    None => published(name)?,
+                },
             };
             Ok::<_, anyhow::Error>((name, url))
         })

@@ -2,7 +2,7 @@ import { globSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test, expect, type APIRequestContext } from '@playwright/test'
-import { MAILS, arriving, mailedCode, unique } from './helpers'
+import { MAILS, arriving, mailedCode, mintToken, unique } from './helpers'
 
 const DOCS = fileURLToPath(new URL('../../docs/', import.meta.url))
 
@@ -356,4 +356,58 @@ test('five wrong codes close an address for good', async ({ request }) => {
   // Even the right code is refused now, so guessing cannot outlast the counter.
   expect(await (await request.post('/api/auth/email/verify', { data: { email, code } })).json())
     .toEqual({ ok: false, handle: null })
+})
+
+test.describe('publishing', () => {
+  const artifact = { name: 'app.edge', mimeType: 'application/octet-stream', buffer: Buffer.from('EDGEPKG\u0001opaque to the registry') }
+  const naming = () => `p${unique()}`.toLowerCase().replace(/[^a-z0-9-]/g, '')
+
+  const send = (request: APIRequestContext, token: string, name: string, version: string) =>
+    request.post('/api/publish', {
+      headers: { authorization: `Bearer ${token}` },
+      multipart: { manifest: JSON.stringify({ name, version }), artifact }
+    })
+
+  test('refuses anything without a live token', async ({ request }) => {
+    for (const token of ['', 'edge_pat_nope.nope', 'not-a-token']) {
+      const response = await send(request, token, naming(), '0.1.0')
+      expect(response.status(), token).toBe(401)
+    }
+  })
+
+  // One flow, because claiming a name and adding a version to it are the same request.
+  test('claims a name, keeps the version, and refuses a repeat or a stranger', async ({ request }) => {
+    await signIn(request)
+    const token = await mintToken(request)
+    const name = naming()
+
+    const first = await send(request, token, name, '0.1.0')
+    expect(first.status()).toBe(201)
+
+    const { digest, url } = await first.json()
+    expect(digest).toMatch(/^[0-9a-f]{64}$/)
+    expect(url).toContain(`/pkg/${name}/0.1.0/app.edge`)
+
+    // The same version never gets overwritten, a newer one is welcome.
+    expect((await send(request, token, name, '0.1.0')).status()).toBe(409)
+    expect((await send(request, token, name, '0.2.0')).status()).toBe(201)
+
+    // What `edge add` reads, carrying the digest it will pin.
+    const looked = await request.get(`/api/packages/${name}`)
+    expect(looked.status()).toBe(200)
+    expect(await looked.json()).toMatchObject({ name, version: '0.2.0' })
+
+    // A name someone holds is theirs, and a shape the registry cannot serve is refused.
+    await request.post('/api/auth/signout')
+    await signIn(request)
+    const other = await mintToken(request)
+
+    expect((await send(request, other, name, '0.3.0')).status()).toBe(409)
+    expect((await send(request, other, 'Upper', '0.1.0')).status()).toBe(400)
+    expect((await send(request, other, naming(), '1.0')).status()).toBe(400)
+  })
+
+  test('says nothing is there for a package that was never published', async ({ request }) => {
+    expect((await request.get(`/api/packages/${naming()}`)).status()).toBe(404)
+  })
 })

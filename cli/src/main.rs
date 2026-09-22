@@ -29,6 +29,7 @@ Commands
   repl               Interactive shell
   test [path]        Run *_test.py files
   init <name>        Scaffold a new project
+  publish <file>     Send a packed .edge to the registry
   add <pkgs>         Add packages to edge.json
   remove <pkgs>      Remove packages from edge.json
   uninstall          Remove the edge binary and PATH entry
@@ -120,6 +121,11 @@ enum Cmd {
         #[arg(long)]
         app: bool,
     },
+    /// Send a packed .edge to the registry.
+    Publish {
+        /// The .edge to publish, packed by edge build.
+        artifact: PathBuf,
+    },
     /// Remove the edge binary and its PATH entry.
     Uninstall,
     /// Run a pool of actors from an actor.yml manifest.
@@ -184,6 +190,7 @@ fn main() -> Result<()> {
                 cmd::build::bundle(&manifest_path, out.unwrap_or_else(|| PathBuf::from("app.edge")))
             }
         }
+        Cmd::Publish { artifact } => cmd::publish::run(&artifact),
         Cmd::Uninstall => cmd::uninstall::run(),
         Cmd::Actor { file } => cmd::actor::run(&file, cli.manifest.as_deref()),
         Cmd::Test { path } => cmd::test::run(&manifest_path, cli.manifest.as_deref(), path.as_deref()),
