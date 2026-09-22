@@ -47,6 +47,7 @@ export const DELETE: APIRoute = async ({ request, locals, cookies }) => {
   if (!user) return json({ error: 'Not signed in.' }, 401)
 
   const { code } = await body<{ code: string }>(request)
+  if (!user.email) return json({ error: 'This account has no address to confirm with.' }, 409)
   if (!(await spend(env.DB, cookies, user.email, String(code ?? '')))) return json({ error: 'That code is wrong or expired.' }, 403)
 
   await deleteUser(env.DB, user.id)

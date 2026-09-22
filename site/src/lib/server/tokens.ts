@@ -37,7 +37,9 @@ export async function createToken(db: D1Database, userId: string, name: string, 
   const now = Date.now()
   const stops = replaces ? now + GRACE : null
 
+  // Writing one sweeps the replaced tokens whose day has run out.
   const writes = [
+    db.prepare('delete from token where expires_at < ?').bind(now),
     db
       .prepare('insert into token (id, user_id, name, salt, hash, created_at) values (?, ?, ?, ?, ?, ?)')
       .bind(id, userId, name, salt, hash, now)

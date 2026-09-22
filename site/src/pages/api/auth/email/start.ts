@@ -18,9 +18,15 @@ export const POST: APIRoute = async (context) => {
   const code = digits(6)
   const nonce = random()
 
-  await env.DB.prepare('insert or replace into email_code (email, hash, expires_at, attempts) values (?, ?, ?, 0)')
-    .bind(email, await sha256(`${nonce}:${email}:${code}`), Date.now() + 10 * MINUTE)
-    .run()
+  const now = Date.now()
+
+  // Writing one sweeps the expired, so codes nobody came back for cannot pile up.
+  await env.DB.batch([
+    env.DB.prepare('delete from email_code where expires_at < ?').bind(now),
+    env.DB
+      .prepare('insert or replace into email_code (email, hash, attempts, created_at, expires_at) values (?, ?, 0, ?, ?)')
+      .bind(email, await sha256(`${nonce}:${email}:${code}`), now, now + 10 * MINUTE)
+  ])
 
   context.cookies.set('__Host-otp', nonce, { path: '/', httpOnly: true, secure: true, sameSite: 'lax', maxAge: 600 })
   await sendCodeMail(email, code)

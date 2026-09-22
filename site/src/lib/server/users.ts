@@ -4,15 +4,18 @@ import type { Me, Public } from '../account/auth'
 
 export type User = {
   id: string
-  email: string
   name: string | null
   handle: string | null
   avatar_icon: number | null
   avatar_palette: string | null
   bio: string | null
   created_at: number
+  updated_at: number
   handle_changed_at: number | null
 }
+
+// The signed-in row carries the address its codes go to, which a join brings in from account.
+export type Holder = User & { email: string | null }
 
 // A handle someone gives up goes back in the pool, so it cannot be traded away and reclaimed at will.
 export const HANDLE_WAIT = 7 * 86_400_000
@@ -30,23 +33,29 @@ export const byCredential = (db: D1Database, provider: string, providerId: strin
     .bind(provider, providerId)
     .first<User>()
 
-/* The user behind an identity, found by its own credential or by the address on file, and created when neither exists. An address lives only on the user row, so nothing here can drift from it. */
+/* The user behind an identity, found by its own credential or by an address already on file, and created with both when neither exists. */
 export async function upsertUser(db: D1Database, identity: Identity): Promise<User> {
   const own = await byCredential(db, identity.provider, identity.providerId)
   if (own) return own
 
-  let user = await db.prepare('select * from user where email = ?').bind(identity.email).first<User>()
+  const known = await byCredential(db, 'email', identity.email)
 
-  if (!user) {
-    const id = `u_${random(12)}`
-    await db.prepare('insert into user (id, email, name, created_at) values (?, ?, ?, ?)').bind(id, identity.email, identity.name ?? null, Date.now()).run()
-    user = (await userById(db, id))!
+  if (known) {
+    await linkAccount(db, known.id, identity)
+    return known
   }
 
-  // A second Google or GitHub on one account is refused by the index, so an existing link stays put.
-  if (identity.provider !== 'email') await linkAccount(db, user.id, identity)
+  const id = `u_${random(12)}`
+  const now = Date.now()
 
-  return user
+  // The address lands beside the provider, so a code to it reaches this account from the first day.
+  await db.batch([
+    db.prepare('insert into user (id, name, created_at, updated_at) values (?, ?, ?, ?)').bind(id, identity.name ?? null, now, now),
+    db.prepare('insert or ignore into account (provider, provider_id, user_id, created_at) values (?, ?, ?, ?)').bind('email', identity.email, id, now),
+    db.prepare('insert or ignore into account (provider, provider_id, user_id, created_at) values (?, ?, ?, ?)').bind(identity.provider, identity.providerId, id, now)
+  ])
+
+  return (await userById(db, id))!
 }
 
 export const handleTaken = async (db: D1Database, handle: string, except?: string) =>
@@ -54,12 +63,14 @@ export const handleTaken = async (db: D1Database, handle: string, except?: strin
 
 /* Saves the profile, and starts the wait only when the handle actually moved. */
 export async function updateProfile(db: D1Database, id: string, profile: { handle: string; name: string; avatar: Avatar; bio?: string }, moved: boolean) {
+  const now = Date.now()
+
   await db
-    .prepare('update user set handle = ?, name = ?, avatar_icon = ?, avatar_palette = ?, bio = coalesce(?, bio), handle_changed_at = coalesce(?, handle_changed_at) where id = ?')
-    .bind(profile.handle, profile.name, profile.avatar.icon, profile.avatar.palette, profile.bio ?? null, moved ? Date.now() : null, id)
+    .prepare('update user set handle = ?, name = ?, avatar_icon = ?, avatar_palette = ?, bio = coalesce(?, bio), updated_at = ?, handle_changed_at = coalesce(?, handle_changed_at) where id = ?')
+    .bind(profile.handle, profile.name, profile.avatar.icon, profile.avatar.palette, profile.bio ?? null, now, moved ? now : null, id)
     .run()
 
-  return (await db.prepare('select * from user where id = ?').bind(id).first<User>())!
+  return (await userById(db, id))!
 }
 
 export const publicUser = ({ id, name, handle, avatar_icon, avatar_palette, bio }: User): Public => ({
@@ -71,11 +82,15 @@ export const publicUser = ({ id, name, handle, avatar_icon, avatar_palette, bio 
 })
 
 /* The signed-in view, which is the public one plus the address the codes go to. */
-export const me = (user: User): Me => ({ ...publicUser(user), email: user.email })
+export const me = (holder: Holder): Me => ({ ...publicUser(holder), email: holder.email })
 
 export const userById = (db: D1Database, id: string) => db.prepare('select * from user where id = ?').bind(id).first<User>()
 
 export const userByHandle = (db: D1Database, handle: string) => db.prepare('select * from user where handle = ?').bind(handle).first<User>()
+
+/* The address a user's codes go to, which lives in account like any other credential. */
+export const addressOf = async (db: D1Database, userId: string) =>
+  (await db.prepare("select provider_id from account where user_id = ? and provider = 'email'").bind(userId).first<{ provider_id: string }>())?.provider_id ?? null
 
 export async function linkedProviders(db: D1Database, userId: string) {
   const { results } = await db.prepare('select provider from account where user_id = ?').bind(userId).all<{ provider: string }>()
@@ -84,17 +99,15 @@ export async function linkedProviders(db: D1Database, userId: string) {
 
 // Links an OAuth identity to the signed-in user, one already linked elsewhere stays where it is.
 export async function linkAccount(db: D1Database, userId: string, identity: Identity) {
-  await db.prepare('insert or ignore into account (provider, provider_id, user_id) values (?, ?, ?)').bind(identity.provider, identity.providerId, userId).run()
+  await db
+    .prepare('insert or ignore into account (provider, provider_id, user_id, created_at) values (?, ?, ?, ?)')
+    .bind(identity.provider, identity.providerId, userId, Date.now())
+    .run()
 }
 
 export async function unlinkAccount(db: D1Database, userId: string, provider: string) {
   await db.prepare('delete from account where user_id = ? and provider = ?').bind(userId, provider).run()
 }
 
-export async function deleteUser(db: D1Database, id: string) {
-  await db.batch([
-    db.prepare('delete from session where user_id = ?').bind(id),
-    db.prepare('delete from account where user_id = ?').bind(id),
-    db.prepare('delete from user where id = ?').bind(id)
-  ])
-}
+// Sessions, credentials and tokens all cascade from the user row, so one delete is the whole account.
+export const deleteUser = (db: D1Database, id: string) => db.prepare('delete from user where id = ?').bind(id).run()
