@@ -29,6 +29,7 @@ const { user } = Astro.locals
 
         <div popover id="user" class="panel w-48 inset-auto m-0 p-0 border-0 bg-transparent opacity-0 open:opacity-100 starting:open:opacity-0 transition-all transition-discrete">
           <ul class="bg-surface border border-line rounded-2xl py-3">
+            <li><a href="/runs" class={item}>Runs</a></li>
             <li><a href={`/@${user.handle ?? ''}`} class={item}>Profile</a></li>
             <li><a href="/settings" class={item}>Settings</a></li>
 
