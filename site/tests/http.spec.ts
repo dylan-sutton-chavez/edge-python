@@ -2,11 +2,9 @@ import { globSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test, expect, type APIRequestContext } from '@playwright/test'
+import { MAILS, arriving, mailedCode, unique } from './helpers'
 
 const DOCS = fileURLToPath(new URL('../../docs/', import.meta.url))
-const MAILS = fileURLToPath(new URL('../.wrangler/tmp/email/', import.meta.url))
-
-const unique = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`
 
 test.describe('pages', () => {
   test('answers the routes a visitor can reach', async ({ request }) => {
@@ -99,23 +97,6 @@ test.describe('oauth without secrets', () => {
   })
 })
 
-// The local email binding writes every message it sends, so the code is read rather than guessed.
-async function mailedCode(request: APIRequestContext, email: string, from?: string) {
-  const before = globSync(join(MAILS, '**/*.txt'))
-
-  // Codes are rate limited per address, so a test that signs in twice arrives from a second one.
-  const started = await request.post('/api/auth/email/start', {
-    data: { email },
-    headers: from ? { 'cf-connecting-ip': from } : undefined
-  })
-  expect(await started.json()).toEqual({ ok: true })
-
-  await expect.poll(() => globSync(join(MAILS, '**/*.txt')).length).toBe(before.length + 1)
-  const mail = globSync(join(MAILS, '**/*.txt')).find((each) => !before.includes(each))!
-
-  return readFileSync(mail, 'utf8').match(/\d{6}/)![0]
-}
-
 test.describe('signing in by email', () => {
   test('turns down an address that is not one', async ({ request }) => {
     const response = await request.post('/api/auth/email/start', { data: { email: 'nope' } })
@@ -163,14 +144,11 @@ const b64url = (length: number) =>
 const SALT = b64url(22)
 const HASH = b64url(43)
 
-// Codes are rate limited per address, so every sign-in arrives from one of its own.
-let arrival = 0
-
 async function signIn(request: APIRequestContext) {
   const email = `${unique()}@example.com`
   const handle = unique()
 
-  await request.post('/api/auth/email/verify', { data: { email, code: await mailedCode(request, email, `10.0.0.${++arrival}`) } })
+  await request.post('/api/auth/email/verify', { data: { email, code: await mailedCode(request, email, arriving()) } })
   await request.patch('/api/me', { data: { handle, name: 'Corpus', avatar: { icon: 1, palette: 'sky' } } })
 
   return { email, handle }
@@ -271,7 +249,7 @@ test.describe('deleting an account', () => {
   test('takes the account with the right code and signs the visitor out', async ({ request }) => {
     const { email, handle } = await signIn(request)
 
-    const code = await mailedCode(request, email, `10.0.0.${++arrival}`)
+    const code = await mailedCode(request, email, arriving())
     expect(await (await request.delete('/api/me', { data: { code } })).json()).toEqual({ ok: true })
 
     expect((await request.get('/@' + handle)).status()).toBe(404)
@@ -348,7 +326,7 @@ test.describe('changing an address', () => {
     expect(await (await request.post('/api/me/email/start', { data: { email: wanted } })).json()).toEqual({ ok: true })
 
     await expect.poll(() => globSync(join(MAILS, '**/*.txt')).length).toBe(before.length + 1)
-    const mail = globSync(join(MAILS, '**/*.txt')).find((each) => !before.includes(each))!
+    const mail = globSync(join(MAILS, '**/*.txt')).find((each: string) => !before.includes(each))!
     const code = readFileSync(mail, 'utf8').match(/\d{6}/)![0]
 
     expect(await (await request.patch('/api/me/email', { data: { email: wanted, code } })).json()).toEqual({ email: wanted })
@@ -357,10 +335,25 @@ test.describe('changing an address', () => {
     await request.post('/api/auth/signout')
 
     // A code to the address it used to hold opens a fresh account, so it has no handle of its own.
-    const again = await mailedCode(request, was, `10.0.0.${++arrival}`)
+    const again = await mailedCode(request, was, arriving())
     const back = await request.post('/api/auth/email/verify', { data: { email: was, code: again } })
 
     expect(await back.json()).toEqual({ ok: true, handle: null })
     expect((await request.get(`/@${handle}`)).status()).toBe(200)
   })
+})
+
+// A six-digit code is a million guesses, so the attempt counter is what makes it safe to mail one.
+test('five wrong codes close an address for good', async ({ request }) => {
+  const email = `${unique()}@example.com`
+  const code = await mailedCode(request, email, arriving())
+
+  for (let at = 1; at <= 5; at++) {
+    const response = await request.post('/api/auth/email/verify', { data: { email, code: '000000' } })
+    expect(await response.json(), `attempt ${at}`).toEqual({ ok: false, handle: null })
+  }
+
+  // Even the right code is refused now, so guessing cannot outlast the counter.
+  expect(await (await request.post('/api/auth/email/verify', { data: { email, code } })).json())
+    .toEqual({ ok: false, handle: null })
 })
