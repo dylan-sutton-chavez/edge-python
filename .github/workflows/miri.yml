@@ -1,0 +1,58 @@
+name: Miri
+
+on:
+  schedule:
+    - cron: "0 4 * * *" # 04:00 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: miri
+  cancel-in-progress: true
+
+jobs:
+  miri:
+    name: Miri / ${{ matrix.entry }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # vm and snapshot each walk the whole vm corpus, so they get a runner apiece.
+          - entry: vm
+            args: "-p edge-python --test tests vm::"
+          - entry: snapshot
+            args: "-p edge-python --test tests snapshot::"
+          - entry: modules
+            args: "-p edge-python --test tests modules::"
+          - entry: parser
+            args: "-p edge-python --test tests parser::"
+          - entry: lexer
+            args: "-p edge-python --test tests lexer::"
+          - entry: abi
+            args: "-p edge-python --test tests abi::"
+          - entry: lang
+            args: "-p lang"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: miri-${{ matrix.entry }}
+
+      # Miri ships on nightly only, and it stays in this workflow so the rest of CI keeps to stable.
+      - name: Toolchain (nightly)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+
+      # Building the sysroot is its own step, so its minutes never read as interpreting time.
+      - name: Sysroot
+        run: cargo miri setup
+
+      - name: Interpret
+        run: cargo miri test ${{ matrix.args }}

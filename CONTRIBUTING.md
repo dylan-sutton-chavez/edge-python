@@ -79,6 +79,8 @@ Builtin corpora sit beside their module, or in `tests/cases/builtins/` when the 
 
 `fuzz/` runs coverage-guided fuzzing of the lexer, parser, and VM on [cargo-afl](https://github.com/rust-fuzz/afl.rs). Campaigns and crash triage are in [Fuzzing](https://edgepython.com/docs/implementation/fuzzing).
 
+[`.github/workflows/miri.yml`](.github/workflows/miri.yml) interprets the same corpora under [Miri](https://github.com/rust-lang/miri) once a day, on the nightly it keeps to itself, for undefined behavior the native build runs past. Run one module with `cargo +nightly miri test -p edge-python --test tests vm::`.
+
 ## Site and Docs
 
 `docs/` holds MDX pages ordered by numeric prefix. `site/` is Astro on Cloudflare Workers with a D1 database, and renders them under `/docs`. It runs locally on miniflare with no credentials, and the sign-in code prints to the terminal.
