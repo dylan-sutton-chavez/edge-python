@@ -4,7 +4,7 @@ Thanks for taking the time to report a vulnerability. Edge is a sandboxed runtim
 
 ## Reporting
 
-Email [dylan@edgepython.com](mailto:dylan@edgepython.com). Do not open a public GitHub issue for a security report.
+Email [c.sutton.dylan@gmail.com](mailto:c.sutton.dylan@gmail.com). Do not open a public GitHub issue for a security report.
 
 Include a minimal reproducing script with the command used to run it, the expected and actual behavior, and the release version or commit hash.
 

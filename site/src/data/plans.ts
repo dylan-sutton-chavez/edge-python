@@ -45,7 +45,7 @@ export const plans: Plan[] = [
   {
     name: 'Team',
     mode: 'Individual',
-    price: '$54.90',
+    price: '$54.9',
     cadence: 'a month',
     who: 'For a product whose customers write the logic.',
     features: [

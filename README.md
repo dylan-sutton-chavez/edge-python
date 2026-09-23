@@ -69,7 +69,9 @@ The root crate is the engine, lexer, parser, VM and WebAssembly exports, tested 
 
 ## License
 
-Edge Python is licensed under the Apache 2.0 License.
+The engine is open source under the Apache 2.0 License. That covers `src/`, `tests/`, `abi/`, `pdk/`, `lang/`, `cli/`, `std/`, `js/`, `fuzz/`, `skill/` and `docs/`, so embedding it in anything, including a closed product, needs nothing from anyone.
+
+The platform in `site/` and `infra/` is published to be read, not to be used. It carries no license, and running it needs a written agreement. See [LICENSE.md](LICENSE.md).
 
 ## Sponsors
 
