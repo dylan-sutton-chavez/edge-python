@@ -69,6 +69,12 @@ const { user } = Astro.locals
     localStorage.setItem('theme', theme)
   })
 
+  // Until the visitor picks one, the device decides, and keeps deciding.
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (event) => {
+    if (localStorage.getItem('theme')) return
+    document.documentElement.dataset.theme = event.matches ? 'dark' : 'light'
+  })
+
   document.addEventListener('signin:done', () => location.replace(location.pathname))
 
   document.querySelector('[data-user-trigger]:not([popovertarget])')?.addEventListener('click', () => {

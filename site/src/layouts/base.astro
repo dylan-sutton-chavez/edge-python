@@ -43,7 +43,7 @@ const card = new URL('/og.png', Astro.url).href
   <Font cssVariable="--font-inter" preload />
   <Font cssVariable="--font-jetbrains-mono" />
   <script is:inline>
-    document.documentElement.dataset.theme = localStorage.getItem('theme') ?? 'light'
+    document.documentElement.dataset.theme = localStorage.getItem('theme') ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
   </script>
 </head>
 <body class="bg-page text-fg flex min-h-screen flex-col has-[dialog:modal]:overflow-hidden">
