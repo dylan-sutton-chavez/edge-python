@@ -1,0 +1,43 @@
+---
+import type { Plan } from '../data/plans'
+
+interface Props {
+  plan: Plan
+  held?: boolean
+}
+
+const { plan, held = false } = Astro.props
+
+const action = 'mt-auto w-full rounded-full px-3 py-1.5 text-xs transition'
+---
+
+<div class="flex h-full flex-col rounded-2xl bg-panel">
+  <div class="flex items-baseline gap-2 px-[21px] py-3">
+    <h2 class="text-md">{plan.name}</h2>
+    {held && <span class="text-2xs text-fg-hint">current</span>}
+  </div>
+
+  <div
+    class:list={[
+      'flex flex-1 flex-col gap-5 rounded-2xl border p-5',
+      held ? 'bg-surface border-line-emphasis' : 'bg-page border-line-strong'
+    ]}
+  >
+    <p class="text-xs text-fg-hint">{plan.who}</p>
+
+    <div class="flex items-baseline gap-1.5">
+      <span class="text-lg">{plan.price}</span>
+      {plan.cadence && <span class="text-2xs text-fg-hint">{plan.cadence}</span>}
+    </div>
+
+    <ul class="flex flex-col gap-1.5 text-xs text-fg-muted">
+      {plan.features.map((feature) => <li>{feature}</li>)}
+    </ul>
+
+    <button
+      type="button"
+      disabled={held}
+      class:list={[action, held ? 'text-fg-disabled' : 'border border-line-strong bg-page hover:bg-header']}
+    >{held ? 'Your plan' : plan.mode === 'Enterprise' ? 'Get in touch' : 'Choose'}</button>
+  </div>
+</div>

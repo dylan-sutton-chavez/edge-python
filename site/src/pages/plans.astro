@@ -1,0 +1,84 @@
+---
+import type { ComponentProps } from 'astro/types'
+import Base from '../layouts/base.astro'
+import Icon from '../components/ui/icon.astro'
+import PlanCard from '../components/plan-card.astro'
+import { plans, current, type Mode } from '../data/plans'
+
+const { user } = Astro.locals
+
+// A visitor reads what each plan costs, an account also sees which one it holds.
+const held = user ? current : null
+
+const modes: { label: Mode; icon: ComponentProps<typeof Icon>['name'] }[] = [
+  { label: 'Individual', icon: 'user' },
+  { label: 'Enterprise', icon: 'users' }
+]
+
+const start: Mode = 'Individual'
+const of = (mode: Mode) => plans.filter((plan) => plan.mode === mode)
+
+const seg = 'flex items-center gap-2 rounded-full px-4 py-1.5 text-xs transition'
+const on = 'bg-page border border-line-strong'
+const off = 'border border-transparent text-fg-subtle hover:text-fg'
+---
+
+<Base title="Plans" description="What a plan covers, and what it costs." gap="lg" class="flex-1">
+  <div>
+    <h1 class="text-xl font-semibold">Plans</h1>
+    <p class="mt-3 text-fg-muted">What you keep, for how long, and how provable it is.</p>
+  </div>
+
+  <div data-plans class="flex flex-col gap-3">
+    <div class="flex justify-center">
+      <div class="flex gap-1 rounded-full bg-panel p-1">
+        {modes.map((mode) => (
+          <button
+            type="button"
+            data-mode={mode.label}
+            aria-pressed={mode.label === start}
+            class:list={[seg, mode.label === start ? on : off]}
+          >
+            <Icon name={mode.icon} size="md" />
+            <span>{mode.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+
+    {modes.map((mode) => (
+      <div data-view={mode.label} hidden={mode.label !== start}>
+        <div class:list={['grid gap-3', mode.label === 'Individual' ? 'lg:grid-cols-3' : 'mx-auto lg:max-w-sm']}>
+          {of(mode.label).map((plan) => <PlanCard plan={plan} held={plan.name === held} />)}
+        </div>
+      </div>
+    ))}
+  </div>
+
+  {/* The sandbox is the product's integrity, so no tier sells it back. */}
+  <p class="text-xs text-fg-hint">The sandbox, the metered limits and the determinism are in every plan.</p>
+</Base>
+
+<script>
+  const root = document.querySelector<HTMLElement>('[data-plans]')
+
+  root?.addEventListener('click', (event) => {
+    const name = (event.target as HTMLElement).closest<HTMLElement>('[data-mode]')?.dataset.mode
+    if (!name || !root) return
+
+    root.querySelectorAll<HTMLElement>('[data-mode]').forEach((button) => {
+      const pressed = button.dataset.mode === name
+
+      button.setAttribute('aria-pressed', String(pressed))
+      button.classList.toggle('bg-page', pressed)
+      button.classList.toggle('border-line-strong', pressed)
+      button.classList.toggle('border-transparent', !pressed)
+      button.classList.toggle('text-fg-subtle', !pressed)
+      button.classList.toggle('hover:text-fg', !pressed)
+    })
+
+    root.querySelectorAll<HTMLElement>('[data-view]').forEach((view) => {
+      view.hidden = view.dataset.view !== name
+    })
+  })
+</script>

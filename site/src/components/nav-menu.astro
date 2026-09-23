@@ -25,6 +25,11 @@ const links: { label: string; pages: Entry[] }[] = [
 ]
 
 const { current, class: className } = Astro.props
+const { user } = Astro.locals
+
+// A page of its own, so it stands beside the groups rather than inside one, and only until an account menu holds it.
+const plans: Entry = { label: 'Plans', href: '/plans' }
+const onPlans = current === plans.href
 
 // An entry links to its first page but owns every page under its folder.
 const at = (page: Entry) => {
@@ -71,6 +76,10 @@ const chevron = 'rotate-90 text-fg-hint transition-transform group-open/section:
         </div>
       )
     })}
+
+    {!user && (
+      <a href={plans.href} aria-current={onPlans ? 'page' : undefined} class:list={[item, onPlans ? 'text-fg' : 'text-fg-subtle hover:text-fg']}>{plans.label}</a>
+    )}
   </div>
 
   <Sheet id="main-nav" class="group lg:hidden">
@@ -98,6 +107,14 @@ const chevron = 'rotate-90 text-fg-hint transition-transform group-open/section:
       ))}
     </div>
   </Sheet>
+
+  {!user && (
+    <a
+      href={plans.href}
+      aria-current={onPlans ? 'page' : undefined}
+      class:list={['lg:hidden px-3 py-1.5 shrink-0 whitespace-nowrap transition', onPlans ? 'text-fg' : 'text-fg-subtle hover:text-fg']}
+    >{plans.label}</a>
+  )}
 </nav>
 
 <style>

@@ -31,6 +31,7 @@ const { user } = Astro.locals
           <ul class="bg-surface border border-line rounded-2xl py-3">
             <li><a href="/runs" class={item}>Runs</a></li>
             <li><a href={`/@${user.handle ?? ''}`} class={item}>Profile</a></li>
+            <li><a href="/plans" class={item}>Plans</a></li>
             <li><a href="/settings" class={item}>Settings</a></li>
 
             <li class="mt-2 pt-2 border-t border-line-strong">
