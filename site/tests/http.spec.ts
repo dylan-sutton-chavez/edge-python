@@ -362,11 +362,11 @@ test.describe('publishing', () => {
   const artifact = { name: 'app.edge', mimeType: 'application/octet-stream', buffer: Buffer.from('EDGEPKG\u0001opaque to the registry') }
   const naming = () => `p${unique()}`.toLowerCase().replace(/[^a-z0-9-]/g, '')
 
-  const send = (request: APIRequestContext, token: string, name: string, version: string) =>
+  const send = (request: APIRequestContext, token: string, name: string, version: string, extra: Record<string, unknown> = {}) =>
     sent(() =>
       request.post('/api/publish', {
         headers: { authorization: `Bearer ${token}` },
-        multipart: { manifest: JSON.stringify({ name, version }), artifact }
+        multipart: { manifest: JSON.stringify({ name, version, hosts: 'cli,web,actor', ...extra }), artifact }
       })
     )
 
@@ -407,6 +407,39 @@ test.describe('publishing', () => {
     expect((await send(request, other, name, '0.3.0')).status()).toBe(409)
     expect((await send(request, other, 'Upper', '0.1.0')).status()).toBe(400)
     expect((await send(request, other, naming(), '1.0')).status()).toBe(400)
+  })
+
+  // What the artifact answers about itself, refused here so a listing never shows what it cannot mean.
+  test('refuses metadata the registry cannot show', async ({ request }) => {
+    await signIn(request)
+    const token = await mintToken(request)
+
+    const bad = [
+      { repository: 'git@github.com:you/charts.git' },
+      { hosts: 'cli,browser' },
+      { hosts: '' },
+      { notice: 'x'.repeat((64 << 10) + 1) }
+    ]
+
+    for (const extra of bad) {
+      const response = await send(request, token, naming(), '0.1.0', extra)
+      expect(response.status(), JSON.stringify(extra).slice(0, 40)).toBe(400)
+    }
+  })
+
+  // A license is read from the notice the artifact carries, and an unread one is not the same as none.
+  test('names the license it recognises and keeps the notice either way', async ({ request }) => {
+    await signIn(request)
+    const token = await mintToken(request)
+
+    const apache = naming()
+    expect((await send(request, token, apache, '0.1.0', { notice: 'Apache License\nVersion 2.0, January 2004' })).status()).toBe(201)
+
+    const homegrown = naming()
+    expect((await send(request, token, homegrown, '0.1.0', { notice: 'Do what you like, signed a human.' })).status()).toBe(201)
+
+    const bare = naming()
+    expect((await send(request, token, bare, '0.1.0')).status()).toBe(201)
   })
 
   test('says nothing is there for a package that was never published', async ({ request }) => {

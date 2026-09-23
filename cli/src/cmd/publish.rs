@@ -1,11 +1,15 @@
 use anyhow::{anyhow, bail, Context, Result};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
 use crate::docs::PREFIX;
 use crate::host::site;
-use crate::manifest::Manifest;
+use crate::manifest::{declares, Manifest};
 use crate::pack::Bundle;
+
+// The modules only a browser can serve, so a project reaching for one runs nowhere else.
+const BROWSER_ONLY: [&str; 2] = ["dom", "storage"];
 
 /* Sends a packed `.edge` to the registry. The artifact travels whole and opaque, the metadata and the doc pages travel beside it, so the registry never has to learn the bundle format. */
 pub fn run(artifact: &Path) -> Result<()> {
@@ -21,6 +25,13 @@ pub fn run(artifact: &Path) -> Result<()> {
         .ok_or_else(|| anyhow!("{} carries no edge.json, so it has nothing to publish under", artifact.display()))?;
     let manifest: Manifest = serde_json::from_slice(declared).context("parsing the packed edge.json")?;
 
+    let meta = Meta {
+        description: manifest.description.clone(),
+        repository: manifest.repository.clone(),
+        notice: notice(&files),
+        hosts: hosts(&manifest)
+    };
+
     let name = manifest.name.ok_or_else(|| anyhow!("edge.json needs a name before it can be published"))?;
     let version = manifest.version.ok_or_else(|| anyhow!("edge.json needs a version before it can be published"))?;
 
@@ -33,7 +44,7 @@ pub fn run(artifact: &Path) -> Result<()> {
 
     let sp = crate::ui::spinner(&format!("publishing {name} {version}"));
 
-    match send(&token, &name, &version, &manifest.description, &bytes, &docs) {
+    match send(&token, &name, &version, &meta, &bytes, &docs) {
         Ok(url) => {
             sp.done(&format!("published {name} {version}"));
             crate::ui::note(&format!("add it with  edge add {name}"));
@@ -47,16 +58,48 @@ pub fn run(artifact: &Path) -> Result<()> {
     }
 }
 
+/* What the artifact answers about itself, which the registry shows and never has to derive. */
+struct Meta {
+    description: Option<String>,
+    repository: Option<String>,
+    notice: Option<String>,
+    hosts: String
+}
+
+/* The LICENSE the bundle carries, whatever its extension, so the registry names the license without guessing at a name. */
+fn notice(files: &HashMap<String, Vec<u8>>) -> Option<String> {
+    let (_, body) = files
+        .iter()
+        .find(|(path, _)| !path.contains('/') && path.split('.').next().is_some_and(|s| s.eq_ignore_ascii_case("LICENSE")))?;
+
+    Some(String::from_utf8_lossy(body).into_owned())
+}
+
+/* Where a program can run, narrowed by the modules a browser alone can serve. */
+fn hosts(manifest: &Manifest) -> String {
+    match BROWSER_ONLY.iter().any(|name| declares(manifest, name)) {
+        true => "web".to_string(),
+        false => "cli,web,actor".to_string()
+    }
+}
+
 /* One multipart request, the artifact as it sits on disk. */
 fn send(
     token: &str,
     name: &str,
     version: &str,
-    description: &Option<String>,
+    meta: &Meta,
     artifact: &[u8],
     docs: &serde_json::Map<String, serde_json::Value>
 ) -> Result<String> {
-    let manifest = serde_json::json!({ "name": name, "version": version, "description": description });
+    let manifest = serde_json::json!({
+        "name": name,
+        "version": version,
+        "description": meta.description,
+        "repository": meta.repository,
+        "notice": meta.notice,
+        "hosts": meta.hosts
+    });
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let boundary = format!("edge{nanos:x}");
 

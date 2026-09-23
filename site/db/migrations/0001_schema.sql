@@ -72,6 +72,7 @@ create table version (
   description text,
   repository text,
   license text,
+  notice text,
   hosts text,
   published_at integer not null,
   yanked_at integer,

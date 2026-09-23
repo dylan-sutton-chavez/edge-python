@@ -25,12 +25,15 @@
     "@astrojs/markdown-remark": "^7.3.1",
     "@astrojs/mdx": "^8.0.1",
     "@tailwindcss/vite": "^4.3.3",
+    "acorn": "^8.18.0",
+    "acorn-globals": "^7.0.1",
     "astro": "^7.3.2",
     "shiki": "^4.4.3",
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.10",
+    "@mdn/browser-compat-data": "^8.1.2",
     "@playwright/test": "^1.63.0",
     "@types/node": "^22.20.3",
     "sharp": "^0.35.4",

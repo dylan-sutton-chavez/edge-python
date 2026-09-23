@@ -4,7 +4,7 @@ import { sha256hex } from '../../lib/crypto'
 import { json } from '../../lib/server/http'
 import { tokenUser } from '../../lib/server/tokens'
 import type { Page } from '../../lib/server/packages'
-import { MAX_ARTIFACT, MAX_DESCRIPTION, MAX_NEW_NAMES, claimedToday, described, keyOf, named, packageByName, pages, publish, versionExists, versioned } from '../../lib/server/packages'
+import { HOSTS, MAX_ARTIFACT, MAX_DESCRIPTION, MAX_NEW_NAMES, MAX_NOTICE, claimedToday, described, hosted, keyOf, linked, named, noticed, packageByName, pages, publish, versionExists, versioned } from '../../lib/server/packages'
 
 // The bundle is stored as it arrived. Its format lives in the CLI, so nothing here has to learn it.
 export const POST: APIRoute = async ({ request }) => {
@@ -19,7 +19,14 @@ export const POST: APIRoute = async ({ request }) => {
   if (!(artifact instanceof File) || typeof manifest !== 'string') return json({ error: 'Send a manifest and an artifact.' }, 400)
 
   // A bundle with no docs directory sends nothing, and a hand-built request can send anything.
-  let declared: { name?: string; version?: string; description?: string | null }
+  let declared: {
+    name?: string
+    version?: string
+    description?: string | null
+    repository?: string | null
+    notice?: string | null
+    hosts?: string
+  }
   let docs: Page[]
 
   try {
@@ -30,11 +37,14 @@ export const POST: APIRoute = async ({ request }) => {
     return json({ error: why }, 400)
   }
 
-  const { name, version, description } = declared
+  const { name, version, description, repository, notice, hosts } = declared
 
   if (typeof name !== 'string' || !named(name)) return json({ error: 'A name is lowercase letters, digits and single hyphens, starting with a letter.' }, 400)
   if (typeof version !== 'string' || !versioned(version)) return json({ error: 'A version is major.minor.patch, digits only.' }, 400)
   if (!described(description)) return json({ error: `A description is ${MAX_DESCRIPTION} characters at most.` }, 400)
+  if (!linked(repository)) return json({ error: 'A repository is an https url a listing can link.' }, 400)
+  if (!noticed(notice)) return json({ error: `A license notice is ${MAX_NOTICE} bytes at most.` }, 400)
+  if (!hosted(hosts)) return json({ error: `Name the hosts it runs on, from ${HOSTS.join(', ')}.` }, 400)
   if (artifact.size > MAX_ARTIFACT) return json({ error: `An artifact is ${MAX_ARTIFACT} bytes at most.` }, 413)
 
   const held = await packageByName(env.DB, name)
@@ -55,7 +65,17 @@ export const POST: APIRoute = async ({ request }) => {
   const key = keyOf(name, version)
 
   await env.CDN_BUCKET.put(key, bytes, { httpMetadata: { contentType: 'application/octet-stream' } })
-  await publish(env.DB, userId, { name, version, digest, size: bytes.byteLength, description: description ?? null, docs })
+  await publish(env.DB, userId, {
+    name,
+    version,
+    digest,
+    size: bytes.byteLength,
+    description: description ?? null,
+    repository: repository ?? null,
+    notice: notice ?? null,
+    hosts,
+    docs
+  })
 
   return json({ name, version, digest, url: `${env.CDN}/${key}` }, 201)
 }
