@@ -10,7 +10,7 @@ Include a minimal failing script, the command used to run it, and the expected a
 
 For a large change, open an issue or email [c.sutton.dylan@gmail.com](mailto:c.sutton.dylan@gmail.com) first so it can be accepted once ready.
 
-Pull requests are welcome everywhere the Apache 2.0 License applies, which is every part except `site/` and `infra/`. Those two are the platform, they carry no license, and they stay free of anyone else's copyright, so a patch to them is closed with thanks and written again by the maintainer. Issues about them are welcome all the same, since a report or a suggestion costs you nothing and carries no copyright.
+Pull requests are welcome everywhere the Apache 2.0 License applies, which is every part except `lang/`, `site/` and `infra/`. Those three are the products, they carry no license, and they stay free of anyone else's copyright, so a patch to them is closed with thanks and written again by the maintainer. Issues about them are welcome all the same, since a report or a suggestion costs you nothing and carries no copyright.
 
 - New behavior comes with tests.
 - Docs describe the code as it is after the change.

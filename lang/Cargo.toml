@@ -2,7 +2,8 @@
 name = "lang"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file = "../LICENSE.md"
+publish = false
 repository.workspace = true
 description = "Embedding API over the Edge Python engine for building your own scripting language."
 
