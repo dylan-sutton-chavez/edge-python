@@ -1,3 +1,4 @@
+pub mod browser;
 pub mod config;
 pub mod driver;
 mod env;
@@ -85,6 +86,15 @@ pub fn cache_root() -> Result<PathBuf, String> {
     }
     let home = std::env::var("HOME").map_err(|_| "cannot locate a cache dir (no HOME)".to_string())?;
     Ok(PathBuf::from(home).join(".cache").join("edge"))
+}
+
+/* What edge downloaded on a user's behalf, kept apart from the cache the uninstaller wipes unasked, since a browser is not refetchable in the way a module is. */
+pub fn data_root() -> Result<PathBuf, String> {
+    if let Ok(x) = std::env::var("XDG_DATA_HOME") {
+        return Ok(PathBuf::from(x).join("edge"));
+    }
+    let home = std::env::var("HOME").map_err(|_| "cannot locate a data dir (no HOME)".to_string())?;
+    Ok(PathBuf::from(home).join(".local").join("share").join("edge"))
 }
 
 // Wall-clock ns, the base every PendingTimer deadline is minted against.

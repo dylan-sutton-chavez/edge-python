@@ -42,7 +42,7 @@ cargo build --release # .rlib and cdylib for Rust embedders
 
 Each `std/*` package builds with `cargo build --release --target wasm32-unknown-unknown` inside its folder. Rust keywords rename the artifact, so `struct` builds `edge_struct.wasm`. `std/test` is pure Edge Python and needs no build. A new package is a `std/<name>/` folder with the crate, or `src/entry.py` for a script-only one, plus a `<name>.json` corpus of `{src, output}` or `{src, error}` cases. The runner prepends `from <name> import *` to each case, so the harness needs no edit.
 
-`cli/` embeds `compiler.wasm` and the std `.wasm` files at build time. Build them first, or point `EDGE_COMPILER_WASM` and `EDGE_STD_DIR` at copies. It precompiles StarlingMonkey from `target/starling.wasm` or `EDGE_STARLING_WASM`, keeps only its hash, and downloads the artifact from `EDGE_CDN_BASE` on the first JavaScript import. Releases embed the speed build from `cargo wasm-cli`.
+`cli/` embeds `compiler.wasm`, the std `.wasm` files and the JS host from `js/dist` at build time. Build them first, or point `EDGE_COMPILER_WASM`, `EDGE_STD_DIR` and `EDGE_JS_DIST` at copies. It precompiles StarlingMonkey from `target/starling.wasm` or `EDGE_STARLING_WASM`, keeps only its hash, and downloads the artifact from `EDGE_CDN_BASE` on the first JavaScript import. Releases embed the speed build from `cargo wasm-cli`.
 
 The JS host in `js/src` is TypeScript, linted with `deno lint js/`. The builtins in `js/builtins` are plain ESM.
 

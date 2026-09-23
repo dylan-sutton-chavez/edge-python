@@ -76,8 +76,11 @@ Run flags.
 | `--save-state <f>` | When the script parks on an unservable wait, write a snapshot blob, print `state saved` to stderr and exit 0 |
 | `--restore-state <f>` | Boot from a snapshot blob instead of a script and keep running |
 | `--preempt <n>` | Yield every `n` loop back-edges so even a tight loop stays snapshottable, 0 disables |
+| `--web` | Run on the browser host in headless Chrome, refusing the four flags above since they belong to the native engine |
 
 `raise SystemExit(code)` with no argument or an integer exits cleanly with that code. Any other uncaught error prints a traceback and exits 1.
+
+`--web` serves the JS host and the engine from the binary on a loopback port, so only the modules a manifest declares by URL leave the machine. It drives a Chrome the system already has, or one it offers to download once into `~/.local/share/edge/chromium`, which `edge uninstall` offers to remove. `EDGE_CHROME_PATH` names a browser directly and skips the search.
 
 ### edge repl
 

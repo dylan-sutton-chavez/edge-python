@@ -19,6 +19,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=EDGE_COMPILER_WASM");
     println!("cargo:rerun-if-env-changed=EDGE_STD_DIR");
     println!("cargo:rerun-if-env-changed=EDGE_STARLING_WASM");
+    println!("cargo:rerun-if-env-changed=EDGE_JS_DIST");
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let target = std::env::var("TARGET").expect("TARGET");
@@ -31,6 +32,10 @@ fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|_| manifest.join("../target/wasm32-unknown-unknown/release/compiler.wasm"));
     precompile(&engine, &compiler, &out.join("compiler.cwasm"), "run cargo wasm first", |e, b| e.precompile_module(b));
+    // A browser runs the module itself, never the precompile, so a dist and a headless run carry a raw copy.
+    std::fs::copy(&compiler, out.join("compiler.wasm")).unwrap_or_else(|e| panic!("copying {}: {e}", compiler.display()));
+    let js_dist = std::env::var("EDGE_JS_DIST").map(PathBuf::from).unwrap_or_else(|_| manifest.join("../js/dist"));
+    js_host(&js_dist, &out.join("js_host.rs"));
     for pkg in STD {
         precompile(&engine, &std_wasm(&manifest, pkg), &out.join(format!("{pkg}.cwasm")), &format!("build std/{pkg} first"), |e, b| e.precompile_module(b));
     }
@@ -106,6 +111,38 @@ fn registry(repo: &Path, out: &Path) {
     }
     table.push_str("];\n");
     std::fs::write(out, table).unwrap_or_else(|e| panic!("writing {}: {e}", out.display()));
+}
+
+/* The compiled JS host the binary carries, keyed by the path the CDN serves each file at, so a page's imports read the same from a dist, from a headless run, or from the CDN. */
+fn js_host(dist: &Path, out: &Path) {
+    println!("cargo:rerun-if-changed={}", dist.display());
+    let hint = "run tsc in js first, see CONTRIBUTING.md";
+    let root = std::fs::canonicalize(dist).unwrap_or_else(|e| panic!("cannot read {}: {e}, {hint}", dist.display()));
+
+    let mut found = Vec::new();
+    walk_js(&root, &root, &mut found);
+    found.sort();
+    assert!(!found.is_empty(), "no .js under {}, {hint}", root.display());
+
+    let mut table = String::from("pub const JS_HOST: &[(&str, &[u8])] = &[\n");
+    for (key, path) in found {
+        table.push_str(&format!("    ({key:?}, include_bytes!({:?})),\n", path.display().to_string()));
+    }
+    table.push_str("];\n");
+    std::fs::write(out, table).unwrap_or_else(|e| panic!("writing {}: {e}", out.display()));
+}
+
+// tsc writes to js/dist and the CDN serves that tree under js/src, so the prefix is added back here.
+fn walk_js(root: &Path, dir: &Path, found: &mut Vec<(String, PathBuf)>) {
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            walk_js(root, &path, found);
+        } else if path.extension().is_some_and(|e| e == "js") {
+            let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+            found.push((format!("src/{rel}"), path));
+        }
+    }
 }
 
 fn packages(tree: &Path) -> Vec<(String, PathBuf)> {

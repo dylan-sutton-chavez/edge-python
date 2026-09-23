@@ -8,7 +8,7 @@ description: "The edge CLI, from run and serve to test, build, actor and package
 The `edge` CLI runs on macOS, Linux, and WSL. It embeds the engine the JS host loads, a `compiler.wasm` built from the same source for speed and precompiled for the host machine, executed under wasmtime, so `run`, `repl`, `test`, and `actor` start in milliseconds with no browser and no server behind them. JavaScript modules run in StarlingMonkey, a runtime the CLI downloads once on the first JavaScript import, and scripts that need a browser (`dom`, `storage`, `frame()`) belong to the JS host, see [JavaScript in the CLI](/docs/reference/modules#javascript-in-the-cli) for what runs where.
 
 ```bash
-edge run app.py        # run a script, a .edge, or stdin
+edge run app.py        # run a script, a .edge, or stdin (--web)
 edge build             # pack a portable .edge (--app, --web)
 edge actor actor.yml # run a pool of cooperative actors
 edge serve             # dev server with live reload
@@ -54,6 +54,8 @@ error: ZeroDivisionError: division by zero
 With no path, `edge run` reads the script from piped stdin (`cat app.py | edge run`) and errors when stdin is a terminal. `-c <code>` runs inline code instead (`edge run -c 'print(1)'`). With a path or `-c`, piped stdin instead feeds [`input()`](/docs/reference/builtins) one line per call. A packed `.edge` or an app binary also runs here, `edge run app.edge` unpacks and runs it exactly as `./app` would.
 
 Flags: `--events`, `--save-state`, `--restore-state`, and `--preempt`, see [run flags](/docs/reference/modules#run-flags).
+
+`--web` runs the script on the browser host instead of the native engine, in headless Chrome. The JS host and the engine come out of the binary and are served on a loopback port, so only the modules the manifest declares by URL leave the machine, and `dom`, `storage` and `frame()` work because a real page is running them. It drives a Chrome the system already has, or offers to download one the first time into `~/.local/share/edge/chromium`, which `edge uninstall` offers to remove. `EDGE_CHROME_PATH` names a browser directly. The four flags above belong to the native engine and are refused alongside it rather than ignored.
 
 ## `edge serve`: local dev server
 
@@ -145,7 +147,7 @@ Packs the project and its imports into one artifact, in one of three modes for t
 | `edge build --app` | a standalone binary | any host of the same OS and CPU, offline, nothing installed |
 | `edge build --web` | a self-contained `dist/` | any browser |
 
-Each mode packs differently. The default `.edge` carries the project and its custom imports, since `edge` is already present where it lands. `--app` appends the project to this `edge` binary, so `./app` runs it directly and honors the run flags `--save-state`, `--restore-state`, `--preempt` and `--events`. `--web` vendors the JS host under `dist/js/` with `compiler.wasm` beside it, adds every declared module with what it needs from the same origin (its relative JavaScript and Python imports and a sibling `edge.json`), and rewrites `edge.json` to the vendored paths, so the `dist/` works offline with `dom` and `network` included.
+Each mode packs differently. The default `.edge` carries the project and its custom imports, since `edge` is already present where it lands. `--app` appends the project to this `edge` binary, so `./app` runs it directly and honors the run flags `--save-state`, `--restore-state`, `--preempt` and `--events`. `--web` writes the JS host it carries under `dist/js/` with `compiler.wasm` beside it, so neither reaches the network, adds every declared module with what it needs from the same origin (its relative JavaScript and Python imports and a sibling `edge.json`), and rewrites `edge.json` to the vendored paths, so the `dist/` works offline with `dom` and `network` included.
 
 All three carry every module the manifest declares by URL, with the files it imports beside it, so `time` and a third-party package travel with the project. The official std packages are the exception. A `.edge` and an app binary resolve them to the copies embedded in the CLI, while a web build vendors them into `dist/vendor/` like any other module.
 

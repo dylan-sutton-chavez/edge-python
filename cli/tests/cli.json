@@ -521,5 +521,13 @@
     },
     "run": ["run", "main.py"],
     "stdout": ["True"]
+  },
+  {
+    "given": {
+      "edge.json": "{}\n",
+      "main.py": "print('x')\n"
+    },
+    "run": ["run", "--web", "--preempt", "500", "main.py"],
+    "fails": ["--preempt belongs to the native engine"]
   }
 ]

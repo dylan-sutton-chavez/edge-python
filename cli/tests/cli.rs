@@ -46,6 +46,12 @@ fn plugin_suite() {
     suite(include_str!("plugins.json"));
 }
 
+/// The browser host under `--web`, which needs a Chrome on the machine the way the plugin suite needs its fixture.
+#[test]
+fn web_suite() {
+    suite(include_str!("web.json"));
+}
+
 fn suite(json: &str) {
     let cases: Vec<Case> = serde_json::from_str(json).expect("case file parse");
     let bin = env!("CARGO_BIN_EXE_edge");

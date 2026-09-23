@@ -33,6 +33,27 @@ runs:
         echo "EDGE_STD_DIR=$GITHUB_WORKSPACE/_inputs/std" >> "$GITHUB_ENV"
         echo "EDGE_STARLING_WASM=$GITHUB_WORKSPACE/_inputs/starling.wasm" >> "$GITHUB_ENV"
 
+    # The host is TypeScript and strips in seconds, so it is built here rather than fetched.
+    - name: Deno
+      uses: denoland/setup-deno@v2
+      with:
+        deno-version: v2.x
+
+    - name: Cache Deno
+      uses: actions/cache@v6
+      with:
+        path: ~/.cache/deno
+        key: deno-${{ runner.os }}-${{ hashFiles('**/deno.json', '**/deno.lock') }}
+        restore-keys: deno-${{ runner.os }}-
+
+    # js/src splits main-thread and worker since tsc rejects mixing the dom and webworker libs.
+    - name: Build the JS host
+      shell: bash
+      working-directory: js
+      run: |
+        deno run -A npm:typescript@5.9.3/tsc -p tsconfig.json
+        deno run -A npm:typescript@5.9.3/tsc -p tsconfig.worker.json
+
     - name: Toolchain (lint)
       if: inputs.mode == 'lint'
       uses: dtolnay/rust-toolchain@stable
@@ -117,6 +138,14 @@ runs:
       if: inputs.mode == 'test' && (inputs.suite == 'engine' || inputs.suite == '')
       shell: bash
       run: cargo build --release --target wasm32-unknown-unknown -p slugify-mod
+
+    # The web suite drives a real browser, and the runner image is not a contract, so one is installed.
+    - name: Install Chromium
+      if: inputs.mode == 'test' && (inputs.suite == 'engine' || inputs.suite == '')
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium
 
     # engine runs cli and run minus the network corpus, network runs that corpus, actors and skill theirs.
     - name: Test

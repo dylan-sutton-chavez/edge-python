@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script type="module" src="/js/src/element.js"></script>
+</head>
+<body>
+  <edge-python id="ep" manifest="/edge.json" wasm="/compiler.wasm"></edge-python>
+  <script type="module">
+    // Progress the CLI reads over CDP, output grows and then done flips with a code or a traceback.
+    const st = { out: "", done: false, ok: false, code: 0, err: "" };
+    window.__edge = st;
+    const el = document.getElementById("ep");
+    (async () => {
+      try {
+        // Waiting on the worker rather than the ready event, so this cannot lose a race with the upgrade.
+        while (!el.worker) await new Promise((r) => setTimeout(r, 10));
+        el.worker.onOutput((text) => { st.out += text });
+        const res = await el.worker.run(__EDGE_SRC__);
+        st.code = res && res.exitCode ? res.exitCode : 0;
+        if (res && res.out) st.err = res.out;
+        else st.ok = true;
+      } catch (e) {
+        st.err = e && e.message ? e.message : String(e);
+      } finally {
+        st.done = true;
+      }
+    })();
+  </script>
+</body>
+</html>

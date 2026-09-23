@@ -39,6 +39,8 @@ ureq = { version = "3", features = ["brotli"] }
 slab = "0.4"
 # A unique temp file for the uninstall script, a predictable path invites symlink squatting.
 tempfile = "3"
+# Drives the browser host for `edge run --web` over CDP, `fetch` downloads a known-good Chromium when the user agrees.
+headless_chrome = { version = "1", features = ["fetch"] }
 
 [build-dependencies]
 # Precompiles compiler.wasm, the std packages and the JavaScript runtime for the build target.

@@ -201,24 +201,7 @@ fn trailer_payload(path: &Path) -> Option<Vec<u8>> {
     Some(payload)
 }
 
-// Production layout we mirror into dist/js/ and dist/.
-const JS_BASE: &str = "https://cdn.edgepython.com/js/";
-const COMPILER_WASM: &str = "https://cdn.edgepython.com/compiler.wasm";
-const JS_FILES: &[&str] = &[
-    "src/index.js",
-    "src/element.js",
-    "src/env.js",
-    "src/fetch.js",
-    "src/native.js",
-    "src/prefetch.js",
-    "src/rt.js",
-    "src/specs.js",
-    "src/util.js",
-    "src/cache/idb.js",
-    "src/cache/memory.js",
-    "src/worker/worker.js",
-    "src/worker/engine.js",
-];
+use crate::web::{COMPILER_WASM, JS_HOST};
 
 const INDEX_HTML: &str = include_str!("../templates/dist.html");
 
@@ -234,19 +217,13 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
 
     fs::create_dir_all(&out_dir).with_context(|| format!("creating {}", out_dir.display()))?;
 
-    let sp = crate::ui::spinner("vendoring the JS host");
+    let sp = crate::ui::spinner("writing the JS host");
     match vendor_js(&out_dir) {
-        Ok(()) => sp.done("vendored the JS host"),
-        Err(e) => { sp.fail("failed to vendor the JS host"); return Err(e); }
+        Ok(()) => sp.done("wrote the JS host"),
+        Err(e) => { sp.fail("failed to write the JS host"); return Err(e); }
     }
 
-    let sp = crate::ui::spinner("fetching compiler.wasm");
-    let compiler_bytes = match fetch(COMPILER_WASM).context("fetching compiler.wasm") {
-        Ok(b) => b,
-        Err(e) => { sp.fail("failed to fetch compiler.wasm"); return Err(e); }
-    };
-    fs::write(out_dir.join("compiler.wasm"), &compiler_bytes)?;
-    sp.done("fetched compiler.wasm");
+    fs::write(out_dir.join("compiler.wasm"), COMPILER_WASM).context("writing compiler.wasm")?;
 
     let scripts = collect_scripts(&project, &out_dir);
     let sp = crate::ui::spinner("vendoring packages");
@@ -267,7 +244,7 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
 
     crate::ui::build_report(
         &out_dir,
-        JS_FILES.len(),
+        JS_HOST.len(),
         packages,
         script_count,
         dir_size(&out_dir)?,
@@ -276,16 +253,14 @@ pub fn run(manifest_path: &Path, out_dir: PathBuf) -> Result<()> {
     Ok(())
 }
 
-/// Fetch the JS host modules into `dist/js/` mirroring their CDN layout.
+/// Write the embedded JS host into `dist/js/` mirroring its CDN layout.
 fn vendor_js(out_dir: &Path) -> Result<()> {
-    for rel in JS_FILES {
-        let url = format!("{JS_BASE}{rel}");
-        let bytes = fetch(&url)?;
+    for (rel, bytes) in JS_HOST {
         let path = out_dir.join("js").join(rel);
         if let Some(p) = path.parent() {
             fs::create_dir_all(p)?;
         }
-        fs::write(&path, bytes)?;
+        fs::write(&path, bytes).with_context(|| format!("writing {}", path.display()))?;
     }
     Ok(())
 }
@@ -456,12 +431,6 @@ fn dir_size(dir: &Path) -> Result<u64> {
 
 fn index_html(entry: &str) -> String {
     INDEX_HTML.replace("__EDGE_ENTRY__", entry)
-}
-
-fn fetch(url: &str) -> Result<Vec<u8>> {
-    let source = cdn(url);
-    let mut resp = get(&source).map_err(|e| anyhow!("fetching {source}: {e}"))?;
-    resp.body_mut().read_to_vec().map_err(|e| anyhow!("reading {source}: {e}"))
 }
 
 #[cfg(test)]

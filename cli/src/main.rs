@@ -8,10 +8,12 @@ mod pack;
 /// Minimalist terminal output, plain text only, no colors.
 mod ui;
 mod wasm_cache;
+/// The browser host's embedded assets, shared by a packed dist and a headless run.
+mod web;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use host::driver::RunOpts;
 
@@ -22,7 +24,7 @@ The Edge Python developer CLI
 Usage  edge <command> [options]
 
 Commands
-  run <file|.edge>   Run a script, a .edge, stdin or -c <code>
+  run <file|.edge>   Run a script, a .edge, stdin or -c <code>  (--web)
   build              Pack a portable .edge  (--app, --web)
   actor <file>       Run an actor pool from actor.yml
   serve              Dev server with live reload
@@ -71,6 +73,9 @@ enum Cmd {
         /// Yield every n loop back-edges and resume.
         #[arg(long)]
         preempt: Option<usize>,
+        /// Run on the browser host in headless Chrome instead of the native engine.
+        #[arg(long)]
+        web: bool,
     },
     /// Interactive shell. Ctrl+C, Ctrl+D, or .exit to quit.
     Repl,
@@ -166,7 +171,15 @@ fn main() -> Result<()> {
         Cmd::Add { pkgs } => cmd::pkg::add(&manifest_path, &pkgs),
         Cmd::Remove { pkgs } => cmd::pkg::remove(&manifest_path, &pkgs),
         Cmd::Serve { host, port, open } => cmd::serve::run(PathBuf::from("."), &host, port, open),
-        Cmd::Run { file, code, events, save_state, restore_state, preempt } => {
+        Cmd::Run { file, code, events, save_state, restore_state, preempt, web } if web => {
+            // The browser host has no stdin, no snapshots and no event file, so a flag meant for the native engine is refused rather than ignored.
+            let native_only = [("--events", events.is_some()), ("--save-state", save_state.is_some()), ("--restore-state", restore_state.is_some()), ("--preempt", preempt.is_some())];
+            match native_only.iter().find(|(_, given)| *given) {
+                Some((flag, _)) => Err(anyhow::anyhow!("{flag} belongs to the native engine, drop it or drop --web")),
+                None => web_run(file.as_deref(), code.as_deref(), cli.manifest.as_deref()),
+            }
+        }
+        Cmd::Run { file, code, events, save_state, restore_state, preempt, .. } => {
             let opts = RunOpts {
                 manifest: cli.manifest.as_deref().map(|p| p.to_string_lossy().replace('\\', "/")),
                 preempt: preempt.unwrap_or(0),
@@ -199,6 +212,26 @@ fn main() -> Result<()> {
     if let Err(e) = result {
         ui::error(&e);
         std::process::exit(1);
+    }
+    Ok(())
+}
+
+/* Runs a script on the browser host, from a file, from `-c`, or from stdin the way `edge run` reads it. */
+fn web_run(file: Option<&Path>, code: Option<&str>, manifest: Option<&Path>) -> Result<()> {
+    let src = match (file, code) {
+        (_, Some(code)) => code.to_string(),
+        (Some(path), None) => std::fs::read_to_string(path).map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?,
+        (None, None) => {
+            let mut buf = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf).map_err(|e| anyhow::anyhow!("reading stdin: {e}"))?;
+            buf
+        }
+    };
+
+    let default = PathBuf::from("edge.json");
+    let code = host::browser::run(&src, Some(manifest.unwrap_or(default.as_path())))?;
+    if code != 0 {
+        std::process::exit(code);
     }
     Ok(())
 }

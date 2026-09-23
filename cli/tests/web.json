@@ -1,0 +1,19 @@
+[
+  {
+    "given": {
+      "main.py": "print('ok from the browser')\nprint(6 * 7)\n",
+      "edge.json": "{}\n"
+    },
+    "run": ["run", "--web", "main.py"],
+    "stdout": ["ok from the browser", "42"]
+  },
+  {
+    "given": {
+      "main.py": "print('before')\nraise ValueError('on purpose')\n",
+      "edge.json": "{}\n"
+    },
+    "run": ["run", "--web", "main.py"],
+    "stdout": ["before"],
+    "fails": ["ValueError: on purpose"]
+  }
+]

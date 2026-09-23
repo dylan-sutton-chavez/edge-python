@@ -1,6 +1,8 @@
 use anyhow::{anyhow, bail, Result};
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::process::Command;
+
+use crate::host::browser;
 
 // Bundled at compile time so the binary is self-contained, no network needed to clean up.
 const UNINSTALL_SH: &str = include_str!("../../setup/uninstall.sh");
@@ -8,6 +10,7 @@ const UNINSTALL_SH: &str = include_str!("../../setup/uninstall.sh");
 /// Drop the bundled uninstall.sh to a temp file and run it via bash.
 pub fn run() -> Result<()> {
     println!("This removes the edge binary, its cache and the PATH entry from your shell rc files.");
+    drop_browser()?;
 
     // Spawning bash with the script as a file lets read prompts (none, in this path) work normally.
     let temp = stage_script()?;
@@ -25,6 +28,33 @@ pub fn run() -> Result<()> {
     if !status.success() {
         bail!("uninstall script exited with code {:?}", status.code());
     }
+    Ok(())
+}
+
+/* A browser edge downloaded is a hundred megabytes it put there, so it goes only when asked, and stays when nobody is there to answer. */
+fn drop_browser() -> Result<()> {
+    let Ok(dir) = browser::chrome_dir() else { return Ok(()) };
+    if !dir.exists() {
+        return Ok(());
+    }
+
+    if !std::io::stdin().is_terminal() {
+        println!("kept the headless Chromium at {}, remove it by hand", dir.display());
+        return Ok(());
+    }
+
+    print!("Remove the headless Chromium edge downloaded to {}? [y/N] ", dir.display());
+    std::io::stdout().flush().ok();
+
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer).map_err(|e| anyhow!("reading the answer: {e}"))?;
+    if !matches!(answer.trim(), "y" | "Y" | "yes" | "Yes" | "YES") {
+        println!("kept {}", dir.display());
+        return Ok(());
+    }
+
+    std::fs::remove_dir_all(&dir).map_err(|e| anyhow!("removing {}: {e}", dir.display()))?;
+    println!("removed {}", dir.display());
     Ok(())
 }
 
