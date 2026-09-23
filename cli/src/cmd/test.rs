@@ -1,6 +1,7 @@
 use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 
+use crate::host::browser;
 use crate::host::driver::{base_dir, Session};
 use crate::manifest::Manifest;
 use crate::ui;
@@ -8,8 +9,14 @@ use crate::ui;
 // Runs registered tests, exit 3 flags an empty file.
 const TEST_DRIVER: &str = "import test\nif not test._tests:\n    raise SystemExit(3)\ntest.run()";
 
+// Which host the files run on, one browser or one session, opened once for the whole suite.
+enum Engine {
+    Native(Session),
+    Web(browser::Host),
+}
+
 /// Discovers *_test.py files and drives each through one session, verdicts come only from SystemExit codes.
-pub fn run(manifest_path: &Path, manifest: Option<&Path>, path: Option<&Path>) -> Result<()> {
+pub fn run(manifest_path: &Path, manifest: Option<&Path>, path: Option<&Path>, web: bool) -> Result<()> {
     let target = path.unwrap_or(Path::new("."));
     let files = if target.is_file() { vec![target.to_path_buf()] } else { discover_tests(target) };
     if files.is_empty() {
@@ -21,25 +28,34 @@ pub fn run(manifest_path: &Path, manifest: Option<&Path>, path: Option<&Path>) -
     }
 
     let open = || Session::open(manifest);
-    let mut session = open_or_die(&open);
+    let mut engine = match web {
+        true => Engine::Web(browser::Host::open(Some(manifest_path))?),
+        false => Engine::Native(open_or_die(&open)),
+    };
 
     let started = std::time::Instant::now();
     let mut failed = 0usize;
     for (i, file) in files.iter().enumerate() {
-        if i > 0 && session.reset().is_err() {
-            drop(session);
-            session = open_or_die(&open);
+        // A browser gets a fresh page a file, a session is wiped between them.
+        if let (Engine::Native(session), true) = (&mut engine, i > 0)
+            && session.reset().is_err()
+        {
+            engine = Engine::Native(open_or_die(&open));
         }
         let result = std::fs::read_to_string(file)
             .with_context(|| format!("reading {}", file.display()))
-            .and_then(|src| run_file(&mut session, &src, file));
+            .and_then(|src| match &mut engine {
+                Engine::Native(session) => run_file(session, &src, file),
+                Engine::Web(host) => web_file(host, &src),
+            });
         let (ok, reason) = match result {
             Ok(v) => v,
             // A wedged session poisons later files, reopen.
             Err(e) => {
                 ui::error(&e);
-                drop(session);
-                session = open_or_die(&open);
+                if let Engine::Native(_) = engine {
+                    engine = Engine::Native(open_or_die(&open));
+                }
                 (false, Some("error"))
             }
         };
@@ -51,7 +67,7 @@ pub fn run(manifest_path: &Path, manifest: Option<&Path>, path: Option<&Path>) -
     }
 
     ui::test_summary(files.len() - failed, files.len(), started.elapsed().as_secs_f64());
-    drop(session);
+    drop(engine);
     if failed > 0 {
         std::process::exit(1);
     }
@@ -92,6 +108,15 @@ fn open_or_die(open: &dyn Fn() -> Result<Session>) -> Session {
             std::process::exit(2);
         }
     }
+}
+
+/* The file and the driver as one source, since a page has no session to eval into twice. A file that drove `run()` itself raises before the appended driver is reached, so the two shapes still read apart. */
+fn web_file(host: &browser::Host, src: &str) -> Result<(bool, Option<&'static str>)> {
+    Ok(match host.run(&format!("{src}\n{TEST_DRIVER}"))? {
+        0 => (true, None),
+        3 => (false, Some("no tests registered")),
+        _ => (false, None),
+    })
 }
 
 /// Eval the file, then the driver when it didn't exit itself.

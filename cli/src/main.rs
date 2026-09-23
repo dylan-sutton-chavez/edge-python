@@ -29,7 +29,7 @@ Commands
   actor <file>       Run an actor pool from actor.yml
   serve              Dev server with live reload
   repl               Interactive shell
-  test [path]        Run *_test.py files
+  test [path]        Run *_test.py files  (--web)
   init <name>        Scaffold a new project
   publish <file>     Send a packed .edge to the registry
   add <pkgs>         Add packages to edge.json
@@ -95,6 +95,9 @@ enum Cmd {
     Test {
         /// Directory or file to run, the tree is searched when omitted.
         path: Option<PathBuf>,
+        /// Run them on the browser host in headless Chrome instead of the native engine.
+        #[arg(long)]
+        web: bool,
     },
     /// Scaffold a new project.
     Init {
@@ -206,7 +209,7 @@ fn main() -> Result<()> {
         Cmd::Publish { artifact } => cmd::publish::run(&artifact),
         Cmd::Uninstall => cmd::uninstall::run(),
         Cmd::Actor { file } => cmd::actor::run(&file, cli.manifest.as_deref()),
-        Cmd::Test { path } => cmd::test::run(&manifest_path, cli.manifest.as_deref(), path.as_deref()),
+        Cmd::Test { path, web } => cmd::test::run(&manifest_path, cli.manifest.as_deref(), path.as_deref(), web),
     };
 
     if let Err(e) = result {

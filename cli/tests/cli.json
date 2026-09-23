@@ -426,7 +426,7 @@
       "main.py": "import json\nprint(json.dumps({\"n\": 1}))\n"
     },
     "run": ["build", "--app"],
-    "stdout": ["packed app (2 files)"],
+    "stdout": ["packed app (3 files)"],
     "then": {
       "bin": "./app",
       "env": { "EDGE_CDN_BASE": "http://127.0.0.1:1", "XDG_CACHE_HOME": "empty-cache" },
@@ -439,7 +439,7 @@
       "main.py": "import json\nprint(json.dumps({\"n\": 1}))\n"
     },
     "run": ["build"],
-    "stdout": ["packed app.edge (2 files)"],
+    "stdout": ["packed app.edge (3 files)"],
     "creates": ["app.edge"]
   },
   {

@@ -105,6 +105,8 @@ Test files declare tests with the [`test` package](/docs/standard-packages/test)
 
 Exit codes: `0` when every file passed, `1` when a file failed or no `*_test.py` was found, `2` when the engine session could not start.
 
+`--web` runs the same files on the browser host in headless Chrome, so a package can prove it works where `dom`, `storage` and `frame()` are real. One browser serves the whole suite with a fresh page per file, since launching one costs seconds. Everything else holds, the discovery, the `test` declaration and the exit codes, and the engine comes out of the binary the same way [`edge run --web`](#edge-run-run-a-script) gets it.
+
 ## `edge init`: scaffold a project
 
 Creates a ready-to-serve project. With no argument it scaffolds the current directory.
@@ -149,7 +151,7 @@ Packs the project and its imports into one artifact, in one of three modes for t
 
 Each mode packs differently. The default `.edge` carries the project and its custom imports, since `edge` is already present where it lands. `--app` appends the project to this `edge` binary, so `./app` runs it directly and honors the run flags `--save-state`, `--restore-state`, `--preempt` and `--events`. `--web` writes the JS host it carries under `dist/js/` with `compiler.wasm` beside it, so neither reaches the network, adds every declared module with what it needs from the same origin (its relative JavaScript and Python imports and a sibling `edge.json`), and rewrites `edge.json` to the vendored paths, so the `dist/` works offline with `dom` and `network` included.
 
-All three carry every module the manifest declares by URL, with the files it imports beside it, so `time` and a third-party package travel with the project. The official std packages are the exception. A `.edge` and an app binary resolve them to the copies embedded in the CLI, while a web build vendors them into `dist/vendor/` like any other module.
+All three carry every module the manifest declares by URL, with the files it imports beside it, so `time`, `json` and a third-party package travel with the project. Nothing is left out for being official, which is what makes the artifact the whole program and lets a registry read what it needs without opening a CLI. A run still reaches for the copy the host already holds, so the packed `.wasm` costs bytes and no time, and it is what keeps the artifact running once a standard package lives in the registry like any other.
 
 A `.edge` and an app binary also carry the `README.md` and any `LICENSE` at the project root, so attribution reaches whoever receives the artifact. A `.edge` carries the documentation too when `edge.json` declares a `docs` directory, under a reserved `@docs/` prefix no import can reach. An app binary leaves the pages behind, nobody reads documentation out of an executable.
 
@@ -173,6 +175,10 @@ Flags: `--out <path>` (mode-specific default), `--app`, `--web`.
 ## `edge publish`: send it to the registry
 
 Uploads a `.edge` packed by `edge build`. The `name` and `version` come from the manifest inside the bundle, so the artifact carries what it is published as, and the doc pages travel beside it for the site to render. Set `EDGE_TOKEN` to a token from [the settings](https://edgepython.com/settings#tokens) first.
+
+The artifact is the whole request. The CLI declares nothing beside it, and the registry opens the bundle and reads the name, the version, the description, the repository, the `LICENSE` and the doc pages out of the bytes it is about to store, so a listing can only ever show what you shipped.
+
+Where a package runs is not declared and not yet worked out, so a release carries no claim about its hosts and a listing shows none.
 
 ```text
 $ export EDGE_TOKEN=edge_pat_...

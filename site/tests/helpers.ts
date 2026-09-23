@@ -12,6 +12,21 @@ export const unique = () => `${Date.now().toString(36)}${Math.random().toString(
 let arrival = 0
 export const arriving = () => `10.0.0.${++arrival}`
 
+/* Packs a tree the way `edge build` does, magic then each file as an ascii length, a newline and the bytes, so a publish test sends a real archive the route has to open. */
+export function packed(files: Record<string, string>, entry = 'main.py') {
+  const framed = (text: string) => {
+    const body = Buffer.from(text)
+    return Buffer.concat([Buffer.from(`${body.length}\n`), body])
+  }
+
+  const names = Object.keys(files)
+  const parts = [Buffer.from('EDGEPKG\u0001', 'binary'), framed(entry), Buffer.from(`${names.length}\n`)]
+
+  for (const path of names) parts.push(framed(path), framed(files[path]!))
+
+  return Buffer.concat(parts)
+}
+
 /* Sends again when the dev server drops the connection mid-flight, which wrangler only retries for GET and HEAD. Nothing reached the worker, so nothing can be applied twice. */
 export async function sent(send: () => Promise<APIResponse>) {
   const first = await send()

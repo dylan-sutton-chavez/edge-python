@@ -1,8 +1,11 @@
 use anyhow::{anyhow, bail, Context, Result};
 use headless_chrome::{Browser, FetcherOptions, LaunchOptions};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use tiny_http::{Header, Response, Server};
@@ -31,23 +34,56 @@ struct State {
     err: String,
 }
 
-/// Run `src` on the browser host and return the code it exited with.
+/// A live browser over the embedded host, reused across sources since launching one costs seconds.
+pub struct Host {
+    // Held so the process outlives the tab, never used directly again.
+    _browser: Browser,
+    // One tab navigated per source. Closing tabs drops the CDP connection once the last one goes.
+    tab: Arc<headless_chrome::Tab>,
+    port: u16,
+    // Each source is served under its own key, so a navigation never reads the page the last run left.
+    pages: Arc<Mutex<HashMap<String, String>>>,
+    next: AtomicUsize,
+}
+
+impl Host {
+    /// Launch a browser and serve the harness, the manifest and the embedded host on a loopback port.
+    pub fn open(manifest: Option<&Path>) -> Result<Host> {
+        // The declared modules keep their own addresses, only the host and the engine come from here.
+        let imports = match manifest {
+            Some(path) if path.exists() => std::fs::read(path).with_context(|| format!("reading {}", path.display()))?,
+            _ => b"{}".to_vec(),
+        };
+
+        let pages = Arc::new(Mutex::new(HashMap::new()));
+        let port = serve(pages.clone(), imports)?;
+        let browser = launch().context("launching headless Chromium")?;
+        let tab = browser.new_tab().map_err(|e| anyhow!("opening a tab: {e}"))?;
+
+        Ok(Host { _browser: browser, tab, port, pages, next: AtomicUsize::new(0) })
+    }
+
+    /// Run one source on the browser host and return the code it exited with.
+    pub fn run(&self, src: &str) -> Result<i32> {
+        let key = self.next.fetch_add(1, Ordering::Relaxed).to_string();
+        let page = HARNESS.replace("__EDGE_SRC__", &embed(src)?);
+        self.pages.lock().map_err(|e| anyhow!("staging the page: {e}"))?.insert(key.clone(), page);
+
+        self.tab
+            .navigate_to(&format!("http://127.0.0.1:{}/{key}", self.port))
+            .map_err(|e| anyhow!("navigating to the harness: {e}"))?;
+        self.tab.wait_until_navigated().map_err(|e| anyhow!("waiting for page load: {e}"))?;
+
+        let code = drain(&self.tab);
+        self.pages.lock().map(|mut pages| pages.remove(&key)).ok();
+
+        code
+    }
+}
+
+/// Run one source on the browser host, for a caller with nothing else to run.
 pub fn run(src: &str, manifest: Option<&Path>) -> Result<i32> {
-    let page = HARNESS.replace("__EDGE_SRC__", &embed(src)?);
-    // The declared modules keep their own addresses, only the host and the engine come from here.
-    let imports = match manifest {
-        Some(path) if path.exists() => std::fs::read(path).with_context(|| format!("reading {}", path.display()))?,
-        _ => b"{}".to_vec(),
-    };
-
-    let port = serve(page, imports)?;
-    let browser = launch().context("launching headless Chromium")?;
-    let tab = browser.new_tab().map_err(|e| anyhow!("opening a tab: {e}"))?;
-
-    tab.navigate_to(&format!("http://127.0.0.1:{port}/")).map_err(|e| anyhow!("navigating to the harness: {e}"))?;
-    tab.wait_until_navigated().map_err(|e| anyhow!("waiting for page load: {e}"))?;
-
-    drain(&tab)
+    Host::open(manifest)?.run(src)
 }
 
 /* The source as a JS string literal. JSON leaves `<` alone, so a script carrying a closing script tag would end the harness block and run as markup, and escaping it keeps the program's own text intact. */
@@ -84,14 +120,6 @@ pub fn fetched() -> Result<bool> {
     Ok(std::fs::read_dir(&dir).is_ok_and(|mut entries| entries.next().is_some()))
 }
 
-/* Every download lands in one dir edge owns, never a shared one, so removing it takes nothing else with it. */
-fn fetching() -> Result<FetcherOptions> {
-    Ok(FetcherOptions::default()
-        .with_install_dir(Some(chrome_dir()?))
-        .with_allow_standard_dirs(false)
-        .with_allow_download(true))
-}
-
 /* Asks once before downloading a browser, and refuses outright without a terminal so a pipeline never hangs on an answer nobody is there to give. */
 fn agreed() -> Result<bool> {
     if !std::io::stdin().is_terminal() {
@@ -107,6 +135,14 @@ fn agreed() -> Result<bool> {
     let mut answer = String::new();
     std::io::stdin().read_line(&mut answer).map_err(|e| anyhow!("reading the answer: {e}"))?;
     Ok(matches!(answer.trim(), "y" | "Y" | "yes" | "Yes" | "YES"))
+}
+
+/* Every download lands in one dir edge owns, never a shared one, so removing it takes nothing else with it. */
+fn fetching() -> Result<FetcherOptions> {
+    Ok(FetcherOptions::default()
+        .with_install_dir(Some(chrome_dir()?))
+        .with_allow_standard_dirs(false)
+        .with_allow_download(true))
 }
 
 /* Headless with the sandbox off, since a container or WSL usually cannot open one and the engine's own limits are what bound the script. */
@@ -158,8 +194,8 @@ fn drain(tab: &headless_chrome::Tab) -> Result<i32> {
     }
 }
 
-/* Serves the harness, the project's manifest and the embedded host on a loopback port, so nothing but the declared modules leaves the machine. */
-fn serve(page: String, imports: Vec<u8>) -> Result<u16> {
+/* Serves the staged pages, the project's manifest and the embedded host on a loopback port, so nothing but the declared modules leaves the machine. */
+fn serve(pages: Arc<Mutex<HashMap<String, String>>>, imports: Vec<u8>) -> Result<u16> {
     let server = Server::http("127.0.0.1:0").map_err(|e| anyhow!("starting the local server: {e}"))?;
     let port = server
         .server_addr()
@@ -171,10 +207,12 @@ fn serve(page: String, imports: Vec<u8>) -> Result<u16> {
         for req in server.incoming_requests() {
             let path = req.url().split('?').next().unwrap_or("/").trim_start_matches('/').to_string();
             let served = match path.as_str() {
-                "" => Some((page.as_bytes().to_vec(), "text/html")),
                 "edge.json" => Some((imports.clone(), content_type(Path::new("edge.json")))),
                 "compiler.wasm" => Some((COMPILER_WASM.to_vec(), content_type(Path::new("compiler.wasm")))),
-                _ => host_file(&path),
+                _ => match host_file(&path) {
+                    Some(found) => Some(found),
+                    None => staged(&pages, &path),
+                }
             };
             let _ = match served {
                 Some((bytes, kind)) => req.respond(Response::from_data(bytes).with_header(header(kind))),
@@ -184,6 +222,12 @@ fn serve(page: String, imports: Vec<u8>) -> Result<u16> {
     });
 
     Ok(port)
+}
+
+/* The page a run staged under its own key, so two sources never share a url the browser could cache. */
+fn staged(pages: &Arc<Mutex<HashMap<String, String>>>, key: &str) -> Option<(Vec<u8>, &'static str)> {
+    let page = pages.lock().ok()?.get(key)?.clone();
+    Some((page.into_bytes(), "text/html"))
 }
 
 /* The embedded host answers under the same `js/` prefix a dist and the CDN use, so the harness imports read the same everywhere. */
@@ -228,5 +272,14 @@ mod tests {
         assert!(host_file("js/src/element.js").is_some());
         assert!(host_file("js/src/nope.js").is_none());
         assert!(host_file("src/element.js").is_none());
+    }
+
+    // Two sources must never share a url, or the browser serves the first page to the second run.
+    #[test]
+    fn a_staged_page_answers_only_under_its_own_key() {
+        let pages = Arc::new(Mutex::new(HashMap::from([("0".to_string(), "<html>first</html>".to_string())])));
+
+        assert!(staged(&pages, "0").is_some());
+        assert!(staged(&pages, "1").is_none());
     }
 }

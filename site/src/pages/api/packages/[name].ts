@@ -21,6 +21,8 @@ export const GET: APIRoute = async ({ params }) => {
     version: latest.version,
     digest: latest.digest,
     size: latest.size,
+    // Null until something establishes it, so a consumer reads no claim rather than every host.
+    hosts: latest.hosts,
     url: `${env.CDN}/${keyOf(name, latest.version)}`
   })
 }

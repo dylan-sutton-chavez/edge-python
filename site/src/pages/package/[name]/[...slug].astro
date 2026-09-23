@@ -20,10 +20,10 @@ if (!doc) return Astro.rewrite('/404')
 const page = detail.pages.find((each) => each.id === doc.id)!
 const base = `/package/${detail.name}`
 
-// The artifact answers this, so the sentence names every host it can reach and says when that is the only one.
-const places = detail.hosts.map((host) => HOSTS[host])
+// The registry works this out from the artifact, so the sentence names every host it reaches and says when that is the only one. Nothing established means nothing said.
+const places = (detail.hosts ?? []).map((host) => HOSTS[host])
 const where = places.length > 1 ? `${places.slice(0, -1).join(', ')} and ${places.at(-1)}` : places[0]
-const runs = places.length > 1 ? `Runs in ${where}.` : `Runs only in ${where}.`
+const runs = places.length > 1 ? `Runs in ${where}.` : places.length === 1 ? `Runs only in ${where}.` : null
 
 const meta = [`${detail.downloads} downloads`, detail.license, detail.size]
 const dot = 'text-fg-disabled'
@@ -70,7 +70,7 @@ const row = `${cell} border-t border-line-strong`
         <span class="min-w-0 truncate font-mono" title={detail.digest}>sha256-{detail.digest}</span>
       </p>
 
-      <p class="text-xs text-fg-muted">{runs}</p>
+      {runs && <p class="text-xs text-fg-muted">{runs}</p>}
     </div>
   </div>
 

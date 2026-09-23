@@ -2,7 +2,8 @@ import { globSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test, expect, type APIRequestContext } from '@playwright/test'
-import { MAILS, arriving, mailedCode, mintToken, sent, unique } from './helpers'
+import { MAILS, arriving, mailedCode, mintToken, packed, sent, unique } from './helpers'
+import { MAX_DESCRIPTION, MAX_NOTICE } from '../src/lib/server/packages'
 
 const DOCS = fileURLToPath(new URL('../../docs/', import.meta.url))
 
@@ -359,20 +360,20 @@ test('five wrong codes close an address for good', async ({ request }) => {
 })
 
 test.describe('publishing', () => {
-  const artifact = { name: 'app.edge', mimeType: 'application/octet-stream', buffer: Buffer.from('EDGEPKG\u0001opaque to the registry') }
   const naming = () => `p${unique()}`.toLowerCase().replace(/[^a-z0-9-]/g, '')
 
-  const send = (request: APIRequestContext, token: string, name: string, version: string, extra: Record<string, unknown> = {}) =>
-    sent(() =>
-      request.post('/api/publish', {
-        headers: { authorization: `Bearer ${token}` },
-        multipart: { manifest: JSON.stringify({ name, version, hosts: 'cli,web,actor', ...extra }), artifact }
-      })
-    )
+  const upload = (buffer: Buffer) => ({ name: 'app.edge', mimeType: 'application/octet-stream', buffer })
+
+  const send = (request: APIRequestContext, token: string, buffer: Buffer) =>
+    sent(() => request.post('/api/publish', { headers: { authorization: `Bearer ${token}` }, multipart: { artifact: upload(buffer) } }))
+
+  /* A release is a bundle and nothing else, so the tests hand over the same archive the CLI packs rather than metadata beside it. */
+  const release = (name: string, version: string, declared: Record<string, unknown> = {}, files: Record<string, string> = {}) =>
+    packed({ 'edge.json': JSON.stringify({ name, version, ...declared }), 'main.py': 'print(1)\n', ...files })
 
   test('refuses anything without a live token', async ({ request }) => {
     for (const token of ['', 'edge_pat_nope.nope', 'not-a-token']) {
-      const response = await send(request, token, naming(), '0.1.0')
+      const response = await send(request, token, release(naming(), '0.1.0'))
       expect(response.status(), token).toBe(401)
     }
   })
@@ -383,7 +384,7 @@ test.describe('publishing', () => {
     const token = await mintToken(request)
     const name = naming()
 
-    const first = await send(request, token, name, '0.1.0')
+    const first = await send(request, token, release(name, '0.1.0'))
     expect(first.status()).toBe(201)
 
     const { digest, url } = await first.json()
@@ -391,8 +392,8 @@ test.describe('publishing', () => {
     expect(url).toContain(`/pkg/${name}/0.1.0/app.edge`)
 
     // The same version never gets overwritten, a newer one is welcome.
-    expect((await send(request, token, name, '0.1.0')).status()).toBe(409)
-    expect((await send(request, token, name, '0.2.0')).status()).toBe(201)
+    expect((await send(request, token, release(name, '0.1.0'))).status()).toBe(409)
+    expect((await send(request, token, release(name, '0.2.0'))).status()).toBe(201)
 
     // What `edge add` reads, carrying the digest it will pin.
     const looked = await request.get(`/api/packages/${name}`)
@@ -404,42 +405,61 @@ test.describe('publishing', () => {
     await signIn(request)
     const other = await mintToken(request)
 
-    expect((await send(request, other, name, '0.3.0')).status()).toBe(409)
-    expect((await send(request, other, 'Upper', '0.1.0')).status()).toBe(400)
-    expect((await send(request, other, naming(), '1.0')).status()).toBe(400)
+    expect((await send(request, other, release(name, '0.3.0'))).status()).toBe(409)
+    expect((await send(request, other, release('Upper', '0.1.0'))).status()).toBe(400)
+    expect((await send(request, other, release(naming(), '1.0'))).status()).toBe(400)
   })
 
-  // What the artifact answers about itself, refused here so a listing never shows what it cannot mean.
+  // What the bundle says about itself, refused here so a listing never shows what it cannot mean.
   test('refuses metadata the registry cannot show', async ({ request }) => {
     await signIn(request)
     const token = await mintToken(request)
 
-    const bad = [
-      { repository: 'git@github.com:you/charts.git' },
-      { hosts: 'cli,browser' },
-      { hosts: '' },
-      { notice: 'x'.repeat((64 << 10) + 1) }
+    const bad: [string, Buffer][] = [
+      ['an ssh remote', release(naming(), '0.1.0', { repository: 'git@github.com:you/charts.git' })],
+      ['a notice past the cap', release(naming(), '0.1.0', {}, { LICENSE: 'x'.repeat(MAX_NOTICE + 1) })],
+      ['a description past the cap', release(naming(), '0.1.0', { description: 'x'.repeat(MAX_DESCRIPTION + 1) })],
+      ['a page the site cannot lay out', release(naming(), '0.1.0', {}, { '@docs/guide.mdx': 'no frontmatter here\n' })]
     ]
 
-    for (const extra of bad) {
-      const response = await send(request, token, naming(), '0.1.0', extra)
-      expect(response.status(), JSON.stringify(extra).slice(0, 40)).toBe(400)
+    for (const [why, buffer] of bad) {
+      expect((await send(request, token, buffer)).status(), why).toBe(400)
     }
   })
 
-  // A license is read from the notice the artifact carries, and an unread one is not the same as none.
-  test('names the license it recognises and keeps the notice either way', async ({ request }) => {
+  /* The bundle is opened here, so bytes that are not an archive never reach storage and a hand-built request cannot skip the read. */
+  test('refuses an artifact it cannot open', async ({ request }) => {
     await signIn(request)
     const token = await mintToken(request)
 
-    const apache = naming()
-    expect((await send(request, token, apache, '0.1.0', { notice: 'Apache License\nVersion 2.0, January 2004' })).status()).toBe(201)
+    const bad: [string, Buffer][] = [
+      ['not a package at all', Buffer.from('a zip, maybe')],
+      ['the magic without a body', Buffer.from('EDGEPKG\u0001', 'binary')],
+      ['no edge.json inside', packed({ 'main.py': 'print(1)\n' })],
+      ['an edge.json that is not JSON', packed({ 'edge.json': '{ nope', 'main.py': '' })],
+      ['a path climbing out of the tree', packed({ 'edge.json': '{}', '../escape.py': '' })]
+    ]
 
-    const homegrown = naming()
-    expect((await send(request, token, homegrown, '0.1.0', { notice: 'Do what you like, signed a human.' })).status()).toBe(201)
+    for (const [why, buffer] of bad) {
+      expect((await send(request, token, buffer)).status(), why).toBe(400)
+    }
+  })
 
-    const bare = naming()
-    expect((await send(request, token, bare, '0.1.0')).status()).toBe(201)
+  /* A license is read from whatever notice the bundle carries, and an unread one is not the same as none. Three versions of one package, because claiming three names is rate limited and the names are not what is under test. */
+  test('names the license it recognises and keeps the notice either way', async ({ request }) => {
+    await signIn(request)
+    const token = await mintToken(request)
+    const name = naming()
+
+    const notices: [string, Record<string, string>][] = [
+      ['a license it recognises', { LICENSE: 'Apache License\nVersion 2.0, January 2004' }],
+      ['a notice it cannot name', { 'LICENSE.md': 'Do what you like, signed a human.' }],
+      ['no notice at all', {}]
+    ]
+
+    for (const [at, [why, files]] of notices.entries()) {
+      expect((await send(request, token, release(name, `0.${at}.0`, {}, files))).status(), why).toBe(201)
+    }
   })
 
   test('says nothing is there for a package that was never published', async ({ request }) => {

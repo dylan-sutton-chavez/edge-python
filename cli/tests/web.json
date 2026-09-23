@@ -15,5 +15,22 @@
     "run": ["run", "--web", "main.py"],
     "stdout": ["before"],
     "fails": ["ValueError: on purpose"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"test\": \"https://cdn.edgepython.com/std/test.py\" } }\n",
+      "adds_test.py": "from test import test\n\n@test(\"it adds up\")\ndef t():\n    assert 6 * 7 == 42\n"
+    },
+    "run": ["test", "--web"],
+    "stdout": ["PASS - it adds up", "1/1 files passed"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"test\": \"https://cdn.edgepython.com/std/test.py\" } }\n",
+      "empty_test.py": "from test import test\n"
+    },
+    "run": ["test", "--web"],
+    "stdout": ["no tests registered"],
+    "fails": []
   }
 ]

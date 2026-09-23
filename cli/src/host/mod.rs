@@ -8,7 +8,7 @@ mod resolver;
 mod rt;
 mod vm;
 
-pub use resolver::{built_in, Project};
+pub use resolver::Project;
 pub use vm::{Completion, Instance, Status, Vm};
 
 use anyhow::{anyhow, Result};

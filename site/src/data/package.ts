@@ -19,7 +19,8 @@ export type Detail = {
   downloads: string
   size: string
   digest: string
-  hosts: Host[]
+  // Null when nothing has established it, which the page shows as no claim rather than as three.
+  hosts: Host[] | null
   author: { handle: string; avatar: Avatar }
   releases: Release[]
   pages: Page[]

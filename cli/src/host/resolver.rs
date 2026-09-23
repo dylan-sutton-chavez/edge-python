@@ -389,11 +389,6 @@ fn extension(spec: &str) -> &str {
     file.rsplit_once('.').map_or("", |(_, ext)| ext)
 }
 
-/* Official packages the binary already carries, so neither a bundle nor a run fetches them. */
-pub fn built_in(spec: &str) -> bool {
-    target(spec) == TEST_SPEC || std_name(spec).is_some()
-}
-
 /* An official std spec names a built-in package, the fragment is left to the caller. */
 fn std_name(spec: &str) -> Option<&'static str> {
     let name = target(spec).strip_prefix(plugins::STD_BASE)?.strip_suffix(".wasm")?;

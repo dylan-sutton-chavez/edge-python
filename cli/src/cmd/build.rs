@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use crate::docs;
-use crate::host::{built_in, cdn, get, js};
+use crate::host::{cdn, get, js};
 use crate::pack::{Bundle, Entry};
 use compiler::modules::{parse_integrity, scan_imports, ImportSpec};
 use compiler::util::sha256::sha256;
@@ -107,9 +107,6 @@ fn vendor_bundle(manifest: &Manifest, files: &mut Vec<Entry>) -> Result<bool> {
     let mut seen = HashSet::new();
     for (name, spec) in manifest.imports.iter().filter(|(_, spec)| spec.contains("://")) {
         let (url, pin) = parse_integrity(spec).map_err(|e| anyhow!(e))?;
-        if built_in(url) {
-            continue;
-        }
         let path = url.split('?').next().unwrap_or(url);
         let (base, entry) = path.rsplit_once('/').ok_or_else(|| anyhow!("'{url}' names no file"))?;
         let bytes = read_package(url)?.ok_or_else(|| anyhow!("fetching {url}: not found"))?;

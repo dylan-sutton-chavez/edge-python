@@ -90,12 +90,6 @@ pub fn registry(name: &str) -> Option<&'static str> {
     REGISTRY.iter().find(|(n, _)| *n == name).map(|(_, url)| *url)
 }
 
-/// True when the manifest declares this official package, matched by url so an alias never hides one.
-pub fn declares(manifest: &Manifest, name: &str) -> bool {
-    let Some(url) = registry(name) else { return false };
-    manifest.imports.values().any(|declared| declared.split('#').next() == Some(url))
-}
-
 /* A name that reads the same in a url, an import and a listing. */
 fn named(name: &str) -> bool {
     !name.is_empty()
