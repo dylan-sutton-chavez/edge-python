@@ -8,6 +8,7 @@ import Confirm from '../components/ui/confirm.astro'
 import Profile from '../components/settings/profile.astro'
 import Account from '../components/settings/account.astro'
 import Tokens from '../components/settings/tokens.astro'
+import Invoices from '../components/settings/invoices.astro'
 import { linkedProviders } from '../lib/server/users'
 import { userTokens } from '../lib/server/tokens'
 
@@ -19,7 +20,8 @@ type Item = { label: string; icon: ComponentProps<typeof Icon>['name'] }
 
 const groups: { label: string; items: Item[] }[] = [
   { label: 'Personal', items: [{ label: 'Profile', icon: 'user' }, { label: 'Account', icon: 'mailbox' }] },
-  { label: 'Publishing', items: [{ label: 'Tokens', icon: 'key' }] }
+  { label: 'Publishing', items: [{ label: 'Tokens', icon: 'key' }] },
+  { label: 'Billing', items: [{ label: 'Invoices', icon: 'file' }] }
 ]
 
 const items = groups.flatMap((group) => group.items)
@@ -114,6 +116,7 @@ const row = 'flex items-center gap-2 w-full px-4 py-1.5 text-left hover:bg-line-
           {item.label === 'Profile' && <Profile user={user} />}
           {item.label === 'Account' && <Account user={user} linked={linked} />}
           {item.label === 'Tokens' && <Tokens tokens={tokens} />}
+          {item.label === 'Invoices' && <Invoices />}
         </div>
       ))}
     </section>

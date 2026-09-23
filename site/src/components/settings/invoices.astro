@@ -1,0 +1,50 @@
+---
+import Icon from '../ui/icon.astro'
+
+type Invoice = { date: string; amount: string; status: string }
+
+// Stands in until a payment provider answers.
+const invoices: Invoice[] = [
+  { date: 'September 1, 2026', amount: '$5.49', status: 'Paid' },
+  { date: 'August 1, 2026', amount: '$5.49', status: 'Paid' },
+  { date: 'July 1, 2026', amount: '$5.49', status: 'Paid' }
+]
+---
+
+<div class="flex flex-col gap-6">
+  <div>
+    <h2 class="text-md">Invoices</h2>
+    <p class="text-fg-hint mt-0.5">What you paid, and what it was charged to.</p>
+  </div>
+
+  <section class="flex flex-col gap-2">
+    <h3 class="ml-4">Payment method</h3>
+
+    <div class="bg-page border border-line-strong rounded-full flex items-center gap-3 px-4 py-3">
+      <Icon name="locked" size="lg" class="shrink-0 text-fg-subtle" />
+      <p class="min-w-0 flex-1 truncate text-fg-hint">No card on file</p>
+      <button type="button" class="shrink-0 text-xs underline text-fg-hint transition hover:text-fg">Add</button>
+    </div>
+  </section>
+
+  <section class="flex flex-col gap-2">
+    <h3 class="ml-4">History</h3>
+
+    <div class="bg-page border border-line-strong rounded-2xl overflow-hidden">
+      <ul class="divide-y divide-line-strong">
+        {invoices.map((invoice) => (
+          <li class="flex items-center gap-3 px-4 py-3">
+            <Icon name="file" size="lg" class="shrink-0 text-fg-subtle" />
+
+            <div class="min-w-0 flex-1">
+              <p class="truncate">{invoice.date}</p>
+              <p class="truncate text-2xs text-fg-hint">{invoice.status}</p>
+            </div>
+
+            <span class="shrink-0 tabular-nums text-xs text-fg-muted">{invoice.amount}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </section>
+</div>
