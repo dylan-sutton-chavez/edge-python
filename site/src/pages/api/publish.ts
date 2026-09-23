@@ -3,7 +3,8 @@ import { env } from 'cloudflare:workers'
 import { sha256hex } from '../../lib/crypto'
 import { json } from '../../lib/server/http'
 import { tokenUser } from '../../lib/server/tokens'
-import { MAX_ARTIFACT, MAX_NEW_NAMES, claimedToday, keyOf, named, packageByName, publish, versionExists, versioned } from '../../lib/server/packages'
+import type { Page } from '../../lib/server/packages'
+import { MAX_ARTIFACT, MAX_DESCRIPTION, MAX_NEW_NAMES, claimedToday, described, keyOf, named, packageByName, pages, publish, versionExists, versioned } from '../../lib/server/packages'
 
 // The bundle is stored as it arrived. Its format lives in the CLI, so nothing here has to learn it.
 export const POST: APIRoute = async ({ request }) => {
@@ -13,13 +14,27 @@ export const POST: APIRoute = async ({ request }) => {
   const form = await request.formData().catch(() => null)
   const artifact = form?.get('artifact')
   const manifest = form?.get('manifest')
+  const carried = form?.get('docs')
 
   if (!(artifact instanceof File) || typeof manifest !== 'string') return json({ error: 'Send a manifest and an artifact.' }, 400)
 
-  const { name, version } = JSON.parse(manifest) as { name?: string; version?: string }
+  // A bundle with no docs directory sends nothing, and a hand-built request can send anything.
+  let declared: { name?: string; version?: string; description?: string | null }
+  let docs: Page[]
+
+  try {
+    declared = JSON.parse(manifest)
+    docs = pages(typeof carried === 'string' ? JSON.parse(carried) : {})
+  } catch (error) {
+    const why = error instanceof SyntaxError ? 'Send the manifest and the doc pages as JSON.' : (error as Error).message
+    return json({ error: why }, 400)
+  }
+
+  const { name, version, description } = declared
 
   if (typeof name !== 'string' || !named(name)) return json({ error: 'A name is lowercase letters, digits and single hyphens, starting with a letter.' }, 400)
   if (typeof version !== 'string' || !versioned(version)) return json({ error: 'A version is major.minor.patch, digits only.' }, 400)
+  if (!described(description)) return json({ error: `A description is ${MAX_DESCRIPTION} characters at most.` }, 400)
   if (artifact.size > MAX_ARTIFACT) return json({ error: `An artifact is ${MAX_ARTIFACT} bytes at most.` }, 413)
 
   const held = await packageByName(env.DB, name)
@@ -40,7 +55,7 @@ export const POST: APIRoute = async ({ request }) => {
   const key = keyOf(name, version)
 
   await env.CDN_BUCKET.put(key, bytes, { httpMetadata: { contentType: 'application/octet-stream' } })
-  await publish(env.DB, userId, name, version, digest, bytes.byteLength)
+  await publish(env.DB, userId, { name, version, digest, size: bytes.byteLength, description: description ?? null, docs })
 
   return json({ name, version, digest, url: `${env.CDN}/${key}` }, 201)
 }

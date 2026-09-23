@@ -58,6 +58,7 @@ create index token_expiry on token(expires_at);
 create table package (
   name text primary key check (name = lower(name)),
   user_id text references user(id) on delete set null,
+  downloads integer not null default 0,
   created_at integer not null
 ) strict;
 
@@ -68,9 +69,22 @@ create table version (
   version text not null,
   digest text not null,
   size integer not null,
+  description text,
+  repository text,
+  license text,
+  hosts text,
   published_at integer not null,
   yanked_at integer,
   primary key (package, version)
 ) strict;
 
 create index version_package on version(package);
+
+create table doc (
+  package text not null,
+  version text not null,
+  path text not null,
+  body text not null,
+  primary key (package, version, path),
+  foreign key (package, version) references version(package, version) on delete cascade
+) strict;
