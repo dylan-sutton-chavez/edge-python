@@ -1,0 +1,112 @@
+---
+import type { ComponentProps } from 'astro/types'
+import Base from '../layouts/base.astro'
+import Icon from '../components/ui/icon.astro'
+import Sheet from '../components/ui/sheet.astro'
+
+const { user } = Astro.locals
+if (!user) return Astro.redirect('/')
+if (!user.handle) return Astro.redirect('/?welcome')
+
+type Item = { label: string; href: string; icon: ComponentProps<typeof Icon>['name'] }
+
+const groups: { label: string; items: Item[] }[] = [
+  {
+    label: 'Execution',
+    items: [
+      { label: 'Runs', href: '/runs', icon: 'hand' },
+      { label: 'Programs', href: '/runs', icon: 'boxes' },
+      { label: 'Snapshots', href: '/runs', icon: 'images' }
+    ]
+  },
+  { label: 'Lang', items: [{ label: 'Dialect', href: '/runs', icon: 'book' }] },
+  {
+    label: 'Platform',
+    items: [
+      { label: 'Tenants', href: '/runs', icon: 'face' },
+      { label: 'Usage', href: '/runs', icon: 'chart' },
+      { label: 'Compliance', href: '/runs', icon: 'shield' }
+    ]
+  },
+  {
+    label: 'Contract',
+    items: [{ label: 'Insurance', href: '/runs', icon: 'umbrella' }]
+  }
+]
+
+const items = groups.flatMap((group) => group.items)
+const current = 'Runs'
+
+const pill = 'flex items-center gap-2 w-full px-4 py-1.5 rounded-full'
+const row = 'flex items-center gap-2 w-full px-4 py-1.5 text-left hover:bg-line-strong transition'
+---
+
+<Base title="Runs" gap="lg" class="flex-1">
+  <h1 class="sr-only">Runs</h1>
+
+  <div class="flex flex-col lg:flex-row gap-3 flex-1 min-h-0 text-sm">
+    <aside data-sticky class="hidden lg:block w-[260px] shrink-0 space-y-4 sticky self-start max-h-[calc(100dvh-var(--sticky-top)-var(--sticky-gap))] overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {groups.map((group) => (
+        <div>
+          <span class="px-4 text-2xs text-fg-subtle">{group.label}</span>
+
+          <ul class="mt-2 space-y-1">
+            {group.items.map((item) => (
+              <li>
+                <a
+                  href={item.href}
+                  aria-current={item.label === current ? 'page' : undefined}
+                  class:list={[pill, item.label === current ? 'bg-surface' : 'hover:bg-surface']}
+                >
+                  <Icon name={item.icon} size="lg" />
+                  <span>{item.label}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </aside>
+
+    <Sheet id="runs-nav" class="group lg:hidden sticky z-[9]">
+      <button slot="trigger" type="button" popovertarget="runs-nav" class:list={[pill, 'border border-line bg-surface/70 backdrop-blur-[1px]']}>
+        <Icon name={items.find((item) => item.label === current)!.icon} size="lg" />
+        <span>{current}</span>
+        <Icon name="next" size="sm" class="ml-auto rotate-90 text-fg-subtle transition-transform group-has-[[data-sheet]:popover-open]:-rotate-90" />
+      </button>
+
+      <div class="space-y-3">
+        {groups.map((group) => (
+          <div>
+            <span class="px-4 text-2xs text-fg-subtle">{group.label}</span>
+
+            <ul class="mt-1">
+              {group.items.map((item) => (
+                <li>
+                  <a
+                    href={item.href}
+                    aria-current={item.label === current ? 'page' : undefined}
+                    class:list={[row, item.label === current && 'bg-line-strong']}
+                  >
+                    <Icon name={item.icon} size="lg" />
+                    <span>{item.label}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </Sheet>
+
+    <section class="flex-1 min-w-0 flex flex-col gap-6">
+      <div>
+        <h2 class="text-md">Runs</h2>
+        <p class="text-fg-hint mt-0.5">Every program you have run, from the CLI and in the browser.</p>
+      </div>
+
+      {/* Stands in until a run has somewhere to be kept, the way the tokens row reads before there are tokens. */}
+      <div class="bg-page border border-line-strong rounded-full px-4 py-3 text-center text-fg-hint">Nothing has run yet.</div>
+    </section>
+  </div>
+</Base>
