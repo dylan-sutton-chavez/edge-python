@@ -218,10 +218,10 @@ The `state` field reads `"waiting_event"` for a parked `receive()`, `"sleeping"`
 
 ## Limits
 
-Script-only state restores identically, including queued but unconsumed events. Live host resources (DOM handles, sockets, pending host calls) are not captured and must be recreated after restoring. The blob carries the whole heap and has no size cap. See [blob layout](/docs/reference/abi#snapshot-exports).
+Script-only state restores identically, including queued but unconsumed events. Live host resources (DOM handles, sockets, pending host calls) are not captured and must be recreated after restoring. The blob carries the whole heap and has no size cap. See [blob layout](/docs/reference/abi#driver-exports).
 
 ## See also
 
 - [Design](/docs/implementation/design) for the serializer internals.
-- [ABI](/docs/reference/abi#snapshot-exports) for the `compiler.wasm` exports and blob layout.
+- [ABI](/docs/reference/abi#driver-exports) for the `compiler.wasm` exports and blob layout.
 - [CLI](/docs/reference/cli) for the snapshot flags.

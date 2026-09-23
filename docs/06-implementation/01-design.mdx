@@ -90,7 +90,7 @@ Restore runs in two passes because hashing reads the heap. First every slot is m
 
 Host-side resources such as in-flight host calls and DOM handles are not part of the snapshot. `state_globals` and `state_stack` introspect a parked run without resuming it.
 
-See [Snapshots](/docs/language/snapshots) for the host-facing feature and the [ABI](/docs/reference/abi#snapshot-exports) for the exports and blob layout.
+See [Snapshots](/docs/language/snapshots) for the host-facing feature and the [ABI](/docs/reference/abi#driver-exports) for the exports and blob layout.
 
 ## What the compiler intentionally does not do
 

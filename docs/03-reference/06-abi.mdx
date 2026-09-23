@@ -403,8 +403,6 @@ The macro emits the worked-example boilerplate. Writing it manually costs about 
 
 Community PDKs (uncoordinated releases, each tracking this sealed spec): Zig (`wasm-pdk-zig`), AssemblyScript (`wasm-pdk-as`), C (`wasm-pdk.h`).
 
-<a id="snapshot-exports"></a>
-
 ## Driver exports
 
 Distinct from the sealed plugin imports above, these are exports on `compiler.wasm` itself, part of the host-driver surface an embedder calls to shape a run and to freeze and revive a paused one. The host-facing feature is [Snapshots](/docs/language/snapshots). They follow the conventions of the run lifecycle (`run_start` / `run_resume` / `run_push_event`) and share its packed status word.

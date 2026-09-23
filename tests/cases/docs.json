@@ -158,5 +158,51 @@
       "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n```edge-python\nprint(1)\n"
     },
     "error": "unterminated"
+  },
+  {
+    "name": "a script tag in prose",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n<script>alert(1)</script>\n"
+    },
+    "error": "writes the raw HTML '<script>'"
+  },
+  {
+    "name": "a closing tag in prose",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n</div>\n"
+    },
+    "error": "writes the raw HTML '</div>'"
+  },
+  {
+    "name": "an image tag carrying a handler",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n<img src=x onerror=alert(1)>\n"
+    },
+    "error": "writes the raw HTML '<img'"
+  },
+  {
+    "name": "a tag after a comparison on the same line",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\nWhere a < b, and <iframe></iframe> follows.\n"
+    },
+    "error": "writes the raw HTML '<iframe>'"
+  },
+  {
+    "name": "html inside a fence is not html",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n```html\n<script>alert(1)</script>\n```\n"
+    }
+  },
+  {
+    "name": "a tag inside inline code is not html",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\nNever write `<script>`, and `Vec<T>` is fine too.\n"
+    }
+  },
+  {
+    "name": "a comparison alone is not a tag",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\nIt holds when a < b and b > c.\n"
+    }
   }
 ]

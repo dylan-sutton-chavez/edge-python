@@ -32,6 +32,9 @@ export function check(page: string, text: string) {
     }
     if (open === null) {
       if (line.startsWith('# ')) headings++
+      if (tagged(line)) {
+        throw new Error(`'${page}' writes the raw HTML '${tagged(line)}', and a page is markdown the site renders itself`)
+      }
       // Blank lines keep two fences adjacent, prose between them does not.
       if (trimmed) closed = null
     }
@@ -39,6 +42,13 @@ export function check(page: string, text: string) {
 
   if (open !== null) throw new Error(`'${page}' leaves a code fence unterminated`)
   if (headings !== 1) throw new Error(`'${page}' has ${headings} top-level headings, the renderer needs exactly one`)
+}
+
+/* The first HTML tag a prose line opens, since a page the registry renders is markdown from a stranger and a raw tag would run on our origin. Inline code drops out first, so a page can still write about `<script>`. */
+function tagged(line: string): string | null {
+  const prose = line.replace(/`[^`]*`/g, '')
+  // A tag that closes right after its name reads as one, a tag with attributes shows only its name.
+  return prose.match(/<\/?[A-Za-z][^\s>]*>?/)?.[0] ?? null
 }
 
 // The page past its frontmatter, which names the page and describes it, and closes.

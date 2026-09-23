@@ -125,7 +125,7 @@ $ edge init my-app
 
 ## `edge add` / `edge remove`: package management
 
-Edits [`edge.json`](/docs/reference/modules#edgejson) by name. The CLI knows the official packages (`json`, `re`, `math`, `struct`, `test`, `dom`, `network`, `storage`, `time`), so you never paste URLs. Every entry goes to `imports` and points at the package on the CDN, a `.wasm` for the standard packages (`test` is `test.py`), an `index.js` for the JavaScript libraries, and the `entry.py` facade for `dom`. Each line prints the name and the URL it wrote. The full catalog is in [Modules](/docs/reference/modules#standard-packages).
+Edits [`edge.json`](/docs/reference/modules#edgejson) by name. The CLI knows the official packages (`json`, `re`, `math`, `struct`, `test`, `dom`, `network`, `storage`, `time`), so you never paste URLs. Every entry goes to `imports` and points at the package on the CDN, a `.wasm` for the standard packages (`test` is `test.py`), an `index.js` for the JavaScript libraries, and the `entry.py` facade for `dom`. Each line prints the name and the URL it wrote. The full catalog is in [Modules](/docs/reference/modules#standard-packages-and-system-libraries).
 
 ```text
 $ edge add math network

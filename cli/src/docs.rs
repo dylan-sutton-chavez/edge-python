@@ -90,6 +90,9 @@ fn check(page: &str, text: &str) -> Result<()> {
             if line.starts_with("# ") {
                 headings += 1;
             }
+            if let Some(tag) = tagged(line) {
+                bail!("'{page}' writes the raw HTML '{tag}', and a page is markdown the site renders itself");
+            }
             // Blank lines keep two fences adjacent, prose between them does not.
             if !line.trim().is_empty() {
                 closed = None;
@@ -103,6 +106,35 @@ fn check(page: &str, text: &str) -> Result<()> {
         bail!("'{page}' has {headings} top-level headings, the renderer needs exactly one");
     }
     Ok(())
+}
+
+/* The first HTML tag a prose line opens, since a page the registry renders is markdown from a stranger and a raw tag would run on its origin. Inline code drops out first, so a page can still write about `<script>`. */
+fn tagged(line: &str) -> Option<String> {
+    let mut prose = String::with_capacity(line.len());
+    let mut code = false;
+    for c in line.chars() {
+        match c {
+            '`' => code = !code,
+            _ if !code => prose.push(c),
+            _ => {}
+        }
+    }
+
+    // Every `<` is a candidate, so `a < b` does not hide a tag later on the same line.
+    for (at, _) in prose.match_indices('<') {
+        let rest = &prose[at + 1..];
+        let closing = rest.starts_with('/');
+        let name = if closing { &rest[1..] } else { rest };
+        if !name.starts_with(|c: char| c.is_ascii_alphabetic()) {
+            continue;
+        }
+        let end = name.find(|c: char| c.is_whitespace() || c == '>').unwrap_or(name.len());
+        // A tag that closes right after its name reads as one, a tag with attributes shows only its name.
+        let shut = if name[end..].starts_with('>') { ">" } else { "" };
+        return Some(format!("<{}{}{shut}", if closing { "/" } else { "" }, &name[..end]));
+    }
+
+    None
 }
 
 /* The page past its frontmatter, which names the page and describes it, and closes. */
