@@ -70,9 +70,6 @@ create table version (
   digest text not null,
   size integer not null,
   description text,
-  repository text,
-  license text,
-  notice text,
   hosts text,
   published_at integer not null,
   yanked_at integer,
@@ -80,12 +77,3 @@ create table version (
 ) strict;
 
 create index version_package on version(package);
-
-create table doc (
-  package text not null,
-  version text not null,
-  path text not null,
-  body text not null,
-  primary key (package, version, path),
-  foreign key (package, version) references version(package, version) on delete cascade
-) strict;

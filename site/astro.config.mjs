@@ -6,6 +6,7 @@ import mdx from '@astrojs/mdx'
 import tailwindcss from '@tailwindcss/vite'
 import { unified } from '@astrojs/markdown-remark'
 import { remarkPlayground } from './src/lib/docs/remark-playground'
+import { shikiConfig } from './src/lib/docs/shiki'
 import { SITE_URL } from '../infra/src/constants'
 
 // The Cloudflare plugin ends Vite environments, dropping Astro's dev font map, so fonts come from .astro/fonts.
@@ -35,11 +36,7 @@ export default defineConfig({
   server: { port: 4322 },
   integrations: [mdx()],
   markdown: {
-    shikiConfig: {
-      themes: { light: 'github-light', dark: 'github-dark' },
-      defaultColor: false,
-      langAlias: { 'edge-python': 'python', output: 'text' }
-    },
+    shikiConfig,
     processor: unified({ remarkPlugins: [remarkPlayground] })
   },
   fonts: [

@@ -14,7 +14,7 @@ export function check(page: string, text: string) {
   let closed: string | null = null
   let headings = 0
 
-  for (const line of front(page, text).split('\n')) {
+  for (const line of front(page, text).body.split('\n')) {
     const trimmed = line.trim()
     if (trimmed.startsWith('```')) {
       if (open !== null) {
@@ -51,25 +51,24 @@ function tagged(line: string): string | null {
   return prose.match(/<\/?[A-Za-z][^\s>]*>?/)?.[0] ?? null
 }
 
-// The page past its frontmatter, which names the page and describes it, and closes.
-function front(page: string, text: string) {
+/* A page's frontmatter and the body past it, the same walk that refuses a page the renderer cannot lay out. The keys come back because a page is read for its title long after it was checked for one. */
+export function front(page: string, text: string): { keys: Map<string, string>; body: string } {
   const start = text.startsWith('---\n') ? 4 : text.startsWith('---\r\n') ? 5 : -1
   if (start < 0) {
     throw new Error(`'${page}' opens with no frontmatter, a page needs a title and a description`)
   }
 
   const rest = text.slice(start)
+  const keys = new Map<string, string>()
   let at = 0
-  let named = false
-  let described = false
 
   for (const line of rest.split('\n')) {
     const trimmed = line.trimEnd()
     if (trimmed === '---') {
-      if (!named || !described) {
+      if (!keys.has('title') || !keys.has('description')) {
         throw new Error(`'${page}' needs both a title and a description in its frontmatter`)
       }
-      return rest.slice(at + line.length + 1)
+      return { keys, body: rest.slice(at + line.length + 1) }
     }
     if (trimmed) {
       const colon = trimmed.indexOf(':')
@@ -77,11 +76,11 @@ function front(page: string, text: string) {
         throw new Error(`'${page}' has the frontmatter line '${trimmed}', which is no key and value`)
       }
       const key = trimmed.slice(0, colon).trim()
-      if (!trimmed.slice(colon + 1).trim()) {
+      const value = trimmed.slice(colon + 1).trim()
+      if (!value) {
         throw new Error(`'${page}' leaves the frontmatter '${key}' empty`)
       }
-      if (key === 'title') named = true
-      if (key === 'description') described = true
+      keys.set(key, value.replace(/^["']|["']$/g, ''))
     }
     at += line.length + 1
   }

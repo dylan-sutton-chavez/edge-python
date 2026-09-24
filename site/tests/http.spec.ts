@@ -445,8 +445,8 @@ test.describe('publishing', () => {
     }
   })
 
-  /* A license is read from whatever notice the bundle carries, and an unread one is not the same as none. Three versions of one package, because claiming three names is rate limited and the names are not what is under test. */
-  test('names the license it recognises and keeps the notice either way', async ({ request }) => {
+  /* A notice of any shape belongs in a bundle, whether the registry can name the license or not, since one it cannot read is not one that is missing. Three versions of one package, because claiming three names is rate limited and the names are not what is under test. */
+  test('takes a notice it can name, one it cannot, and none at all', async ({ request }) => {
     await signIn(request)
     const token = await mintToken(request)
     const name = naming()

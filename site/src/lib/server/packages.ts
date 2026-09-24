@@ -1,10 +1,6 @@
 import { check } from '../docs/convention'
-import { identify } from './license'
 
 export type Package = { name: string; user_id: string | null; created_at: number }
-
-// One page a bundle carried, keyed by the path the renderer orders it with.
-export type Page = { path: string; body: string }
 
 export type Release = {
   name: string
@@ -12,9 +8,6 @@ export type Release = {
   digest: string
   size: number
   description: string | null
-  repository: string | null
-  notice: string | null
-  docs: Page[]
 }
 
 const NAME = /^[a-z][a-z0-9-]*$/
@@ -45,19 +38,18 @@ export const linked = (url: unknown) =>
 // A LICENSE of any length is a notice, and the Apache one is eleven thousand characters.
 export const noticed = (text: unknown) => text == null || (typeof text === 'string' && text.length <= MAX_NOTICE)
 
-/* The pages a bundle carried, held to the same convention the CLI checked before packing, since a token holder can still post by hand. */
-export function pages(raw: unknown): Page[] {
+/* Holds the pages a bundle carried to the same convention the CLI checked before packing, since a token holder can still post by hand and a page the renderer cannot lay out belongs nowhere. */
+export function checkPages(raw: unknown) {
   if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Send the doc pages as an object.')
 
   const entries = Object.entries(raw as Record<string, unknown>)
   if (entries.length > MAX_PAGES) throw new Error(`A package carries ${MAX_PAGES} doc pages at most.`)
 
-  return entries.map(([path, body]) => {
+  for (const [path, body] of entries) {
     if (typeof body !== 'string' || body.length > MAX_PAGE) throw new Error(`'${path}' is not a page of ${MAX_PAGE} bytes or fewer.`)
 
     check(path, body)
-    return { path, body }
-  })
+  }
 }
 
 /* Where a published artifact lives, the same path a consumer's imports entry points at. */
@@ -76,21 +68,16 @@ export const packageByName = (db: D1Database, name: string) =>
 export const versionExists = async (db: D1Database, name: string, version: string) =>
   Boolean(await db.prepare('select 1 from version where package = ? and version = ?').bind(name, version).first())
 
-/* Claims the name when it is free and records the version with its pages, all of it or none. */
+/* Claims the name when it is free and records the version, all of it or none. */
 export async function publish(db: D1Database, userId: string, release: Release) {
-  const { name, version, digest, size, description, repository, notice, docs } = release
+  const { name, version, digest, size, description } = release
   const now = Date.now()
 
   await db.batch([
     db.prepare('insert or ignore into package (name, user_id, created_at) values (?, ?, ?)').bind(name, userId, now),
     db
-      .prepare(
-        'insert into version (package, version, digest, size, description, repository, license, notice, published_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      )
-      .bind(name, version, digest, size, description, repository, notice && identify(notice), notice, now),
-    ...docs.map((page) =>
-      db.prepare('insert into doc (package, version, path, body) values (?, ?, ?, ?)').bind(name, version, page.path, page.body)
-    )
+      .prepare('insert into version (package, version, digest, size, description, published_at) values (?, ?, ?, ?, ?, ?)')
+      .bind(name, version, digest, size, description, now)
   ])
 }
 
