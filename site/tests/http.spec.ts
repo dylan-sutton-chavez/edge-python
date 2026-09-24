@@ -1,8 +1,8 @@
 import { globSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { test, expect, type APIRequestContext } from '@playwright/test'
-import { MAILS, arriving, mailedCode, mintToken, packed, published, sent, signIn, unique } from './helpers'
+import { expect, type APIRequestContext } from '@playwright/test'
+import { MAILS, arriving, mailedCode, mintToken, packed, published, signIn, test, unique } from './helpers'
 import { MAX_DESCRIPTION, MAX_NOTICE } from '../src/lib/server/packages'
 
 const DOCS = fileURLToPath(new URL('../../docs/', import.meta.url))
@@ -386,7 +386,7 @@ test.describe('publishing', () => {
   const upload = (buffer: Buffer) => ({ name: 'app.edge', mimeType: 'application/octet-stream', buffer })
 
   const send = (request: APIRequestContext, token: string, buffer: Buffer) =>
-    sent(() => request.post('/api/publish', { headers: { authorization: `Bearer ${token}` }, multipart: { artifact: upload(buffer) } }))
+    request.post('/api/publish', { headers: { authorization: `Bearer ${token}` }, multipart: { artifact: upload(buffer) } })
 
   /* A release is a bundle and nothing else, so the tests hand over the same archive the CLI packs rather than metadata beside it. */
   const release = (name: string, version: string, declared: Record<string, unknown> = {}, files: Record<string, string> = {}) =>

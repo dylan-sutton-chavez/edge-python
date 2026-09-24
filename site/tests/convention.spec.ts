@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { test, expect } from '@playwright/test'
+import { expect } from '@playwright/test'
+import { test } from './helpers'
 import { check } from '../src/lib/docs/convention'
 
 type Case = { name: string; files: Record<string, string>; error?: string }

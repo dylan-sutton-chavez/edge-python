@@ -1,7 +1,7 @@
 import { globSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { expect, type APIRequestContext, type APIResponse, type BrowserContext } from '@playwright/test'
+import { test as base, expect, type APIRequestContext, type APIResponse, type BrowserContext } from '@playwright/test'
 import { random, sha256 } from '../src/lib/crypto'
 import { BASE } from '../playwright.config'
 
@@ -28,22 +28,45 @@ export function packed(files: Record<string, string>, entry = 'main.py') {
   return Buffer.concat(parts)
 }
 
-/* Sends again when the dev server drops the connection mid-flight, which wrangler only retries for GET and HEAD. Nothing reached the worker, so nothing can be applied twice. */
-export async function sent(send: () => Promise<APIResponse>) {
-  const first = await send()
-  return first.status() < 500 ? first : send()
+// What wrangler will not retry itself, so a dropped connection surfaces as a 500 the assertion then blames on the route.
+const MUTATES = ['post', 'patch', 'put', 'delete', 'fetch']
+
+/* Sends again when the dev server drops the connection mid-flight. Nothing reached the worker, so nothing can be applied twice. A drop can outlast one immediate retry, so each wait is longer than the last before the status goes back for an assertion to judge. */
+async function sent(send: () => Promise<APIResponse>, tries = 3) {
+  let answer = await send()
+
+  for (let at = 1; at < tries && answer.status() >= 500; at++) {
+    await new Promise((wake) => setTimeout(wake, at * 250))
+    answer = await send()
+  }
+
+  return answer
 }
+
+/* A context that retries what wrangler will not, so no test has to remember. Forty five mutating calls do not each need a wrapper, they need one that cannot be forgotten. */
+export const retrying = (context: APIRequestContext): APIRequestContext =>
+  new Proxy(context, {
+    get(target, key) {
+      const held = Reflect.get(target, key, target)
+      if (typeof held !== 'function' || !MUTATES.includes(String(key))) return held
+
+      return (...args: unknown[]) => sent(() => held.apply(target, args) as Promise<APIResponse>)
+    }
+  })
+
+// Every spec takes its request context from here, which is the only place it can be wrapped once and for all.
+export const test = base.extend({
+  request: async ({ request }, use) => use(retrying(request))
+})
 
 /* The local email binding writes every message it sends, so the code is read rather than guessed. */
 export async function mailedCode(request: APIRequestContext, email: string, from?: string) {
   const before = globSync(join(MAILS, '**/*.txt'))
 
-  const started = await sent(() =>
-    request.post('/api/auth/email/start', {
-      data: { email },
-      headers: from ? { 'cf-connecting-ip': from } : undefined
-    })
-  )
+  const started = await request.post('/api/auth/email/start', {
+    data: { email },
+    headers: from ? { 'cf-connecting-ip': from } : undefined
+  })
   expect(await started.json()).toEqual({ ok: true })
 
   await expect.poll(() => globSync(join(MAILS, '**/*.txt')).length).toBe(before.length + 1)
@@ -63,8 +86,8 @@ export async function signIn(request: APIRequestContext) {
   return { email, handle }
 }
 
-/* The same account through a browser context, which shares its cookies with the page, so a test lands signed in without walking the sign-up wizard its own tests already cover. */
-export const signedIn = (context: BrowserContext) => signIn(context.request)
+/* The same account through a browser context, which shares its cookies with the page, so a test lands signed in without walking the sign-up wizard its own tests already cover. Its own request context comes from the browser rather than the fixture, so it is wrapped here. */
+export const signedIn = (context: BrowserContext) => signIn(retrying(context.request))
 
 /* A usable token, minted the way the browser does so the secret exists only here. */
 export async function mintToken(request: APIRequestContext, name = 'ci') {

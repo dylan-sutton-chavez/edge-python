@@ -1,5 +1,5 @@
-import { test, expect, type Page } from '@playwright/test'
-import { published } from './helpers'
+import { expect, type Page } from '@playwright/test'
+import { published, test } from './helpers'
 
 const PAGE = '/docs/reference/cli'
 
