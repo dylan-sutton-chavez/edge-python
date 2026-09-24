@@ -41,7 +41,7 @@ if (Astro.params.slug && !doc) return Astro.rewrite('/404')
 
 const page = doc ? await render(doc.id, artifact.docs[doc.id]!) : null
 
-const author = held.user_id ? await userById(env.DB, held.user_id) : null
+const author = await userById(env.DB, held.user_id)
 const shown = author && publicUser(author)
 
 const description = typeof artifact.description === 'string' ? artifact.description : null
@@ -68,7 +68,7 @@ const row = `${cell} border-t border-line-strong`
     {description && <p class="mt-3 text-fg-muted">{description}</p>}
 
     <div class="mt-4 flex flex-wrap items-center gap-3 text-xs text-fg-subtle">
-      {shown && (
+      {shown?.handle && (
         <a href={`/@${shown.handle}`} class="flex items-center gap-2 transition hover:text-fg">
           <Avatar {...(shown.avatar ?? avatarFor(shown.id))} />
           <span>@{shown.handle}</span>

@@ -5,13 +5,13 @@ import Avatar from '../../components/ui/avatar.astro'
 import PackageCard from '../../components/package-card.astro'
 import { userByHandle, publicUser } from '../../lib/server/users'
 import { avatarFor } from '../../lib/account/avatar'
-import { packages } from '../../data/packages'
+import { listed } from '../../lib/server/packages'
 
 const found = await userByHandle(env.DB, Astro.params.user ?? '')
 if (!found) return Astro.rewrite('/404')
 
 const user = publicUser(found)
-const own = packages.filter((each) => each.author.handle === user.handle)
+const { results: own } = await listed(env.DB, { handle: user.handle ?? '' })
 ---
 
 <Base title={user.name ?? `@${user.handle}`} description={`Packages published by @${user.handle} on Edge Python.`} gap="lg">

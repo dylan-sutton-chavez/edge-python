@@ -53,7 +53,7 @@ test('leaves the aside pinned below the header while scrolling', async ({ page }
 // The gap belongs to the page, so a route that opens with content above the aside pins it just the same.
 test('pins the aside to the header wherever the aside starts', async ({ page, request }) => {
   const gaps: number[] = []
-  const name = await published(request, { '@docs/01-intro.mdx': PACKAGE_PAGE })
+  const { name } = await published(request, { '@docs/01-intro.mdx': PACKAGE_PAGE })
 
   for (const route of [PAGE, `/package/${name}`]) {
     await page.goto(route)

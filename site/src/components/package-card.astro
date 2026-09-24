@@ -1,36 +1,32 @@
 ---
 import Icon from './ui/icon.astro'
 import Avatar from './ui/avatar.astro'
-import type { Avatar as Look } from '../lib/account/avatar'
+import { avatarFor, type Palette } from '../lib/account/avatar'
+import { count } from '../lib/format'
+import type { Listed } from '../lib/server/packages'
 
-interface Props {
-  href: string
-  name: string
-  description: string
-  author: { handle: string; avatar: Look }
-  downloads: string
-}
+const { name, description, downloads, handle, avatar_icon, avatar_palette } = Astro.props as Listed
 
-const { href, name, description, author, downloads } = Astro.props
+const avatar = avatar_icon && avatar_palette ? { icon: avatar_icon, palette: avatar_palette as Palette } : avatarFor(name)
 ---
 
 <li class="bg-page border border-line-strong rounded-2xl p-4 group relative has-[a:focus-visible]:ring-1 has-[a:focus-visible]:ring-line-emphasis">
   <div class="mb-3">
     <h3 class="mb-1 text-sm font-semibold">
-      <a href={href} class="after:absolute after:inset-0 after:rounded-2xl focus-visible:outline-none">{name}</a>
+      <a href={`/package/${name}`} class="after:absolute after:inset-0 after:rounded-2xl focus-visible:outline-none">{name}</a>
     </h3>
-    <p class="text-fg-muted">{description}</p>
+    {description && <p class="text-fg-muted">{description}</p>}
   </div>
 
   <div class="flex items-center w-full">
     <div class="flex items-center gap-2">
-      <Avatar {...author.avatar} />
-      <p><a href={`/@${author.handle}`} class="underline relative">@{author.handle}</a></p>
+      <Avatar {...avatar} />
+      <p><a href={`/@${handle}`} class="underline relative">@{handle}</a></p>
     </div>
 
     <div class="ml-auto flex items-center gap-1.5 text-fg-disabled group-has-[h3>a:hover]:text-link transition">
       <Icon name="download" size="sm" />
-      <span class="tabular-nums text-2xs">{downloads}</span>
+      <span class="tabular-nums text-2xs">{count(downloads)}</span>
     </div>
   </div>
 </li>

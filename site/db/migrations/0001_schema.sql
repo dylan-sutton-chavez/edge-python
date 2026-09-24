@@ -57,7 +57,7 @@ create index token_expiry on token(expires_at);
 
 create table package (
   name text primary key check (name = lower(name)),
-  user_id text references user(id) on delete set null,
+  user_id text not null references user(id),
   downloads integer not null default 0,
   created_at integer not null
 ) strict;

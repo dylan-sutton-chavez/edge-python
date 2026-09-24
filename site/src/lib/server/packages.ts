@@ -1,6 +1,6 @@
 import { check } from '../docs/convention'
 
-export type Package = { name: string; user_id: string | null; downloads: number; created_at: number }
+export type Package = { name: string; user_id: string; downloads: number; created_at: number }
 
 export type Release = {
   name: string
@@ -80,6 +80,39 @@ export async function publish(db: D1Database, userId: string, release: Release) 
       .bind(name, version, digest, size, description, now)
   ])
 }
+
+/* A package as a listing shows it, its newest live version describing it and its author beside it. A handle narrows the same query to one person's shelf. */
+export type Listed = {
+  name: string
+  description: string | null
+  downloads: number
+  handle: string
+  avatar_icon: number | null
+  avatar_palette: string | null
+}
+
+export function listed(db: D1Database, { handle, limit = 60 }: { handle?: string; limit?: number } = {}) {
+  const held = handle ? 'and u.handle = ?' : ''
+
+  return db
+    .prepare(
+      `select p.name, p.downloads, v.description, u.handle, u.avatar_icon, u.avatar_palette
+       from package p
+         join version v on v.package = p.name
+         join user u on u.id = p.user_id
+       where v.published_at = (select max(published_at) from version where package = p.name and yanked_at is null)
+         ${held}
+       order by p.downloads desc, p.name
+       limit ?`
+    )
+    .bind(...(handle ? [handle, limit] : [limit]))
+    .all<Listed>()
+}
+
+export const counted = async (db: D1Database) =>
+  ((await db
+    .prepare('select count(distinct package) as total from version where yanked_at is null')
+    .first<{ total: number }>())?.total ?? 0)
 
 export const versionsOf = (db: D1Database, name: string) =>
   db

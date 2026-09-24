@@ -80,7 +80,7 @@ export async function mintToken(request: APIRequestContext, name = 'ci') {
 
 /* A package in the registry, published the way the CLI does, so a test that reads a page reads one that was really stored. */
 export async function published(request: APIRequestContext, files: Record<string, string> = {}) {
-  await signIn(request)
+  const account = await signIn(request)
   const token = await mintToken(request)
   const name = `p${unique()}`.toLowerCase().replace(/[^a-z0-9-]/g, '')
 
@@ -92,7 +92,7 @@ export async function published(request: APIRequestContext, files: Record<string
   const sent = await request.post('/api/publish', { headers, multipart: { artifact } })
   expect(sent.status(), await sent.text()).toBe(201)
 
-  return name
+  return { ...account, name }
 }
 
 const DECLARED = { description: 'Turn text into a slug.', repository: 'https://github.com/x/slugify' }

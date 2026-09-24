@@ -1,10 +1,11 @@
 ---
+import { env } from 'cloudflare:workers'
 import Base from '../layouts/base.astro'
 import Icon from '../components/ui/icon.astro'
 import Field from '../components/ui/field.astro'
 import PackageCard from '../components/package-card.astro'
 import Agent from '../components/agent.astro'
-import { packages } from '../data/packages'
+import { counted, listed } from '../lib/server/packages'
 
 const guides = [
   { icon: 'file', label: 'Quickstart', detail: 'curl -fsSL https://cdn.edgepython.com/cli/install.sh | sh', href: '/docs/getting-started/quickstart' },
@@ -20,6 +21,9 @@ const scopes = [
 // Publishing needs a token, so signed out the same button opens the sign-in dialog.
 const { user } = Astro.locals
 
+const { results: packages } = await listed(env.DB)
+const total = await counted(env.DB)
+
 const outline = 'flex items-center gap-2 transition border border-line text-fg-hint px-4 py-1 rounded-full hover:text-fg'
 ---
 
@@ -29,7 +33,7 @@ const outline = 'flex items-center gap-2 transition border border-line text-fg-h
       <h1 class="text-xl font-semibold">Edge Python</h1>
 
       <div class="order-2 sm:order-3 ml-auto sm:ml-0 sm:basis-full flex items-center gap-4 text-2xs text-fg-hint">
-        <span class="flex items-center gap-1.5"><Icon name="create" size="xs" />{packages.length} {packages.length === 1 ? 'package' : 'packages'}</span>
+        <span class="flex items-center gap-1.5"><Icon name="create" size="xs" />{total} {total === 1 ? 'package' : 'packages'}</span>
       </div>
 
       <div class="order-3 sm:order-2 basis-full sm:basis-auto sm:ml-auto flex items-center gap-3 text-sm">
@@ -88,9 +92,13 @@ const outline = 'flex items-center gap-2 transition border border-line text-fg-h
         </div>
       </div>
 
-      <ul class="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
-        {packages.map((item) => <PackageCard {...item} />)}
-      </ul>
+      {packages.length > 0 ? (
+        <ul class="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+          {packages.map((item) => <PackageCard {...item} />)}
+        </ul>
+      ) : (
+        <p class="ml-4 text-fg-hint">No packages yet.</p>
+      )}
     </section>
   </div>
 

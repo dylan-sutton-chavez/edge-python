@@ -2,7 +2,7 @@ import { globSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test, expect, type APIRequestContext } from '@playwright/test'
-import { MAILS, arriving, mailedCode, mintToken, packed, sent, signIn, unique } from './helpers'
+import { MAILS, arriving, mailedCode, mintToken, packed, published, sent, signIn, unique } from './helpers'
 import { MAX_DESCRIPTION, MAX_NOTICE } from '../src/lib/server/packages'
 
 const DOCS = fileURLToPath(new URL('../../docs/', import.meta.url))
@@ -65,7 +65,7 @@ test.describe('the api while signed out', () => {
   })
 
   test('knows which handles are free', async ({ request }) => {
-    expect(await (await request.get('/api/handles/dylan')).json()).toEqual({ available: false })
+    expect(await (await request.get('/api/handles/unclaimed')).json()).toEqual({ available: false })
     expect(await (await request.get('/api/handles/docs')).json()).toEqual({ available: false })
     expect(await (await request.get(`/api/handles/${unique()}`)).json()).toEqual({ available: true })
   })
@@ -119,9 +119,10 @@ test.describe('signing in by email', () => {
     const welcome = await request.get('/settings', { maxRedirects: 0 })
     expect(welcome.headers().location).toBe('/?welcome')
 
-    const taken = await request.patch('/api/me', { data: { handle: 'dylan', name: 'Corpus', avatar: { icon: 1, palette: 'sky' } } })
-    expect(taken.status()).toBe(409)
-    expect(await taken.json()).toEqual({ error: '@dylan is already taken.' })
+    // The seeded account holding abandoned packages is reserved, so nobody can become it.
+    const held = await request.patch('/api/me', { data: { handle: 'unclaimed', name: 'Corpus', avatar: { icon: 1, palette: 'sky' } } })
+    expect(held.status()).toBe(400)
+    expect(await held.json()).toEqual({ error: 'That name is reserved.' })
 
     const saved = await request.patch('/api/me', { data: { handle, name: 'Corpus', avatar: { icon: 1, palette: 'sky' }, bio: 'hello' } })
     expect(saved.status()).toBe(200)
@@ -135,6 +136,12 @@ test.describe('signing in by email', () => {
 
     expect(await (await request.post('/api/auth/signout')).json()).toEqual({ ok: true })
     expect((await request.get('/settings', { maxRedirects: 0 })).headers().location).toBe('/')
+
+    // A handle someone holds is theirs, which only a second account can prove.
+    await signIn(request)
+    const taken = await request.patch('/api/me', { data: { handle, name: 'Corpus', avatar: { icon: 1, palette: 'sky' } } })
+    expect(taken.status()).toBe(409)
+    expect(await taken.json()).toEqual({ error: `@${handle} is already taken.` })
   })
 })
 
@@ -154,6 +161,19 @@ test.describe('publish tokens', () => {
       expect(response.status()).toBe(401)
       expect(await response.json()).toEqual({ error: 'Not signed in.' })
     }
+  })
+
+  /* A token publishes and a release carries its author, so an account has to be nameable before it holds one. The wizard asks for a handle after the code, and nothing but this stops an api call in between. */
+  test('refuses a token to an account that has not been named', async ({ request }) => {
+    const email = `${unique()}@example.com`
+    await request.post('/api/auth/email/verify', { data: { email, code: await mailedCode(request, email, arriving()) } })
+
+    const early = await request.post('/api/me/tokens', { data: { name: 'CI', salt: SALT, hash: HASH } })
+    expect(early.status()).toBe(403)
+    expect(await early.json()).toEqual({ error: 'Pick a handle before you mint a token.' })
+
+    await request.patch('/api/me', { data: { handle: unique(), name: 'Corpus', avatar: { icon: 1, palette: 'sky' } } })
+    expect((await request.post('/api/me/tokens', { data: { name: 'CI', salt: SALT, hash: HASH } })).status()).toBe(201)
   })
 
   test('refuses a name or a digest it cannot have produced', async ({ request }) => {
@@ -246,6 +266,17 @@ test.describe('deleting an account', () => {
     expect((await request.get('/@' + handle)).status()).toBe(404)
     expect((await request.get('/settings', { maxRedirects: 0 })).headers().location).toBe('/')
   })
+
+  /* A name others import cannot vanish with the person behind it, so the package stands and the reserved account holds it. */
+  test('leaves a published package standing under the unclaimed account', async ({ request }) => {
+    const { email, name } = await published(request)
+
+    const code = await mailedCode(request, email, arriving())
+    expect(await (await request.delete('/api/me', { data: { code } })).json()).toEqual({ ok: true })
+
+    expect((await request.get(`/api/packages/${name}`)).status()).toBe(200)
+    expect(await (await request.get('/@unclaimed')).text()).toContain(name)
+  })
 })
 
 test.describe('changing a handle', () => {
@@ -292,7 +323,7 @@ test.describe('changing an address', () => {
     expect(same.status()).toBe(409)
     expect(await same.json()).toEqual({ error: 'That is already your address.' })
 
-    const held = await request.post('/api/me/email/start', { data: { email: 'c.sutton.dylan@gmail.com' } })
+    const held = await request.post('/api/me/email/start', { data: { email: 'unclaimed@edgepython.com' } })
     expect(held.status()).toBe(409)
     expect(await held.json()).toEqual({ error: 'Another account already uses that address.' })
   })

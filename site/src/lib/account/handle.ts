@@ -1,5 +1,5 @@
 // Handles live under @, so this list is about names nobody should claim, not about routes.
-export const RESERVED = ['404', 'api', 'docs', 'packages', 'publish', 'settings', 'terms', 'welcome']
+export const RESERVED = ['404', 'api', 'docs', 'packages', 'publish', 'settings', 'terms', 'unclaimed', 'welcome']
 
 export function validateHandle(value: string): string | null {
   if (value.length < 3) return 'At least 3 characters.'

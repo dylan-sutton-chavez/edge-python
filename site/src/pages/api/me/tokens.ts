@@ -7,6 +7,9 @@ import { createToken, userTokens, wellFormed, MAX_NAME, MAX_TOKENS } from '../..
 export const POST: APIRoute = async ({ request, locals }) => {
   if (!locals.user) return json({ error: 'Not signed in.' }, 401)
 
+  // A token publishes, and a release is attributed, so the account has to be nameable before it holds one.
+  if (!locals.user.handle) return json({ error: 'Pick a handle before you mint a token.' }, 403)
+
   const { name, salt, hash, replaces } = await body<{ name: string; salt: string; hash: string; replaces: string }>(request)
   const trimmed = name?.trim()
 

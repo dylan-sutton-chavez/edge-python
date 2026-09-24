@@ -128,4 +128,12 @@ export async function unlinkAccount(db: D1Database, userId: string, provider: st
 }
 
 // Sessions, credentials and tokens all cascade from the user row, so one delete is the whole account.
-export const deleteUser = (db: D1Database, id: string) => db.prepare('delete from user where id = ?').bind(id).run()
+/* Takes the account and leaves its packages standing, because a name others import cannot vanish with the person behind it. They pass to the reserved account, so a listing always has an author to show and a shelf of them has a page. */
+export const deleteUser = (db: D1Database, id: string) =>
+  db.batch([
+    db.prepare('update package set user_id = ? where user_id = ?').bind(UNCLAIMED, id),
+    db.prepare('delete from user where id = ?').bind(id)
+  ])
+
+// The account that holds a package whose author is gone, seeded and never sign-in-able.
+export const UNCLAIMED = 'u_unclaimed'

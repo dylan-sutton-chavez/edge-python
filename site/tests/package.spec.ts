@@ -47,7 +47,7 @@ const DOCS = {
 
 /* One flow, because a page is only right if the row, the artifact and the markdown all reach it together. */
 test('renders a published package from its row and its artifact', async ({ page, request }) => {
-  const name = await published(request, DOCS)
+  const { name } = await published(request, DOCS)
 
   await page.goto(`/package/${name}`)
 
@@ -74,7 +74,7 @@ test('renders a published package from its row and its artifact', async ({ page,
 })
 
 test('opens a page the aside names and refuses one it does not', async ({ page, request }) => {
-  const name = await published(request, DOCS)
+  const { name } = await published(request, DOCS)
 
   await page.goto(`/package/${name}/getting-started/installation`)
   await expect(page.locator('.prose h2')).toHaveText('Installation')
@@ -93,7 +93,7 @@ test.describe('the versions table on a phone', () => {
 
   // Three columns never fit, so each keeps its width and the table scrolls rather than squeezing the dates.
   test('scrolls sideways instead of cramming the columns', async ({ page, request }) => {
-    const name = await published(request)
+    const { name } = await published(request)
 
     await page.goto(`/package/${name}`)
 
