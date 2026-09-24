@@ -21,14 +21,17 @@ const card = 'bg-page border border-line-strong rounded-2xl overflow-hidden p-4'
 const footer = 'flex items-center justify-between py-3 px-[17px] text-2xs text-fg-hint'
 ---
 
-<div data-playground data-cdn={env.CDN} data-min={minLines} data-max={maxLines} data-expected={output}>
+<div data-playground data-cdn={env.CDN} data-min={minLines} data-expected={output}>
   <div class={panel}>
     <div class:list={[card, 'text-xs']}>
-      <div class="relative -m-4 font-mono leading-code">
-        <pre aria-hidden="true" class="pointer-events-none absolute inset-0 m-0 overflow-hidden whitespace-pre p-4 font-mono leading-code"><code data-view class="[&_span]:text-(--shiki-light) dark:[&_span]:text-(--shiki-dark)"></code></pre>
+      <div
+        class="-m-4 grid overflow-auto font-mono leading-code [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        style={`max-height:calc(${maxLines} * var(--leading-code) + 2rem)`}
+      >
+        <pre aria-hidden="true" class="pointer-events-none col-start-1 row-start-1 m-0 whitespace-pre p-4 font-mono leading-code"><code data-view class="[&_span]:text-(--shiki-light) dark:[&_span]:text-(--shiki-dark)"></code></pre>
         <textarea
           data-input name={name} rows={rows} placeholder={placeholder} spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="Edge Python source"
-          class="relative block w-full resize-none overflow-auto whitespace-pre border-0 bg-transparent p-4 font-mono leading-code text-transparent caret-fg outline-none placeholder:text-fg-placeholder selection:bg-link/30 selection:text-transparent [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{code}</textarea>
+          class="col-start-1 row-start-1 w-full resize-none overflow-hidden whitespace-pre border-0 bg-transparent p-4 font-mono leading-code text-transparent caret-fg outline-none placeholder:text-fg-placeholder selection:bg-link/30 selection:text-transparent">{code}</textarea>
       </div>
     </div>
 
@@ -86,8 +89,7 @@ const footer = 'flex items-center justify-between py-3 px-[17px] text-2xs text-f
       view,
       highlight,
       onRun: () => start(),
-      minLines: Number(root.dataset.min) || 1,
-      maxLines: Number(root.dataset.max) || 5
+      minLines: Number(root.dataset.min) || 1
     })
 
     async function start() {

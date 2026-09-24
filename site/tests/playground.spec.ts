@@ -77,11 +77,11 @@ test('scrolls the highlight with the source', async ({ page }) => {
 
   const view = await input.evaluate((el: HTMLTextAreaElement) => {
     const overlay = el.previousElementSibling!
-    return { scroll: el.scrollTop, overlayScroll: overlay.scrollTop }
+    return { scroll: el.parentElement!.scrollTop, drift: overlay.getBoundingClientRect().top - el.getBoundingClientRect().top }
   })
 
   expect(view.scroll).toBeGreaterThan(0)
-  expect(view.overlayScroll).toBe(view.scroll)
+  expect(view.drift).toBe(0)
 })
 
 test('runs the documented example and reports the elapsed time', async ({ page }) => {

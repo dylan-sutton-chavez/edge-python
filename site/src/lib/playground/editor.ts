@@ -239,13 +239,15 @@ export type EditorOptions = {
   highlight: (code: string) => string
   onRun: (source: string) => void
   minLines?: number
-  maxLines?: number
 }
 
 export function createEditor(options: EditorOptions) {
-  const { input, view, highlight, onRun, minLines = 1, maxLines = 5 } = options
+  const { input, view, highlight, onRun, minLines = 1 } = options
   const listeners = new AbortController()
   const { signal } = listeners
+
+  // A textarea never scrolls into its own end padding, so the wrapper carries the scroll.
+  const scroller = input.parentElement!
 
   let pairedAt = -1
   let composing = false
@@ -253,9 +255,9 @@ export function createEditor(options: EditorOptions) {
   const style = getComputedStyle(input)
   const lineHeight = parseFloat(style.lineHeight)
 
-  // The padding bleeds the code to the card edges, so the caret cannot use it.
-  const gutter = () => ({
-    x: parseFloat(style.paddingLeft) + parseFloat(style.paddingRight),
+  const inset = () => ({
+    left: parseFloat(style.paddingLeft),
+    top: parseFloat(style.paddingTop),
     y: parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
   })
 
@@ -279,36 +281,32 @@ export function createEditor(options: EditorOptions) {
 
   const resize = () => {
     const lines = input.value.split('\n').length
-    input.style.height = `${Math.min(Math.max(lines, minLines), maxLines) * lineHeight + gutter().y}px`
+    input.style.height = `${Math.max(lines, minLines) * lineHeight + inset().y}px`
   }
 
   const render = () => {
     const code = input.value
     view.innerHTML = highlight(code) + (code.endsWith('\n') ? ' ' : '')
-    view.parentElement!.scrollTop = input.scrollTop
-    view.parentElement!.scrollLeft = input.scrollLeft
   }
 
-  // setSelectionRange moves the caret without scrolling to it, so past `maxLines` the caret walks off-screen silently.
+  // setSelectionRange moves the caret without scrolling to it, so past the visible height it walks off-screen silently.
   const reveal = () => {
     const caret = input.selectionEnd
     const before = input.value.slice(0, caret)
     const row = before.split('\n').length - 1
     const column = caret - (before.lastIndexOf('\n') + 1)
 
-    const { x: padX, y: padY } = gutter()
-    const height = input.clientHeight - padY
-    const width = input.clientWidth - padX
+    const { left: padLeft, top: padTop } = inset()
+    const height = scroller.clientHeight
+    const width = scroller.clientWidth
 
-    const top = row * lineHeight
-    if (top < input.scrollTop) input.scrollTop = top
-    else if (top + lineHeight > input.scrollTop + height) input.scrollTop = top + lineHeight - height
+    const top = padTop + row * lineHeight
+    if (top < scroller.scrollTop) scroller.scrollTop = top
+    else if (top + lineHeight > scroller.scrollTop + height) scroller.scrollTop = top + lineHeight - height
 
-    const left = column * columnWidth
-    if (left < input.scrollLeft) input.scrollLeft = Math.max(0, left - columnWidth * 2)
-    else if (left + columnWidth > input.scrollLeft + width) input.scrollLeft = left + columnWidth * 2 - width
-
-    render()
+    const left = padLeft + column * columnWidth
+    if (left < scroller.scrollLeft) scroller.scrollLeft = Math.max(0, left - columnWidth * 2)
+    else if (left + columnWidth > scroller.scrollLeft + width) scroller.scrollLeft = left + columnWidth * 2 - width
   }
 
   const sync = () => {
@@ -358,8 +356,6 @@ export function createEditor(options: EditorOptions) {
   input.addEventListener('compositionend', () => { composing = false }, { signal })
   input.addEventListener('input', () => { pairedAt = -1; sync() }, { signal })
   input.addEventListener('keyup', reveal, { signal })
-  input.addEventListener('click', render, { signal })
-  input.addEventListener('scroll', render, { signal })
 
   input.addEventListener('keydown', (event) => {
     if (composing || event.isComposing) return
