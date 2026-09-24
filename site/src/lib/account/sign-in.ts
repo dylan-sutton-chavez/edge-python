@@ -8,7 +8,12 @@ export type Step = 'providers' | 'code' | 'user' | 'avatar'
 type Screen = { title: string; text: string; next?: Step; submit?: () => Promise<boolean | 'done'> }
 
 const PROFILE: Step[] = ['user', 'avatar']
-const KEY = 'signin-step'
+const KEY = 'signin-pending'
+
+// As long as the mailed code lives, which is what the dialog has to outlast.
+const CODE_LIFE = 10 * 60_000
+
+type Pending = { step: Step; email?: string; until?: number }
 
 export function createSignIn(dialog: HTMLDialogElement) {
   const find = <T extends Element>(selector: string) => dialog.querySelector<T>(selector)!
@@ -19,6 +24,7 @@ export function createSignIn(dialog: HTMLDialogElement) {
   const panels = dialog.querySelectorAll<HTMLElement>('[data-panel]')
 
   let email = ''
+  let until = 0
 
   const STEPS: Record<Step, Screen> = {
     providers: { title: 'Sign In', text: 'Sign in to publish packages and pin them by sha256.', next: 'code', submit: start },
@@ -38,6 +44,7 @@ export function createSignIn(dialog: HTMLDialogElement) {
       return false
     }
 
+    until = Date.now() + CODE_LIFE
     setError(field, null)
     form('code').reset()
     setError(input('code'), null)
@@ -78,15 +85,17 @@ export function createSignIn(dialog: HTMLDialogElement) {
   const active = () => find<HTMLElement>(`[data-panel="${current()}"]`)
   const fit = () => { track.style.height = `${active().offsetHeight}px` }
 
-  const remember = (step: Step | null) => {
+  const remember = (held: Pending | null) => {
     try {
-      step ? sessionStorage.setItem(KEY, step) : sessionStorage.removeItem(KEY)
+      held ? sessionStorage.setItem(KEY, JSON.stringify(held)) : sessionStorage.removeItem(KEY)
     } catch {}
   }
 
-  const recall = (): Step | null => {
+  /* A record whose code already expired is not worth returning to, so it comes back empty. */
+  const recall = (): Pending | null => {
     try {
-      return sessionStorage.getItem(KEY) as Step | null
+      const held = JSON.parse(sessionStorage.getItem(KEY) ?? 'null') as Pending | null
+      return held && (!held.until || held.until > Date.now()) ? held : null
     } catch {
       return null
     }
@@ -106,16 +115,25 @@ export function createSignIn(dialog: HTMLDialogElement) {
     next.querySelector('[data-label]')!.textContent = STEPS[step].next ? 'Next' : 'Finish'
     next.setAttribute('form', `signin-${step}`)
     dialog.querySelectorAll('[data-dots] li').forEach((dot, i) => (i === index ? dot.setAttribute('aria-current', 'step') : dot.removeAttribute('aria-current')))
-    remember(index === -1 ? null : step)
+    remember(step === 'code' ? { step, email, until } : index === -1 ? null : { step })
 
     if (matchMedia('(hover: hover)').matches) active().querySelector<HTMLElement>('input:not([type="radio"])')?.focus({ preventScroll: true })
   }
 
   function open(step?: Step) {
     const stored = recall()
+
+    // A code already in an inbox stays good, so returning lands on it.
+    if (stored?.email) {
+      email = stored.email
+      until = stored.until ?? 0
+    }
+
+    const resumable = stored && (stored.step === 'code' || PROFILE.includes(stored.step))
+
     dialog.showModal()
     track.style.transition = 'none'
-    go(step ?? (stored && PROFILE.includes(stored) ? stored : 'providers'))
+    go(step ?? (resumable ? stored!.step : 'providers'))
     void track.offsetHeight
     track.style.transition = ''
   }
@@ -146,7 +164,19 @@ export function createSignIn(dialog: HTMLDialogElement) {
   form('avatar').addEventListener('change', () => pickAvatar(form('avatar'), readAvatar(form('avatar'))))
 
   find('[data-resend]').addEventListener('click', async () => {
-    await sendCode(email)
+    if (!email) return go('providers')
+
+    try {
+      await sendCode(email)
+    } catch (error) {
+      setError(input('code'), (error as Error).message)
+      return
+    }
+
+    until = Date.now() + CODE_LIFE
+    remember({ step: 'code', email, until })
+    form('code').reset()
+    setError(input('code'), null)
     find('[data-subtitle]').textContent = `We sent a new code to ${email}.`
   })
 

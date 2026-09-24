@@ -141,11 +141,14 @@ const card = 'bg-page border border-line-strong p-4'
       await startEmailChange(wanted)
       moving(false)
 
-      const code = await confirmedWithCode({
-        title: `Send your codes to ${wanted}?`,
-        body: 'The old address stops reaching this account, and we will let it know. Your GitHub and Google connections are unaffected.',
-        action: 'Change address'
-      })
+      const code = await confirmedWithCode(
+        {
+          title: `Send your codes to ${wanted}?`,
+          body: 'The old address stops reaching this account, and we will let it know. Your GitHub and Google connections are unaffected.',
+          action: 'Change address'
+        },
+        () => startEmailChange(wanted)
+      )
 
       if (!code) return
 
@@ -178,11 +181,14 @@ const card = 'bg-page border border-line-strong p-4'
     try {
       await sendCode(email)
 
-      const code = await confirmedWithCode({
-        title: 'Delete your account?',
-        body: 'Your profile, your sign-in methods and your publish tokens go with it. Nothing here comes back.',
-        action: 'Delete account'
-      })
+      const code = await confirmedWithCode(
+        {
+          title: 'Delete your account?',
+          body: 'Your profile, your sign-in methods and your publish tokens go with it. Nothing here comes back.',
+          action: 'Delete account'
+        },
+        () => sendCode(email)
+      )
 
       if (code) {
         await deleteAccount(code)

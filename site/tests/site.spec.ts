@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test'
-import { test } from './helpers'
+import { test, unique } from './helpers'
 
 const routes = [
   { path: '/', group: 'Explore', label: 'Community' },
@@ -195,6 +195,24 @@ test.describe('dialogs', () => {
 
     await dialog.getByRole('button', { name: 'Close' }).click()
     await expect(dialog).toBeHidden()
+  })
+
+  // A reload used to land on the email step, which minted a second code and killed the one already sent.
+  test('returns to the code it already sent after a reload', async ({ page }) => {
+    const email = `${unique()}@example.com`
+    const dialog = page.locator('[data-signin]')
+
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+    await page.getByLabel('Email').fill(email)
+    await page.locator('form[data-email] button').click()
+    await expect(dialog).toHaveAttribute('data-step', 'code')
+
+    await page.reload()
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+
+    await expect(dialog).toHaveAttribute('data-step', 'code')
+    await expect(dialog.locator('[data-subtitle]')).toContainText(email)
+    await expect(dialog.getByRole('button', { name: 'Resend code' })).toBeVisible()
   })
 
   test('opens the agent briefing and closes it on Escape', async ({ page }) => {

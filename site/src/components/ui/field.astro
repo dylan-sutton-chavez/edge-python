@@ -20,7 +20,10 @@ const { name, label, hideLabel = false, type = 'text', placeholder, required = f
 ---
 
 <div class:list={['flex flex-col gap-2 text-sm', className]}>
-  <label for={name} class={hideLabel ? 'sr-only' : 'ml-4'}>{label}</label>
+  <div class="flex items-baseline gap-3">
+    <label for={name} class={hideLabel ? 'sr-only' : 'ml-4'}>{label}</label>
+    {error && <p id={`${name}-error`} data-error hidden class="ml-auto mr-4 min-w-0 text-right text-2xs text-danger"></p>}
+  </div>
 
   <span class="w-full px-4 py-2 bg-surface border border-line-emphasis rounded-full flex items-center gap-2 has-[[aria-invalid=true]]:border-danger">
     {icon && <Icon name={icon} class="shrink-0 text-fg-placeholder" />}
@@ -41,8 +44,6 @@ const { name, label, hideLabel = false, type = 'text', placeholder, required = f
       </button>
     )}
   </span>
-
-  {error && <p id={`${name}-error`} data-error hidden class="ml-4 text-2xs text-danger"></p>}
 </div>
 
 <script>
