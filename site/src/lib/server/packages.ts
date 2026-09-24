@@ -109,6 +109,10 @@ export function listed(db: D1Database, { handle, limit = 60 }: { handle?: string
     .all<Listed>()
 }
 
+/* One more reach for this package, counted where `edge add` asks for a digest, since that is the moment somebody puts it in a project rather than merely reads its page. */
+export const downloaded = (db: D1Database, name: string) =>
+  db.prepare('update package set downloads = downloads + 1 where name = ?').bind(name).run()
+
 export const counted = async (db: D1Database) =>
   ((await db
     .prepare('select count(distinct package) as total from version where yanked_at is null')

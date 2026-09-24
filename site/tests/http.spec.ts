@@ -486,4 +486,17 @@ test.describe('publishing', () => {
   test('says nothing is there for a package that was never published', async ({ request }) => {
     expect((await request.get(`/api/packages/${naming()}`)).status()).toBe(404)
   })
+
+  /* A reach counts where `edge add` asks for a digest, which is somebody putting the package in a project. Reading the page is not that, so the figure the page shows counts the asks and not its own views. */
+  test('counts a reach for the digest and not a look at the page', async ({ request }) => {
+    const { name } = await published(request)
+    const shown = async () => (await (await request.get(`/package/${name}`)).text()).match(/([\d.k]+) downloads/)?.[1]
+
+    expect(await shown()).toBe('0')
+
+    for (let at = 1; at <= 3; at++) {
+      expect((await request.get(`/api/packages/${name}`)).status()).toBe(200)
+      expect(await shown(), `after ${at} asks`).toBe(String(at))
+    }
+  })
 })
