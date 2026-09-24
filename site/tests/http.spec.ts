@@ -2,7 +2,7 @@ import { globSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test, expect, type APIRequestContext } from '@playwright/test'
-import { MAILS, arriving, mailedCode, mintToken, packed, sent, unique } from './helpers'
+import { MAILS, arriving, mailedCode, mintToken, packed, sent, signIn, unique } from './helpers'
 import { MAX_DESCRIPTION, MAX_NOTICE } from '../src/lib/server/packages'
 
 const DOCS = fileURLToPath(new URL('../../docs/', import.meta.url))
@@ -144,16 +144,6 @@ const b64url = (length: number) =>
 
 const SALT = b64url(22)
 const HASH = b64url(43)
-
-async function signIn(request: APIRequestContext) {
-  const email = `${unique()}@example.com`
-  const handle = unique()
-
-  await request.post('/api/auth/email/verify', { data: { email, code: await mailedCode(request, email, arriving()) } })
-  await request.patch('/api/me', { data: { handle, name: 'Corpus', avatar: { icon: 1, palette: 'sky' } } })
-
-  return { email, handle }
-}
 
 test.describe('publish tokens', () => {
   test('turns a signed out visitor away', async ({ request }) => {

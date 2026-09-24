@@ -1,6 +1,17 @@
 import { test, expect, type Page } from '@playwright/test'
+import { published } from './helpers'
 
 const PAGE = '/docs/reference/cli'
+
+const PACKAGE_PAGE = `---
+title: Introduction
+description: Where to start.
+---
+
+# Introduction
+
+${'Long enough to scroll. '.repeat(120)}
+`
 
 const aside = (page: Page) => page.locator('aside[data-sticky]')
 const header = (page: Page) => page.locator('header')
@@ -40,10 +51,11 @@ test('leaves the aside pinned below the header while scrolling', async ({ page }
 })
 
 // The gap belongs to the page, so a route that opens with content above the aside pins it just the same.
-test('pins the aside to the header wherever the aside starts', async ({ page }) => {
+test('pins the aside to the header wherever the aside starts', async ({ page, request }) => {
   const gaps: number[] = []
+  const name = await published(request, { '@docs/01-intro.mdx': PACKAGE_PAGE })
 
-  for (const route of [PAGE, '/package/json']) {
+  for (const route of [PAGE, `/package/${name}`]) {
     await page.goto(route)
     await page.mouse.wheel(0, 600)
     await page.waitForTimeout(300)

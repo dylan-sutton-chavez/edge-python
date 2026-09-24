@@ -1,51 +1,101 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
+import { published } from './helpers'
 
-const PAGE = '/package/json'
+const INTRO = `---
+title: Introduction
+description: Where to start.
+---
 
-const scope = (page: Page) => page.locator('p', { hasText: /^Runs/ })
+# Introduction
 
-test('points the docs aside at the package it belongs to', async ({ page }) => {
-  await page.goto(PAGE)
+Turns text into a slug, with a \`normalise\` helper.
 
+\`\`\`edge-python
+from slugify import slug
+print(slug('Hello World'))
+\`\`\`
+
+\`\`\`output
+hello-world
+\`\`\`
+
+Then a list.
+
+- one
+- two
+
+\`\`\`bash
+edge add slugify
+\`\`\`
+`
+
+const INSTALL = `---
+title: Installation
+description: How to add it.
+---
+
+# Installation
+
+Declare it, then import it.
+`
+
+const DOCS = {
+  '@docs/01-getting-started/01-introduction.mdx': INTRO,
+  '@docs/01-getting-started/02-installation.mdx': INSTALL,
+  LICENSE: 'Apache License\nVersion 2.0, January 2004'
+}
+
+/* One flow, because a page is only right if the row, the artifact and the markdown all reach it together. */
+test('renders a published package from its row and its artifact', async ({ page, request }) => {
+  const name = await published(request, DOCS)
+
+  await page.goto(`/package/${name}`)
+
+  // What the listing indexed, beside what was read back out of the bundle.
+  await expect(page.locator('h1')).toHaveText(name)
+  await expect(page.getByText('Turn text into a slug.')).toBeVisible()
+  await expect(page.getByText('Apache-2.0')).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Repository' })).toHaveAttribute('href', 'https://github.com/x/slugify')
+
+  // The markdown the worker rendered, prose and a runnable pair alike.
+  await expect(page.locator('.prose li')).toHaveText(['one', 'two'])
+  await expect(page.locator('[data-playground]')).toHaveCount(1)
+  await expect(page.locator('[data-playground] textarea')).toHaveValue(/from slugify import slug/)
+  await expect(page.locator('.prose code.language-bash')).toHaveText('edge add slugify\n')
+
+  // The aside orders both pages and every link stays inside the package.
   const links = page.locator('aside[data-sticky] a')
-  const count = await links.count()
-
-  expect(count).toBeGreaterThan(0)
-  for (let at = 0; at < count; at++) await expect(links.nth(at)).toHaveAttribute('href', /^\/package\/json\//)
-})
-
-test('names every host an open package reaches and says when there is only one', async ({ page }) => {
-  await page.goto(PAGE)
-  await expect(scope(page)).toHaveText('Runs in the CLI, a browser and an actor pool.')
-
-  await page.goto('/package/dom')
-  await expect(scope(page)).toHaveText('Runs only in a browser.')
-})
-
-// The sentence rode an ml-auto, so a band of widths left it wrapped onto its own line and still pushed right.
-test('keeps the scope sentence beside the digest or below it, never adrift', async ({ page }) => {
-  await page.goto(PAGE)
-
-  for (const width of [1440, 1100, 900, 800, 700, 600, 480, 390]) {
-    await page.setViewportSize({ width, height: 900 })
-
-    const seen = await scope(page).evaluate((el) => {
-      const digest = el.previousElementSibling!.getBoundingClientRect()
-      const own = el.getBoundingClientRect()
-
-      return { stacked: Math.abs(digest.top - own.top) > 4, offset: own.left - el.parentElement!.getBoundingClientRect().left }
-    })
-
-    if (seen.stacked) expect(seen.offset, `wrapped at ${width}px so it belongs at the start of its line`).toBeLessThan(3)
+  await expect(links).toHaveText(['Introduction', 'Installation'])
+  for (const href of await links.evaluateAll((all) => all.map((a) => a.getAttribute('href')))) {
+    expect(href).toMatch(new RegExp(`^/package/${name}/`))
   }
+
+  await expect(page.locator('table tbody tr')).toHaveCount(1)
+})
+
+test('opens a page the aside names and refuses one it does not', async ({ page, request }) => {
+  const name = await published(request, DOCS)
+
+  await page.goto(`/package/${name}/getting-started/installation`)
+  await expect(page.locator('.prose h2')).toHaveText('Installation')
+
+  await page.goto(`/package/${name}/nope`)
+  await expect(page.getByText('Not found')).toBeVisible()
+})
+
+test('says nothing is there for a name nobody published', async ({ page }) => {
+  await page.goto('/package/nobody-here')
+  await expect(page.getByText('Not found')).toBeVisible()
 })
 
 test.describe('the versions table on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } })
 
   // Three columns never fit, so each keeps its width and the table scrolls rather than squeezing the dates.
-  test('scrolls sideways instead of cramming the columns', async ({ page }) => {
-    await page.goto(PAGE)
+  test('scrolls sideways instead of cramming the columns', async ({ page, request }) => {
+    const name = await published(request)
+
+    await page.goto(`/package/${name}`)
 
     const room = await page.locator('table').evaluate((el) => ({
       table: el.getBoundingClientRect().width,

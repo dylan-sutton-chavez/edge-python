@@ -1,6 +1,6 @@
 import { check } from '../docs/convention'
 
-export type Package = { name: string; user_id: string | null; created_at: number }
+export type Package = { name: string; user_id: string | null; downloads: number; created_at: number }
 
 export type Release = {
   name: string

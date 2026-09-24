@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, type APIRequestContext, type APIResponse, type BrowserContext } from '@playwright/test'
 import { random, sha256 } from '../src/lib/crypto'
+import { BASE } from '../playwright.config'
 
 export const MAILS = fileURLToPath(new URL('../.wrangler/tmp/email/', import.meta.url))
 
@@ -51,17 +52,19 @@ export async function mailedCode(request: APIRequestContext, email: string, from
   return readFileSync(mail, 'utf8').match(/\d{6}/)![0]
 }
 
-/* A named account, ready to use. The context shares its cookies with the page, so the browser lands signed in without walking the sign-up wizard, which its own tests already cover. */
-export async function signedIn(context: BrowserContext) {
+/* A named account, ready to use. */
+export async function signIn(request: APIRequestContext) {
   const email = `${unique()}@example.com`
   const handle = unique()
 
-  const code = await mailedCode(context.request, email, arriving())
-  await context.request.post('/api/auth/email/verify', { data: { email, code } })
-  await context.request.patch('/api/me', { data: { handle, name: 'Corpus', avatar: { icon: 1, palette: 'sky' } } })
+  await request.post('/api/auth/email/verify', { data: { email, code: await mailedCode(request, email, arriving()) } })
+  await request.patch('/api/me', { data: { handle, name: 'Corpus', avatar: { icon: 1, palette: 'sky' } } })
 
   return { email, handle }
 }
+
+/* The same account through a browser context, which shares its cookies with the page, so a test lands signed in without walking the sign-up wizard its own tests already cover. */
+export const signedIn = (context: BrowserContext) => signIn(context.request)
 
 /* A usable token, minted the way the browser does so the secret exists only here. */
 export async function mintToken(request: APIRequestContext, name = 'ci') {
@@ -74,3 +77,22 @@ export async function mintToken(request: APIRequestContext, name = 'ci') {
 
   return `edge_pat_${(await made.json()).id}.${secret}`
 }
+
+/* A package in the registry, published the way the CLI does, so a test that reads a page reads one that was really stored. */
+export async function published(request: APIRequestContext, files: Record<string, string> = {}) {
+  await signIn(request)
+  const token = await mintToken(request)
+  const name = `p${unique()}`.toLowerCase().replace(/[^a-z0-9-]/g, '')
+
+  const tree = { 'edge.json': JSON.stringify({ name, version: '0.1.0', ...DECLARED }), 'main.py': 'print(1)\n', ...files }
+  const artifact = { name: 'app.edge', mimeType: 'application/octet-stream', buffer: packed(tree) }
+
+  // A multipart post is a form submission, which the origin check covers, unlike the JSON posts above it.
+  const headers = { authorization: `Bearer ${token}`, origin: BASE }
+  const sent = await request.post('/api/publish', { headers, multipart: { artifact } })
+  expect(sent.status(), await sent.text()).toBe(201)
+
+  return name
+}
+
+const DECLARED = { description: 'Turn text into a slug.', repository: 'https://github.com/x/slugify' }

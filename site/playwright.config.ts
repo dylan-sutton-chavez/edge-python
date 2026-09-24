@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 // Its own port, so a run never borrows or disturbs the dev server on 4322.
 const PORT = 4323
-const BASE = `https://127.0.0.1:${PORT}`
+export const BASE = `https://127.0.0.1:${PORT}`
 
 // Specs with no renderer, run once beside the http suite instead of three times.
 const NODE_ONLY = /(http|convention)\.spec\.ts/

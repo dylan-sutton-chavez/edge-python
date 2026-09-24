@@ -5,7 +5,8 @@ export type Section = { label: string | null; docs: Doc[] }
 
 type Entry = { id: string; data: { title?: string } }
 
-const name = (segment: string) => segment.replace(ORDER, '')
+// A collection entry arrives without its extension and a packed page with one, and a slug carries neither.
+const name = (segment: string) => segment.replace(ORDER, '').replace(/\.mdx$/, '')
 
 function label(segment: string) {
   const words = name(segment).replaceAll('-', ' ')

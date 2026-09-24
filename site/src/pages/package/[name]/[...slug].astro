@@ -1,31 +1,55 @@
 ---
+import { env } from 'cloudflare:workers'
 import Base from '../../../layouts/base.astro'
 import DocsNav from '../../../components/docs-nav.astro'
 import Playground from '../../../components/playground.astro'
 import CodeBlock from '../../../components/ui/code-block.astro'
 import Avatar from '../../../components/ui/avatar.astro'
 import Icon from '../../../components/ui/icon.astro'
+import { avatarFor } from '../../../lib/account/avatar'
+import { packed } from '../../../lib/server/bundle'
+import { identify } from '../../../lib/server/license'
+import { keyOf, named, packageByName, versionsOf } from '../../../lib/server/packages'
+import { publicUser, userById } from '../../../lib/server/users'
+import { bytes, count, on } from '../../../lib/format'
+import { entries, render } from '../../../lib/docs/page'
 import { tree } from '../../../lib/docs/tree'
-import { HOSTS, details } from '../../../data/package'
 
-const detail = details[Astro.params.name ?? '']
-if (!detail) return Astro.rewrite('/404')
+const name = String(Astro.params.name ?? '').toLowerCase()
+if (!named(name)) return Astro.rewrite('/404')
 
-const sections = tree(detail.pages, '')
+const held = await packageByName(env.DB, name)
+if (!held) return Astro.rewrite('/404')
+
+const { results } = await versionsOf(env.DB, name)
+const releases = results.filter((each) => each.yanked_at === null)
+
+const latest = releases[0]
+if (!latest) return Astro.rewrite('/404')
+
+// The artifact is the release, so what a listing does not index is read back out of the bytes that will run.
+const object = await env.CDN_BUCKET.get(keyOf(name, latest.version))
+if (!object) return Astro.rewrite('/404')
+
+const artifact = packed(new Uint8Array(await object.arrayBuffer()))
+
+const sections = tree(entries(artifact.docs), '')
 const docs = sections.flatMap((section) => section.docs)
 
 const doc = Astro.params.slug ? docs.find((each) => each.slug === Astro.params.slug) : docs[0]
-if (!doc) return Astro.rewrite('/404')
+if (Astro.params.slug && !doc) return Astro.rewrite('/404')
 
-const page = detail.pages.find((each) => each.id === doc.id)!
-const base = `/package/${detail.name}`
+const page = doc ? await render(doc.id, artifact.docs[doc.id]!) : null
 
-// The registry works this out from the artifact, so the sentence names every host it reaches and says when that is the only one. Nothing established means nothing said.
-const places = (detail.hosts ?? []).map((host) => HOSTS[host])
-const where = places.length > 1 ? `${places.slice(0, -1).join(', ')} and ${places.at(-1)}` : places[0]
-const runs = places.length > 1 ? `Runs in ${where}.` : places.length === 1 ? `Runs only in ${where}.` : null
+const author = held.user_id ? await userById(env.DB, held.user_id) : null
+const shown = author && publicUser(author)
 
-const meta = [`${detail.downloads} downloads`, detail.license, detail.size]
+const description = typeof artifact.description === 'string' ? artifact.description : null
+const repository = typeof artifact.repository === 'string' ? artifact.repository : null
+const license = artifact.notice && identify(artifact.notice)
+
+const base = `/package/${name}`
+const meta = [`${count(held.downloads)} downloads`, license, bytes(latest.size)].filter(Boolean)
 const dot = 'text-fg-disabled'
 
 // A column keeps its own width so the table scrolls instead of squeezing the dates on a phone.
@@ -34,59 +58,61 @@ const head = `${cell} font-normal text-fg-subtle`
 const row = `${cell} border-t border-line-strong`
 ---
 
-<Base title={`${detail.name} ${detail.version}`} description={detail.description} gap="lg" class="flex-1">
+<Base title={`${name} ${latest.version}`} description={description ?? `The ${name} package on Edge Python.`} gap="lg" class="flex-1">
   <div>
     <div class="flex flex-wrap items-baseline gap-3">
-      <h1 class="text-xl font-semibold">{detail.name}</h1>
-      <span class="font-mono text-xs text-fg-subtle">{detail.version}</span>
+      <h1 class="text-xl font-semibold">{name}</h1>
+      <span class="font-mono text-xs text-fg-subtle">{latest.version}</span>
     </div>
 
-    <p class="mt-3 text-fg-muted">{detail.description}</p>
+    {description && <p class="mt-3 text-fg-muted">{description}</p>}
 
     <div class="mt-4 flex flex-wrap items-center gap-3 text-xs text-fg-subtle">
-      <a href={`/@${detail.author.handle}`} class="flex items-center gap-2 transition hover:text-fg">
-        <Avatar {...detail.author.avatar} />
-        <span>@{detail.author.handle}</span>
-      </a>
+      {shown && (
+        <a href={`/@${shown.handle}`} class="flex items-center gap-2 transition hover:text-fg">
+          <Avatar {...(shown.avatar ?? avatarFor(shown.id))} />
+          <span>@{shown.handle}</span>
+        </a>
+      )}
 
       {meta.map((item) => <><span class={dot}>·</span><span>{item}</span></>)}
 
-      <span class="flex items-center gap-3">
-        <span class={dot}>·</span>
+      {repository && (
+        <span class="flex items-center gap-3">
+          <span class={dot}>·</span>
 
-        <a href={detail.repository} rel="noopener" class="flex items-center gap-1.5 transition hover:text-fg">
-          <Icon name="github" size="sm" />Repository
-        </a>
-      </span>
+          <a href={repository} rel="noopener" class="flex items-center gap-1.5 transition hover:text-fg">
+            <Icon name="github" size="sm" />Repository
+          </a>
+        </span>
+      )}
     </div>
   </div>
 
   <div>
-    <CodeBlock data-language="bash">edge add {detail.name}</CodeBlock>
+    <CodeBlock data-language="bash">edge add {name}</CodeBlock>
 
     <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
       <p class="flex min-w-0 items-center gap-2 text-2xs text-fg-hint">
         <Icon name="locked" size="sm" />
-        <span class="min-w-0 truncate font-mono" title={detail.digest}>sha256-{detail.digest}</span>
+        <span class="min-w-0 truncate font-mono" title={latest.digest}>sha256-{latest.digest}</span>
       </p>
-
-      {runs && <p class="text-xs text-fg-muted">{runs}</p>}
     </div>
   </div>
 
-  <div class="flex flex-col lg:flex-row gap-3 flex-1 min-h-0">
-    <DocsNav sections={sections} current={doc} base={base} />
+  {page && doc && (
+    <div class="flex flex-col lg:flex-row gap-3 flex-1 min-h-0">
+      <DocsNav sections={sections} current={doc} base={base} />
 
-    <section class="prose flex-1 min-w-0">
-      <h2>{doc.title}</h2>
+      <section class="prose flex-1 min-w-0">
+        <h2>{doc.title}</h2>
 
-      {page.blocks.map((block) => (
-        block.kind === 'heading' ? <h3>{block.value}</h3>
-          : block.kind === 'text' ? <p>{block.value}</p>
-            : <Playground code={block.code} output={block.output} />
-      ))}
-    </section>
-  </div>
+        {page.blocks.map((block) => (
+          block.kind === 'prose' ? <Fragment set:html={block.html} /> : <Playground code={block.code} output={block.output} />
+        ))}
+      </section>
+    </div>
+  )}
 
   <section class="flex flex-col gap-3">
     <h2 class="ml-4">Versions</h2>
@@ -102,16 +128,16 @@ const row = `${cell} border-t border-line-strong`
         </thead>
 
         <tbody>
-          {detail.releases.map((release) => (
+          {releases.map((release) => (
             <tr>
               <td class={row}>
                 <span class="flex items-center gap-3">
                   <span class="font-mono text-xs">{release.version}</span>
-                  {release.version === detail.version && <span class="text-2xs text-fg-hint">current</span>}
+                  {release.version === latest.version && <span class="text-2xs text-fg-hint">current</span>}
                 </span>
               </td>
-              <td class:list={[row, 'text-fg-muted']}>{release.published}</td>
-              <td class:list={[row, 'text-fg-muted tabular-nums']}>{release.size}</td>
+              <td class:list={[row, 'text-fg-muted']}>{on(release.published_at)}</td>
+              <td class:list={[row, 'text-fg-muted tabular-nums']}>{bytes(release.size)}</td>
             </tr>
           ))}
         </tbody>
