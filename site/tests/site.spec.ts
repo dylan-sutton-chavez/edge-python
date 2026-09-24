@@ -139,7 +139,7 @@ test('toggles the theme and remembers the choice', async ({ page }) => {
   const before = await html.getAttribute('data-theme')
   const after = before === 'light' ? 'dark' : 'light'
 
-  await page.locator('[data-theme-toggle]').click()
+  await page.locator('header > div > [data-theme-toggle]').click()
   await expect(html).toHaveAttribute('data-theme', after)
 
   await page.reload()
@@ -158,7 +158,7 @@ test('takes the theme from the device until a choice is stored', async ({ page }
   await page.emulateMedia({ colorScheme: 'light' })
   await expect(html).toHaveAttribute('data-theme', 'light')
 
-  await page.locator('[data-theme-toggle]').click()
+  await page.locator('header > div > [data-theme-toggle]').click()
   await expect(html).toHaveAttribute('data-theme', 'dark')
 
   // A stored choice outranks the device from then on.

@@ -39,8 +39,8 @@ const label = 'px-4 pb-1 pt-2 text-2xs text-fg-subtle'
       <kbd class="shrink-0 rounded border border-line-strong px-1 font-sans text-2xs text-fg-hint">Esc</kbd>
     </span>
 
-    <div data-list class="max-h-80 overflow-y-auto overscroll-contain py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <section data-doors>
+    <div data-found-list class="max-h-80 overflow-y-auto overscroll-contain py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <section data-found-doors>
         <p class={label}>Go to</p>
         <ul>
           {doors.map((door) => (
@@ -67,26 +67,26 @@ const label = 'px-4 pb-1 pt-2 text-2xs text-fg-subtle'
         </ul>
       </section>
 
-      <template data-group>
+      <template data-found-group>
         <section>
-          <p class={label} data-label></p>
-          <ul data-rows></ul>
+          <p class={label} data-found-label></p>
+          <ul data-found-rows></ul>
         </section>
       </template>
 
-      <template data-row>
+      <template data-found-row>
         <li>
-          <a data-link class={row}>
+          <a data-found-link class={row}>
             <span class="min-w-0 flex-1">
-              <span data-title class="block"></span>
-              <span data-where class="block truncate text-2xs text-fg-hint"></span>
-              <span data-snippet class="mt-0.5 block truncate text-2xs text-fg-muted [&_b]:rounded-sm [&_b]:bg-link/20 [&_b]:font-semibold [&_b]:text-fg"></span>
+              <span data-found-title class="block"></span>
+              <span data-found-where class="block truncate text-2xs text-fg-hint"></span>
+              <span data-found-snippet class="mt-0.5 block truncate text-2xs text-fg-muted [&_b]:rounded-sm [&_b]:bg-link/20 [&_b]:font-semibold [&_b]:text-fg"></span>
             </span>
           </a>
         </li>
       </template>
 
-      <p data-state hidden class="px-4 py-1.5 text-fg-hint">Nothing matches that.</p>
+      <p data-found-state hidden class="px-4 py-1.5 text-fg-hint">Nothing matches that.</p>
     </div>
   </div>
 </div>
@@ -104,13 +104,13 @@ const label = 'px-4 pb-1 pt-2 text-2xs text-fg-subtle'
   const trigger = document.querySelector<HTMLButtonElement>('[data-find]')
   const panel = document.querySelector<HTMLElement>('[data-found]')
   const input = panel?.querySelector<HTMLInputElement>('[data-search]')
-  const list = panel?.querySelector<HTMLElement>('[data-list]')
+  const list = panel?.querySelector<HTMLElement>('[data-found-list]')
 
   if (trigger && panel && input && list) {
-    const doors = list.querySelector<HTMLElement>('[data-doors]')!
-    const state = list.querySelector<HTMLElement>('[data-state]')!
-    const groupOf = list.querySelector<HTMLTemplateElement>('[data-group]')!
-    const rowOf = list.querySelector<HTMLTemplateElement>('[data-row]')!
+    const doors = list.querySelector<HTMLElement>('[data-found-doors]')!
+    const state = list.querySelector<HTMLElement>('[data-found-state]')!
+    const groupOf = list.querySelector<HTMLTemplateElement>('[data-found-group]')!
+    const rowOf = list.querySelector<HTMLTemplateElement>('[data-found-row]')!
 
     let running: AbortController | null = null
     let timer = 0
@@ -137,15 +137,15 @@ const label = 'px-4 pb-1 pt-2 text-2xs text-fg-subtle'
       if (found.length === 0) return
 
       const group = groupOf.content.firstElementChild!.cloneNode(true) as HTMLElement
-      group.querySelector('[data-label]')!.textContent = label
-      const rows = group.querySelector('[data-rows]')!
+      group.querySelector('[data-found-label]')!.textContent = label
+      const rows = group.querySelector('[data-found-rows]')!
 
       for (const item of found) {
         const row = rowOf.content.firstElementChild!.cloneNode(true) as HTMLElement
-        row.querySelector<HTMLAnchorElement>('[data-link]')!.href = item.href
-        row.querySelector('[data-title]')!.textContent = item.title
-        row.querySelector('[data-where]')!.textContent = item.where
-        written(item.snippet, row.querySelector('[data-snippet]')!)
+        row.querySelector<HTMLAnchorElement>('[data-found-link]')!.href = item.href
+        row.querySelector('[data-found-title]')!.textContent = item.title
+        row.querySelector('[data-found-where]')!.textContent = item.where
+        written(item.snippet, row.querySelector('[data-found-snippet]')!)
         rows.appendChild(row)
       }
 
@@ -154,7 +154,7 @@ const label = 'px-4 pb-1 pt-2 text-2xs text-fg-subtle'
 
     /* Nothing typed is not an empty result, it is the map, so the doors come back and the groups go away. */
     const rest = () => {
-      list.querySelectorAll('section:not([data-doors])').forEach((each) => each.remove())
+      list.querySelectorAll('section:not([data-found-doors])').forEach((each) => each.remove())
       doors.hidden = false
       state.hidden = true
     }
@@ -167,7 +167,7 @@ const label = 'px-4 pb-1 pt-2 text-2xs text-fg-subtle'
         const answer = await fetch(`/api/search?q=${encodeURIComponent(asked)}`, { signal: running.signal })
         const found = (await answer.json()) as Record<string, Found[]>
 
-        list.querySelectorAll('section:not([data-doors])').forEach((each) => each.remove())
+        list.querySelectorAll('section:not([data-found-doors])').forEach((each) => each.remove())
         doors.hidden = true
 
         draw('Packages', found.packages ?? [])
@@ -200,7 +200,7 @@ const label = 'px-4 pb-1 pt-2 text-2xs text-fg-subtle'
     input.addEventListener('keydown', (event) => {
       if (event.key !== 'Enter') return
       event.preventDefault()
-      list.querySelector<HTMLAnchorElement>('[data-link]')?.click()
+      list.querySelector<HTMLAnchorElement>('[data-found-link]')?.click()
     })
 
     // The shortcut every palette answers to, which is why the trigger wears it.
