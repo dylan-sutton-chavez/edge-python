@@ -21,7 +21,10 @@ const scopes = [
 // Publishing needs a token, so signed out the same button opens the sign-in dialog.
 const { user } = Astro.locals
 
-const { results: packages } = await listed(env.DB)
+// A query narrows the shelf, and it arrives in the url so the form works before any script does.
+const asked = (Astro.url.searchParams.get('q') ?? '').trim().slice(0, 64)
+
+const { results: packages } = await listed(env.DB, { asked: asked || undefined })
 const total = await counted(env.DB)
 
 const outline = 'flex items-center gap-2 transition border border-line text-fg-hint px-4 py-1 rounded-full hover:text-fg'
@@ -78,12 +81,12 @@ const outline = 'flex items-center gap-2 transition border border-line text-fg-h
       <h2 class="ml-4">Packages</h2>
 
       <div class="flex flex-col gap-3 text-sm sm:flex-row sm:items-center">
-        <form role="search" class="w-full sm:w-[341px]">
-          <Field name="search" label="Search" hideLabel type="search" placeholder="Search..." icon="search" clearable />
+        <form data-shelf role="search" class="w-full sm:w-[341px]">
+          <Field name="q" label="Filter packages" hideLabel type="search" placeholder="Filter packages" icon="search" value={asked} class="[&>span]:h-8.5 [&>span]:py-0" />
         </form>
 
         <div class="flex items-center gap-4 sm:ml-auto">
-          <span class="text-fg-hint">Search</span>
+          <span class="text-fg-hint">Scope</span>
           {scopes.map(({ label, current }) => (
             <button class:list={['rounded-full border border-line-strong px-3 py-1', current ? 'text-fg' : 'text-fg-faint transition hover:text-fg']}>
               <span>{label}</span>
@@ -92,16 +95,60 @@ const outline = 'flex items-center gap-2 transition border border-line text-fg-h
         </div>
       </div>
 
-      {packages.length > 0 ? (
-        <ul class="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
-          {packages.map((item) => <PackageCard {...item} />)}
-        </ul>
-      ) : (
-        <p class="ml-4 text-fg-hint">No packages yet.</p>
-      )}
+      <div data-cards>
+        {packages.length > 0 ? (
+          <ul class="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+            {packages.map((item) => <PackageCard {...item} />)}
+          </ul>
+        ) : (
+          <p class="ml-4 text-fg-hint">{asked ? 'No package matches that.' : 'No packages yet.'}</p>
+        )}
+      </div>
     </section>
   </div>
 
   <Agent />
 </Base>
+
+<script>
+  // Short enough to feel like typing, long enough that one word is one request.
+  const WAIT = 120
+
+  const form = document.querySelector<HTMLFormElement>('[data-shelf]')
+  const input = form?.querySelector<HTMLInputElement>('input')
+  const cards = document.querySelector<HTMLElement>('[data-cards]')
+
+  if (form && input && cards) {
+    let running: AbortController | null = null
+    let timer = 0
+
+    /* The shelf is asked for as a page, not as json, so the cards it answers with are the same markup the server already knows how to draw. */
+    const narrow = async (asked: string) => {
+      const url = asked ? `/?q=${encodeURIComponent(asked)}` : '/'
+
+      running?.abort()
+      running = new AbortController()
+
+      try {
+        const answer = await fetch(url, { signal: running.signal, headers: { accept: 'text/html' } })
+        const page = new DOMParser().parseFromString(await answer.text(), 'text/html')
+        const drawn = page.querySelector('[data-cards]')
+
+        if (drawn) cards.replaceChildren(...drawn.childNodes)
+        history.replaceState(null, '', url)
+      } catch (error) {
+        // An aborted request is the next keystroke arriving, which is not a failure to report.
+        if ((error as Error).name !== 'AbortError') throw error
+      }
+    }
+
+    // The url already holds the query, so a submit would only reload what the script just drew.
+    form.addEventListener('submit', (event) => event.preventDefault())
+
+    input.addEventListener('input', () => {
+      clearTimeout(timer)
+      timer = window.setTimeout(() => narrow(input.value.trim()), WAIT)
+    })
+  }
+</script>
 

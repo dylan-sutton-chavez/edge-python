@@ -8,6 +8,9 @@ type Entry = { id: string; data: { title?: string } }
 // A collection entry arrives without its extension and a packed page with one, and a slug carries neither.
 const name = (segment: string) => segment.replace(ORDER, '').replace(/\.mdx$/, '')
 
+/* The url a stored path answers under, which is the path with what only the store needed taken off. */
+export const slugOf = (path: string) => path.split('/').map(name).join('/')
+
 function label(segment: string) {
   const words = name(segment).replaceAll('-', ' ')
   return words.charAt(0).toUpperCase() + words.slice(1)

@@ -5,6 +5,7 @@ import { json } from '../../lib/server/http'
 import { tokenUser } from '../../lib/server/tokens'
 import type { Packed } from '../../lib/server/bundle'
 import { packed } from '../../lib/server/bundle'
+import type { Page } from '../../lib/server/packages'
 import { MAX_ARTIFACT, MAX_DESCRIPTION, MAX_NEW_NAMES, MAX_NOTICE, checkPages, claimedToday, described, keyOf, linked, named, noticed, packageByName, publish, versionExists, versioned } from '../../lib/server/packages'
 
 /* The artifact is the only thing sent. Everything a listing shows is read out of it here, so a publisher declares nothing twice and cannot declare it differently from what they shipped. */
@@ -22,10 +23,11 @@ export const POST: APIRoute = async ({ request }) => {
 
   // A token holder can hand-build a bundle, so the archive and its pages are held to the same rules the CLI packs under.
   let declared: Packed
+  let pages: Page[]
 
   try {
     declared = packed(new Uint8Array(bytes))
-    checkPages(declared.docs)
+    pages = checkPages(declared.docs)
   } catch (error) {
     return json({ error: (error as Error).message }, 400)
   }
@@ -61,7 +63,9 @@ export const POST: APIRoute = async ({ request }) => {
     version,
     digest,
     size: bytes.byteLength,
-    description: typeof description === 'string' ? description : null
+    description: typeof description === 'string' ? description : null,
+    notice,
+    pages
   })
 
   return json({ name, version, digest, url: `${env.CDN}/${key}` }, 201)

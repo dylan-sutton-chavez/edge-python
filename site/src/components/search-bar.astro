@@ -1,0 +1,213 @@
+---
+import Icon from './ui/icon.astro'
+
+const { class: className } = Astro.props
+
+// What the product holds, shown before a query so somebody who does not know the words can still find the door.
+const doors = [
+  { label: 'Docs', detail: 'The language, the CLI, the ABI', href: '/docs' },
+  { label: 'Packages', detail: 'Everything published', href: '/' },
+  { label: 'Runs', detail: 'Executions, programs, snapshots', href: '/runs' },
+  { label: 'Plans', detail: 'What each one covers', href: '/plans' }
+]
+
+const row = 'flex w-full items-center gap-2 px-4 py-2 text-left transition hover:bg-line-strong focus-visible:bg-line-strong focus-visible:outline-none'
+const label = 'px-4 pb-1 pt-2 text-2xs text-fg-subtle'
+---
+
+<button
+  type="button" data-find popovertarget="found"
+  class:list={[
+    'flex h-8.5 w-8.5 shrink-0 items-center justify-center rounded-full border border-line text-fg-subtle transition hover:text-fg',
+    'sm:w-auto sm:justify-start sm:gap-2 sm:px-3',
+    className
+  ]}
+>
+  <Icon name="search" size="sm" class="shrink-0" />
+  <span class="hidden sm:inline">Search</span>
+  <kbd class="hidden rounded border border-line-strong px-1 font-sans text-2xs text-fg-hint sm:inline">⌘K</kbd>
+</button>
+
+<div popover id="found" data-found class="m-auto w-full max-w-[600px] max-h-[calc(100dvh-3.5rem)] border-0 bg-transparent p-3.5 opacity-0 backdrop:bg-scrim backdrop:backdrop-blur-[1px] transition-all transition-discrete open:opacity-100 starting:open:opacity-0">
+  <div class="overflow-hidden rounded-2xl border border-line bg-surface text-xs">
+    <span class="flex h-11 items-center gap-2 border-b border-line-strong px-4 text-fg-subtle">
+      <Icon name="search" size="sm" class="shrink-0" />
+      <input
+        data-search type="search" aria-label="Search" placeholder="Search the docs and the registry" autocomplete="off"
+        class="w-full bg-transparent text-sm placeholder:text-fg-placeholder focus:outline-none"
+      />
+      <kbd class="shrink-0 rounded border border-line-strong px-1 font-sans text-2xs text-fg-hint">Esc</kbd>
+    </span>
+
+    <div data-list class="max-h-80 overflow-y-auto overscroll-contain py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <section data-doors>
+        <p class={label}>Go to</p>
+        <ul>
+          {doors.map((door) => (
+            <li>
+              <a href={door.href} class={row}>
+                <span class="min-w-0">
+                  <span class="block">{door.label}</span>
+                  <span class="block truncate text-2xs text-fg-hint">{door.detail}</span>
+                </span>
+              </a>
+            </li>
+          ))}
+        </ul>
+
+        <p class={label}>Commands</p>
+        <ul>
+          <li>
+            <button type="button" data-theme-toggle class={row}>
+              <Icon name="moon" size="sm" class="shrink-0 text-fg-hint dark:hidden" />
+              <Icon name="sun" size="sm" class="hidden shrink-0 text-fg-hint dark:block" />
+              <span>Toggle theme</span>
+            </button>
+          </li>
+        </ul>
+      </section>
+
+      <template data-group>
+        <section>
+          <p class={label} data-label></p>
+          <ul data-rows></ul>
+        </section>
+      </template>
+
+      <template data-row>
+        <li>
+          <a data-link class={row}>
+            <span class="min-w-0 flex-1">
+              <span data-title class="block"></span>
+              <span data-where class="block truncate text-2xs text-fg-hint"></span>
+              <span data-snippet class="mt-0.5 block truncate text-2xs text-fg-muted [&_b]:rounded-sm [&_b]:bg-link/20 [&_b]:font-semibold [&_b]:text-fg"></span>
+            </span>
+          </a>
+        </li>
+      </template>
+
+      <p data-state hidden class="px-4 py-1.5 text-fg-hint">Nothing matches that.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  // The marks the worker brackets a hit with, control characters so a snippet can never carry markup.
+  const OPEN = '\u0001'
+  const CLOSE = '\u0002'
+
+  // Short enough to feel like typing, long enough that one word is one request.
+  const WAIT = 60
+
+  type Found = { title: string; where: string; href: string; snippet: string }
+
+  const trigger = document.querySelector<HTMLButtonElement>('[data-find]')
+  const panel = document.querySelector<HTMLElement>('[data-found]')
+  const input = panel?.querySelector<HTMLInputElement>('[data-search]')
+  const list = panel?.querySelector<HTMLElement>('[data-list]')
+
+  if (trigger && panel && input && list) {
+    const doors = list.querySelector<HTMLElement>('[data-doors]')!
+    const state = list.querySelector<HTMLElement>('[data-state]')!
+    const groupOf = list.querySelector<HTMLTemplateElement>('[data-group]')!
+    const rowOf = list.querySelector<HTMLTemplateElement>('[data-row]')!
+
+    let running: AbortController | null = null
+    let timer = 0
+
+    /* A snippet arrives bracketed rather than marked up, so the run becomes a bold element and everything around it becomes text a browser cannot read as html. */
+    const written = (snippet: string, into: HTMLElement) => {
+      into.replaceChildren()
+
+      for (const [at, piece] of snippet.split(OPEN).entries()) {
+        if (at === 0) {
+          into.appendChild(document.createTextNode(piece))
+          continue
+        }
+
+        const [hit, rest = ''] = piece.split(CLOSE)
+        const bold = document.createElement('b')
+        bold.textContent = hit ?? ''
+        into.appendChild(bold)
+        into.appendChild(document.createTextNode(rest))
+      }
+    }
+
+    const draw = (label: string, found: Found[]) => {
+      if (found.length === 0) return
+
+      const group = groupOf.content.firstElementChild!.cloneNode(true) as HTMLElement
+      group.querySelector('[data-label]')!.textContent = label
+      const rows = group.querySelector('[data-rows]')!
+
+      for (const item of found) {
+        const row = rowOf.content.firstElementChild!.cloneNode(true) as HTMLElement
+        row.querySelector<HTMLAnchorElement>('[data-link]')!.href = item.href
+        row.querySelector('[data-title]')!.textContent = item.title
+        row.querySelector('[data-where]')!.textContent = item.where
+        written(item.snippet, row.querySelector('[data-snippet]')!)
+        rows.appendChild(row)
+      }
+
+      list.appendChild(group)
+    }
+
+    /* Nothing typed is not an empty result, it is the map, so the doors come back and the groups go away. */
+    const rest = () => {
+      list.querySelectorAll('section:not([data-doors])').forEach((each) => each.remove())
+      doors.hidden = false
+      state.hidden = true
+    }
+
+    const ask = async (asked: string) => {
+      running?.abort()
+      running = new AbortController()
+
+      try {
+        const answer = await fetch(`/api/search?q=${encodeURIComponent(asked)}`, { signal: running.signal })
+        const found = (await answer.json()) as Record<string, Found[]>
+
+        list.querySelectorAll('section:not([data-doors])').forEach((each) => each.remove())
+        doors.hidden = true
+
+        draw('Packages', found.packages ?? [])
+        draw('People', found.people ?? [])
+        draw('Docs', found.docs ?? [])
+
+        state.hidden = Object.values(found).some((group) => group.length > 0)
+      } catch (error) {
+        // An aborted request is the next keystroke arriving, which is not a failure to report.
+        if ((error as Error).name !== 'AbortError') throw error
+      }
+    }
+
+    panel.addEventListener('toggle', (event) => {
+      if ((event as ToggleEvent).newState !== 'open') return
+      input.value = ''
+      rest()
+      input.focus()
+    })
+
+    input.addEventListener('input', () => {
+      const asked = input.value.trim()
+
+      clearTimeout(timer)
+      if (!asked) return rest()
+
+      timer = window.setTimeout(() => ask(asked), WAIT)
+    })
+
+    input.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return
+      event.preventDefault()
+      list.querySelector<HTMLAnchorElement>('[data-link]')?.click()
+    })
+
+    // The shortcut every palette answers to, which is why the trigger wears it.
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'k' || !(event.metaKey || event.ctrlKey)) return
+      event.preventDefault()
+      panel.togglePopover()
+    })
+  }
+</script>

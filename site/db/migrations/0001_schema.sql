@@ -70,6 +70,7 @@ create table version (
   digest text not null,
   size integer not null,
   description text,
+  license text,
   hosts text,
   published_at integer not null,
   yanked_at integer,
@@ -77,3 +78,5 @@ create table version (
 ) strict;
 
 create index version_package on version(package);
+
+create virtual table page_search using fts5(package, path, title, section, anchor, body, tokenize = 'trigram');

@@ -1,6 +1,7 @@
 // The layout rules a page has to follow, mirrored in cli/src/docs.rs and locked by tests/cases/docs.json.
 export const ORDER = /^\d+[-_]/
 
+/* Refuses a page the renderer cannot lay out, and hands back what it read on the way, so a caller that needs the title does not parse the frontmatter a second time. */
 export function check(page: string, text: string) {
   const segments = page.split('/')
   if (segments.length > 2) {
@@ -10,11 +11,13 @@ export function check(page: string, text: string) {
     throw new Error(`'${page}' needs a numeric prefix on every segment, like '01-reference/02-cli.mdx'`)
   }
 
+  const read = front(page, text)
+
   let open: string | null = null
   let closed: string | null = null
   let headings = 0
 
-  for (const line of front(page, text).body.split('\n')) {
+  for (const line of read.body.split('\n')) {
     const trimmed = line.trim()
     if (trimmed.startsWith('```')) {
       if (open !== null) {
@@ -42,6 +45,8 @@ export function check(page: string, text: string) {
 
   if (open !== null) throw new Error(`'${page}' leaves a code fence unterminated`)
   if (headings !== 1) throw new Error(`'${page}' has ${headings} top-level headings, the renderer needs exactly one`)
+
+  return read
 }
 
 /* The first HTML tag a prose line opens, since a page the registry renders is markdown from a stranger and a raw tag would run on our origin. Inline code drops out first, so a page can still write about `<script>`. */

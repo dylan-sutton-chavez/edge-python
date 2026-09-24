@@ -2,6 +2,7 @@
 import Icon from './ui/icon.astro'
 import Avatar from './ui/avatar.astro'
 import NavMenu from './nav-menu.astro'
+import SearchBar from './search-bar.astro'
 import { avatarFor } from '../lib/account/avatar'
 
 const item = 'block w-full px-4 py-1 text-left hover:bg-line-strong transition'
@@ -16,7 +17,9 @@ const { user } = Astro.locals
 
     <NavMenu current={path} class="min-w-0 overflow-x-auto [scrollbar-width:none]" />
 
-    <button type="button" data-theme-toggle aria-label="Toggle theme" class="ml-auto shrink-0 inline-flex items-center justify-center transition border border-line rounded-full h-8.5 w-8.5 text-fg-subtle hover:text-fg">
+    <SearchBar class="ml-auto" />
+
+    <button type="button" data-theme-toggle aria-label="Toggle theme" class="shrink-0 hidden sm:inline-flex items-center justify-center transition border border-line rounded-full h-8.5 w-8.5 text-fg-subtle hover:text-fg">
       <Icon name="sun" size="xl" class="hidden dark:block" />
       <Icon name="moon" size="xl" class="dark:hidden" />
     </button>
@@ -63,11 +66,14 @@ const { user } = Astro.locals
 <script>
   import { signOut } from '../lib/account/auth'
 
-  document.querySelector('[data-theme-toggle]')?.addEventListener('click', () => {
-    const theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'
-    document.documentElement.dataset.theme = theme
-    localStorage.setItem('theme', theme)
-  })
+  // The header holds one and the palette holds another, because a command palette carries commands too.
+  document.querySelectorAll('[data-theme-toggle]').forEach((button) =>
+    button.addEventListener('click', () => {
+      const theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'
+      document.documentElement.dataset.theme = theme
+      localStorage.setItem('theme', theme)
+    })
+  )
 
   // Until the visitor picks one, the device decides, and keeps deciding.
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (event) => {
