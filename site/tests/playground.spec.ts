@@ -89,8 +89,9 @@ test('runs the documented example and reports the elapsed time', async ({ page }
 
   await page.getByRole('button', { name: 'Run' }).click()
 
-  await expect(page.locator('[data-output]')).toHaveText(expected!.trim(), { timeout: 30000 })
-  await expect(status(page)).toHaveText(/^Output, \d+(\.\d+)?(ms|s)$/)
+  // The output is server rendered, so only the elapsed time tells us the run actually finished.
+  await expect(status(page)).toHaveText(/^Output, \d+(\.\d+)?(ms|s)$/, { timeout: 30000 })
+  await expect(page.locator('[data-output]')).toHaveText(expected!.trim())
 })
 
 test('runs from the keyboard without touching the source', async ({ page }) => {
