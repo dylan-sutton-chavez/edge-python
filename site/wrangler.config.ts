@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import type { Unstable_RawConfig as Config } from 'wrangler'
-import { WORKER, SITE_DOMAIN, SITE_URL, CDN_URL, DB_NAME, BUCKET, EMAIL_FROM } from '../infra/src/constants'
+import { ENV, WORKER, SITE_DOMAIN, SITE_URL, CDN_URL, DB_NAME, BUCKET, EMAIL_FROM } from '../infra/src/constants'
 
 const LOCAL_DATABASE_ID = '00000000-0000-4000-8000-000000000000'
 
@@ -33,7 +33,7 @@ const config: Config = {
   workers_dev: false,
   preview_urls: false,
   routes: [{ pattern: SITE_DOMAIN, custom_domain: true }],
-  vars: { SITE: SITE_URL, CDN: CDN_URL, EMAIL_FROM },
+  vars: { SITE: SITE_URL, CDN: CDN_URL, EMAIL_FROM, DRAFT: ENV === 'dev' ? '1' : '' }, // Empty outside dev, which is what turns a draft page into a 404.
   d1_databases: [{ binding: 'DB', database_name: DB_NAME, database_id: database_id(), migrations_dir: 'db/migrations' }],
   r2_buckets: [{ binding: 'CDN_BUCKET', bucket_name: BUCKET }],
   send_email: [{ name: 'EMAIL' }],

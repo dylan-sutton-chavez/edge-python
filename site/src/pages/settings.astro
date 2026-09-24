@@ -52,7 +52,7 @@ const row = 'flex items-center gap-2 w-full px-4 py-1.5 text-left hover:bg-line-
   <div data-settings class="flex flex-col lg:flex-row gap-3 flex-1 min-h-0 text-sm">
     <aside data-sticky class="hidden lg:block w-[260px] shrink-0 space-y-4 sticky self-start max-h-[calc(100dvh-var(--sticky-top)-var(--sticky-gap))] overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {groups.map((group) => (
-        <div>
+        <div data-group={group.label}>
           <span class="px-4 text-2xs text-fg-subtle">{group.label}</span>
 
           <ul class="mt-2 space-y-1">
@@ -86,7 +86,7 @@ const row = 'flex items-center gap-2 w-full px-4 py-1.5 text-left hover:bg-line-
 
       <div class="space-y-3">
         {groups.map((group) => (
-          <div>
+          <div data-group={group.label}>
             <span class="px-4 text-2xs text-fg-subtle">{group.label}</span>
 
             <ul class="mt-1">

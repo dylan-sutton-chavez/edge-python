@@ -90,10 +90,13 @@ Builtin corpora sit beside their module, or in `tests/cases/builtins/` when the 
 ```bash
 cd site && npm ci
 npm run dev # port 4322
+EDGE_ENV=prod npm run dev # the same tree as production sees it
 npm run check
 npx playwright install --with-deps chromium firefox webkit # once
 npm test # builds the Worker and drives it in three engines
 ```
+
+[`site/src/draft.ts`](site/src/draft.ts) names what is still being built, a path for a page and a fragment for a surface inside one. Under `EDGE_ENV=prod` a page answers 404 and the rest is rewritten out of the html.
 
 An `edge-python` code block followed by an `output` block becomes a playground on the real engine, so every example and its output stay a verifiable pair.
 
