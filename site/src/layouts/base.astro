@@ -47,6 +47,7 @@ const card = new URL('/og.png', Astro.url).href
   <script is:inline>
     document.documentElement.dataset.theme = localStorage.getItem('theme') ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
   </script>
+  <slot name="head" />
 </head>
 <body class="bg-page text-fg flex min-h-screen flex-col has-[dialog:modal]:overflow-hidden">
   <p class="bg-notice text-notice-fg border-b border-line px-3 py-1.5 text-center text-2xs">

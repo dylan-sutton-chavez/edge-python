@@ -1,5 +1,7 @@
 ---
 import { env } from 'cloudflare:workers'
+import { Schema } from 'astro-seo-schema'
+import type { WithContext, ProfilePage } from 'schema-dts'
 import Base from '../../layouts/base.astro'
 import Avatar from '../../components/ui/avatar.astro'
 import PackageCard from '../../components/package-card.astro'
@@ -12,9 +14,23 @@ if (!found) return Astro.rewrite('/404')
 
 const user = publicUser(found)
 const { results: own } = await listed(env.DB, { handle: user.handle ?? '' })
+
+// The handle is the name that reaches the page, so it stands as the alternate one.
+const profile: WithContext<ProfilePage> = {
+  '@context': 'https://schema.org',
+  '@type': 'ProfilePage',
+  mainEntity: {
+    '@type': 'Person',
+    name: user.name ?? `@${user.handle}`,
+    alternateName: `@${user.handle}`,
+    url: new URL(`/@${user.handle}`, Astro.url).href,
+    ...(user.bio ? { description: user.bio } : {})
+  }
+}
 ---
 
 <Base title={user.name ?? `@${user.handle}`} description={`Packages published by @${user.handle} on Edge Python.`} gap="lg">
+  <Schema slot="head" item={profile} />
   <div class="flex flex-col items-start">
     <Avatar {...(user.avatar ?? avatarFor(user.id))} size="xl" label={`@${user.handle}`} />
 

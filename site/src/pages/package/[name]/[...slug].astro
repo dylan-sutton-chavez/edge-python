@@ -1,5 +1,7 @@
 ---
 import { env } from 'cloudflare:workers'
+import { Schema } from 'astro-seo-schema'
+import type { WithContext, SoftwareSourceCode } from 'schema-dts'
 import Base from '../../../layouts/base.astro'
 import DocsNav from '../../../components/docs-nav.astro'
 import Playground from '../../../components/playground.astro'
@@ -49,6 +51,20 @@ const repository = typeof artifact.repository === 'string' ? artifact.repository
 const license = artifact.notice && identify(artifact.notice)
 
 const base = `/package/${name}`
+
+/* The artifact is the release, so a listing describes the code it carries rather than an app nobody rated. */
+const release: WithContext<SoftwareSourceCode> = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareSourceCode',
+  name,
+  version: latest.version,
+  programmingLanguage: 'Edge Python',
+  url: new URL(base, Astro.url).href,
+  ...(description ? { description } : {}),
+  ...(repository ? { codeRepository: repository } : {}),
+  ...(license ? { license } : {}),
+  ...(shown?.handle ? { author: { '@type': 'Person', name: shown.name ?? `@${shown.handle}`, url: new URL(`/@${shown.handle}`, Astro.url).href } } : {})
+}
 const meta = [`${count(held.downloads)} downloads`, license, bytes(latest.size)].filter(Boolean)
 const dot = 'text-fg-disabled'
 
@@ -59,6 +75,8 @@ const row = `${cell} border-t border-line-strong`
 ---
 
 <Base title={`${name} ${latest.version}`} description={description ?? `The ${name} package on Edge Python.`} gap="lg" class="flex-1">
+  <Schema slot="head" item={release} />
+
   <div>
     <div class="flex flex-wrap items-baseline gap-3">
       <h1 class="text-xl font-semibold">{name}</h1>
