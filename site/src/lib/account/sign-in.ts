@@ -2,6 +2,7 @@ import { sendCode, verifyCode, checkHandle, saveProfile } from './auth'
 import { validateHandle } from './handle'
 import { avatarFor, pickAvatar, readAvatar } from './avatar'
 import { setError, pending } from './form'
+import { CODE_LIFE } from '../otp'
 
 export type Step = 'providers' | 'code' | 'user' | 'avatar'
 
@@ -9,9 +10,6 @@ type Screen = { title: string; text: string; next?: Step; submit?: () => Promise
 
 const PROFILE: Step[] = ['user', 'avatar']
 const KEY = 'signin-pending'
-
-// As long as the mailed code lives, which is what the dialog has to outlast.
-const CODE_LIFE = 10 * 60_000
 
 type Pending = { step: Step; email?: string; until?: number }
 
@@ -38,7 +36,7 @@ export function createSignIn(dialog: HTMLDialogElement) {
     email = field.value.trim().toLowerCase()
 
     try {
-      await sendCode(email)
+      await sendCode('sign_in', email)
     } catch (error) {
       setError(field, (error as Error).message)
       return false
@@ -167,7 +165,7 @@ export function createSignIn(dialog: HTMLDialogElement) {
     if (!email) return go('providers')
 
     try {
-      await sendCode(email)
+      await sendCode('sign_in', email, true)
     } catch (error) {
       setError(input('code'), (error as Error).message)
       return

@@ -1,4 +1,5 @@
 import type { Avatar } from './avatar'
+import type { Purpose } from '../otp'
 
 export type Profile = { handle: string; name: string; avatar: Avatar; bio?: string }
 
@@ -21,12 +22,13 @@ async function call<T>(path: string, method: string, data?: unknown): Promise<T>
   return response.json() as Promise<T>
 }
 
-export const sendCode = (email: string) => call<{ ok: boolean }>('/api/auth/email/start', 'POST', { email })
+/* Asks for a code and says whether one was mailed, since a live code for the same purpose is reused rather than replaced. */
+export const sendCode = (purpose: Purpose, email?: string, resend = false) =>
+  call<{ ok: boolean; sent: boolean }>('/api/auth/code', 'POST', { purpose, email, resend })
 export const verifyCode = (email: string, code: string) => call<{ ok: boolean; handle: string | null }>('/api/auth/email/verify', 'POST', { email, code })
 export const checkHandle = (handle: string) => call<{ available: boolean }>(`/api/handles/${handle}`, 'GET').then((result) => result.available)
 export const saveProfile = (profile: Profile) => call<Public>('/api/me', 'PATCH', profile)
 export const signOut = () => call<{ ok: boolean }>('/api/auth/signout', 'POST')
 export const deleteAccount = (code: string) => call<{ ok: boolean }>('/api/me', 'DELETE', { code })
 export const disconnect = (provider: string) => call<{ ok: boolean }>(`/api/me/accounts/${provider}`, 'DELETE')
-export const startEmailChange = (email: string) => call<{ ok: boolean }>('/api/me/email/start', 'POST', { email })
 export const changeEmail = (email: string, code: string) => call<{ email: string }>('/api/me/email', 'PATCH', { email, code })

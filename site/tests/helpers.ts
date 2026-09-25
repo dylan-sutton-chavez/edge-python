@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test as base, expect, type APIRequestContext, type APIResponse, type BrowserContext } from '@playwright/test'
 import { random, sha256 } from '../src/lib/crypto'
+import type { Purpose } from '../src/lib/otp'
 import { BASE } from '../playwright.config'
 
 export const MAILS = fileURLToPath(new URL('../.wrangler/tmp/email/', import.meta.url))
@@ -60,14 +61,14 @@ export const test = base.extend({
 })
 
 /* The local email binding writes every message it sends, so the code is read rather than guessed. */
-export async function mailedCode(request: APIRequestContext, email: string, from?: string) {
+export async function mailedCode(request: APIRequestContext, email: string, from?: string, purpose: Purpose = 'sign_in') {
   const before = globSync(join(MAILS, '**/*.txt'))
 
-  const started = await request.post('/api/auth/email/start', {
-    data: { email },
+  const started = await request.post('/api/auth/code', {
+    data: { purpose, email },
     headers: from ? { 'cf-connecting-ip': from } : undefined
   })
-  expect(await started.json()).toEqual({ ok: true })
+  expect(await started.json()).toEqual({ ok: true, sent: true })
 
   await expect.poll(() => globSync(join(MAILS, '**/*.txt')).length).toBe(before.length + 1)
   const mail = globSync(join(MAILS, '**/*.txt')).find((each) => !before.includes(each))!

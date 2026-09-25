@@ -109,7 +109,7 @@ const card = 'bg-page border border-line-strong p-4'
 </div>
 
 <script>
-  import { changeEmail, deleteAccount, disconnect, sendCode, startEmailChange } from '../../lib/account/auth'
+  import { changeEmail, deleteAccount, disconnect, sendCode } from '../../lib/account/auth'
   import { confirmedWithCode } from '../../lib/account/confirm'
 
   const address = document.querySelector<HTMLElement>('[data-address]')
@@ -138,7 +138,7 @@ const card = 'bg-page border border-line-strong p-4'
     if (!wanted) return
 
     try {
-      await startEmailChange(wanted)
+      await sendCode('change_email', wanted)
       moving(false)
 
       const code = await confirmedWithCode(
@@ -147,7 +147,7 @@ const card = 'bg-page border border-line-strong p-4'
           body: 'The old address stops reaching this account, and we will let it know. Your GitHub and Google connections are unaffected.',
           action: 'Change address'
         },
-        () => startEmailChange(wanted)
+        () => sendCode('change_email', wanted, true)
       )
 
       if (!code) return
@@ -179,7 +179,7 @@ const card = 'bg-page border border-line-strong p-4'
     button.disabled = true
 
     try {
-      await sendCode(email)
+      await sendCode('delete_account')
 
       const code = await confirmedWithCode(
         {
@@ -187,7 +187,7 @@ const card = 'bg-page border border-line-strong p-4'
           body: 'Your profile, your sign-in methods and your publish tokens go with it. Nothing here comes back.',
           action: 'Delete account'
         },
-        () => sendCode(email)
+        () => sendCode('delete_account', undefined, true)
       )
 
       if (code) {

@@ -9,7 +9,7 @@ export const POST: APIRoute = async ({ request, cookies }) => {
   const { email: raw, code } = await body<{ email: string; code: string }>(request)
   const email = String(raw ?? '').trim().toLowerCase()
 
-  if (!(await spend(env.DB, cookies, email, String(code ?? '')))) return json({ ok: false, handle: null })
+  if (!(await spend(env.DB, cookies, email, 'sign_in', String(code ?? '')))) return json({ ok: false, handle: null })
 
   const user = await upsertUser(env.DB, { provider: 'email', providerId: email, email })
   await startSession(env.DB, cookies, user.id)

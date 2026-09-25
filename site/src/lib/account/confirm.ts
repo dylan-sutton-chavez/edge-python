@@ -1,6 +1,11 @@
 type Ask = { title: string; body: string; action: string }
 
 const CODE = 6
+const AGAIN = 'Resend code'
+const DONE = 'Code sent'
+
+// Long enough to read, short enough that the button is back before anyone reaches for it again.
+const HELD = 2500
 
 const parts = () => {
   const dialog = document.querySelector<HTMLDialogElement>('[data-dialog="confirm"]')
@@ -14,27 +19,28 @@ const parts = () => {
     input: dialog?.querySelector<HTMLInputElement>('[name="confirm-code"]'),
     error: dialog?.querySelector<HTMLElement>('[data-confirm-error]'),
     hint: dialog?.querySelector<HTMLElement>('[data-confirm-resend]'),
-    again: dialog?.querySelector<HTMLButtonElement>('[data-confirm-again]'),
-    sent: dialog?.querySelector<HTMLElement>('[data-confirm-sent]')
+    again: dialog?.querySelector<HTMLButtonElement>('[data-confirm-again]')
   }
 }
 
 /* Opens the dialog and settles when it closes, so Escape, Cancel and the backdrop all read as no. Resolves the typed code when one was asked for, or the empty string when it was not. */
 function ask({ title, body, action }: Ask, wantsCode: boolean, resend?: () => Promise<unknown>): Promise<string | null> {
-  const { dialog, go, title: heading, body: text, field, input, error, hint, again, sent } = parts()
-  if (!dialog || !go || !heading || !text || !field || !input || !error || !hint || !again || !sent) return Promise.resolve(null)
+  const { dialog, go, title: heading, body: text, field, input, error, hint, again } = parts()
+  if (!dialog || !go || !heading || !text || !field || !input || !error || !hint || !again) return Promise.resolve(null)
 
   heading.textContent = title
   text.textContent = body
   go.textContent = action
   field.hidden = !wantsCode
   hint.hidden = !wantsCode || !resend
-  sent.hidden = true
+  again.textContent = AGAIN
+  again.disabled = false
   error.hidden = true
   input.value = ''
 
   return new Promise((resolve) => {
     let answer: string | null = null
+    let held: ReturnType<typeof setTimeout> | undefined
 
     const yes = () => {
       const code = input.value.trim()
@@ -52,24 +58,32 @@ function ask({ title, body, action }: Ask, wantsCode: boolean, resend?: () => Pr
 
     /* Asks for another code and clears the field, so the one already typed cannot be sent against the new hash. */
     const mail = async () => {
+      clearTimeout(held)
       again.disabled = true
-      sent.hidden = true
+      again.textContent = AGAIN
       error.hidden = true
 
       try {
         await resend!()
-        sent.hidden = false
         input.value = ''
+
+        // The button says it landed and then offers itself again, so nothing else has to hold the news.
+        again.textContent = DONE
+        held = setTimeout(() => {
+          again.textContent = AGAIN
+          again.disabled = false
+        }, HELD)
       } catch (problem) {
         error.textContent = (problem as Error).message
         error.hidden = false
+        again.disabled = false
       }
 
-      again.disabled = false
       input.focus()
     }
 
     const done = () => {
+      clearTimeout(held)
       go.removeEventListener('click', yes)
       again.removeEventListener('click', mail)
       resolve(answer)

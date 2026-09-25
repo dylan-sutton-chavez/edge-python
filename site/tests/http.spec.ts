@@ -100,7 +100,7 @@ test.describe('oauth without secrets', () => {
 
 test.describe('signing in by email', () => {
   test('turns down an address that is not one', async ({ request }) => {
-    const response = await request.post('/api/auth/email/start', { data: { email: 'nope' } })
+    const response = await request.post('/api/auth/code', { data: { purpose: 'sign_in', email: 'nope' } })
 
     expect(response.status()).toBe(400)
     expect(await response.json()).toEqual({ error: 'Enter a valid email.' })
@@ -246,9 +246,12 @@ test.describe('deleting an account', () => {
 
   // A live session is not enough, the code proves the mailbox still answers.
   test('refuses a session without a fresh code', async ({ request }) => {
-    const { handle } = await signIn(request)
+    const { email, handle } = await signIn(request)
 
-    for (const data of [{}, { code: '000000' }]) {
+    // A code mailed to sign in is not a code to delete, so what it was issued for is checked too.
+    const elsewhere = await mailedCode(request, email, arriving())
+
+    for (const data of [{}, { code: '000000' }, { code: elsewhere }]) {
       const response = await request.delete('/api/me', { data })
       expect(response.status()).toBe(403)
       expect(await response.json()).toEqual({ error: 'That code is wrong or expired.' })
@@ -260,7 +263,7 @@ test.describe('deleting an account', () => {
   test('takes the account with the right code and signs the visitor out', async ({ request }) => {
     const { email, handle } = await signIn(request)
 
-    const code = await mailedCode(request, email, arriving())
+    const code = await mailedCode(request, email, arriving(), 'delete_account')
     expect(await (await request.delete('/api/me', { data: { code } })).json()).toEqual({ ok: true })
 
     expect((await request.get('/@' + handle)).status()).toBe(404)
@@ -271,7 +274,7 @@ test.describe('deleting an account', () => {
   test('leaves a published package standing under the unclaimed account', async ({ request }) => {
     const { email, name } = await published(request)
 
-    const code = await mailedCode(request, email, arriving())
+    const code = await mailedCode(request, email, arriving(), 'delete_account')
     expect(await (await request.delete('/api/me', { data: { code } })).json()).toEqual({ ok: true })
 
     expect((await request.get(`/api/packages/${name}`)).status()).toBe(200)
@@ -305,7 +308,7 @@ test.describe('changing a handle', () => {
 test.describe('changing an address', () => {
   test('turns a signed out visitor away', async ({ request }) => {
     for (const response of [
-      await request.post('/api/me/email/start', { data: { email: 'new@example.com' } }),
+      await request.post('/api/auth/code', { data: { purpose: 'change_email', email: 'new@example.com' } }),
       await request.patch('/api/me/email', { data: { email: 'new@example.com', code: '000000' } })
     ]) {
       expect(response.status()).toBe(401)
@@ -316,14 +319,14 @@ test.describe('changing an address', () => {
   test('refuses an address that is not one, its own, or one already held', async ({ request }) => {
     const { email } = await signIn(request)
 
-    const bad = await request.post('/api/me/email/start', { data: { email: 'nope' } })
+    const bad = await request.post('/api/auth/code', { data: { purpose: 'change_email', email: 'nope' } })
     expect(bad.status()).toBe(400)
 
-    const same = await request.post('/api/me/email/start', { data: { email } })
+    const same = await request.post('/api/auth/code', { data: { purpose: 'change_email', email } })
     expect(same.status()).toBe(409)
     expect(await same.json()).toEqual({ error: 'That is already your address.' })
 
-    const held = await request.post('/api/me/email/start', { data: { email: 'unclaimed@edgepython.com' } })
+    const held = await request.post('/api/auth/code', { data: { purpose: 'change_email', email: 'unclaimed@edgepython.com' } })
     expect(held.status()).toBe(409)
     expect(await held.json()).toEqual({ error: 'Another account already uses that address.' })
   })
@@ -332,7 +335,18 @@ test.describe('changing an address', () => {
     await signIn(request)
 
     const wanted = `${unique()}@example.com`
-    expect(await (await request.post('/api/me/email/start', { data: { email: wanted } })).json()).toEqual({ ok: true })
+    const ask = (resend?: boolean) => request.post('/api/auth/code', { data: { purpose: 'change_email', email: wanted, resend } })
+    const mails = () => globSync(join(MAILS, '**/*.txt')).length
+    const before = mails()
+
+    expect(await (await ask()).json()).toEqual({ ok: true, sent: true })
+
+    // Four reopens, because a token spent on any of them would turn the fourth into a 429.
+    for (let at = 1; at <= 4; at++) expect(await (await ask()).json(), `reopen ${at}`).toEqual({ ok: true, sent: false })
+    expect(mails()).toBe(before + 1)
+
+    expect(await (await ask(true)).json()).toEqual({ ok: true, sent: true })
+    await expect.poll(mails).toBe(before + 2)
 
     const wrong = await request.patch('/api/me/email', { data: { email: wanted, code: '000000' } })
     expect(wrong.status()).toBe(403)
@@ -345,7 +359,7 @@ test.describe('changing an address', () => {
     const wanted = `${unique()}@example.com`
 
     const before = globSync(join(MAILS, '**/*.txt'))
-    expect(await (await request.post('/api/me/email/start', { data: { email: wanted } })).json()).toEqual({ ok: true })
+    expect(await (await request.post('/api/auth/code', { data: { purpose: 'change_email', email: wanted } })).json()).toEqual({ ok: true, sent: true })
 
     await expect.poll(() => globSync(join(MAILS, '**/*.txt')).length).toBe(before.length + 1)
     const mail = globSync(join(MAILS, '**/*.txt')).find((each: string) => !before.includes(each))!

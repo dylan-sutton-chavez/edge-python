@@ -13,7 +13,7 @@ export const PATCH: APIRoute = async ({ request, locals, cookies }) => {
   const email = String(raw ?? '').trim().toLowerCase()
 
   // The code was mailed to this address, so spending it is the proof that the mailbox answers.
-  if (!(await spend(env.DB, cookies, email, String(code ?? '')))) return json({ error: 'That code is wrong or expired.' }, 403)
+  if (!(await spend(env.DB, cookies, email, 'change_email', String(code ?? '')))) return json({ error: 'That code is wrong or expired.' }, 403)
   if (!(await moveAddress(env.DB, user.id, email))) return json({ error: 'Another account already uses that address.' }, 409)
 
   if (user.email) await sendMovedMail(user.email, email)

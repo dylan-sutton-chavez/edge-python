@@ -33,6 +33,7 @@ create index session_expiry on session(expires_at);
 
 create table email_code (
   email text primary key check (email = lower(email)),
+  purpose text not null,
   hash text not null,
   attempts integer not null default 0,
   created_at integer not null,

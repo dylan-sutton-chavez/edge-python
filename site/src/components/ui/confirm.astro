@@ -23,8 +23,7 @@ import Dialog from './dialog.astro'
 
   <div class="flex items-center justify-end gap-3">
     <p data-confirm-resend hidden class="mr-auto flex items-center gap-2 text-2xs text-fg-hint">
-      <button type="button" data-confirm-again class="underline text-link transition hover:text-fg">Resend code</button>
-      <span data-confirm-sent hidden>Sent.</span>
+      <button type="button" data-confirm-again class="underline text-link transition hover:text-fg disabled:no-underline disabled:text-fg-hint">Resend code</button>
     </p>
 
     <button type="button" data-dialog-close class="flex items-center gap-2 transition border border-line text-fg-hint px-4 py-1 rounded-full hover:text-fg">Cancel</button>
