@@ -43,13 +43,14 @@ const note = (token: Token) =>
           </li>
         ))}
 
-        <li data-new>
-          <button type="button" data-add class="flex w-full items-center justify-center gap-2 px-4 py-3 text-fg-hint transition hover:bg-surface hover:text-fg">
+        {/* The row owns the height, so naming a token swaps what fills it rather than growing it. */}
+        <li data-new class="h-9">
+          <button type="button" data-add class="flex h-full w-full items-center justify-center gap-2 px-4 text-fg-hint transition hover:bg-surface hover:text-fg">
             <Icon name="close" size="sm" class="rotate-45" />
             <span>Create new</span>
           </button>
 
-          <form data-new-token hidden class="flex items-center gap-3 px-4 py-3">
+          <form data-new-token hidden class="flex h-full items-center gap-3 px-4">
             <Icon name="key" size="lg" class="shrink-0 text-fg-subtle" />
 
             <input
