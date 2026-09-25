@@ -21,9 +21,27 @@ if (!doc) return Astro.rewrite('/404')
 
 const entry = entries.find((each) => each.id === doc.id)!
 const { Content } = await render(entry)
+
+const origin = (Astro.site ?? Astro.url).origin
+const section = sections.find((each) => each.docs.some((one) => one.id === doc.id))
+
+/* A section is not a page, so its crumb borrows the first one it holds. */
+const crumbs = [
+  { name: 'Docs', item: `${origin}/docs` },
+  ...(section?.label && section.docs[0] ? [{ name: section.label, item: `${origin}/docs/${section.docs[0].slug}` }] : []),
+  { name: doc.title }
+]
+
+const trail = {
+  '@context': 'https://schema.org',
+  '@type': 'BreadcrumbList',
+  itemListElement: crumbs.map((crumb, at) => ({ '@type': 'ListItem', position: at + 1, ...crumb }))
+}
 ---
 
 <Base title={doc.title} description={entry.data.description} gap="lg" class="flex-1">
+  <script type="application/ld+json" is:inline set:html={JSON.stringify(trail)} />
+
   <div class="flex flex-col lg:flex-row gap-3 flex-1 min-h-0">
     <DocsNav sections={sections} current={doc} />
 

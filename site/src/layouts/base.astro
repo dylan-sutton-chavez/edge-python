@@ -10,11 +10,12 @@ const GAPS = { xs: 'gap-3', sm: 'gap-4', lg: 'gap-7' }
 interface Props {
   title?: string
   description?: string
+  index?: boolean
   gap?: keyof typeof GAPS
   class?: string
 }
 
-const { title, description = 'Packages for Edge Python, pinned by sha256.', gap = 'sm', class: className } = Astro.props
+const { title, description = 'Packages for Edge Python, pinned by sha256.', index = true, gap = 'sm', class: className } = Astro.props
 
 // A preview reads absolute addresses, and a query string never names a different page.
 const heading = title ? `${title} on Edge Python` : 'Edge Python'
@@ -29,6 +30,7 @@ const card = new URL('/og.png', Astro.url).href
   <title>{heading}</title>
   <meta name="description" content={description} />
   <link rel="canonical" href={page} />
+  {!index && <meta name="robots" content="noindex, follow" />}
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 
   <meta property="og:type" content="website" />
