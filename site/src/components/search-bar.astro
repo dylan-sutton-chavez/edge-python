@@ -39,7 +39,7 @@ const label = 'px-4 pb-1 pt-2 text-2xs text-fg-subtle'
       <kbd class="shrink-0 rounded border border-line-strong px-1 font-sans text-2xs text-fg-hint">Esc</kbd>
     </span>
 
-    <div data-found-list class="max-h-80 overflow-y-auto overscroll-contain py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div data-found-list data-slots={doors.length} class="max-h-[calc(100dvh-8rem)] overflow-y-auto overscroll-contain py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <section data-found-doors>
         <p class={label}>Go to</p>
         <ul>
@@ -159,6 +159,18 @@ const label = 'px-4 pb-1 pt-2 text-2xs text-fg-subtle'
       state.hidden = true
     }
 
+    /* The panel reserves every slot the set rendered, so its height never moves. */
+    const pin = () => {
+      if (doors.hidden) return
+
+      const slots = Number(list.dataset.slots)
+      const shown = doors.querySelectorAll<HTMLElement>('a')
+      const slot = shown[0]?.offsetHeight ?? 0
+
+      list.style.height = ''
+      list.style.height = `${list.scrollHeight + (slots - shown.length) * slot}px`
+    }
+
     const ask = async (asked: string) => {
       running?.abort()
       running = new AbortController()
@@ -185,6 +197,7 @@ const label = 'px-4 pb-1 pt-2 text-2xs text-fg-subtle'
       if ((event as ToggleEvent).newState !== 'open') return
       input.value = ''
       rest()
+      pin()
       input.focus()
     })
 
