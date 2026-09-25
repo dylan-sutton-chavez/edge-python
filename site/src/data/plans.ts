@@ -29,11 +29,11 @@ export const plans: Plan[] = [
     ]
   },
   {
-    name: 'Sandbox',
+    name: 'Session',
     mode: 'Individual',
     price: '$5.49',
     cadence: 'a month',
-    who: 'For an agent that writes code and needs to run it.',
+    who: 'For an agent that leaves tasks running and forks them.',
     features: [
       'Runs by volume',
       'Snapshots to restore, fork to branch',
