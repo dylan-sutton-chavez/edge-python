@@ -92,6 +92,8 @@ const label = 'px-4 pb-1 pt-2 text-2xs text-fg-subtle'
 </div>
 
 <script>
+  import { offer } from '../lib/account/form'
+
   // The marks the worker brackets a hit with, control characters so a snippet can never carry markup.
   const OPEN = '\u0001'
   const CLOSE = '\u0002'
@@ -198,7 +200,7 @@ const label = 'px-4 pb-1 pt-2 text-2xs text-fg-subtle'
       input.value = ''
       rest()
       pin()
-      input.focus()
+      offer(input)
     })
 
     input.addEventListener('input', () => {

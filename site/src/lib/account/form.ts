@@ -7,6 +7,11 @@ export function setError(input: HTMLInputElement, message: string | null) {
   input.setAttribute('aria-invalid', String(message !== null))
 }
 
+// A touch keyboard covers the popup that just opened, so only a hover pointer gets the field.
+export function offer(field?: HTMLElement | null) {
+  if (matchMedia('(hover: hover)').matches) field?.focus({ preventScroll: true })
+}
+
 export async function pending<T>(button: HTMLButtonElement, task: () => Promise<T>) {
   button.disabled = true
   button.toggleAttribute('data-busy', true)

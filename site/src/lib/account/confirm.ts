@@ -1,4 +1,6 @@
-type Ask = { title: string; body: string; action: string }
+import { offer } from './form'
+
+type Ask ={ title: string; body: string; action: string }
 
 const CODE = 6
 const AGAIN = 'Resend code'
@@ -48,7 +50,7 @@ function ask({ title, body, action }: Ask, wantsCode: boolean, resend?: () => Pr
       if (wantsCode && code.length !== CODE) {
         error.textContent = `The code is ${CODE} digits.`
         error.hidden = false
-        input.focus()
+        offer(input)
         return
       }
 
@@ -79,7 +81,7 @@ function ask({ title, body, action }: Ask, wantsCode: boolean, resend?: () => Pr
         again.disabled = false
       }
 
-      input.focus()
+      offer(input)
     }
 
     const done = () => {
@@ -94,7 +96,7 @@ function ask({ title, body, action }: Ask, wantsCode: boolean, resend?: () => Pr
     dialog.addEventListener('close', done, { once: true })
     dialog.showModal()
 
-    if (wantsCode) input.focus()
+    if (wantsCode) offer(input)
   })
 }
 

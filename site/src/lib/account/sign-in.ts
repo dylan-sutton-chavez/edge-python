@@ -1,7 +1,7 @@
 import { sendCode, verifyCode, checkHandle, saveProfile } from './auth'
 import { validateHandle } from './handle'
 import { avatarFor, pickAvatar, readAvatar } from './avatar'
-import { setError, pending } from './form'
+import { setError, pending, offer } from './form'
 import { CODE_LIFE } from '../otp'
 
 export type Step = 'providers' | 'code' | 'user' | 'avatar'
@@ -115,7 +115,7 @@ export function createSignIn(dialog: HTMLDialogElement) {
     dialog.querySelectorAll('[data-dots] li').forEach((dot, i) => (i === index ? dot.setAttribute('aria-current', 'step') : dot.removeAttribute('aria-current')))
     remember(step === 'code' ? { step, email, until } : index === -1 ? null : { step })
 
-    if (matchMedia('(hover: hover)').matches) active().querySelector<HTMLElement>('input:not([type="radio"])')?.focus({ preventScroll: true })
+    offer(active().querySelector<HTMLElement>('input:not([type="radio"])'))
   }
 
   function open(step?: Step) {

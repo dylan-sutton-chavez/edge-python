@@ -180,6 +180,16 @@ test('applies hover styles', async ({ page }) => {
   await expect.poll(color).not.toBe(idle)
 })
 
+// No engine emulates a pointer that cannot hover, so the page is told it has none.
+test('opens the search without the touch keyboard', async ({ page }) => {
+  await page.addInitScript(() => { const media = matchMedia.bind(window); window.matchMedia = (q) => media(q.replace('hover: hover', 'hover: none')) })
+  await page.goto('/')
+  await page.locator('[data-find]').click()
+
+  await expect(page.locator('[data-found] input')).toBeVisible()
+  await expect(page.locator('[data-found] input')).not.toBeFocused()
+})
+
 test.describe('dialogs', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
