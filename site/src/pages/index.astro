@@ -101,7 +101,7 @@ const outline = 'flex items-center gap-2 transition border border-line text-fg-h
             {packages.map((item) => <PackageCard {...item} />)}
           </ul>
         ) : (
-          <p class="ml-4 text-fg-hint">{asked ? 'No package matches that.' : 'No packages yet.'}</p>
+          <p class="ml-4 text-sm text-fg-hint">{asked ? 'No package matches that.' : 'No packages yet.'}</p>
         )}
       </div>
     </section>
