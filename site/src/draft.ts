@@ -2,7 +2,7 @@ import type { MiddlewareNext } from 'astro'
 import { env } from 'cloudflare:workers'
 
 /* Everything still being built, named by the address that already reaches it. A path is a page of its own and a fragment is a surface inside one, which is the name a deep link already uses. */
-const DRAFT = ['/plans', '/runs', '/settings#billing', '/settings#invoices']
+const DRAFT = ['/plans', '/runs', '/settings#billing', '/settings#invoices', '/settings#upkeep']
 
 // What a surface renders with, so a group, its tab, its icon and its panel all answer to one name.
 const HOOKS = ['data-group', 'data-panel', 'data-view', 'data-bar-icon']
