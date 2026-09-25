@@ -1,6 +1,87 @@
+---
+import Icon from '../ui/icon.astro'
+
+type Held = { name: string; reach: string; earns: string }
+type Paid = { date: string; amount: string; status: string }
+
+// Stands in until upkeep is measured.
+const held: Held[] = [
+  { name: 'slugify', reach: '1,204 people this month', earns: '$18.40' },
+  { name: 'edge-struct', reach: '312 people this month', earns: '$4.90' }
+]
+
+// Stands in until a payment provider answers.
+const paid: Paid[] = [
+  { date: 'September 1, 2026', amount: '$23.30', status: 'Paid' },
+  { date: 'August 1, 2026', amount: '$19.80', status: 'Paid' }
+]
+
+const card = 'bg-page border border-line-strong rounded-2xl overflow-hidden'
+const rows = 'divide-y divide-line-strong'
+const line = 'flex items-center gap-3 px-4 py-3'
+const amount = 'shrink-0 tabular-nums text-xs text-fg-muted'
+const note = 'ml-4 text-2xs text-fg-hint'
+---
+
 <div class="flex flex-col gap-6">
   <div>
     <h2 class="text-md">Upkeep</h2>
     <p class="text-fg-hint mt-0.5">What a package earns while people use it and you maintain it. Publishing is not upkeep, and a bot is not a person.</p>
   </div>
+
+  <section class="flex flex-col gap-2">
+    <h3 class="ml-4">Getting paid</h3>
+
+    <div class="bg-page border border-line-strong rounded-full flex items-center gap-3 px-4 py-3">
+      <Icon name="handshake" size="lg" class="shrink-0 text-fg-subtle" />
+      <p class="min-w-0 flex-1 truncate text-fg-hint">Not enrolled</p>
+      <button type="button" class="shrink-0 text-xs underline text-fg-hint transition hover:text-fg">Join</button>
+    </div>
+  </section>
+
+  <section class="flex flex-col gap-2">
+    <h3 class="ml-4">Your packages</h3>
+
+    <div class={card}>
+      <ul class={rows}>
+        {held.map((one) => (
+          <li class={line}>
+            <Icon name="boxes" size="lg" class="shrink-0 text-fg-subtle" />
+
+            <div class="min-w-0 flex-1">
+              <p class="truncate">{one.name}</p>
+              <p class="truncate text-2xs text-fg-hint">{one.reach}</p>
+            </div>
+
+            <span class={amount}>{one.earns}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+
+    <p class={note}>A package stops earning when it stops being used, or when it stops being maintained.</p>
+  </section>
+
+  <section class="flex flex-col gap-2">
+    <h3 class="ml-4">Payouts</h3>
+
+    <div class={card}>
+      <ul class={rows}>
+        {paid.map((one) => (
+          <li class={line}>
+            <Icon name="file" size="lg" class="shrink-0 text-fg-subtle" />
+
+            <div class="min-w-0 flex-1">
+              <p class="truncate">{one.date}</p>
+              <p class="truncate text-2xs text-fg-hint">{one.status}</p>
+            </div>
+
+            <span class={amount}>{one.amount}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+
+    <p class={note}>A month closes on the first, and what it owes goes out with it.</p>
+  </section>
 </div>
