@@ -471,7 +471,7 @@ test.describe('publishing', () => {
       ['no edge.json inside', packed({ 'main.py': 'print(1)\n' })],
       ['an edge.json that is not JSON', packed({ 'edge.json': '{ nope', 'main.py': '' })],
       ['a path climbing out of the tree', packed({ 'edge.json': '{}', '../escape.py': '' })],
-      ['a url climbing out of its host', packed({ 'edge.json': '{}', 'https://cdn.edgepython.com/../escape.py': '' })]
+      ['a url climbing out of its host', packed({ 'edge.json': '{}', 'https://example.com/../escape.py': '' })]
     ]
 
     for (const [why, buffer] of bad) {
@@ -483,7 +483,7 @@ test.describe('publishing', () => {
   test('takes a package that carries a dependency under its url', async ({ request }) => {
     await signIn(request)
     const token = await mintToken(request)
-    const files = { 'https://cdn.edgepython.com/pkg/test/0.1.0/app.edge': 'EDGEPKG\u0001' }
+    const files = { 'https://example.com/dep.edge': 'EDGEPKG\u0001' }
 
     expect((await send(request, token, release(naming(), '0.1.0', {}, files))).status()).toBe(201)
   })

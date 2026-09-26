@@ -41,7 +41,7 @@ const baseUrl = new URL("./nomanifest/", import.meta.url).href;
 Deno.test("deno: a packed package imports from inside itself", async () => {
     const enc = new TextEncoder();
     const framed = (bytes) => [...enc.encode(`${bytes.length}\n`), ...bytes];
-    const files = { "main.py": "from .src.hello import hello\n", "src/hello.py": "def hello(name):\n    return 'hello ' + name\n" };
+    const files = { "main.py": "from .src.hello import hello\n", "src/hello.py": "def hello(name):\n    return 'hello ' + name\n", "https://example.com/dep.edge": "" };
     const packed = [...enc.encode("EDGEPKG\x01"), ...framed(enc.encode("main.py")), ...enc.encode(`${Object.keys(files).length}\n`)];
     for (const [path, text] of Object.entries(files)) packed.push(...framed(enc.encode(path)), ...framed(enc.encode(text)));
     const dir = await Deno.makeTempDir();

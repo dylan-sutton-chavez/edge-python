@@ -10,9 +10,11 @@ export interface Bundle {
     files: Map<string, Uint8Array>
 }
 
-// Every path stays a plain relative one, so no file lands outside the package it came in.
-const plain = (path: string): boolean =>
-    path !== '' && !path.startsWith('/') && !path.includes('\\') && path.split('/').every((part) => part !== '' && part !== '.' && part !== '..');
+// A plain relative path or a vendored url, so no file lands outside the package.
+const plain = (path: string): boolean => {
+    const rest = path.startsWith('https://') ? path.slice('https://'.length) : path;
+    return rest !== '' && !rest.includes('\\') && rest.split('/').every((part) => part !== '' && part !== '.' && part !== '..');
+};
 
 /* A packed `.edge`, its entry and every file it carries, each length an ascii number and a newline. */
 export function decodeBundle(buf: Uint8Array): Bundle {
