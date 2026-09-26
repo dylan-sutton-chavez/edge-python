@@ -34,19 +34,12 @@ struct Published {
     url: String
 }
 
-/* One multipart request, the artifact as it sits on disk. */
+/* The artifact as it sits on disk is the whole body. */
 fn send(token: &str, artifact: &[u8]) -> Result<Published> {
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-    let boundary = format!("edge{nanos:x}");
-
-    let mut body = Vec::new();
-    part(&mut body, &boundary, "artifact", "app.edge", artifact);
-    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
-
     let mut response = ureq::post(site("/api/publish").as_str())
         .header("authorization", &format!("Bearer {token}"))
-        .header("content-type", &format!("multipart/form-data; boundary={boundary}"))
-        .send(&body[..])
+        .header("content-type", "application/octet-stream")
+        .send(artifact)
         .map_err(|e| match e {
             ureq::Error::StatusCode(code) => anyhow!("the registry refused it with {code}"),
             other => anyhow!("reaching the registry: {other}")
@@ -61,13 +54,4 @@ fn send(token: &str, artifact: &[u8]) -> Result<Published> {
         (Some(name), Some(version), Some(url)) => Ok(Published { name, version, url }),
         _ => bail!("{}", answer.get("error").and_then(|e| e.as_str()).unwrap_or("the registry sent no url"))
     }
-}
-
-fn part(body: &mut Vec<u8>, boundary: &str, name: &str, filename: &str, value: &[u8]) {
-    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
-    body.extend_from_slice(
-        format!("content-disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\ncontent-type: application/octet-stream\r\n\r\n").as_bytes()
-    );
-    body.extend_from_slice(value);
-    body.extend_from_slice(b"\r\n");
 }

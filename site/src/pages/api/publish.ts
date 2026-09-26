@@ -13,13 +13,11 @@ export const POST: APIRoute = async ({ request }) => {
   const userId = await tokenUser(env.DB, request.headers.get('authorization'))
   if (!userId) return json({ error: 'That token is not valid.' }, 401)
 
-  const form = await request.formData().catch(() => null)
-  const artifact = form?.get('artifact')
+  // The body is the artifact itself, which also keeps it out of the origin check a form would meet.
+  const bytes = await request.arrayBuffer()
 
-  if (!(artifact instanceof File)) return json({ error: 'Send an artifact.' }, 400)
-  if (artifact.size > MAX_ARTIFACT) return json({ error: `An artifact is ${MAX_ARTIFACT} bytes at most.` }, 413)
-
-  const bytes = await artifact.arrayBuffer()
+  if (bytes.byteLength === 0) return json({ error: 'Send an artifact.' }, 400)
+  if (bytes.byteLength > MAX_ARTIFACT) return json({ error: `An artifact is ${MAX_ARTIFACT} bytes at most.` }, 413)
 
   // A token holder can hand-build a bundle, so the archive and its pages are held to the same rules the CLI packs under.
   let declared: Packed

@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url'
 import { test as base, expect, type APIRequestContext, type APIResponse, type BrowserContext } from '@playwright/test'
 import { random, sha256 } from '../src/lib/crypto'
 import type { Purpose } from '../src/lib/otp'
-import { BASE } from '../playwright.config'
 
 export const MAILS = fileURLToPath(new URL('../.wrangler/tmp/email/', import.meta.url))
 
@@ -109,11 +108,9 @@ export async function published(request: APIRequestContext, files: Record<string
   const name = `p${unique()}`.toLowerCase().replace(/[^a-z0-9-]/g, '')
 
   const tree = { 'edge.json': JSON.stringify({ name, version: '0.1.0', ...DECLARED }), 'main.py': 'print(1)\n', ...files }
-  const artifact = { name: 'app.edge', mimeType: 'application/octet-stream', buffer: packed(tree) }
-
-  // A multipart post is a form submission, which the origin check covers, unlike the JSON posts above it.
-  const headers = { authorization: `Bearer ${token}`, origin: BASE }
-  const sent = await request.post('/api/publish', { headers, multipart: { artifact } })
+  // Bytes with a token and no origin, exactly what the CLI sends.
+  const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream' }
+  const sent = await request.post('/api/publish', { headers, data: packed(tree) })
   expect(sent.status(), await sent.text()).toBe(201)
 
   return { ...account, name }

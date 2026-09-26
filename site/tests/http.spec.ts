@@ -397,10 +397,8 @@ test('five wrong codes close an address for good', async ({ request }) => {
 test.describe('publishing', () => {
   const naming = () => `p${unique()}`.toLowerCase().replace(/[^a-z0-9-]/g, '')
 
-  const upload = (buffer: Buffer) => ({ name: 'app.edge', mimeType: 'application/octet-stream', buffer })
-
   const send = (request: APIRequestContext, token: string, buffer: Buffer) =>
-    request.post('/api/publish', { headers: { authorization: `Bearer ${token}` }, multipart: { artifact: upload(buffer) } })
+    request.post('/api/publish', { headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream' }, data: buffer })
 
   /* A release is a bundle and nothing else, so the tests hand over the same archive the CLI packs rather than metadata beside it. */
   const release = (name: string, version: string, declared: Record<string, unknown> = {}, files: Record<string, string> = {}) =>
