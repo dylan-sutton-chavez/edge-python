@@ -271,12 +271,11 @@ Code you do not trust goes to an [eval group](/docs/reference/actors#untrusted-c
 ### Building from source
 
 ```bash
-cargo wasm                                                              # compiler.wasm
-(cd std/json && cargo build --release --target wasm32-unknown-unknown)  # and re, math, struct
-cd cli && cargo build --release                                         # embeds them precompiled
+cargo wasm                        # compiler.wasm
+cd cli && cargo build --release   # embeds it precompiled
 ```
 
-The build also needs the pinned StarlingMonkey release in `target/starling.wasm`, or at the path `EDGE_STARLING_WASM` names, see `CONTRIBUTING.md` for the command. `cli/build.rs` reads the artifacts from those paths, or from `EDGE_COMPILER_WASM` and `EDGE_STD_DIR`, fetches nothing, and precompiles StarlingMonkey into the artifact the binary later downloads by hash.
+The build also needs the pinned StarlingMonkey release in `target/starling.wasm`, or at the path `EDGE_STARLING_WASM` names, see `CONTRIBUTING.md` for the command. `cli/build.rs` reads the artifacts from those paths, or from `EDGE_COMPILER_WASM`, fetches nothing, and precompiles StarlingMonkey into the artifact the binary later downloads by hash.
 
 ## See also
 

@@ -33,7 +33,7 @@ cargo install --path cli
 
 `install.sh` drops the binary at `~/.local/bin/edge` and appends that directory to your `~/.bashrc` or `~/.zshrc` unless already present. Open a new shell and `edge --version` should work. Re-run the same line to upgrade. The Linux binaries are static, so any distribution works.
 
-Building from source embeds `compiler.wasm` and the std packages, so run `cargo wasm` and build each `std/*` package for `wasm32-unknown-unknown` first, or point `EDGE_COMPILER_WASM` and `EDGE_STD_DIR` at copies. The build fetches nothing.
+Building from source embeds `compiler.wasm`, so run `cargo wasm` first, or point `EDGE_COMPILER_WASM` at a copy. The build fetches nothing.
 
 ## `edge run`: run a script
 

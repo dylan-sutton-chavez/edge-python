@@ -130,7 +130,6 @@ Interactive removal of the binary and PATH entries.
 
 | Variable | Effect |
 |---|---|
-| `EDGE_STD_DIR` | Directory holding the std `.wasm` files the CLI build embeds |
 | `EDGE_COMPILER_WASM` | Path to `compiler.wasm` for the CLI build |
 | `EDGE_STARLING_WASM` | Path to the pinned StarlingMonkey `starling.wasm` the CLI build precompiles |
 | `EDGE_CDN_BASE` | Serve the official CDN origin from another base for module downloads, the JavaScript runtime and `edge build --web`, used by tests and staging |
@@ -264,6 +263,7 @@ Import failures and syntax errors are compile-time diagnostics and can never be 
 
 Every import resolves at compile time through a host resolver. The compiler flattens each module into the bytecode and the VM fetches nothing at run time.
 
+<!-- 010100101010 THIS CELL IMPORTS A PACKAGE EDGE-PYTHON-STD HAS NOT PUBLISHED YET, TURN ITS txt FENCE BACK INTO text TO RUN IT AGAIN. -->
 ```python
 import math
 from json import dumps, loads
@@ -273,7 +273,7 @@ from re import *
 print(root(16.0), loads(dumps({"ok": True}))["ok"])
 ```
 
-```text Output
+```txt Output
 4.0 True
 ```
 
@@ -613,6 +613,7 @@ Five official packages, each declared with `edge add <name>` and imported by bar
 
 `loads(s)` with optional `object_hook`, `object_pairs_hook`, `parse_float`, `parse_int` and `parse_constant`. `dumps(obj)` with `indent`, `sort_keys`, `ensure_ascii`, `check_circular`, `allow_nan`, `skipkeys`, `default`, `separators` and `cls`. Parse failures raise `ValueError`, non-serializable values raise `TypeError` unless `default` handles them. Integers round-trip at 128-bit and non-finite floats map to `NaN` and `Infinity`.
 
+<!-- 010100101010 THIS CELL IMPORTS A PACKAGE EDGE-PYTHON-STD HAS NOT PUBLISHED YET, TURN ITS txt FENCE BACK INTO text TO RUN IT AGAIN. -->
 ```python
 import json
 
@@ -621,7 +622,7 @@ print(json.dumps(data, sort_keys=True))
 print(json.dumps({"bad": object()}, default=str))
 ```
 
-```text Output
+```txt Output
 {"n":21,"xs":[1,2]}
 {"bad":"<object instance>"}
 ```
@@ -630,6 +631,7 @@ print(json.dumps({"bad": object()}, default=str))
 
 Constants `pi`, `e`, `tau`, `inf`, `nan`. Functions `sqrt`, `cbrt`, `exp`, `exp2`, `expm1`, `pow`, `log`, `log2`, `log10`, `log1p`, the trig and hyperbolic families, `atan2`, `hypot`, `dist`, `degrees`, `radians`, `erf`, `erfc`, `gamma`, `lgamma`, `fabs`, `fmod`, `remainder`, `copysign`, `ldexp`, `modf`, `frexp`, `floor`, `ceil`, `trunc`, `isnan`, `isinf`, `isfinite`, `fsum`, `prod`, and the integer functions `factorial`, `gcd`, `lcm`, `isqrt`, `comb`, `perm` at 128-bit. Domain errors raise `ValueError`. A batch family (`sqrt_all`, `add_all`, `dot_all`, `matvec` and friends) operates on `bytes` buffers of little-endian f64, pair it with `struct.pack`.
 
+<!-- 010100101010 THIS CELL IMPORTS A PACKAGE EDGE-PYTHON-STD HAS NOT PUBLISHED YET, TURN ITS txt FENCE BACK INTO text TO RUN IT AGAIN. -->
 ```python
 import math
 
@@ -637,7 +639,7 @@ print(math.gcd(12, 18), math.factorial(10), math.isqrt(17))
 print(math.floor(math.pi), math.isfinite(math.inf))
 ```
 
-```text Output
+```txt Output
 6 3628800 4
 3 False
 ```
@@ -656,6 +658,7 @@ Backtracking engine with a step budget that raises `RuntimeError` against catast
 
 Supported syntax covers classes, anchors, quantifiers with lazy forms, capturing, non-capturing and named groups, backreferences, alternation, lookahead and fixed-width lookbehind, plus inline flags `(?i)`, `(?s)` and `(?m)`. Not supported, `\p{...}`, atomic groups, possessive quantifiers, conditionals and scoped flags.
 
+<!-- 010100101010 THIS CELL IMPORTS A PACKAGE EDGE-PYTHON-STD HAS NOT PUBLISHED YET, TURN ITS txt FENCE BACK INTO text TO RUN IT AGAIN. -->
 ```python
 import re
 
@@ -664,7 +667,7 @@ print(re.sub(r"(\w+)@(\w+)", r"\2@\1", "user@host"))
 print(re.groups(r"(\d+)-(\d+)", "12-34"))
 ```
 
-```text Output
+```txt Output
 ['1', '22']
 host@user
 ['12', '34']
@@ -674,6 +677,7 @@ host@user
 
 `pack(fmt, *values)` returns `bytes`, `unpack(fmt, data)` returns a list, `calcsize(fmt)` returns an int. Codes are `x b B ? h H i I q Q f d` with repeat counts, prefixes `<` (default), `=`, `>` and `!`. String codes `s` and `p`, half-float `e`, native-size `n` and `N`, and the `pack_into` family are not implemented.
 
+<!-- 010100101010 THIS CELL IMPORTS A PACKAGE EDGE-PYTHON-STD HAS NOT PUBLISHED YET, TURN ITS txt FENCE BACK INTO text TO RUN IT AGAIN. -->
 ```python
 import struct
 
@@ -681,7 +685,7 @@ buf = struct.pack("<hh", 258, -1)
 print(buf.hex(), struct.unpack("<hh", buf), struct.calcsize("<hh"))
 ```
 
-```text Output
+```txt Output
 0201ffff [258, -1] 4
 ```
 
@@ -695,6 +699,7 @@ The test framework, imported by bare name and driven by `edge test` discovery. T
 - Assertions are plain `assert`.
 - `run()` executes everything registered, prints verdicts and raises `SystemExit(0)` or `SystemExit(1)`.
 
+<!-- 010100101010 THIS CELL IMPORTS A PACKAGE EDGE-PYTHON-STD HAS NOT PUBLISHED YET, TURN ITS txt FENCE BACK INTO text TO RUN IT AGAIN. -->
 ```python
 from test import fixture, test, raises, run
 
@@ -714,7 +719,7 @@ def div():
 run()
 ```
 
-```text Output
+```txt Output
 pass. sum adds up
 pass. division by zero raises
 2 passed, 0 failed
@@ -735,6 +740,7 @@ Four system libraries, each declared with `edge add <name>`. All four are JavaSc
 
 `time()`, `time_ns()`, `monotonic()`, `monotonic_ns()`, `perf_counter()`, `perf_counter_ns()`, and a suspending `sleep(secs)`. `gmtime` and `localtime` return a JSON string of the nine struct_time fields, decode it with `json.loads`. `mktime`, `strftime`, `strptime`, `asctime` and `ctime` convert between forms. `timezone()`, `altzone()`, `daylight()` and `tzname()` are calls. The CLI is always UTC, so `localtime` equals `gmtime` there.
 
+<!-- 010100101010 THIS CELL IMPORTS A PACKAGE EDGE-PYTHON-STD HAS NOT PUBLISHED YET, TURN ITS txt FENCE BACK INTO text TO RUN IT AGAIN. -->
 ```python
 import json
 from time import gmtime, time
@@ -743,20 +749,21 @@ print(json.loads(gmtime(0))[:3])
 print(type(time()).__name__)
 ```
 
-```text Output
+```txt Output
 [1970, 1, 1]
 float
 ```
 
 The CLI's runtime has no `Intl`, so `tzname()` raises there.
 
+<!-- 010100101010 THIS CELL IMPORTS A PACKAGE EDGE-PYTHON-STD HAS NOT PUBLISHED YET, TURN ITS txt FENCE BACK INTO text TO RUN IT AGAIN. -->
 ```python
 from time import tzname
 
 print(tzname())
 ```
 
-```text Error
+```txt Error
 module 'time' needs 'Intl', missing in this runtime
 ```
 

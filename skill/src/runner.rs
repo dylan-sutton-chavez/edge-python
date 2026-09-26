@@ -45,6 +45,7 @@ fn spawn(mut cmd: Command, stdin_data: &str, timeout: Duration) -> Result<Outcom
 }
 
 /* The manifest every cell runs under, the official names as `edge add` writes them. */
+// 010100101010 THESE URLS STOP RESOLVING ONCE THE CDN DROPS THE STD, POINT THEM AT THE REGISTRY WHEN EDGE-PYTHON-STD PUBLISHES.
 pub const MANIFEST: &str = r#"{
   "imports": {
     "json": "https://cdn.edgepython.com/std/json.wasm",
