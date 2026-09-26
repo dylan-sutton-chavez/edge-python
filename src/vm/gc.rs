@@ -35,6 +35,8 @@ impl<'a> VM<'a> {
         for &v in &self.template_roots { self.heap.mark(v); }
         for &v in self.globals.values() { self.heap.mark(v); }
         for &v in self.module_state.values() { self.heap.mark(v); }
+        // A `from x import` binds no name to the module, yet its functions still read their globals through this table.
+        for &v in self.module_table.values() { self.heap.mark(v); }
         let heap = &mut self.heap; // split borrow, lets closures take &mut heap while iterating other fields
         for frame in &self.iter_stack { frame.for_each_val(&mut |v| heap.mark(v)); }
         for sf in &self.pending_sync_frames { sf.for_each_val(&mut |v| heap.mark(v)); }
