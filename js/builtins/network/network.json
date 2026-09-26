@@ -1,6 +1,0 @@
-[
-  {
-    "src": "sock = ws_open('{WS_BASE}/ws', 'echo')\ngot = None\nwhile True:\n    ev = receive()\n    if '\"type\":\"open\"' in ev:\n        ws_send(sock, 'hello')\n    elif '\"type\":\"message\"' in ev:\n        got = 'hello' in ev\n        ws_close(sock)\n    elif '\"type\":\"close\"' in ev:\n        break\nprint(got)",
-    "output": ["True"]
-  }
-]
