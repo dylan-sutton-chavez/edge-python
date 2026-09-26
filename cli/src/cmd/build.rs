@@ -262,7 +262,7 @@ fn vendor_js(out_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Walk the project for `.py` and JavaScript files, skipping hidden dirs and the output directory itself.
+/// Walk the project for `.py`, JavaScript and `.wasm` plugin files, skipping hidden dirs and the output directory itself.
 fn collect_scripts(project: &Path, out_dir: &Path) -> Vec<PathBuf> {
     let mut scripts = Vec::new();
     let out_dir = fs::canonicalize(out_dir).unwrap_or_else(|_| out_dir.to_path_buf());
@@ -285,7 +285,7 @@ fn walk(dir: &Path, out_dir: &Path, found: &mut Vec<PathBuf>) {
         }
         if path.is_dir() {
             walk(&path, out_dir, found);
-        } else if matches!(path.extension().and_then(|e| e.to_str()), Some("py" | "js" | "mjs")) {
+        } else if matches!(path.extension().and_then(|e| e.to_str()), Some("py" | "js" | "mjs" | "wasm")) {
             found.push(path);
         }
     }
@@ -500,6 +500,21 @@ mod tests {
         assert_eq!(paths, ["LICENSE", "LICENSE.py", "LICENSE.txt", "README.md", "main.py"]);
         assert_eq!(bundle.entry, "main.py");
         assert!(!javascript);
+    }
+
+    // A relative plugin resolves inside the bundle, so the walk must carry it.
+    #[test]
+    fn a_bundle_carries_a_relative_wasm_plugin() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path();
+        fs::create_dir(project.join("src")).unwrap();
+        fs::write(project.join("src/entry.py"), "from _json import *").unwrap();
+        fs::write(project.join("src/json.wasm"), b"\0asm").unwrap();
+        let (bundle, _) = collect_bundle(&project.join("edge.json"), false).unwrap();
+        let mut paths: Vec<&str> = bundle.files.iter().map(|f| f.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(paths, ["src/entry.py", "src/json.wasm"]);
+        assert_eq!(bundle.entry, "src/entry.py");
     }
 
     #[test]
