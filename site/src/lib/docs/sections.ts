@@ -5,9 +5,9 @@ export type Part = { section: string; anchor: string; body: string }
 
 // A fence can hold a line that looks like a heading, so the walk tracks whether it is inside one.
 const FENCE = /^\s*```/
-const HEADING = /^##\s+(.+?)\s*$/
+const HEADING = /^#{2,3}\s+(.+?)\s*$/
 
-/* Cuts a page at its second-level headings. What comes before the first one belongs to the page itself, which is why that part carries no anchor. */
+/* Cuts a page at its second- and third-level headings. What comes before the first one belongs to the page itself, which is why that part carries no anchor. */
 export function parts(body: string): Part[] {
   const slugger = new Slugger()
   const found: Part[] = [{ section: '', anchor: '', body: '' }]
