@@ -357,8 +357,9 @@ fn file_deps(rel: &str, bytes: &[u8]) -> Result<Vec<(String, bool)>> {
                 .map(|target| (target.to_string(), true))
                 .collect()
         }
-        "wasm" => Vec::new(),
-        _ if bytes.starts_with(b"\0asm") => Vec::new(),
+        // A plugin and a packed package each carry all they need.
+        "wasm" | "edge" => Vec::new(),
+        _ if bytes.starts_with(b"\0asm") || bytes.starts_with(crate::pack::MAGIC) => Vec::new(),
         // Python source, its relative imports plus the manifest beside it when one is served.
         _ => scan_imports(&text)
             .into_iter()
@@ -515,6 +516,12 @@ mod tests {
         assert_eq!(paths, ["LICENSE", "LICENSE.py", "LICENSE.txt", "README.md", "main.py"]);
         assert_eq!(bundle.entry, "main.py");
         assert!(!javascript);
+    }
+
+    // A packed dependency rides whole, the imports inside it answer from inside it.
+    #[test]
+    fn a_packed_dependency_drags_nothing_beside_it() {
+        assert!(file_deps("app.edge", b"EDGEPKG\x01from .src.test import run").unwrap().is_empty());
     }
 
     // A relative plugin resolves inside the bundle, so the walk must carry it.
