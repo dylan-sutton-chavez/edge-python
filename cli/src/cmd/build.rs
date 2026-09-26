@@ -409,15 +409,14 @@ fn copy_scripts(scripts: &[PathBuf], project: &Path, out_dir: &Path) -> Result<u
 /// Pick `main.py`/`app.py`/`index.py` if present, otherwise the first script found.
 fn find_entry(scripts: &[PathBuf], project: &Path) -> String {
     let rel = |s: &PathBuf| s.strip_prefix(project).ok().map(|p| p.to_string_lossy().replace('\\', "/"));
+    // The shallowest match wins, so a package's main.py never outranks the project's.
+    let shallowest = |found: Vec<String>| found.into_iter().min_by_key(|r| (r.matches('/').count(), r.clone()));
     for c in ["main.py", "app.py", "index.py"] {
-        if let Some(s) = scripts.iter().find(|s| s.file_name().and_then(|n| n.to_str()) == Some(c)) {
-            return rel(s).unwrap_or_else(|| c.to_string());
+        if let Some(r) = shallowest(scripts.iter().filter(|s| s.file_name().and_then(|n| n.to_str()) == Some(c)).filter_map(rel).collect()) {
+            return r;
         }
     }
-    scripts
-        .iter()
-        .find(|s| s.extension().and_then(|e| e.to_str()) == Some("py"))
-        .and_then(rel)
+    shallowest(scripts.iter().filter(|s| s.extension().and_then(|e| e.to_str()) == Some("py")).filter_map(rel).collect())
         .unwrap_or_else(|| "main.py".to_string())
 }
 
@@ -456,6 +455,13 @@ mod tests {
     #[test]
     fn root_main_wins_over_nested_candidates() {
         let scripts = paths(&["./sub/app.py", "./main.py"]);
+        assert_eq!(find_entry(&scripts, Path::new(".")), "main.py");
+    }
+
+    // Linux lists a package folder before the root file, which once made the package the entry.
+    #[test]
+    fn root_main_wins_over_a_nested_main_listed_first() {
+        let scripts = paths(&["./pkg/main.py", "./main.py"]);
         assert_eq!(find_entry(&scripts, Path::new(".")), "main.py");
     }
 
