@@ -1,3 +1,4 @@
+import { decodeBundle } from './bundle.ts';
 import { fetchWithLockfile, requestUrl } from './fetch.ts';
 import { loadNativeModule, nativeTable } from './native.ts';
 import type { NativeLoader } from './native.ts';
@@ -184,6 +185,18 @@ export async function bfsPrefetch(rootSrc: string, exports: CompilerExports, loc
             }
             bytes = fetched;
             fetchedSources.set(spec, bytes);
+        }
+
+        // A published package is verified whole, its files answer from inside it and its entry runs as the module.
+        if (ext === '.edge') {
+            let bundle;
+            try { bundle = decodeBundle(bytes); }
+            catch (e) { failures.push(`'${spec}' is not a packed .edge: ${errMsg(e)}`); continue; }
+            const base = dirOf(spec);
+            for (const [path, file] of bundle.files) fetchedSources.set(base + path, file);
+            const entry = bundle.files.get(bundle.entry);
+            if (!entry) { failures.push(`'${spec}' names an entry it does not carry`); continue; }
+            bytes = entry;
         }
 
         if (spec.endsWith('edge.json')) {

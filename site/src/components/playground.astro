@@ -10,9 +10,11 @@ interface Props {
   minLines?: number
   maxLines?: number
   outputMaxLines?: number
+  // Packages the examples import beyond the official ones, by name to pinned url.
+  imports?: Record<string, string>
 }
 
-const { code, name, output = '', placeholder, minLines = 1, maxLines = 5, outputMaxLines = 5 } = Astro.props
+const { code, name, output = '', placeholder, minLines = 1, maxLines = 5, outputMaxLines = 5, imports } = Astro.props
 
 const rows = Math.min(Math.max(code.split('\n').length, minLines), maxLines)
 
@@ -21,7 +23,7 @@ const card = 'bg-page border border-line-strong rounded-2xl overflow-hidden p-4'
 const footer = 'flex items-center justify-between py-3 px-[17px] text-2xs text-fg-hint'
 ---
 
-<div data-playground data-cdn={env.CDN} data-min={minLines} data-expected={output}>
+<div data-playground data-cdn={env.CDN} data-min={minLines} data-expected={output} data-imports={imports && JSON.stringify(imports)}>
   <div class={panel}>
     <div class:list={[card, 'text-xs']}>
       <div
@@ -107,7 +109,8 @@ const footer = 'flex items-center justify-between py-3 px-[17px] text-2xs text-f
             buffer += chunk
             output!.textContent = applyControls(buffer).replace(/\n$/, '')
           },
-          (phase) => { status!.textContent = `Output, ${PHASES[phase]}` }
+          (phase) => { status!.textContent = `Output, ${PHASES[phase]}` },
+          JSON.parse(root.dataset.imports ?? '{}')
         )
 
         const text = applyControls(buffer).replace(/\n$/, '')

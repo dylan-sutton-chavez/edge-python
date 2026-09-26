@@ -70,7 +70,7 @@ pub fn run(file: Option<&Path>, code: Option<&str>, opts: &RunOpts) -> Result<i3
             input = Some(buf);
         }
     }
-    let project = Project::disk(dir_of(&name), opts.manifest.as_deref());
+    let project = Project::disk(&dir_of(&name), opts.manifest.as_deref());
     let mut vm = host()?.vm(stdout_sink(), project, None, None)?;
     vm.set_preempt_interval(opts.preempt)?;
     vm.set_source_name(&name)?;
@@ -87,7 +87,7 @@ pub fn run_bundle(payload: &[u8], opts: &RunOpts) -> Result<i32> {
         super::js::use_packed(bytes);
     }
     let src = files.get(&entry).map(|b| String::from_utf8_lossy(b).into_owned()).ok_or_else(|| anyhow!("bundle entry '{entry}' is missing"))?;
-    let project = Project::bundle(files, dir_of(&entry), false);
+    let project = Project::bundle(files, &dir_of(&entry), false);
     let mut vm = host()?.vm(stdout_sink(), project, None, None)?;
     vm.set_preempt_interval(opts.preempt)?;
     vm.set_source_name(&entry)?;

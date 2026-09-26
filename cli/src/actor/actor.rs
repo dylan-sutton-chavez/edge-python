@@ -288,7 +288,7 @@ fn unbundle(body: &str) -> Option<(String, HashMap<String, Vec<u8>>, String)> {
     let entry = bundle.entry.clone();
     let files = bundle.into_files();
     let source = String::from_utf8_lossy(files.get(&entry)?).into_owned();
-    Some((source, files, dir_of(&entry).to_string()))
+    Some((source, files, dir_of(&entry)))
 }
 
 /* The print sink a group's setting names, a file opens in append mode. */
