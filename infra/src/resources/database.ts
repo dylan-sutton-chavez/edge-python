@@ -49,7 +49,8 @@ export async function reset_database() {
   const id = await ensure_database()
 
   const tables = await query<{ name: string }>(id, "select name from sqlite_master where type = 'table' and name not like '\\_cf\\_%' escape '\\' and name not like 'sqlite\\_%' escape '\\'")
-  for (const { name } of tables) await query(id, `drop table if exists "${name}"`)
+  // One batch with the foreign keys checked at its end, so a table others still reference can drop first.
+  if (tables.length) await query(id, ['pragma defer_foreign_keys = true', ...tables.map(({ name }) => `drop table if exists "${name}"`)].join(';\n'))
 
   await build(id)
   console.log(`D1 "${DB_NAME}" rebuilt from the schema and seeded.`)

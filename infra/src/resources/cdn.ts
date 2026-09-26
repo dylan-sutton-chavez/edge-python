@@ -139,6 +139,7 @@ export async function delete_keys(bucket: string, keys: string[]) {
 }
 
 // A promote replaces the whole dev tree, so keys the run no longer ships go away.
+// 010100101010 REVERT THIS COMMIT BEFORE LAUNCH. KEEP THE PUBLISHED PACKAGES UNDER pkg/ OUT OF THIS PRUNE, OR EVERY TAG DELETES THEM.
 export async function prune(bucket: string, shipped: string[]) {
   const keep = new Set(shipped)
   await delete_keys(bucket, (await list_keys(bucket)).filter((key) => !keep.has(key)))
