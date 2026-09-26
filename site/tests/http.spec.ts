@@ -470,12 +470,22 @@ test.describe('publishing', () => {
       ['the magic without a body', Buffer.from('EDGEPKG\u0001', 'binary')],
       ['no edge.json inside', packed({ 'main.py': 'print(1)\n' })],
       ['an edge.json that is not JSON', packed({ 'edge.json': '{ nope', 'main.py': '' })],
-      ['a path climbing out of the tree', packed({ 'edge.json': '{}', '../escape.py': '' })]
+      ['a path climbing out of the tree', packed({ 'edge.json': '{}', '../escape.py': '' })],
+      ['a url climbing out of its host', packed({ 'edge.json': '{}', 'https://cdn.edgepython.com/../escape.py': '' })]
     ]
 
     for (const [why, buffer] of bad) {
       expect((await send(request, token, buffer)).status(), why).toBe(400)
     }
+  })
+
+  // edge build keys a module it vendors by its url, so a package with a url dependency publishes.
+  test('takes a package that carries a dependency under its url', async ({ request }) => {
+    await signIn(request)
+    const token = await mintToken(request)
+    const files = { 'https://cdn.edgepython.com/pkg/test/0.1.0/app.edge': 'EDGEPKG\u0001' }
+
+    expect((await send(request, token, release(naming(), '0.1.0', {}, files))).status()).toBe(201)
   })
 
   /* A notice of any shape belongs in a bundle, whether the registry can name the license or not, since one it cannot read is not one that is missing. Three versions of one package, because claiming three names is rate limited and the names are not what is under test. */

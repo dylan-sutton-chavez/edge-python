@@ -101,12 +101,14 @@ function docs(files: Map<string, Uint8Array>): Record<string, string> {
 function relative(path: string): string {
   if (!path) throw new Error('That package has an empty path in it.')
 
-  const segments = path.split('/').filter((segment) => segment !== '.')
+  // A module vendored from a url rides under that url, the address it answers at run time.
+  const scheme = path.startsWith('https://') ? 'https://' : ''
+  const segments = path.slice(scheme.length).split('/').filter((segment) => segment !== '.')
   if (segments.some((segment) => segment === '' || segment === '..' || segment.includes('\\'))) {
     throw new Error(`'${path}' is not a plain relative path.`)
   }
 
-  return segments.join('/')
+  return scheme + segments.join('/')
 }
 
 /* A cursor over the archive, where every length is ascii digits closed by a newline. */
