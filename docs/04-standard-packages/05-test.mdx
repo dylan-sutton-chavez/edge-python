@@ -7,7 +7,7 @@ description: "A unit-test harness written in pure Edge Python."
 
 `test` is a unit-test harness written in pure Edge Python, not a compiled plugin. Declare it with `edge add test` and import it by bare name. To pin a different version, point the `edge.json` entry at another URL, see [Modules](/docs/reference/modules#edgejson).
 
-`@fixture` registers a factory under its function's name. `@test(description, *uses)` registers a test and the fixtures to inject by keyword. `raises(ExcType)` is a context manager asserting the block raises, and it accepts a class or a tuple of classes. `run()` executes every registered test, prints a `PASS -`, `FAIL -`, or `ERROR` line per test plus a summary, and raises `SystemExit(1)` if anything failed, else `SystemExit(0)`. Fixtures are flat and built fresh per test, with no scopes, autouse, or parametrization. One module-level registry holds every test, so `run()` executes all of them.
+`@fixture` registers a factory under its function's name. `@test(description, *uses)` registers a test and the fixtures to inject by keyword. `raises(ExcType)` is a context manager asserting the block raises, and it accepts a class or a tuple of classes. `run()` executes every registered test, prints a `pass.`, `fail.` or `error.` line per test plus a summary, and raises `SystemExit(1)` if anything failed, else `SystemExit(0)`. Fixtures are flat and built fresh per test, with no scopes, autouse, or parametrization. One module-level registry holds every test, so `run()` executes all of them.
 
 ```edge-python
 from test import fixture, test, raises, run
@@ -29,8 +29,8 @@ run()
 ```
 
 ```output
-PASS - user has a name
-PASS - division by zero raises
+pass. user has a name
+pass. division by zero raises
 2 passed, 0 failed
 ```
 
@@ -56,12 +56,12 @@ run()
 ```
 
 ```output
-PASS - first sees an empty list
-PASS - second also sees an empty list
+pass. first sees an empty list
+pass. second also sees an empty list
 2 passed, 0 failed
 ```
 
-A failed assertion prints a `FAIL -` line with the error, and `run()` exits nonzero:
+A failed assertion prints a `fail.` line with the error, and `run()` exits nonzero:
 
 ```edge-python
 from test import test, run
@@ -78,8 +78,8 @@ run()
 ```
 
 ```output
-PASS - two plus two
-FAIL - this one fails (AssertionError: letter missing)
+pass. two plus two
+fail. this one fails (AssertionError: letter missing)
 1 passed, 1 failed
 ```
 

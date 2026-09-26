@@ -715,8 +715,8 @@ run()
 ```
 
 ```text Output
-PASS - sum adds up
-PASS - division by zero raises
+pass. sum adds up
+pass. division by zero raises
 2 passed, 0 failed
 ```
 
