@@ -6,9 +6,6 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-// The pure Edge Python test package, embedded at build time.
-const TEST_PY: &str = include_str!("../../../std/test/src/entry.py");
-const TEST_SPEC: &str = "https://cdn.edgepython.com/std/test.py";
 // How a fetch error reads when the server says the file does not exist.
 const ABSENT: &str = "not found on the server";
 // Bounds a runaway download, the largest module is well under a megabyte.
@@ -89,12 +86,6 @@ impl<'a> Walk<'a> {
                 self.manifest(&spec);
                 continue;
             }
-            if let Some(name) = std_name(&spec) {
-                if let Err(e) = plugins::register(self.inst, name, &spec) {
-                    self.failures.push(e);
-                }
-                continue;
-            }
             match extension(&spec) {
                 "js" | "mjs" => self.javascript(&spec),
                 "so" | "dylib" => self.refuse(&spec, "is not supported, ship a .wasm"),
@@ -118,11 +109,8 @@ impl<'a> Walk<'a> {
     fn refuse_undeclared(&mut self) {
         let names: HashSet<String> = self.pending_bare.drain(..).map(|(name, _)| name).collect();
         for name in names {
-            let help = match crate::manifest::registry(&name) {
-                Some(_) => format!("run `edge add {name}`"),
-                None => "declare it in edge.json, or use a relative import".to_string(),
-            };
-            let msg = format!("module '{name}' is not provided by this host and no edge.json declares it\nhelp: {help}");
+            // 010100101010 ONCE EDGE-PYTHON-STD PUBLISHES TO THE REGISTRY, SUGGEST `edge add <name>` FOR A NAME THE REGISTRY KNOWS.
+            let msg = format!("module '{name}' is not provided by this host and no edge.json declares it\nhelp: declare it in edge.json, or use a relative import");
             if let Err(e) = self.inst.register_error(&name, &msg) {
                 self.failures.push(e);
             }
@@ -142,10 +130,7 @@ impl<'a> Walk<'a> {
         for imp in scan_imports(&text) {
             self.enqueue_import(imp, &dir, via.as_deref());
         }
-        // The embedded test package has no manifest to probe, the CDN would only answer 404.
-        if target(spec) != TEST_SPEC {
-            self.enqueue_manifest_chain(&dir);
-        }
+        self.enqueue_manifest_chain(&dir);
     }
 
     /* A third party wasm plugin, compiled by Cranelift and instantiated beside the compiler. */
@@ -347,9 +332,6 @@ impl<'a> Walk<'a> {
     /* Bytes for a spec, the bundle, a pinned download or the disk, None when absent. */
     fn fetch(&mut self, spec: &str) -> Result<Option<Vec<u8>>, String> {
         let (target, pin) = parse_integrity(spec)?;
-        if target == TEST_SPEC {
-            return Ok(Some(TEST_PY.as_bytes().to_vec()));
-        }
         let packed = self.project.bundle.as_ref().map(|files| files.get(target.strip_prefix("./").unwrap_or(target)).cloned());
         let bytes = if let Some(Some(bytes)) = packed {
             Some(bytes)
@@ -389,11 +371,6 @@ fn extension(spec: &str) -> &str {
     file.rsplit_once('.').map_or("", |(_, ext)| ext)
 }
 
-/* An official std spec names a built-in package, the fragment is left to the caller. */
-fn std_name(spec: &str) -> Option<&'static str> {
-    let name = target(spec).strip_prefix(plugins::STD_BASE)?.strip_suffix(".wasm")?;
-    ["json", "re", "math", "struct"].into_iter().find(|n| *n == name)
-}
 
 /* A remote manifest, None when it is absent, a 404 leaves a `.missing` marker in the cache. */
 fn fetch_manifest(url: &str) -> Option<Vec<u8>> {

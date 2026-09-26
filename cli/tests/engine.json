@@ -26,6 +26,7 @@
     "steps": [{ "run": ["run", "main.py"], "exit": 1, "stderr": ["--> main.py:2:1"], "stderr_bytes": 2000000 }]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "name": "a browser library fails where it touches a missing Web API",
     "given": {
       "edge.json": "{ \"imports\": { \"storage\": \"https://cdn.edgepython.com/js/builtins/storage/index.js\", \"dom\": \"https://cdn.edgepython.com/js/builtins/dom/entry.py\" } }\n",
@@ -78,6 +79,7 @@
     "steps": [{ "run": ["run", "main.py"], "stdout": ["pong x\n"] }]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "name": "a Web API the runtime lacks fails at the call",
     "given": {
       "edge.json": "{ \"imports\": { \"network\": \"https://cdn.edgepython.com/js/builtins/network/index.js\", \"time\": \"https://cdn.edgepython.com/js/builtins/time/index.js\" } }\n",
@@ -108,6 +110,7 @@
     "steps": [{ "run": ["run", "main.py"], "exit": 1, "stderr": ["integrity check failed for './w.js'", "--> <input>:1:8"] }]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "name": "an undeclared official name says how to declare it",
     "given": { "main.py": "x = 1\nimport json\n" },
     "steps": [{ "run": ["run", "main.py"], "exit": 1, "stderr": ["error: module 'json' is not provided by this host and no edge.json declares it\nhelp: run `edge add json`\n", "--> <input>:2:8"] }]
@@ -137,6 +140,7 @@
     "steps": [{ "run": ["actor", "pool.yml"], "lines": { "ok ": 20000 } }]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "name": "thousands of actors share the std packages",
     "given": {
       "edge.json": "{ \"imports\": { \"json\": \"https://cdn.edgepython.com/std/json.wasm\", \"re\": \"https://cdn.edgepython.com/std/re.wasm\", \"math\": \"https://cdn.edgepython.com/std/math.wasm\", \"struct\": \"https://cdn.edgepython.com/std/struct.wasm\" } }\n",

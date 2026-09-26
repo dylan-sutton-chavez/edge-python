@@ -390,6 +390,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
         // Imported natives shadow builtins, matching Python `from x import *` rebinding.
         if let Some(&extern_idx) = self.chunk.extern_index.get(&name) {
+            self.chunk.emit(OpCode::BeginArgs, 0);
             let (pos, kw) = self.parse_args();
             if pos > 0xF || kw > 0xF { self.error("native calls take at most 15 positional and 15 keyword arguments"); }
             // Operand packs extern_idx<<8 | kw<<4 | pos, same layout as Call.

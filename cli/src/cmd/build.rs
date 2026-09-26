@@ -63,6 +63,8 @@ fn collect_bundle(manifest_path: &Path, with_docs: bool) -> Result<(Bundle, bool
     let mut files = Vec::new();
     for s in scripts.iter().chain(&notices) {
         let rel = s.strip_prefix(&project).unwrap_or(s).to_string_lossy().replace('\\', "/");
+        // The root manifest is the one the command names, pushed below whatever its file is called.
+        if rel == "edge.json" { continue; }
         files.push(Entry { path: rel, bytes: fs::read(s).with_context(|| format!("reading {}", s.display()))? });
     }
     let mut javascript = false;
@@ -78,6 +80,13 @@ fn collect_bundle(manifest_path: &Path, with_docs: bool) -> Result<(Bundle, bool
         }
         javascript = vendor_bundle(&manifest, &mut files)?;
     }
+    // A nested package answers to its own manifest, so its url modules and runtime ride along too.
+    let nested: Vec<PathBuf> = files.iter().filter(|f| f.path.ends_with("/edge.json")).map(|f| project.join(&f.path)).collect();
+    for path in nested {
+        javascript |= vendor_bundle(&Manifest::load(&path)?, &mut files)?;
+    }
+    let mut kept = HashSet::new();
+    files.retain(|f| kept.insert(f.path.clone()));
     Ok((Bundle { entry: find_entry(&scripts, &project), files }, javascript))
 }
 
@@ -262,7 +271,7 @@ fn vendor_js(out_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Walk the project for `.py`, JavaScript and `.wasm` plugin files, skipping hidden dirs and the output directory itself.
+/// Walk the project for `.py`, JavaScript, `.wasm` plugin and `edge.json` files, skipping hidden dirs and the output directory itself.
 fn collect_scripts(project: &Path, out_dir: &Path) -> Vec<PathBuf> {
     let mut scripts = Vec::new();
     let out_dir = fs::canonicalize(out_dir).unwrap_or_else(|_| out_dir.to_path_buf());
@@ -285,7 +294,7 @@ fn walk(dir: &Path, out_dir: &Path, found: &mut Vec<PathBuf>) {
         }
         if path.is_dir() {
             walk(&path, out_dir, found);
-        } else if matches!(path.extension().and_then(|e| e.to_str()), Some("py" | "js" | "mjs" | "wasm")) {
+        } else if name == "edge.json" || matches!(path.extension().and_then(|e| e.to_str()), Some("py" | "js" | "mjs" | "wasm")) {
             found.push(path);
         }
     }
@@ -515,6 +524,22 @@ mod tests {
         paths.sort();
         assert_eq!(paths, ["src/entry.py", "src/json.wasm"]);
         assert_eq!(bundle.entry, "src/entry.py");
+    }
+
+    // A package keeps its own manifest, and the root one rides once under its fixed name.
+    #[test]
+    fn a_bundle_carries_a_nested_manifest_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path();
+        fs::create_dir(project.join("pkg")).unwrap();
+        fs::write(project.join("main.py"), "import pkg").unwrap();
+        fs::write(project.join("edge.json"), r#"{ "imports": { "pkg": "./pkg/main.py" } }"#).unwrap();
+        fs::write(project.join("pkg/main.py"), "import _slug").unwrap();
+        fs::write(project.join("pkg/edge.json"), r#"{ "imports": { "_slug": "./slug.wasm" } }"#).unwrap();
+        let (bundle, _) = collect_bundle(&project.join("edge.json"), false).unwrap();
+        let mut paths: Vec<&str> = bundle.files.iter().map(|f| f.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(paths, ["edge.json", "main.py", "pkg/edge.json", "pkg/main.py"]);
     }
 
     #[test]

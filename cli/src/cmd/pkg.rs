@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Result};
 use std::path::Path;
 
 use crate::host::{get, site};
-use crate::manifest::{registry, Manifest};
+use crate::manifest::Manifest;
 use crate::ui;
 
 /* The newest version of a published package, pinned to the digest the registry reports, so a build fails if those bytes ever change. */
@@ -34,11 +34,7 @@ pub fn add(path: &Path, pkgs: &[String]) -> Result<()> {
             let (name, url_override) = parse_spec(spec);
             let url = match url_override {
                 Some(u) => u,
-                // An official name resolves offline, anything else is looked up in the registry.
-                None => match registry(name) {
-                    Some(official) => official.to_string(),
-                    None => published(name)?,
-                },
+                None => published(name)?,
             };
             Ok::<_, anyhow::Error>((name, url))
         })

@@ -19,24 +19,28 @@
     "creates": ["main.py", "edge.json", "index.html"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": { "edge.json": "{}\n" },
     "run": ["add", "math"],
     "stdout": ["+ math       https://cdn.edgepython.com/std/math.wasm"],
     "contains": { "edge.json": "cdn.edgepython.com/std/math.wasm" }
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": { "edge.json": "{}\n" },
     "run": ["add", "network"],
     "stdout": ["+ network    https://cdn.edgepython.com/js/builtins/network/index.js"],
     "contains": { "edge.json": "\"imports\": {\n    \"network\": \"https://cdn.edgepython.com/js/builtins/network/index.js\"" }
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": { "edge.json": "{}\n" },
     "run": ["add", "test"],
     "stdout": ["+ test       https://cdn.edgepython.com/std/test.py"],
     "contains": { "edge.json": "cdn.edgepython.com/std/test.py" }
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": { "edge.json": "{}\n" },
     "run": ["add", "dom"],
     "stdout": ["+ dom        https://cdn.edgepython.com/js/builtins/dom/entry.py"],
@@ -53,17 +57,20 @@
     "fails": ["unknown package 'mystery'"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": { "edge.json": "{ \"system\": { \"time\": \"https://cdn.edgepython.com/js/builtins/time/index.js\" } }\n" },
     "run": ["add", "math"],
     "fails": ["edge.json at 'edge.json': move the system entries into imports"],
     "contains": { "edge.json": "\"system\"" }
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": { "edge.json": "{ \"extends\": \"..\", \"imports\": {} }\n" },
     "run": ["add", "math"],
     "contains": { "edge.json": "\"extends\": \"..\"" }
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": { "edge.json": "{}\n" },
     "run": ["add", "math", "mystery"],
     "fails": ["unknown package 'mystery'"],
@@ -94,6 +101,7 @@
     "fails": ["nothing to remove"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": { "custom.json": "{}\n" },
     "run": ["--manifest", "custom.json", "add", "math"],
     "contains": { "custom.json": "cdn.edgepython.com/std/math.wasm" }
@@ -107,15 +115,18 @@
     "fails": ["unrecognized subcommand"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "run": ["test"],
     "fails": ["no *_test.py files found"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": { "a_test.py": "raise SystemExit(0)\n" },
     "run": ["test"],
     "fails": ["declare test in edge.json (edge add test)"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": {
       "sub/util.py": "def add(a, b):\n    return a + b\n",
       "sub/s_test.py": "from .util import add\nfrom test import test\n\n@test(\"adds\")\ndef t_add():\n    assert add(2, 3) == 5\n",
@@ -125,6 +136,7 @@
     "stdout": ["PASS - adds", "(successful) sub/s_test.py", "1/1 files passed"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": {
       "f_test.py": "from test import test\n\n@test(\"breaks\")\ndef t():\n    assert 1 == 2\n",
       "edge.json": "{ \"imports\": { \"test\": \"https://cdn.edgepython.com/std/test.py\" } }\n"
@@ -134,6 +146,7 @@
     "stdout": ["FAIL - breaks", "(unsuccessful) f_test.py", "0/1 files passed"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": {
       "e_test.py": "x = 1\n",
       "edge.json": "{ \"imports\": { \"test\": \"https://cdn.edgepython.com/std/test.py\" } }\n"
@@ -177,6 +190,7 @@
     "stderr": ["NameError"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "run": ["repl"],
     "stdin": "from time import sleep\nsleep(0.05)\nprint(\"done\")\n.exit\n",
     "stdout": ["done"],
@@ -293,6 +307,7 @@
     "fails": ["--> late.py:3:1", "x = 1 / 0"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": {
       "edge.json": "{ \"imports\": { \"network\": \"https://cdn.edgepython.com/js/builtins/network/index.js\" } }\n",
       "main.py": "from network import fetch_text\nprint(\"before\")\nbody = fetch_text(\"http://127.0.0.1:1/\")\nprint(\"after\")\n"
@@ -302,6 +317,7 @@
     "fails": ["RuntimeError", "--> main.py:3:1", "fetch_text("]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": {
       "edge.json": "{ \"imports\": { \"dom\": \"https://cdn.edgepython.com/js/builtins/dom/entry.py\" } }\n",
       "main.py": "import dom\ndom.body()\n"
@@ -315,6 +331,7 @@
     "fails": ["frame() needs requestAnimationFrame, missing in this runtime"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": {
       "edge.json": "{ \"imports\": { \"storage\": \"https://cdn.edgepython.com/js/builtins/storage/index.js\" } }\n",
       "main.py": "import storage\nstorage.local_get('k')\n"
@@ -342,6 +359,7 @@
     "stdout": ["42"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": {
       "edge.json": "{ \"system\": { \"time\": \"https://cdn.edgepython.com/js/builtins/time/index.js\" } }\n",
       "main.py": "print(1)\n"
@@ -384,6 +402,7 @@
     "fails": ["module 'x' is not supported, ship a .wasm"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": {
       "edge.json": "{ \"imports\": { \"network\": \"https://cdn.edgepython.com/js/builtins/network/index.js\", \"dom\": \"https://cdn.edgepython.com/js/builtins/dom/entry.py\" } }\n",
       "main.py": "print(\"ok\")\n"
@@ -393,6 +412,7 @@
     "contains": { "dist/edge.json": "\"dom\": \"./vendor/dom/entry.py\",\n    \"network\": \"./vendor/network/index.js\"" }
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": {
       "edge.json": "{ \"imports\": { \"time\": \"https://cdn.edgepython.com/js/builtins/time/index.js\" } }\n",
       "main.py": "from time import time\nprint(\"packed\", time() > 0)\n"
@@ -421,6 +441,7 @@
     }
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": {
       "edge.json": "{ \"imports\": { \"json\": \"https://cdn.edgepython.com/std/json.wasm\" } }\n",
       "main.py": "import json\nprint(json.dumps({\"n\": 1}))\n"
@@ -434,6 +455,7 @@
     }
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": {
       "edge.json": "{ \"imports\": { \"json\": \"https://cdn.edgepython.com/std/json.wasm\" } }\n",
       "main.py": "import json\nprint(json.dumps({\"n\": 1}))\n"
@@ -483,6 +505,7 @@
     "fails": ["the cap is 60"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": {
       "edge.json": "{ \"imports\": { \"json\": \"https://cdn.edgepython.com/std/json.wasm\" } }\n",
       "main.py": "import json\nprint(json.dumps({\"a\": [1, True, None]}))\n"
@@ -491,6 +514,7 @@
     "stdout": ["{\"a\":[1,true,null]}"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": {
       "edge.json": "{ \"imports\": { \"re\": \"https://cdn.edgepython.com/std/re.wasm\" } }\n",
       "main.py": "import re\nprint(re.search(r'\\d+', 'abc123def'))\n"
@@ -499,6 +523,7 @@
     "stdout": ["123"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": {
       "edge.json": "{ \"imports\": { \"math\": \"https://cdn.edgepython.com/std/math.wasm\" } }\n",
       "main.py": "import math\nprint(math.floor(2.7))\n"
@@ -507,6 +532,7 @@
     "stdout": ["2"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": {
       "edge.json": "{ \"imports\": { \"struct\": \"https://cdn.edgepython.com/std/struct.wasm\" } }\n",
       "main.py": "import struct\nprint(struct.calcsize('i'))\n"
@@ -515,6 +541,7 @@
     "stdout": ["4"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": {
       "edge.json": "{ \"imports\": { \"test\": \"https://cdn.edgepython.com/std/test.py\" } }\n",
       "main.py": "from test import test\nprint(callable(test))\n"

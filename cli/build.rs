@@ -10,20 +10,16 @@ mod sha256;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
-const STD: [&str; 4] = ["json", "re", "math", "struct"];
-
 // The StarlingMonkey release the JavaScript runtime is built from, starlingmonkey-v0.3.0.
 const STARLING_SHA256: &str = "b5707b9d97164e0c29e471844a9ccdd81c445a5d379a9299ae2ee7a9dab3aabe";
 
 fn main() {
     println!("cargo:rerun-if-env-changed=EDGE_COMPILER_WASM");
-    println!("cargo:rerun-if-env-changed=EDGE_STD_DIR");
     println!("cargo:rerun-if-env-changed=EDGE_STARLING_WASM");
     println!("cargo:rerun-if-env-changed=EDGE_JS_DIST");
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let target = std::env::var("TARGET").expect("TARGET");
-    registry(&manifest.join(".."), &out.join("registry.rs"));
     let mut cfg = config::base();
     cfg.target(&target).expect("wasmtime has no backend for the build target");
     cfg.cranelift_opt_level(wasmtime::OptLevel::Speed);
@@ -36,9 +32,6 @@ fn main() {
     std::fs::copy(&compiler, out.join("compiler.wasm")).unwrap_or_else(|e| panic!("copying {}: {e}", compiler.display()));
     let js_dist = std::env::var("EDGE_JS_DIST").map(PathBuf::from).unwrap_or_else(|_| manifest.join("../js/dist"));
     js_host(&js_dist, &out.join("js_host.rs"));
-    for pkg in STD {
-        precompile(&engine, &std_wasm(&manifest, pkg), &out.join(format!("{pkg}.cwasm")), &format!("build std/{pkg} first"), |e, b| e.precompile_module(b));
-    }
     let starling = std::env::var("EDGE_STARLING_WASM").map(PathBuf::from).unwrap_or_else(|_| manifest.join("../target/starling.wasm"));
     js_runtime(&starling, &target, &out);
 }
@@ -78,41 +71,6 @@ fn js_runtime(input: &Path, target: &str, out: &Path) {
     }
 }
 
-/* The name to url index `edge add` reads, one entry per package directory in std and js/builtins. */
-fn registry(repo: &Path, out: &Path) {
-    let (std, builtins) = (repo.join("std"), repo.join("js/builtins"));
-    println!("cargo:rerun-if-changed={}", std.display());
-    println!("cargo:rerun-if-changed={}", builtins.display());
-    let mut entries = Vec::new();
-    for (name, dir) in packages(&std) {
-        if dir.join("Cargo.toml").exists() {
-            entries.push((name, "std", "wasm".to_string()));
-        } else if dir.join("src/entry.py").exists() {
-            entries.push((name, "std", "py".to_string()));
-        }
-    }
-    for (name, dir) in packages(&builtins) {
-        // A Python facade is the entry when the library has one, its JavaScript sits behind it.
-        for file in ["entry.py", "index.js"] {
-            if dir.join("src").join(file).exists() {
-                entries.push((name, "js/builtins", file.to_string()));
-                break;
-            }
-        }
-    }
-    entries.sort();
-    let mut table = String::from("const REGISTRY: &[(&str, &str)] = &[\n");
-    for (name, tree, file) in entries {
-        let url = match tree {
-            "std" => format!("https://cdn.edgepython.com/std/{name}.{file}"),
-            _ => format!("https://cdn.edgepython.com/js/builtins/{name}/{file}"),
-        };
-        table.push_str(&format!("    ({name:?}, {url:?}),\n"));
-    }
-    table.push_str("];\n");
-    std::fs::write(out, table).unwrap_or_else(|e| panic!("writing {}: {e}", out.display()));
-}
-
 /* The compiled JS host the binary carries, keyed by the path the CDN serves each file at, so a page's imports read the same from a dist, from a headless run, or from the CDN. */
 fn js_host(dist: &Path, out: &Path) {
     println!("cargo:rerun-if-changed={}", dist.display());
@@ -143,25 +101,6 @@ fn walk_js(root: &Path, dir: &Path, found: &mut Vec<(String, PathBuf)>) {
             found.push((format!("src/{rel}"), path));
         }
     }
-}
-
-fn packages(tree: &Path) -> Vec<(String, PathBuf)> {
-    let entries = std::fs::read_dir(tree).unwrap_or_else(|e| panic!("reading {}: {e}", tree.display()));
-    entries
-        .flatten()
-        .filter(|e| e.path().is_dir())
-        .filter_map(|e| Some((e.file_name().into_string().ok()?, e.path())))
-        .collect()
-}
-
-// The struct crate is named after a Rust keyword, so its artifact carries the edge prefix.
-fn std_wasm(manifest: &Path, pkg: &str) -> PathBuf {
-    if let Ok(dir) = std::env::var("EDGE_STD_DIR") {
-        return PathBuf::from(dir).join(format!("{pkg}.wasm"));
-    }
-    let release = manifest.join(format!("../std/{pkg}/target/wasm32-unknown-unknown/release"));
-    let plain = release.join(format!("{pkg}.wasm"));
-    if plain.exists() { plain } else { release.join(format!("edge_{pkg}.wasm")) }
 }
 
 fn precompile(engine: &wasmtime::Engine, input: &Path, output: &Path, hint: &str, compile: fn(&wasmtime::Engine, &[u8]) -> wasmtime::Result<Vec<u8>>) {

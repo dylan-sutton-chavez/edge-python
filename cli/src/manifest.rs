@@ -3,9 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-// The name to url index `edge add` reads, generated from the std and js/builtins directories.
-include!(concat!(env!("OUT_DIR"), "/registry.rs"));
-
 // A short description reads as one line in a listing, past this it is a readme.
 const MAX_DESCRIPTION: usize = 60;
 
@@ -83,11 +80,6 @@ impl Manifest {
         let text = serde_json::to_string_pretty(self)?;
         std::fs::write(path, format!("{text}\n")).with_context(|| format!("writing {}", path.display()))
     }
-}
-
-/// The url `edge add` writes for an official package name.
-pub fn registry(name: &str) -> Option<&'static str> {
-    REGISTRY.iter().find(|(n, _)| *n == name).map(|(_, url)| *url)
 }
 
 /* A name that reads the same in a url, an import and a listing. */

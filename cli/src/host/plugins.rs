@@ -3,9 +3,6 @@ use anyhow::{anyhow, Result};
 use compiler::abi::EDGE_ABI_VERSION;
 use wasmtime::{Caller, ExternType, InstancePre, Linker, Memory, TypedFunc};
 
-// The std specs `edge add` writes, the built-in packages answer to them.
-pub const STD_BASE: &str = "https://cdn.edgepython.com/std/";
-
 /* The six `env` imports a plugin declares, each bridges guest memory to the compiler exports. */
 pub fn link(linker: &mut Linker<State>) -> Result<()> {
     linker
@@ -112,17 +109,7 @@ fn guest_memory(caller: &mut Caller<'_, State>) -> wasmtime::Result<Memory> {
         .ok_or_else(|| wasmtime::format_err!("plugin exports no memory"))
 }
 
-/* Instantiates a built-in std package in the instance's store and registers its exports under `spec`. */
-pub fn register(inst: &mut Instance, name: &str, spec: &str) -> Result<(), String> {
-    if let Some((base, names)) = inst.store.data().registered.get(spec).cloned() {
-        return inst.register_native(spec, &names, base);
-    }
-    let host = inst.host.clone();
-    let pre = host.std_pre(name)?.ok_or_else(|| format!("no built-in std package '{name}'"))?;
-    register_pre(inst, &format!("std '{name}'"), spec, &pre)
-}
-
-/* Instantiates a third party plugin from its bytes, once per instance like a std package. */
+/* Instantiates a third party plugin from its bytes, once per instance. */
 pub fn register_bytes(inst: &mut Instance, name: &str, spec: &str, bytes: &[u8]) -> Result<(), String> {
     if let Some((base, names)) = inst.store.data().registered.get(spec).cloned() {
         return inst.register_native(spec, &names, base);

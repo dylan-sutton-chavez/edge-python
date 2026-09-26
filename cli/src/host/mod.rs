@@ -17,18 +17,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use wasmtime::{AsContextMut, Engine, Instance as Wasm, InstancePre, Linker, Memory, Module, ResourceLimiter, Store, TypedFunc};
 use wasmtime_wasi_http::p2::bindings::sync::ProxyPre;
 
 const COMPILER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/compiler.cwasm"));
-// Each std package is deserialized the first time a program imports it.
-const STD: [(&str, &[u8]); 4] = [
-    ("json", include_bytes!(concat!(env!("OUT_DIR"), "/json.cwasm"))),
-    ("re", include_bytes!(concat!(env!("OUT_DIR"), "/re.cwasm"))),
-    ("math", include_bytes!(concat!(env!("OUT_DIR"), "/math.cwasm"))),
-    ("struct", include_bytes!(concat!(env!("OUT_DIR"), "/struct.cwasm"))),
-];
 
 // The official origin every package url starts with.
 pub const ORIGIN: &str = "https://cdn.edgepython.com";
@@ -122,7 +115,6 @@ pub type EdgeOp = TypedFunc<(i32, i32, i32, i32, i32, i32, i32), i32>;
 pub struct Runtime {
     pub engine: Engine,
     compiler: Module,
-    std: [OnceLock<Module>; 4],
     // The JavaScript runtime, loaded on the first JavaScript import and retried after a failure.
     js: Mutex<Option<ProxyPre<js::JsState>>>,
 }
@@ -131,7 +123,7 @@ impl Runtime {
     pub fn new() -> Result<Arc<Runtime>> {
         let engine = wt(Engine::new(&config::base()))?;
         let compiler = wt(unsafe { Module::deserialize(&engine, COMPILER) })?;
-        Ok(Arc::new(Runtime { engine, compiler, std: Default::default(), js: Mutex::new(None) }))
+        Ok(Arc::new(Runtime { engine, compiler, js: Mutex::new(None) }))
     }
 
     /* StarlingMonkey ready to instantiate, fetched from the CDN the first time any process needs it. */
@@ -143,16 +135,6 @@ impl Runtime {
         let pre = js::load(&self.engine)?;
         *slot = Some(pre.clone());
         Ok(pre)
-    }
-
-    /* A std package's module, None for a name that is not built in. */
-    fn std_module(&self, name: &str) -> Result<Option<&Module>> {
-        let Some(i) = STD.iter().position(|(n, _)| *n == name) else { return Ok(None) };
-        if let Some(module) = self.std[i].get() {
-            return Ok(Some(module));
-        }
-        let module = wt(unsafe { Module::deserialize(&self.engine, STD[i].1) })?;
-        Ok(Some(self.std[i].get_or_init(|| module)))
     }
 
     /* Advances the engine epoch every tick so untrusted deadlines fire. */
@@ -172,7 +154,6 @@ pub struct Host {
     pub runtime: Arc<Runtime>,
     compiler: InstancePre<State>,
     guest: Linker<State>,
-    std: RefCell<HashMap<String, InstancePre<State>>>,
     // Third party plugins by the sha256 of their bytes, compiled once per thread.
     plugins: RefCell<HashMap<[u8; 32], InstancePre<State>>>,
 }
@@ -184,7 +165,7 @@ impl Host {
         let compiler = wt(linker.instantiate_pre(&runtime.compiler))?;
         let mut guest = Linker::new(&runtime.engine);
         plugins::link(&mut guest)?;
-        Ok(Rc::new(Host { runtime, compiler, guest, std: RefCell::new(HashMap::new()), plugins: RefCell::new(HashMap::new()) }))
+        Ok(Rc::new(Host { runtime, compiler, guest, plugins: RefCell::new(HashMap::new()) }))
     }
 
     /* A third party plugin linked for instantiation, Cranelift compiles it on the first sight. */
@@ -202,16 +183,6 @@ impl Host {
     /* A plugin module linked against the six guest imports. */
     pub fn plugin_pre(&self, module: &Module) -> Result<InstancePre<State>, String> {
         wt(self.guest.instantiate_pre(module)).map_err(|e| e.to_string())
-    }
-
-    fn std_pre(&self, name: &str) -> Result<Option<InstancePre<State>>, String> {
-        if let Some(pre) = self.std.borrow().get(name) {
-            return Ok(Some(pre.clone()));
-        }
-        let Some(module) = self.runtime.std_module(name).map_err(|e| e.to_string())? else { return Ok(None) };
-        let pre = self.plugin_pre(module)?;
-        self.std.borrow_mut().insert(name.to_string(), pre.clone());
-        Ok(Some(pre))
     }
 }
 

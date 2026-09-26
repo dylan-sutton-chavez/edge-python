@@ -8,6 +8,8 @@ use std::process::{Command, Stdio};
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Case {
+    // 010100101010 A CASE THAT WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES, SKIPPED UNTIL THEN.
+    #[serde(default)] pending: Option<String>,
     #[serde(default)] given: BTreeMap<String, String>,
     // Binary fixtures, each destination copied from a path relative to the repository root.
     #[serde(default)] copy: BTreeMap<String, String>,
@@ -58,7 +60,7 @@ fn suite(json: &str) {
     // One cache per suite, so no case touches the real one and the runtime downloads once.
     let cache = tempfile::tempdir().expect("suite cache dir");
     let mut failed = vec![];
-    for c in &cases {
+    for c in cases.iter().filter(|c| c.pending.is_none()) {
         if let Err(e) = check(bin, c, cache.path()) {
             failed.push(format!("[edge {}] {e}", c.run.join(" ")));
         }

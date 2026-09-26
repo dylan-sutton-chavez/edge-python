@@ -20,6 +20,15 @@
   {
     "given": {
       "edge.json": "{ \"imports\": { \"slugify_mod\": \"./slugify_mod.wasm\" } }\n",
+      "main.py": "from slugify_mod import join_all\nparts = (\"a\", \"b\")\ndef spread(*p):\n    return join_all(\"-\", *p)\nprint(join_all(\"-\", *parts), spread(\"x\", \"y\", \"z\"), join_all(*[\"+\", \"k\"]))\n"
+    },
+    "copy": { "slugify_mod.wasm": "target/wasm32-unknown-unknown/release/slugify_mod.wasm" },
+    "run": ["run", "main.py"],
+    "stdout": ["a-b x-y-z k"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"slugify_mod\": \"./slugify_mod.wasm\" } }\n",
       "lib.py": "from slugify_mod import Slugger\n",
       "main.py": "from .lib import Slugger\ns = Slugger()\ns.add(\"Via A Module\")\nprint(s.build())\n"
     },
@@ -53,5 +62,30 @@
     "copy": { "slugify_mod.wasm": "target/wasm32-unknown-unknown/release/slugify_mod.wasm" },
     "run": ["run", "main.py"],
     "fails": ["integrity check failed for './slugify_mod.wasm'"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"pkg\": \"./pkg/main.py\" } }\n",
+      "pkg/edge.json": "{ \"imports\": { \"_slug\": \"./slugify_mod.wasm\", \"_js\": \"./helper.js\" } }\n",
+      "pkg/helper.js": "export default () => ({ shout: (s) => s.toUpperCase() + '!' });\n",
+      "pkg/main.py": "from _slug import join_all\nimport _js\n\ndef label(*parts):\n    return _js.shout(join_all(\"-\", *parts))\n",
+      "main.py": "from pkg import label\nprint(label(\"a\", \"b\"))\n"
+    },
+    "copy": { "pkg/slugify_mod.wasm": "target/wasm32-unknown-unknown/release/slugify_mod.wasm" },
+    "run": ["run", "main.py"],
+    "stdout": ["A-B!"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"pkg\": \"./pkg/main.py\" } }\n",
+      "pkg/edge.json": "{ \"imports\": { \"_slug\": \"./slugify_mod.wasm\", \"_js\": \"./helper.js\" } }\n",
+      "pkg/helper.js": "export default () => ({ shout: (s) => s.toUpperCase() + '!' });\n",
+      "pkg/main.py": "from _slug import join_all\nimport _js\n\ndef label(*parts):\n    return _js.shout(join_all(\"-\", *parts))\n",
+      "main.py": "from pkg import label\nprint(label(\"a\", \"b\"))\n"
+    },
+    "copy": { "pkg/slugify_mod.wasm": "target/wasm32-unknown-unknown/release/slugify_mod.wasm" },
+    "run": ["build", "--app"],
+    "creates": ["app"],
+    "then": { "bin": "./app", "env": { "EDGE_CDN_BASE": "http://127.0.0.1:1", "XDG_CACHE_HOME": "empty-cache" }, "stdout": ["A-B!"] }
   }
 ]

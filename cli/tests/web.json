@@ -17,6 +17,7 @@
     "fails": ["ValueError: on purpose"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": {
       "edge.json": "{ \"imports\": { \"test\": \"https://cdn.edgepython.com/std/test.py\" } }\n",
       "adds_test.py": "from test import test\n\n@test(\"it adds up\")\ndef t():\n    assert 6 * 7 == 42\n"
@@ -25,6 +26,7 @@
     "stdout": ["PASS - it adds up", "1/1 files passed"]
   },
   {
+    "pending": "010100101010 WAITS ON EDGE-PYTHON-STD PUBLISHING ITS PACKAGES TO THE REGISTRY, RESTORE THEN",
     "given": {
       "edge.json": "{ \"imports\": { \"test\": \"https://cdn.edgepython.com/std/test.py\" } }\n",
       "empty_test.py": "from test import test\n"

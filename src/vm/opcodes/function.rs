@@ -860,8 +860,12 @@ impl<'a> VM<'a> {
     /* CallExtern's operand packs `(extern_idx<<8)|(kw<<4)|pos`. Pop kw `name,val` pairs then `pos` positional vals, pack pairs into a heap dict via `pack_kw_dict` and hand it off as the explicit `Option<Val>` kwargs slot. Pure externs leave the impurity flag alone, bodies whose only side-effects are pure externs stay memoizable. */
     pub(crate) fn call_extern(&mut self, operand: u16, chunk: &SSAChunk) -> Result<(), VmErr> {
         let extern_idx = (operand >> 8) as usize;
-        let kw = ((operand >> 4) & 0xF) as usize;
-        let pos = (operand & 0xF) as usize;
+        // A star spread grows the counts the operand was written with.
+        let kw = (((operand >> 4) & 0xF) as i32 + self.pending.kw_delta).max(0) as usize;
+        let pos = ((operand & 0xF) as i32 + self.pending.pos_delta).max(0) as usize;
+        let (p, k) = self.pending.delta_save.pop().unwrap_or((0, 0));
+        self.pending.pos_delta = p;
+        self.pending.kw_delta = k;
         let extern_fn = chunk.extern_table.get(extern_idx).ok_or(cold_runtime("CallExtern: extern index out of bounds"))?;
         let func = extern_fn.func.clone(); // Arc clone, refcount bump only
         let pure = extern_fn.pure;
