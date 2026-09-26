@@ -50,6 +50,10 @@ const card = new URL('/og.png', Astro.url).href
   <slot name="head" />
 </head>
 <body class="bg-page text-fg flex min-h-screen flex-col has-[dialog:modal]:overflow-hidden">
+  <p class="bg-link/10 text-link border-b border-link/20 px-3 py-1.5 text-center text-2xs">
+    Edge Python is in beta. The registry works, but hold off on publishing while the compiler is still being tested. <a href="/docs" class="underline">Read the docs</a>.
+  </p>
+
   <Header />
   <SignIn />
   <main class:list={['p-3.5 w-full max-w-[1200px] mx-auto my-2 text-base flex flex-col', GAPS[gap], className]}>
