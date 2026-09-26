@@ -52,6 +52,8 @@ struct Walk<'a> {
     missing: HashSet<String>,
     // Spec to the name its first importer wrote and that importer's own name, None for the entry.
     origins: HashMap<String, (String, Option<String>)>,
+    // Files of every imported package, keyed under the package spec it came in as.
+    mounted: HashMap<String, Vec<u8>>,
 }
 
 impl<'a> Walk<'a> {
@@ -69,6 +71,7 @@ impl<'a> Walk<'a> {
             manifest_dirs: HashSet::new(),
             missing: HashSet::new(),
             origins: HashMap::new(),
+            mounted: HashMap::new(),
         }
     }
 
@@ -87,6 +90,7 @@ impl<'a> Walk<'a> {
                 continue;
             }
             match extension(&spec) {
+                "edge" => self.package(&spec),
                 "js" | "mjs" => self.javascript(&spec),
                 "so" | "dylib" => self.refuse(&spec, "is not supported, ship a .wasm"),
                 ext => match self.fetch(&spec) {
@@ -125,12 +129,34 @@ impl<'a> Walk<'a> {
         }
         let text = String::from_utf8_lossy(&bytes).into_owned();
         self.inst.store.data_mut().fetched.insert(spec.to_string(), bytes);
-        let dir = dir_of(spec).to_string();
+        let dir = dir_of(spec);
         let via = self.origins.get(spec).map(|(name, _)| name.clone());
         for imp in scan_imports(&text) {
             self.enqueue_import(imp, &dir, via.as_deref());
         }
         self.enqueue_manifest_chain(&dir);
+    }
+
+    /* A published package, verified whole, then its entry runs as the module and its other files answer from inside it. */
+    fn package(&mut self, spec: &str) {
+        let bytes = match self.fetch(spec) {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => return self.failures.push(format!("could not read package '{}'", target(spec))),
+            Err(e) => return self.failures.push(e),
+        };
+        let bundle = match crate::pack::Bundle::decode(&bytes) {
+            Ok(bundle) => bundle,
+            Err(e) => return self.failures.push(format!("package '{}' is not a packed .edge, {e}", target(spec))),
+        };
+        let base = dir_of(spec);
+        let entry = format!("{base}{}", bundle.entry);
+        for file in bundle.files {
+            self.mounted.insert(format!("{base}{}", file.path), file.bytes);
+        }
+        match self.mounted.get(&entry).cloned() {
+            Some(code) => self.module(spec, code),
+            None => self.failures.push(format!("package '{}' names an entry it does not carry", target(spec))),
+        }
     }
 
     /* A third party wasm plugin, compiled by Cranelift and instantiated beside the compiler. */
@@ -219,7 +245,7 @@ impl<'a> Walk<'a> {
                 return;
             }
         };
-        let dir = dir_of(spec).to_string();
+        let dir = dir_of(spec);
         self.manifest_dirs.insert(dir.clone());
         for (name, target) in &parsed.imports {
             self.table.entry(name.clone()).or_insert_with(|| join_relative(&dir, target));
@@ -332,6 +358,9 @@ impl<'a> Walk<'a> {
     /* Bytes for a spec, the bundle, a pinned download or the disk, None when absent. */
     fn fetch(&mut self, spec: &str) -> Result<Option<Vec<u8>>, String> {
         let (target, pin) = parse_integrity(spec)?;
+        if let Some(bytes) = self.mounted.get(target) {
+            return Ok(Some(bytes.clone()));
+        }
         let packed = self.project.bundle.as_ref().map(|files| files.get(target.strip_prefix("./").unwrap_or(target)).cloned());
         let bytes = if let Some(Some(bytes)) = packed {
             Some(bytes)

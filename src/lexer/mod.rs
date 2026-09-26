@@ -89,7 +89,7 @@ pub fn lex(source: &str) -> (Vec<Token>, Vec<LexError>) {
 
         /* `match` and `case` stay keywords only in a header, `type` only in an alias. */
         let kind = match tok {
-            TokenType::Match | TokenType::Case if !(starts_stmt(&raw, i) && ends_in_colon(&raw, i)) => TokenType::Name,
+            TokenType::Match | TokenType::Case if !(starts_stmt(&raw, i) && opens_header(&raw, i)) => TokenType::Name,
             TokenType::Type if !(starts_stmt(&raw, i) && matches!(raw.get(i + 1), Some(&(TokenType::Name, ..)))) => TokenType::Name,
             _ => tok,
         };
@@ -102,16 +102,15 @@ fn starts_stmt(raw: &[(TokenType, usize, usize, usize)], i: usize) -> bool {
     i == 0 || matches!(raw[i - 1].0, TokenType::Newline | TokenType::Indent | TokenType::Dedent | TokenType::Semi)
 }
 
-/* Only a colon outside brackets counts, so a slice or a dict never makes a header. */
-fn ends_in_colon(raw: &[(TokenType, usize, usize, usize)], i: usize) -> bool {
+/* A header colon sits outside brackets and before any `=`, so a body may follow it. */
+fn opens_header(raw: &[(TokenType, usize, usize, usize)], i: usize) -> bool {
     let mut depth = 0usize;
-    for j in i + 1..raw.len() {
-        match raw[j].0 {
+    for (j, &(tok, ..)) in raw.iter().enumerate().skip(i + 1) {
+        match tok {
             TokenType::Lpar | TokenType::Lsqb | TokenType::Lbrace => depth += 1,
             TokenType::Rpar | TokenType::Rsqb | TokenType::Rbrace => depth = depth.saturating_sub(1),
-            TokenType::Newline | TokenType::Semi | TokenType::Endmarker if depth == 0 => {
-                return j > i + 1 && raw[j - 1].0 == TokenType::Colon;
-            }
+            TokenType::Colon if depth == 0 => return j > i + 1,
+            TokenType::Equal | TokenType::Newline | TokenType::Semi | TokenType::Endmarker if depth == 0 => return false,
             _ => {}
         }
     }

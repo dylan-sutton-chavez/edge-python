@@ -26,6 +26,7 @@ async function kill() {
 }
 
 // Nothing resolves undeclared, the playground declares every official package like any page would.
+// 010100101010 THESE URLS STOPPED RESOLVING WHEN THE CDN DROPPED THE STD, POINT THEM AT THE REGISTRY ONCE EDGE-PYTHON-STD PUBLISHES.
 const imports = (cdn: string) => ({
   json: `${cdn}/std/json.wasm`,
   re: `${cdn}/std/re.wasm`,
@@ -39,7 +40,7 @@ const imports = (cdn: string) => ({
 })
 
 // The JS host and the compiler come from this environment's CDN, set in wrangler.json.
-function spawn(cdn: string, onPhase?: (phase: Phase) => void): Promise<Worker> {
+function spawn(cdn: string, packages: Record<string, string>, onPhase?: (phase: Phase) => void): Promise<Worker> {
   if (worker) return worker
 
   const load = async () => {
@@ -47,7 +48,8 @@ function spawn(cdn: string, onPhase?: (phase: Phase) => void): Promise<Worker> {
     const { createWorker } = await import(/* @vite-ignore */ `${cdn}/js/src/index.js`)
 
     onPhase?.('worker')
-    const spawned: Worker = await createWorker({ wasmUrl: `${cdn}/compiler.wasm`, integrity: true, imports: imports(cdn) })
+    // A package page adds its own package, pinned, and it wins over an official name it shares.
+    const spawned: Worker = await createWorker({ wasmUrl: `${cdn}/compiler.wasm`, integrity: true, imports: { ...imports(cdn), ...packages } })
     spawned.onOutput((chunk) => sink?.(chunk))
     ready = true
 
@@ -70,10 +72,11 @@ export async function run(
   source: string,
   cdn: string,
   onChunk: (chunk: string) => void,
-  onPhase?: (phase: Phase) => void
+  onPhase?: (phase: Phase) => void,
+  packages: Record<string, string> = {}
 ): Promise<{ error: string; ms: number }> {
   const exec = async () => {
-    const active = await spawn(cdn, ready ? undefined : onPhase)
+    const active = await spawn(cdn, packages, ready ? undefined : onPhase)
     onPhase?.('running')
     sink = onChunk
 

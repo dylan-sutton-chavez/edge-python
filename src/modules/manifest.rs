@@ -55,11 +55,15 @@ pub fn walk_up_dirs(start: &str) -> impl Iterator<Item = String> + '_ {
     })
 }
 
-/* Directory of `spec`, up to and including the last '/'. "lib/foo.py" -> "lib/", "foo.py" -> "". */
-pub fn dir_of(spec: &str) -> &str {
+/* Directory of `spec`, up to and including the last '/'. A packed package is the directory of the files it carries, "pkg/app.edge" -> "pkg/app.edge/". */
+pub fn dir_of(spec: &str) -> String {
+    let path = spec.split(['#', '?']).next().unwrap_or(spec);
+    if path.ends_with(".edge") {
+        return s!(str path, "/");
+    }
     match spec.rfind('/') {
-        Some(i) => &spec[..=i],
-        None => "",
+        Some(i) => spec[..=i].to_string(),
+        None => String::new(),
     }
 }
 
@@ -218,6 +222,7 @@ mod tests {
     fn dir_walk_routes() {
         assert_eq!(dir_of("lib/test/a.py"), "lib/test/");
         assert_eq!(dir_of("a.py"), "");
+        assert_eq!(dir_of("https://cdn/pkg/test/0.1.0/app.edge#sha256-00"), "https://cdn/pkg/test/0.1.0/app.edge/");
         assert_eq!(parent_dir("lib/test/"), Some("lib/".into()));
         assert_eq!(parent_dir("lib/"), Some("".into()));
         assert_eq!(parent_dir(""), None);

@@ -5,6 +5,9 @@ export const sha256Hex = async (bytes: Uint8Array): Promise<string> => {
 
 /* Mirror `compiler::modules::manifest` so transitive imports canonicalize identically on both sides. */
 export const dirOf = (spec: string): string => {
+    // A packed package is the directory of the files it carries.
+    const path = spec.replace(/[?#].*$/, '');
+    if (path.endsWith('.edge')) return path + '/';
     const i = spec.lastIndexOf('/');
     return i === -1 ? '' : spec.slice(0, i + 1);
 };

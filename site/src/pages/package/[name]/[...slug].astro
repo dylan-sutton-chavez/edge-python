@@ -35,6 +35,9 @@ if (!object) return Astro.rewrite('/404')
 
 const artifact = packed(new Uint8Array(await object.arrayBuffer()))
 
+// The examples import the package they document, pinned to the release they sit on.
+const own = { [name]: `${env.CDN}/${keyOf(name, latest.version)}#sha256-${latest.digest}` }
+
 const sections = tree(entries(artifact.docs), '')
 const docs = sections.flatMap((section) => section.docs)
 
@@ -126,7 +129,7 @@ const row = `${cell} border-t border-line-strong`
         <h2>{doc.title}</h2>
 
         {page.blocks.map((block) => (
-          block.kind === 'prose' ? <Fragment set:html={block.html} /> : <Playground code={block.code} output={block.output} />
+          block.kind === 'prose' ? <Fragment set:html={block.html} /> : <Playground code={block.code} output={block.output} imports={own} />
         ))}
       </section>
     </div>

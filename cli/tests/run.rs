@@ -146,6 +146,27 @@ fn test_runner_verdicts_come_from_system_exit() {
     assert_eq!(code, 1);
 }
 
+// A packed package imports its own files from inside itself, and its pin covers every one of them.
+#[test]
+fn a_packed_package_imports_from_inside_itself() {
+    let lib = scratch("package");
+    std::fs::create_dir_all(lib.join("src")).unwrap();
+    std::fs::write(lib.join("edge.json"), "{ \"name\": \"greet\", \"version\": \"0.1.0\", \"imports\": { \"_words\": \"./src/words.py\" } }\n").unwrap();
+    std::fs::write(lib.join("main.py"), "from .src.hello import hello\n").unwrap();
+    std::fs::write(lib.join("src/hello.py"), "from _words import WORD\n\ndef hello(name):\n    return WORD + \" \" + name\n").unwrap();
+    std::fs::write(lib.join("src/words.py"), "WORD = \"hello\"\n").unwrap();
+    let (_, err, code) = run_in(&lib, &["build"], None);
+    assert_eq!(code, 0, "build failed: {err}");
+
+    let app = scratch("package-app");
+    std::fs::copy(lib.join("app.edge"), app.join("greet.edge")).unwrap();
+    let pin = compiler::util::sha256::hex_encode(&compiler::util::sha256::sha256(&std::fs::read(app.join("greet.edge")).unwrap()));
+    std::fs::write(app.join("edge.json"), format!("{{ \"imports\": {{ \"greet\": \"./greet.edge#sha256-{pin}\" }} }}\n")).unwrap();
+    std::fs::write(app.join("main.py"), "from greet import hello\nprint(hello(\"edge\"))\n").unwrap();
+    let (out, err, code) = run_in(&app, &["run", "main.py"], None);
+    assert_eq!((out.as_str(), code), ("hello edge\n", 0), "stderr: {err}");
+}
+
 #[derive(serde::Deserialize)]
 struct CorpusCase {
     src: String,

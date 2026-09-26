@@ -6,7 +6,7 @@ if (!BASE) throw new Error("set EDGE_CDN_BASE (npm run cdn:local in infra)");
 const WASM = `${BASE}/compiler.wasm`;
 
 // A fresh engine per test, the query string keeps the module state apart.
-async function boot(name, builtins) {
+async function boot(name, builtins, extra = {}) {
     const engine = await import(new URL(`../src/worker/engine.ts?deno=${name}`, import.meta.url).href);
     const handlers = {};
     const labels = {};
@@ -29,13 +29,28 @@ async function boot(name, builtins) {
         }
     });
     // Each builtin is declared the way edge.json would, by the url of its JavaScript module.
-    const imports = Object.fromEntries(builtins.map((b) => [b, new URL(`../builtins/${b}/src/index.js`, import.meta.url).href]));
+    const imports = { ...Object.fromEntries(builtins.map((b) => [b, new URL(`../builtins/${b}/src/index.js`, import.meta.url).href])), ...extra };
     await engine.load({ wasmUrl: WASM, integrity: false, imports });
     return engine;
 }
 
 // No manifest lives here, so bare names stay undeclared.
 const baseUrl = new URL("./nomanifest/", import.meta.url).href;
+
+// A packed package runs its entry and imports its own files from inside itself, the way a published one arrives.
+Deno.test("deno: a packed package imports from inside itself", async () => {
+    const enc = new TextEncoder();
+    const framed = (bytes) => [...enc.encode(`${bytes.length}\n`), ...bytes];
+    const files = { "main.py": "from .src.hello import hello\n", "src/hello.py": "def hello(name):\n    return 'hello ' + name\n" };
+    const packed = [...enc.encode("EDGEPKG\x01"), ...framed(enc.encode("main.py")), ...enc.encode(`${Object.keys(files).length}\n`)];
+    for (const [path, text] of Object.entries(files)) packed.push(...framed(enc.encode(path)), ...framed(enc.encode(text)));
+    const dir = await Deno.makeTempDir();
+    await Deno.writeFile(`${dir}/greet.edge`, new Uint8Array(packed));
+    const engine = await boot("package", [], { greet: new URL(`file://${dir}/greet.edge`).href });
+    const lines = [];
+    const { out } = await engine.run({ src: "from greet import hello\nprint(hello('edge'))", baseUrl }, (t) => lines.push(t));
+    if (out !== "" || lines.join("").trim() !== "hello edge") throw new Error(`unexpected ${JSON.stringify([out, lines])}`);
+});
 
 Deno.test("deno: an undeclared name fails at compile time", async () => {
     const engine = await boot("undeclared", []);
