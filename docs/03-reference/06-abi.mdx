@@ -381,8 +381,7 @@ The reference bridge is `js/src/native.ts` in the repo, and the [CLI](/docs/refe
 - **Reentrance supported.** A guest's `edge_op` runs while the VM is paused on the script's `CallExtern`. Method dispatch routes through the same method table the language uses internally, so adding a method there makes it visible to existing modules with no recompile.
 - **Error-as-status, not panic.** Returning `1` does not abort the host. The host pulls the error and raises it as a typed exception.
 - **Memory ownership.** The host reads guest linear memory only at well-defined copy points. Guest-internal allocations stay private.
-- **ABI v1 leaks about 8 bytes per host call** in guest linear memory. A single worker session caps at roughly 500 k plugin calls, so recycle the worker periodically for unbounded streaming. The bundled std packages recycle their own per-call memory through a static pool and stay flat.
-
+- **ABI v1 leaks about 8 bytes per host call** in guest linear memory. A single worker session caps at roughly 500 k plugin calls, so recycle the worker periodically for unbounded streaming.
 ## Author conveniences
 
 The `wasm-pdk` crate (Plugin Development Kit), bundled in this repo and publishable independently of `compiler.wasm`, provides:

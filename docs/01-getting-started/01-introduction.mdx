@@ -12,7 +12,7 @@ The engine is one WebAssembly binary of about 200 KB, and two hosts run it:
 - The JS host, the JavaScript package. It is built on the browser's sandbox model over Web APIs, so it runs in browsers and in JavaScript runtimes that offer the same APIs, such as Deno. `dom`, `storage`, `frame()` and the `<edge-python>` element need a browser.
 - The `edge` command line interface, a Rust binary that embeds the same engine, built from the same source for speed, precompiled and run under wasmtime.
 
-Sandboxed means the defaults deny everything. A program gets no file system, no network, and no environment access unless the host grants it. Imports resolve at compile time through a resolver the host injects, so a running program never loads code you did not declare, the official packages included. Every module a project uses is an entry in its `edge.json`.
+Sandboxed means the defaults deny everything. A program gets no file system, no network, and no environment access unless the host grants it. Imports resolve at compile time through a resolver the host injects, so a running program never loads code you did not declare. Every module a project uses is an entry in its `edge.json`.
 
 Every runnable example in these docs executes on the real engine through the JS host. Try editing this one:
 

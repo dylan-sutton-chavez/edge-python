@@ -37,7 +37,7 @@ Building from source embeds `compiler.wasm` and the std packages, so run `cargo 
 
 ## `edge run`: run a script
 
-Runs a script and streams its output to the terminal. Bare imports resolve through [`edge.json`](/docs/reference/modules#edgejson), the official packages included, so declare each one with `edge add` first. Relative imports resolve against the importing file. Uncaught errors print a traceback to stderr and exit 1.
+Runs a script and streams its output to the terminal. Bare imports resolve through [`edge.json`](/docs/reference/modules#edgejson), so declare each one with `edge add` first. Relative imports resolve against the importing file. Uncaught errors print a traceback to stderr and exit 1.
 
 ```text
 $ edge run broken.py
@@ -101,7 +101,7 @@ pass. parses
   2/2 files passed · 0.0s
 ```
 
-Test files declare tests with the [`test` package](/docs/standard-packages/test) and do not need to call `run()`. The runner drives it after the file loads and reads the verdict from the file's `SystemExit` code, never from parsed output. A file that registers no tests fails. State never leaks between files. The project must declare `test` in `edge.json`, otherwise the runner stops with `declare test in edge.json (edge add test)`.
+Test files declare tests with the `test` package and do not need to call `run()`. The runner drives it after the file loads and reads the verdict from the file's `SystemExit` code, never from parsed output. A file that registers no tests fails. State never leaks between files. The project must declare `test` in `edge.json`, otherwise the runner stops with `declare test in edge.json (edge add test)`.
 
 Exit codes: `0` when every file passed, `1` when a file failed or no `*_test.py` was found, `2` when the engine session could not start.
 
@@ -125,7 +125,7 @@ $ edge init my-app
 
 ## `edge add` / `edge remove`: package management
 
-Edits [`edge.json`](/docs/reference/modules#edgejson) by name. The CLI knows the official packages (`json`, `re`, `math`, `struct`, `test`, `dom`, `network`, `storage`, `time`), so you never paste URLs. Every entry goes to `imports` and points at the package on the CDN, a `.wasm` for the standard packages (`test` is `test.py`), an `index.js` for the JavaScript libraries, and the `entry.py` facade for `dom`. Each line prints the name and the URL it wrote. The full catalog is in [Modules](/docs/reference/modules#standard-packages-and-system-libraries).
+Edits [`edge.json`](/docs/reference/modules#edgejson) by name, so you never paste URLs. Each line prints the name and the URL it wrote.
 
 ```text
 $ edge add math network
@@ -135,10 +135,7 @@ $ edge add math network
   updated edge.json
 ```
 
-A name the catalog does not know is looked up in the registry, and the entry it writes carries the digest of the version it found, so a build fails if those bytes ever change. Point a name at a custom URL with `edge add foo=https://example.com/foo.wasm`. It goes to `imports` too, whatever the URL, because each host tells a code module, a native module, and a JS module apart by the artifact. `edge add` keeps `extends` and any other key already in the manifest. `edge remove` deletes entries the same way.
-
-The catalog is an index the CLI build generates from the repository's `std/*` and `js/builtins/*` folders, so adding an official package is adding its folder and nobody files it under a category.
-
+A name is looked up in the registry, and the entry it writes carries the digest of the version it found, so a build fails if those bytes ever change. Point a name at a custom URL with `edge add foo=https://example.com/foo.wasm`. It goes to `imports` too, whatever the URL, because each host tells a code module, a native module, and a JS module apart by the artifact. `edge add` keeps `extends` and any other key already in the manifest. `edge remove` deletes entries the same way.
 ## `edge build`: pack the app
 
 Packs the project and its imports into one artifact, in one of three modes for three targets.
@@ -151,7 +148,7 @@ Packs the project and its imports into one artifact, in one of three modes for t
 
 Each mode packs differently. The default `.edge` carries the project and its custom imports, since `edge` is already present where it lands. `--app` appends the project to this `edge` binary, so `./app` runs it directly and honors the run flags `--save-state`, `--restore-state`, `--preempt` and `--events`. `--web` writes the JS host it carries under `dist/js/` with `compiler.wasm` beside it, so neither reaches the network, adds every declared module with what it needs from the same origin (its relative JavaScript and Python imports and a sibling `edge.json`), and rewrites `edge.json` to the vendored paths, so the `dist/` works offline with `dom` and `network` included.
 
-All three carry every module the manifest declares by URL, with the files it imports beside it, so `time`, `json` and a third-party package travel with the project. Nothing is left out for being official, which is what makes the artifact the whole program and lets a registry read what it needs without opening a CLI. A run still reaches for the copy the host already holds, so the packed `.wasm` costs bytes and no time, and it is what keeps the artifact running once a standard package lives in the registry like any other.
+All three carry every module the manifest declares by URL, with the files it imports beside it, which is what makes the artifact the whole program and lets a registry read what it needs without opening a CLI.
 
 A `.edge` and an app binary also carry the `README.md` and any `LICENSE` at the project root, so attribution reaches whoever receives the artifact. A `.edge` carries the documentation too when `edge.json` declares a `docs` directory, under a reserved `@docs/` prefix no import can reach. An app binary leaves the pages behind, nobody reads documentation out of an executable.
 

@@ -1,14 +1,5 @@
 name: Test
-description: The Deno and Chromium suites of the JS host, the std packages and the builtins, against this run's tmp CDN.
-
-inputs:
-  suite:
-    description: "js | std | builtins"
-    required: true
-  capability:
-    description: "dom | network | storage | time (builtins only)"
-    required: false
-    default: ""
+description: The Deno and Chromium suites of the JS host, against this run's tmp CDN.
 
 runs:
   using: composite
@@ -38,23 +29,7 @@ runs:
 
     # The Deno suite proves the host runs with no browser, the Playwright one drives Chromium.
     - name: JS host
-      if: inputs.suite == 'js'
       shell: bash
       run: |
         deno test --allow-all js/tests/deno.test.js
         deno test --allow-all js/tests/js.test.js
-
-    - name: Std corpora
-      if: inputs.suite == 'std'
-      shell: bash
-      working-directory: std
-      run: deno test --allow-all harness/
-
-    # SYSPKG narrows discovery to one capability, the network fixture is a Deno script the suite spawns.
-    - name: Builtin corpora
-      if: inputs.suite == 'builtins'
-      shell: bash
-      working-directory: js/builtins
-      env:
-        SYSPKG: ${{ inputs.capability }}
-      run: deno test --allow-all --node-modules-dir=none tests/

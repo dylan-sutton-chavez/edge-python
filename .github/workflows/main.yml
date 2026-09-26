@@ -34,17 +34,6 @@ jobs:
         with:
           github-token: ${{ github.token }}
 
-  std:
-    name: Std
-    needs: [compiler]
-    runs-on: ubuntu-26.04
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/std
-
   js:
     name: JS
     needs: [compiler]
@@ -59,7 +48,7 @@ jobs:
   # cli/build.rs embeds the compiler and std builds this run staged on tmp.
   cli:
     name: CLI / ${{ matrix.entry }}
-    needs: [std, js]
+    needs: [js]
     strategy:
       fail-fast: false
       matrix:
@@ -105,20 +94,6 @@ jobs:
         include:
           - entry: js
             suite: js
-          - entry: std
-            suite: std
-          - entry: builtins-dom
-            suite: builtins
-            capability: dom
-          - entry: builtins-network
-            suite: builtins
-            capability: network
-          - entry: builtins-storage
-            suite: builtins
-            capability: storage
-          - entry: builtins-time
-            suite: builtins
-            capability: time
           - entry: cli-engine
             cli: engine
           - entry: cli-network
@@ -131,9 +106,6 @@ jobs:
       - uses: actions/checkout@v7
       - if: matrix.suite
         uses: ./.github/actions/test
-        with:
-          suite: ${{ matrix.suite }}
-          capability: ${{ matrix.capability }}
       - if: matrix.cli
         uses: ./.github/actions/cli
         with:

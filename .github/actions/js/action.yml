@@ -1,5 +1,5 @@
 name: JS
-description: The JS host. Deno lint and check, tsc emit to js/dist, then its tree and the builtins staged on tmp.
+description: The JS host. Deno lint and check, tsc emit to js/dist, then its tree staged on tmp.
 
 runs:
   using: composite

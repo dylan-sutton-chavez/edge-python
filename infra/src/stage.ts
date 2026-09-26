@@ -3,10 +3,8 @@ import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { REPO_DIR } from './constants'
 
-export const PARTS = ['compiler', 'std', 'js', 'cli'] as const
+export const PARTS = ['compiler', 'js', 'cli'] as const
 export type Part = (typeof PARTS)[number]
-
-const STD = ['json', 're', 'math', 'struct']
 
 function need(path: string, hint: string) {
   if (!existsSync(path)) throw new Error(`${path} is missing, ${hint} first.`)
@@ -26,21 +24,8 @@ const STAGERS: Record<Part, (out: string) => void> = {
     // The CLI embeds the speed build, later jobs read it from tmp and promote skips it.
     if (existsSync(join(target, 'cli/compiler.wasm'))) copy(join(target, 'cli/compiler.wasm'), join(out, '_build/compiler-cli.wasm'))
   },
-  std(out) {
-    for (const name of STD) {
-      const release = join(REPO_DIR, `std/${name}/target/wasm32-unknown-unknown/release`)
-      // Keyword-named crates emit an edge_ prefixed artifact.
-      const built = [`${name}.wasm`, `edge_${name}.wasm`].map((file) => join(release, file)).find((file) => existsSync(file))
-      copy(need(built ?? join(release, `${name}.wasm`), `build std/${name}`), join(out, `std/${name}.wasm`))
-    }
-    copy(join(REPO_DIR, 'std/test/src/entry.py'), join(out, 'std/test.py'))
-  },
   js(out) {
     copy(need(join(REPO_DIR, 'js/dist'), 'run tsc in js'), join(out, 'js/src'))
-    const builtins = join(REPO_DIR, 'js/builtins')
-    for (const cap of readdirSync(builtins)) {
-      if (existsSync(join(builtins, cap, 'src'))) copy(join(builtins, cap, 'src'), join(out, 'js/builtins', cap))
-    }
   },
   cli(out) {
     for (const script of ['install.sh', 'uninstall.sh']) copy(join(REPO_DIR, 'cli/setup', script), join(out, 'cli', script))
@@ -68,7 +53,7 @@ export function stage(out: string, parts: readonly Part[] = PARTS) {
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const [out, ...parts] = process.argv.slice(2)
-  if (!out) throw new Error('Pass the output directory and optional parts, for example "npm run stage -- ../_cdn std".')
+  if (!out) throw new Error('Pass the output directory and optional parts, for example "npm run stage -- ../_cdn js".')
 
   const unknown = parts.find((part) => !(PARTS as readonly string[]).includes(part))
   if (unknown) throw new Error(`Unknown part "${unknown}", pick from ${PARTS.join(', ')}.`)

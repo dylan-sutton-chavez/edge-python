@@ -186,7 +186,7 @@ print(gather(status("https://api.github.com/zen"), status("https://nope.invalid/
 ['ok', 'failed']
 ```
 
-In the JS host, `fetch_text` runs the platform `fetch()` inside a Web Worker, and a browser subjects it to CORS. The CLI runs the same calls on host threads, so `gather` overlaps them there too, with no CORS. See [network](/docs/system-libraries/network).
+In the JS host, `fetch_text` runs the platform `fetch()` inside a Web Worker, and a browser subjects it to CORS. The CLI runs the same calls on host threads, so `gather` overlaps them there too, with no CORS.
 
 ## with_timeout
 

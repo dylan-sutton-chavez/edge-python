@@ -4,7 +4,7 @@ Edge Python is licensed in two parts, and the directory a file sits in decides w
 
 ## The engine
 
-`src/` `tests/` `abi/` `pdk/` `cli/` `std/` `js/` `fuzz/` `skill/` `docs/`
+`src/` `tests/` `abi/` `pdk/` `cli/` `js/` `fuzz/` `skill/` `docs/`
 
 Licensed under the Apache License 2.0, whose text is at <https://www.apache.org/licenses/LICENSE-2.0>.
 
