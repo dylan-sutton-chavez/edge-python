@@ -78,6 +78,10 @@ async function until_live(domain: string, timeout_ms = 10 * 60_000) {
 }
 
 export const ensure_site_cdn = () => ensure_bucket(BUCKET, CDN_DOMAIN)
+
+// Respect Existing Headers, so the zone's four hour default never overrides CACHE.
+export const ensure_browser_cache = async () => client.zones.settings.edit('browser_cache_ttl', { zone_id: await zone_id(ZONE), value: 0 })
+
 export const ensure_tmp_cdn = () => ensure_bucket(TMP_BUCKET, TMP_CDN_DOMAIN, TMP_EXPIRY_SECONDS)
 
 export function cdn_objects(tree: string): CdnObject[] {
