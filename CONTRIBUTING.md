@@ -107,3 +107,5 @@ A page nests one folder deep at most, carries a numeric prefix on every path seg
 `infra/` declares every Cloudflare resource in code and is checked with `npm run check` and `npm test`. `stage` and `cdn:local` run locally. The other scripts deploy and read `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
 
 [`.github/workflows/main.yml`](.github/workflows/main.yml) runs CI and CD, with each part in a composite action under [`.github/actions/`](.github/actions). Build jobs stage their outputs on `cdn.tmp.edgepython.com`, test jobs run every suite against them, and pushes to `main` promote the tested tree to `dev.edgepython.com`.
+
+[`site/db/schema.sql`](site/db/schema.sql) is the whole database as it stands, and every local, test and dev database is built from it. Production keeps its rows, so a schema change also adds a file to `site/db/migrations/` that a `v` tag applies before the Worker ships, and the file is deleted once production has run it. `npm run schema` in `infra/` reads production and checks that it plus the pending migrations matches `schema.sql`, which the Database job warns about on `main` and enforces on a tag.

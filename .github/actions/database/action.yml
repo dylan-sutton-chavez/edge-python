@@ -1,0 +1,29 @@
+name: Database
+description: Reads production D1 and checks it against schema.sql and the pending migrations, without writing to it.
+
+inputs:
+  strict:
+    description: Fail on any difference instead of warning, set when the run ships to production.
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v7
+      with:
+        node-version-file: site/.node-version
+        cache: npm
+        cache-dependency-path: infra/package-lock.json
+
+    - name: Install
+      shell: bash
+      working-directory: infra
+      run: npm ci
+
+    # A stale migration or a schema.sql that disagrees with production and its migrations.
+    - name: Check
+      shell: bash
+      working-directory: infra
+      run: npm run schema -- ${{ inputs.strict == 'true' && '--strict' || '' }}

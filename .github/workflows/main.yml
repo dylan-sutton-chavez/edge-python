@@ -168,6 +168,22 @@ jobs:
         working-directory: infra
         run: npm run check && npm test
 
+  # Pushes only, since pull requests get no secrets. Main warns about a difference and a tag refuses to ship one.
+  database:
+    name: Database
+    needs: [infra]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-26.04
+    env:
+      EDGE_ENV: prod
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/database
+        with:
+          strict: ${{ startsWith(github.ref, 'refs/tags/v') }}
+
   # Main pushes only, the tested tmp tree and the site ship together to dev.
   promote:
     name: Promote
@@ -189,9 +205,11 @@ jobs:
   # A v tag ships the same tested tree to production, no Access gate and its own OAuth apps.
   ship:
     name: Ship
-    needs: [test, site, infra]
+    needs: [test, site, infra, database]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-26.04
+    # Required reviewers on this environment hold the run until the migrations are approved.
+    environment: production
     env:
       EDGE_ENV: prod
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
