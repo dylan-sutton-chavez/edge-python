@@ -33,12 +33,19 @@ async function cdn(route, url) {
     return route.fulfill({ status: res.status, headers, body: Buffer.from(await res.arrayBuffer()) });
 }
 
+// The release in production still answers at the old address, so the second entry goes once it ships the rename.
+const RESOLVERS = ["/api/resolve/package", "/api/packages"];
+
 /* What `edge lock` would write beside app/edge.json, asked with lock=1 so nothing counts. */
 async function lockOf(imports) {
     const lock = {};
     for (const [name, version] of Object.entries(imports)) {
         if (!/^\d+\.\d+\.\d+$/.test(version)) continue;
-        const res = await fetch(`${SITE}/api/resolve/package/${name}?v=${version}&lock=1`);
+        let res;
+        for (const at of RESOLVERS) {
+            res = await fetch(`${SITE}${at}/${name}?v=${version}&lock=1`);
+            if (res.ok) break;
+        }
         if (!res.ok) throw new Error(`the registry has no ${name} ${version}, it answered ${res.status}`);
         const { url, digest } = await res.json();
         lock[name] = { version, url, digest: `sha256-${digest}` };
