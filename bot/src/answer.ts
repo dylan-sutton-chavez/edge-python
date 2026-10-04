@@ -148,7 +148,7 @@ function source(sentence: string, indexed: { page: Page; words: Set<string> }[])
 // What a reader sees for a link, the heading it opens on, and its page beside it when two links share a heading.
 function labels(pages: Found[]) {
   const titles = pages.map((page) => page.title.replace(/[`[\]]/g, ''))
-  return titles.map((title, at) => (titles.indexOf(title) === titles.lastIndexOf(title) ? title : `${title} in ${pages[at]!.where.split(' · ').at(-1)}`))
+  return titles.map((title, at) => (titles.indexOf(title) === titles.lastIndexOf(title) ? title : `${title} under ${pages[at]!.where.split(' · ').at(-1)}`))
 }
 
 // A run of sentences from one page links it once, after its last sentence, numbered in the order the links appear.

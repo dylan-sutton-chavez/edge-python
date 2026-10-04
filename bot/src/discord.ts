@@ -107,12 +107,18 @@ function tidy(text: string) {
   return out.join('\n').trim()
 }
 
+// Varied by the address a link opens, so links do not all read the same and one message always renders alike.
+const LEADS = ['see', 'more in', 'from', 'details in']
+
+const lead = (url: string, at: number) => LEADS[([...url].reduce((sum, char) => sum + char.charCodeAt(0), 0) + at) % LEADS.length]
+
 // A cited number becomes the name of the page it opens, so a link reads as part of the sentence.
 const linked = (text: string, sources: string[], names: string[]) =>
   prose(text, (part) =>
     part.replace(HIDDEN, '<$1>').replace(/\[(\d+)\]/g, (whole, mark: string) => {
-      const url = sources[Number(mark) - 1]
-      return url ? `([see ${names[Number(mark) - 1]}](<${url}>))` : whole
+      const at = Number(mark) - 1
+      const url = sources[at]
+      return url ? `([${lead(url, at)} ${names[at]}](<${url}>))` : whole
     })
   )
 
