@@ -46,6 +46,7 @@ export default defineConfig({
   vite: {
     plugins: [tailwindcss(), devFonts],
     optimizeDeps: { include: ['astro/assets/services/noop'] },
-    server: { watch: { usePolling: true, interval: 300, ignored: ['**/.wrangler/**'] } }
+    // SKILL.md is imported raw from outside this root, which the dev server guards by default.
+    server: { watch: { usePolling: true, interval: 300, ignored: ['**/.wrangler/**'] }, fs: { allow: ['..'] } }
   }
 })
