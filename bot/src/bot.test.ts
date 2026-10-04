@@ -196,4 +196,9 @@ test('an answer reads as one chat message', () => {
   )
 
   assert.equal(spoken({ text: 'This sentence is long enough to count. '.repeat(12).trim(), sources: [], names: [] }).split('\n\n').length, 2)
+
+  assert.equal(
+    spoken({ text: 'It overflows past $\\pm 2^{127}$, while $10 and $100 stay prices and `echo $HOME^{x}$` stays code.', sources: [], names: [] }),
+    'It overflows past ± 2¹²⁷, while $10 and $100 stay prices and `echo $HOME^{x}$` stays code.'
+  )
 })

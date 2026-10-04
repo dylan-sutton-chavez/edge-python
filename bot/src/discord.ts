@@ -62,6 +62,19 @@ const HALF = 120
 // Discord leaves a masked link raw when its label is an address, which is how it stops one hiding behind another.
 const HIDDEN = /\[https?:\/\/[^\]\s]+\]\((https?:\/\/[^)\s]+)\)/g
 
+// A formula between dollar signs, told from a price by the backslash, caret or brace only LaTeX writes.
+const MATH = /\$([^$\n]*[\\^_{][^$\n]*)\$/g
+const SUPER: Record<string, string> = { '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '-': '⁻', '+': '⁺' }
+const SYMBOLS: Record<string, string> = { pm: '±', times: '×', cdot: '·', le: '≤', leq: '≤', ge: '≥', geq: '≥', neq: '≠', approx: '≈', infty: '∞', to: '→' }
+
+// Discord renders no math, so a formula the model wrote in LaTeX is written out in Unicode.
+const unicode = (text: string) =>
+  prose(text, (part) =>
+    part.replace(MATH, (_, math: string) =>
+      math.replace(/\\([a-z]+)/g, (whole, name: string) => SYMBOLS[name] ?? whole).replace(/\^\{?([-+0-9]+)\}?/g, (_, power: string) => [...power].map((char) => SUPER[char]).join(''))
+    )
+  )
+
 // A paragraph too long for a chat is cut at the sentence end nearest its middle, again while still too long, and no half is left shorter than a line.
 function paragraphs(line: string): string[] {
   if (line.length <= LONG || LIST.test(line)) return [line]
@@ -132,4 +145,4 @@ function fits(content: string) {
   return `${line > MAX_MESSAGE / 2 ? held.slice(0, line) : held}…`
 }
 
-export const spoken = (answer: Answer) => fits(linked(tidy(answer.text), answer.sources, answer.names))
+export const spoken = (answer: Answer) => fits(linked(tidy(unicode(answer.text)), answer.sources, answer.names))

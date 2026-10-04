@@ -26,7 +26,7 @@ If neither the reference nor the passages cover it, say so plainly and do not gu
 This is a chat message and not a page, however long an earlier answer of yours was.
 Decide the whole answer before writing it, about eighty words and one code block at most, and finish every sentence you start.
 No headings, no horizontal rules, no numbered lists and no bullets.
-Write an address on its own and never as a markdown link, since this chat shows those unrendered.`
+Write an address on its own and never as a markdown link, and math in plain Unicode such as 2¹²⁷ or ≤ and never as LaTeX, since this chat shows both unrendered.`
 
 // The one tool, so a number or an output in an answer comes from the engine rather than from the model.
 const TOOLS = [
