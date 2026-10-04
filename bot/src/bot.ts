@@ -35,6 +35,10 @@ export class Bot extends DurableObject<Env> {
     }
   }
 
+  private passed(channel: string, id: string) {
+    return this.env.DB.prepare('insert or replace into cursor (channel, last_id) values (?, ?)').bind(channel, id).run()
+  }
+
   private async tick() {
     await sweep(this.env)
 
@@ -52,27 +56,25 @@ export class Bot extends DurableObject<Env> {
       const fresh = await since(token, channel.id, after).catch(() => [])
       if (!fresh.length) continue
 
-      // Past everything read, the bot's own replies included, so a channel is never walked twice.
-      await this.env.DB.prepare('insert or replace into cursor (channel, last_id) values (?, ?)').bind(channel.id, fresh.at(-1)!.id).run()
+      // A first pass only learns where the channel is, and without the MESSAGE CONTENT intent a mention of the bot's role arrives with no text to answer.
+      const asked = after ? fresh.filter((each) => !each.author.bot && each.content.trim() && calls(each, self)) : []
 
-      // A first pass only learns where the channel is, so nothing said before the bot arrived is answered.
-      if (!after) continue
+      for (const message of asked) {
+        // What this tick cannot afford waits for the next, since the cursor has not passed it yet.
+        if (budget <= 0) return
+        budget -= 1
 
-      // Without the MESSAGE CONTENT intent a mention of the bot's role arrives with no text, and a question nobody can read is left alone.
-      const asked = fresh.filter((each) => !each.author.bot && each.content.trim() && calls(each, self))
-
-      for (const message of asked.slice(0, budget)) {
-        // Each on its own, since the cursor has passed them all and one failure must not lose the rest.
         try {
           await this.respond(channel.id, message)
         } catch (failure) {
           console.error('answering', message.id, failure)
         }
 
-        budget -= 1
+        // Past each question once it is handled, so a restart in the middle of an answer asks it again instead of losing it.
+        await this.passed(channel.id, message.id)
       }
 
-      if (budget <= 0) return
+      await this.passed(channel.id, fresh.at(-1)!.id)
     }
   }
 
