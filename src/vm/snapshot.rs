@@ -11,7 +11,7 @@ use super::{Pending, VM};
 use super::types::*;
 
 const MAGIC: u32 = 0x4E53_5045;
-const FORMAT: u32 = 5;
+const FORMAT: u32 = 6;
 
 pub type SnapErr = String;
 
@@ -214,6 +214,7 @@ codec!(struct ExceptionFrame, put_exc_frame, get_exc_frame {
 codec!(struct SyncFrame, put_sync_frame, get_sync_frame {
     ip: usz,
     fi: usz,
+    func: val,
     slots: vals,
     stack_delta: vals,
     iter_delta: [put_iter_frame, get_iter_frame],

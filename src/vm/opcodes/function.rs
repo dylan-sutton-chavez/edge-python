@@ -437,7 +437,7 @@ impl<'a> VM<'a> {
             let helper_resume_ip = self.resume_ip;
             self.resume_ip = 0;
             let (stack_delta, iter_delta, exception_delta) = self.split_frames(stack_base, iter_base, exc_base);
-            self.pending_sync_frames.push(SyncFrame { ip: helper_resume_ip, fi, slots: fn_slots, stack_delta, iter_delta, exception_delta });
+            self.pending_sync_frames.push(SyncFrame { ip: helper_resume_ip, fi, func: callee, slots: fn_slots, stack_delta, iter_delta, exception_delta });
             return Ok(());
         }
 
@@ -870,7 +870,7 @@ impl<'a> VM<'a> {
     }
 
     /* Back-propagate `nonlocal` writes to the caller's slots and sync the callee Func's capture entries so the next call sees the new value. No-op if no `nonlocal`. */
-    fn back_propagate_nonlocals(&mut self, fi: usize, body: &SSAChunk, callee: Val, chunk: &SSAChunk, slots: &mut [Val], fn_slots: &[Val]) {
+    pub(crate) fn back_propagate_nonlocals(&mut self, fi: usize, body: &SSAChunk, callee: Val, chunk: &SSAChunk, slots: &mut [Val], fn_slots: &[Val]) {
         if self.nonlocal_tables[fi].is_empty() { return; }
         // Snapshot to release borrows on self before the `heap.get_mut` writes.
         let nl_pairs: Vec<(usize, usize)> = self.nonlocal_tables[fi].clone();

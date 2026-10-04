@@ -1,5 +1,5 @@
 use alloc::string::{String, ToString};
-use crate::vm::types::{Val, HeapObj, HeapPool, VmErr, cold_value, fabs, fsignum, ftrunc, num_as_f64};
+use crate::vm::types::{Val, HeapObj, HeapPool, VmErr, cold_value, fabs, ftrunc, num_as_f64};
 
 // `%c`/`{:c}` out-of-range raises OverflowError, other format errors are ValueError.
 pub const C_RANGE_ERR: &str = "%c arg not in range(0x110000)";
@@ -358,47 +358,31 @@ fn pad_with(body: &str, pad: usize, align: u8, fill: char, sign_prefix_len: usiz
     out
 }
 
+// Every power of ten up to 1e22 is exact in an f64.
+const POW10: [f64; 23] = [1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22];
+
 fn fixed(mag: f64, prec: usize) -> String {
-    // Round-half-to-even to `prec` decimals, renders manually to avoid `alloc::format!`'s %f.
-    let scale = pow10(prec);
-    let scaled = mag * scale;
-    let rounded = if fabs(scaled - ftrunc(scaled)) == 0.5 {
-        let f = ftrunc(scaled);
-        if (f as i64) % 2 == 0 { f } else if scaled > 0.0 { f + 1.0 } else { f - 1.0 }
-    } else {
-        ftrunc(scaled + 0.5 * fsignum(scaled))
-    };
-    let dec = u128_to_dec(fabs(rounded) as u128);
-    if prec == 0 { return dec; }
-    /* Pad on the left so we can insert a `.` exactly `prec` chars from the end. */
-    let needed = prec + 1;
-    let padded = if dec.len() < needed {
-        let mut s = String::with_capacity(needed);
-        for _ in 0..(needed - dec.len()) { s.push('0'); }
-        s.push_str(&dec); s
-    } else { dec };
-    let dot = padded.len() - prec;
-    let mut out = String::with_capacity(padded.len() + 1);
-    out.push_str(&padded[..dot]);
-    out.push('.');
-    out.push_str(&padded[dot..]);
-    out
+    // A product under 2^53 whose fraction sits more than an ulp from one half rounds as the exact value does.
+    if let Some(&scale) = POW10.get(prec) {
+        let scaled = mag * scale;
+        let whole = ftrunc(scaled);
+        let ulp = f64::from_bits(scaled.to_bits() + 1) - scaled;
+        if scaled < 9_007_199_254_740_992.0 && fabs(scaled - whole - 0.5) > ulp {
+            let digits = itoa_str(whole as i64 + (scaled - whole > 0.5) as i64);
+            if prec == 0 { return digits; }
+            let mut out = String::with_capacity(digits.len() + prec + 2);
+            for _ in digits.len()..=prec { out.push('0'); }
+            out.push_str(&digits);
+            out.insert(out.len() - prec, '.');
+            return out;
+        }
+    }
+    // Ties and the rest go to core::fmt, which expands the exact binary value and rounds half to even.
+    alloc::format!("{:.*}", prec, mag)
 }
 
-fn pow10(n: usize) -> f64 {
-    let mut r = 1.0f64;
-    for _ in 0..n { r *= 10.0; }
-    r
-}
 fn itoa_str(i: i64) -> String {
     let mut b = itoa::Buffer::new(); b.format(i).to_string()
-}
-fn u128_to_dec(n: u128) -> String {
-    if n == 0 { return String::from("0"); }
-    let mut out = String::new();
-    let mut x = n;
-    while x > 0 { out.push((b'0' + (x % 10) as u8) as char); x /= 10; }
-    out.chars().rev().collect()
 }
 
 /* `ascii()` of a repr, every non-ASCII char escaped as `\\x`, `\\u` or `\\U`. */

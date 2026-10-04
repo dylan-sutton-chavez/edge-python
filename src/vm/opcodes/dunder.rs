@@ -336,7 +336,8 @@ impl<'a> VM<'a> {
                 && let Some(r) = self.try_call_dunder(v, "__repr__", &[], chunk, slots)? {
                 return self.require_str(r, "__repr__");
             }
-            return Ok(self.repr(v));
+            // The outer path goes along, so an exception inside its own args stops there.
+            return Ok(self.repr_d(v, seen));
         }
         let id = v.as_heap();
         if seen.contains(&id) {

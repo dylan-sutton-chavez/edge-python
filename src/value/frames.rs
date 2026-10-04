@@ -54,6 +54,8 @@ pub struct CoroutineHandle {
 pub struct SyncFrame {
     pub ip: usize,
     pub fi: usize,
+    // The function object, whose captured cells take its nonlocal writes once the resumed frame returns.
+    pub func: Val,
     pub slots: Vec<Val>,
     pub stack_delta: Vec<Val>,
     pub iter_delta: Vec<IterFrame>,
@@ -160,6 +162,7 @@ impl IterFrame {
 impl SyncFrame {
     /* Visit all Vals across slots, stack delta, and iter frames. */
     pub(crate) fn for_each_val(&self, f: &mut impl FnMut(Val)) {
+        f(self.func);
         for &v in &self.slots { f(v); }
         for &v in &self.stack_delta { f(v); }
         for fr in &self.iter_delta { fr.for_each_val(f); }

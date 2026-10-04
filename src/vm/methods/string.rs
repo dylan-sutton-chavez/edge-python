@@ -218,7 +218,7 @@ pub fn replace(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
 // `str.rsplit([sep[, maxsplit]])`, like split but counts from the right.
 pub fn rsplit(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> { split_impl(vm, recv, pos, true) }
 
-// `str.format(*args)` takes positional/auto/explicit-index fields with `{[idx][!r|!s|!a][:spec]}`, keyword fields are not supported.
+// `str.format(*args)` fills `{[idx][!r|!s|!a][:spec]}` fields, a spec may hold fields one level deep, keyword fields are not supported.
 pub(crate) fn format(vm: &mut VM, recv: Val, pos: &[Val], chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
     let tmpl = recv_str(vm, recv)?;
     // Fields run user dunders, so the arguments stay rooted until the text is built.
@@ -227,35 +227,47 @@ pub(crate) fn format(vm: &mut VM, recv: Val, pos: &[Val], chunk: &crate::parser:
 }
 
 fn format_fields(vm: &mut VM, tmpl: &str, pos: &[Val], chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<String, VmErr> {
+    // The next auto index and the numbering mode, Some(true)=manual, shared with the fields nested in a spec.
+    expand_fields(vm, tmpl, pos, &mut (0, None), 0, chunk, slots)
+}
+
+/* Fills the fields of `tmpl`, where `depth` 1 is a spec and a field nested past it is refused as Python refuses it. */
+fn expand_fields(vm: &mut VM, tmpl: &str, pos: &[Val], numbering: &mut (usize, Option<bool>), depth: u8, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<String, VmErr> {
+    if depth > 1 { return Err(cold_value("Max string recursion exceeded")); }
     let chars: Vec<char> = tmpl.chars().collect();
     let mut out = String::with_capacity(tmpl.len());
-    let mut auto = 0usize;
-    // Numbering mode, Some(true)=manual, Some(false)=auto.
-    let mut manual: Option<bool> = None;
     let mut ci = 0;
     while ci < chars.len() {
         let c = chars[ci];
         if c == '{' {
             if chars.get(ci + 1) == Some(&'{') { out.push('{'); ci += 2; continue; }
-            let mut j = ci + 1;
+            // The field ends at its matching brace, so a field nested in its spec stays inside it.
+            let (mut j, mut nest) = (ci + 1, 0usize);
             let mut field = String::new();
-            while j < chars.len() && chars[j] != '}' { field.push(chars[j]); j += 1; }
+            while j < chars.len() && (chars[j] != '}' || nest > 0) {
+                match chars[j] { '{' => nest += 1, '}' => nest -= 1, _ => {} }
+                field.push(chars[j]);
+                j += 1;
+            }
             if j >= chars.len() { return Err(cold_value("Single '{' encountered in format string")); }
             ci = j + 1;
             let (name_conv, spec) = match field.split_once(':') { Some((a, b)) => (a, b.to_string()), None => (field.as_str(), String::new()) };
             let (name, conv) = match name_conv.split_once('!') { Some((a, b)) => (a, Some(b)), None => (name_conv, None) };
+            let (auto, manual) = (&mut numbering.0, &mut numbering.1);
             let val = if name.is_empty() {
-                if manual == Some(true) { return Err(cold_value("cannot switch from manual field specification to automatic field numbering")); }
-                manual = Some(false);
-                let v = *pos.get(auto).ok_or_else(|| cold_index("Replacement index out of range"))?;
-                auto += 1; v
+                if *manual == Some(true) { return Err(cold_value("cannot switch from manual field specification to automatic field numbering")); }
+                *manual = Some(false);
+                let v = *pos.get(*auto).ok_or_else(|| cold_index("Replacement index out of range"))?;
+                *auto += 1; v
             } else if let Ok(idx) = name.parse::<usize>() {
-                if manual == Some(false) { return Err(cold_value("cannot switch from automatic field numbering to manual field specification")); }
-                manual = Some(true);
+                if *manual == Some(false) { return Err(cold_value("cannot switch from automatic field numbering to manual field specification")); }
+                *manual = Some(true);
                 *pos.get(idx).ok_or_else(|| cold_index("Replacement index out of range"))?
             } else {
                 return Err(cold_type("str.format() does not support keyword fields"));
             };
+            // The fields of a spec fill after the field that holds it, numbered on from it.
+            let spec = if spec.contains('{') { expand_fields(vm, &spec, pos, numbering, depth + 1, chunk, slots)? } else { spec };
             // A conversion renders to a string first, then the spec applies to that.
             let text = match conv {
                 None => None,

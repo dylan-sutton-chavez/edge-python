@@ -119,7 +119,8 @@ fn compare(m: &Measure, last: &Snapshot, now: &Snapshot, sources: &BTreeMap<Stri
     if paired.is_empty() {
         return failures;
     }
-    let change = (paired.iter().map(|&(_, l, n)| (n / l).ln()).sum::<f64>() / paired.len().max(1) as f64).exp() - 1.0;
+    // A move under the floor counts as none, as it does for each case.
+    let change = (paired.iter().map(|&(_, l, n)| if (n - l).abs() > floor { (n / l).ln() } else { 0.0 }).sum::<f64>() / paired.len().max(1) as f64).exp() - 1.0;
     let (total, before) = paired.iter().fold((0.0, 0.0), |(t, w), &(_, l, n)| (t + n, w + l));
     let moved = |grew: bool| {
         let mut picked: Vec<&(&String, f64, f64)> = paired.iter().filter(|(_, l, n)| if grew { n > l } else { n < l }).collect();

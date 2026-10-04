@@ -57,6 +57,8 @@ pub struct Parser<'src, I: Iterator<Item = Token>> {
     /* Names declared `global` in the current function body, redirects load/store to `self.globals`. */
     pub(super) globals_decl: crate::util::hash::FxHashSet<String>,
     pub(super) join_stack: Vec<JoinNode>,
+    /* Set once a block takes its dedent, the statement it closed is complete. */
+    pub(super) block_closed: bool,
     pub(super) last_line: usize,
     /* Last token's end offset, anchors diagnostics when `peek()` already skipped a Newline. */
     pub(super) last_end: usize,
@@ -468,12 +470,25 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
+    /* A simple statement ends at its line or a `;`, not at another statement. */
+    pub(super) fn end_statement(&mut self, errors_before: usize) {
+        // A statement that already failed reports nothing more, its own error comes first.
+        if self.block_closed || self.errors.len() > errors_before { return; }
+        let Some(t) = self.tokens.peek() else { return };
+        if t.line != self.last_line || matches!(t.kind, TokenType::Semi | TokenType::Newline | TokenType::Nl | TokenType::Comment | TokenType::Dedent | TokenType::Endmarker) { return; }
+        // Reported without skipping, so the rest of the line still reports its own errors.
+        let (start, end) = (t.start, t.end);
+        let msg = s!("expected newline, got '", str &self.source[start..end], "'");
+        self.errors.push(Diagnostic { start, end, msg });
+    }
+
     // Comma list with forward-progress guard.
     pub(super) fn comma_list(&mut self, is_end: impl Fn(TokenType) -> bool, mut elem: impl FnMut(&mut Self)) {
         while !matches!(self.peek(), Some(t) if is_end(t)) && self.peek().is_some() {
             let progress = self.last_end;
             elem(self);
-            self.eat_if(TokenType::Comma);
+            // A missing comma between items is an error, not two items.
+            if !matches!(self.peek(), Some(t) if is_end(t)) { self.eat(TokenType::Comma); }
             if self.last_end == progress { break; }
         }
     }
@@ -505,6 +520,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             ssa_versions: HashMap::default(),
             globals_decl: crate::util::hash::FxHashSet::default(),
             join_stack: Vec::new(),
+            block_closed: false,
             loops: Vec::new(),
             cleanup_count: 0,
             saw_newline: false,
@@ -525,7 +541,10 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             while self.eat_if(TokenType::Semi) {}
             if self.at_end() { break; }
 
+            self.block_closed = false;
+            let errors_before = self.errors.len();
             let produced_value = self.stmt();
+            self.end_statement(errors_before);
             // Pop expression-statement results, chunk's implicit ReturnValue expects empty stack.
             if produced_value { self.chunk.emit(OpCode::PopTop, 0); }
         }

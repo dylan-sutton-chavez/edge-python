@@ -58,14 +58,23 @@ impl<'a> VM<'a> {
         let mut pending_ret: Option<Val> = None;
         let result: Result<Val, VmErr> = 'drive: loop {
             if let Some(frame) = sync_frames.pop() {
-                let SyncFrame { ip, fi, mut slots, stack_delta, iter_delta, exception_delta } = frame;
+                let SyncFrame { ip, fi, func, mut slots, stack_delta, iter_delta, exception_delta } = frame;
                 let (frame_stack_base, frame_iter_base, frame_exc_base) = self.restore_frames(stack_delta, iter_delta, exception_delta);
                 // Inner result lands on this frame's stack.
                 if let Some(v) = pending_ret.take() { self.push(v); }
                 self.pending_exec_exc_base = Some(frame_exc_base);
                 self.pending_exec_safe = resume_safe;
                 let (_, body, _, _) = self.functions[fi];
-                match self.exec_from(body, &mut slots, ip) {
+                let ran = self.exec_from(body, &mut slots, ip);
+                // A frame that ends past a pause hands its nonlocal writes to its caller here, as a plain return does.
+                if match &ran { Ok(_) => !self.yielded, Err(e) => !matches!(e, VmErr::HostYield(_)) } {
+                    let (caller, caller_slots): (&SSAChunk, &mut [Val]) = match sync_frames.last_mut() {
+                        Some(f) => { let held = self.functions[f.fi]; (&held.1, &mut f.slots) }
+                        None => (match outer_body { BodyRef::Fn(ofi) => { let held = self.functions[ofi]; &held.1 } BodyRef::Module => self.chunk }, &mut outer_slots),
+                    };
+                    self.back_propagate_nonlocals(fi, body, func, caller, caller_slots, &slots);
+                }
+                match ran {
                     Err(e @ VmErr::HostYield(_)) => break 'drive Err(e),
                     // An escaping error re-raises at the caller's call site, so its handlers and the traceback note follow.
                     Err(e) => {
@@ -94,7 +103,7 @@ impl<'a> VM<'a> {
                     }
                     Ok(val) if self.yielded => {
                         let (stack_delta, iter_delta, exception_delta) = self.split_frames(frame_stack_base, frame_iter_base, frame_exc_base);
-                        sync_frames.push(SyncFrame { ip: self.resume_ip, fi, slots, stack_delta, iter_delta, exception_delta });
+                        sync_frames.push(SyncFrame { ip: self.resume_ip, fi, func, slots, stack_delta, iter_delta, exception_delta });
                         // Reverse so pop re-enters innermost first.
                         let newer = core::mem::take(&mut self.pending_sync_frames);
                         sync_frames.extend(newer.into_iter().rev());

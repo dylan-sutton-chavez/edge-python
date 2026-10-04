@@ -372,9 +372,13 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             if self.at_end() { break; }
             if matches!(self.peek(), Some(TokenType::Dedent)) {
                 self.advance();
+                self.block_closed = true;
                 break;
             }
+            self.block_closed = false;
+            let errors_before = self.errors.len();
             let produced_value = self.stmt();
+            self.end_statement(errors_before);
             if produced_value {
                 self.chunk.emit(OpCode::PopTop, 0);
             }

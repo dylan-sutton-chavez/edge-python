@@ -86,8 +86,16 @@ fn the_peak_keeps_what_a_program_held_after_a_collection_let_it_go() {
 }
 
 #[test]
-fn the_peak_keeps_what_a_container_held_before_it_shrank() {
-    // The set shrinks in place with no collection, which only the shrink itself can record.
+fn a_set_keeps_its_slots_after_its_items_go() {
+    // Removing items frees no slots, so the count stays where the full set put it.
+    let (full, _) = peaked("s = set(range(100000))\n");
     let (held, peak) = peaked("s = set(range(100000))\ns.difference_update(range(100000))\n");
+    assert!(held >= full && held == peak, "full {full} held {held} peak {peak}");
+}
+
+#[test]
+fn the_peak_keeps_what_a_set_held_before_it_shrank() {
+    // An in-place intersection swaps in a smaller table, so only the shrink records it.
+    let (held, peak) = peaked("s = set(range(100000))\ns &= {0}\n");
     assert!(peak >= 2_000_000 && held < peak / 2, "peak {peak} held {held}");
 }

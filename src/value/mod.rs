@@ -50,7 +50,8 @@ impl Footprint for DictMap {
 }
 
 impl Footprint for ValSet {
-    fn bytes(&self) -> usize { self.t.capacity() * SET_ENTRY_BYTES }
+    // Allocated slots, which a removal never gives back, the same on every target.
+    fn bytes(&self) -> usize { self.t.allocation_size() / (core::mem::size_of::<(u64, Val)>() + 1) * SET_ENTRY_BYTES }
 }
 
 impl Footprint for Vec<(usize, Val)> {

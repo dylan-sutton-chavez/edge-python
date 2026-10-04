@@ -255,6 +255,13 @@ impl<'a> VM<'a> {
         }
     }
 
+    /* The heap slot of an exception's `args` tuple, the key cycle checks use. */
+    fn exc_args_slot(&self, inst: Val) -> Option<u32> {
+        let Some(HeapObj::Instance(_, attrs)) = self.heap.try_get(inst) else { return None };
+        let args = attrs.borrow().iter().find(|(k, _)| matches!(self.heap.try_get(*k), Some(HeapObj::Str(s)) if s == "args")).map(|(_, v)| v)?;
+        matches!(self.heap.try_get(args), Some(HeapObj::Tuple(_))).then(|| args.as_heap())
+    }
+
     /* The `args` an exception instance holds, empty for anything else. */
     pub(crate) fn exc_args(&self, inst: Val) -> Vec<Val> {
         let Some(HeapObj::Instance(_, attrs)) = self.heap.try_get(inst) else { return Vec::new() };
@@ -324,7 +331,15 @@ impl<'a> VM<'a> {
             HeapObj::Class(name, _, _) => crate::s!("<class '__main__.", str name, "'>"),
             HeapObj::Instance(cls, _) => {
                 // An exception reads as its message.
-                if let Some(base) = self.exc_base(*cls) { return self.exc_text(base, &self.exc_args(v), seen); }
+                if let Some(base) = self.exc_base(*cls) {
+                    // An exception inside its own args reads as `E(...)` there, the way repr does.
+                    let slot = self.exc_args_slot(v);
+                    if slot.is_some_and(|s| seen.contains(&s)) { return s!(str self.type_name(v), "(...)"); }
+                    seen.extend(slot);
+                    let text = self.exc_text(base, &self.exc_args(v), seen);
+                    if slot.is_some() { seen.pop(); }
+                    return text;
+                }
                 if cls.is_heap() && let HeapObj::Class(name, _, _) | HeapObj::Type(name) = self.heap.get(*cls) { return crate::s!("<", str name, " instance>"); }
                 "<instance>".into()
             }
@@ -387,7 +402,7 @@ impl<'a> VM<'a> {
         self.repr_d(v, seen)
     }
 
-    fn repr_d(&self, v: Val, seen: &mut Vec<u32>) -> String {
+    pub(crate) fn repr_d(&self, v: Val, seen: &mut Vec<u32>) -> String {
         if v.is_heap() {
             match self.heap.get(v) {
                 HeapObj::Str(s) => return repr_str(s),
@@ -400,9 +415,13 @@ impl<'a> VM<'a> {
                 }
                 // An exception instance reads as its constructor call, `E('x')`.
                 &HeapObj::Instance(cls, _) if self.exc_base(cls).is_some() => {
+                    let slot = self.exc_args_slot(v);
+                    if slot.is_some_and(|s| seen.contains(&s)) { return s!(str self.type_name(v), "(...)"); }
+                    seen.extend(slot);
                     let mut o = s!(cap: 32; str self.type_name(v), "(");
                     self.append_reprs(&mut o, self.exc_args(v).iter(), seen);
                     o.push(')');
+                    if slot.is_some() { seen.pop(); }
                     return o;
                 }
                 _ => {}
