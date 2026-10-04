@@ -1,11 +1,10 @@
 import REFERENCE from '../../skill/SKILL.md'
-import { MAX_ANSWER, MAX_QUESTION, MODEL, PASSAGES } from './config'
+import { MAX_ANSWER, MAX_QUESTION, MODEL } from './config'
 import { prose } from './prose'
+import { search, type Page } from './search'
 import type { Turn } from './session'
 
 export type Answer = { text: string; sources: string[] }
-
-type Found = { title: string; where: string; href: string; snippet: string }
 
 const WRITES = `You answer questions about Edge Python.
 The reference below is the whole language and its tools, and the passages after it are pages found for this question.
@@ -21,9 +20,6 @@ This is a chat message and not a page, however long an earlier answer of yours w
 Decide the whole answer before writing it, about eighty words and one code block at most, and finish every sentence you start.
 No headings, no horizontal rules, no numbered lists and no bullets.
 Write an address on its own and never as a markdown link, since this chat shows those unrendered.`
-
-// The index brackets what it matched with control characters, which mean nothing to a model.
-const MARKS = /[\u0001\u0002]/g
 
 // A reply the budget cut is taken back to the last sentence it finished, and kept whole when it finished none.
 function finished(text: string) {
@@ -55,16 +51,8 @@ const terms = (ai: Ai, turns: Turn[], question: string) =>
     24
   )
 
-async function search(site: string, query: string): Promise<Found[]> {
-  const response = await fetch(`${site}/api/search?q=${encodeURIComponent(query)}`)
-  if (!response.ok) throw new Error(`search answered ${response.status}`)
-
-  const found = (await response.json()) as { docs: Found[]; packages: Found[] }
-  return [...found.docs, ...found.packages].slice(0, PASSAGES)
-}
-
 // Each passage is named by its page, so a citation points at something a reader can open.
-const passages = (found: Found[]) => found.map((each, at) => `[${at + 1}] ${each.where} — ${each.title}\n${each.snippet.replace(MARKS, '')}`).join('\n\n')
+const passages = (found: Page[]) => found.map((each, at) => `[${at + 1}] ${each.where} — ${each.title}\n${each.text}`).join('\n\n')
 
 // A rewrite or a search out of reach only means fewer passages, since the reference carries the language on its own.
 export async function answer(env: { AI: Ai; SITE: string }, turns: Turn[], asked: string): Promise<Answer> {

@@ -34,12 +34,16 @@ async function heard(until: number): Promise<{ discord?: boolean; ticked?: numbe
   return heard(until)
 }
 
-// Checked on its own, since the reference can carry an answer and leave a silent search looking healthy.
+// Checked on their own, since the reference can carry an answer and a failed read falls back to a snippet without a word.
 const shelf = await fetch(`${SITE}/api/search?q=cli`)
 if (!shelf.ok) throw new Error(`${SITE}/api/search answered ${shelf.status}`)
 
-const { docs } = (await shelf.json()) as { docs: unknown[] }
+const { docs } = (await shelf.json()) as { docs: { href: string }[] }
 if (!docs.length) throw new Error(`${SITE}/api/search found nothing for a word its own reference uses`)
+
+const page = `${SITE}/api${docs[0]!.href.split('#')[0]}`
+const opened = await fetch(page)
+if (!opened.ok || !((await opened.json()) as { body?: string }).body) throw new Error(`${page} answered no page to read`)
 
 const answer = (await (await reached(Date.now() + WAIT_MS)).json()) as { text?: string; sources?: string[]; session?: string }
 if (!answer.text) throw new Error('answered with no text')

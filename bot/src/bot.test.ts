@@ -6,6 +6,7 @@ import { stale } from './alarm'
 import { left, spend } from './budget'
 import { HISTORY_MS, MAX_QUESTION, PER_DAY, SESSION_MS, TICK_MS, TURNS } from './config'
 import { spoken } from './discord'
+import { search } from './search'
 import { digest, link, remember, rooted, sweep, threaded, turns, type Turn } from './session'
 
 const SCHEMA = readFileSync(new URL('../db/schema.sql', import.meta.url), 'utf8')
@@ -125,6 +126,32 @@ test('an alarm that strayed from the next tick is armed again', () => {
   assert.equal(stale(null, now), true, 'none at all')
   assert.equal(stale(now - 10 * 60_000, now), true, 'behind and never delivered')
   assert.equal(stale(now + 10 * 60_000, now), true, 'pushed out by retries')
+})
+
+// A hit reads as the part of the page it points at, and one that fails to read keeps its snippet.
+test('a search reads what it finds under /api', async (t) => {
+  const site = 'https://edgepython.com'
+  const served: Record<string, unknown> = {
+    '/api/search?q=actors': {
+      docs: [
+        { title: 'Groups', where: 'Reference · Actors', href: '/docs/reference/actors#groups', snippet: '' },
+        { title: 'Gone', where: 'Docs', href: '/docs/gone', snippet: 'a \u0001group\u0002 of actors' }
+      ],
+      packages: [{ title: 'json', where: 'Package', href: '/package/json', snippet: '' }]
+    },
+    '/api/docs/reference/actors': { body: '# Actors\nIntro.\n## Groups\nA group runs one program.\n```python\n## not a heading\n```\n## Limits\nMemory.' },
+    '/api/package/json': { name: 'json', version: '0.1.0' }
+  }
+
+  t.mock.method(globalThis, 'fetch', async (input: RequestInfo | URL) => {
+    const path = String(input).slice(site.length)
+    return path in served ? Response.json(served[path]) : new Response(null, { status: 404 })
+  })
+
+  assert.deepEqual(
+    (await search(site, 'actors')).map((each) => each.text),
+    ['## Groups\nA group runs one program.\n```python\n## not a heading\n```', '{"name":"json","version":"0.1.0"}', 'a group of actors']
+  )
 })
 
 // Discord breaks a line after a block by itself, so a blank line written there shows as two.

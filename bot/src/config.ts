@@ -2,7 +2,10 @@ export const MODEL = '@cf/google/gemma-4-26b-a4b-it'
 
 export const TICK_MS = 10_000
 export const FETCH_LIMIT = 50
+
+// How many hits a search reads and how much of each it keeps.
 export const PASSAGES = 5
+export const MAX_PASSAGE = 1_500
 
 // Characters Discord takes in one message, and tokens an answer may spend, which stays well inside it.
 export const MAX_MESSAGE = 2_000

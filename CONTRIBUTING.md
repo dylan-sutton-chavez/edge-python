@@ -115,12 +115,12 @@ npm test # builds the Worker and drives it in three engines
 
 ## The bot
 
-`bot/` answers questions about Edge Python out of the published pages, over http at `ask.edgepython.com` and in the Discord server. It reads `/api/search` the way any other client does and [`bot.yml`](.github/workflows/bot.yml) ships it on a push that touches it or the `skill/SKILL.md` it carries inside, so a fix to it never waits on a release.
+`bot/` answers questions about Edge Python out of the published pages, over http at `ask.edgepython.com` and in the Discord server. It searches and reads the site under `/api` the way any other client does and [`bot.yml`](.github/workflows/bot.yml) ships it on a push that touches it or the `skill/SKILL.md` it carries inside, so a fix to it never waits on a release.
 
 ```bash
 cd bot && npm ci
 npm run check # types and the wrangler config
-npm test      # what it keeps and how a reply reads, on the schema itself
+npm test      # what it keeps, what a search reads and how a reply looks
 npm run dev   # the http side on a local database, with the model through your wrangler login
 ```
 
