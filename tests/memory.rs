@@ -1,5 +1,6 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
 use compiler::lexer::lex;
 use compiler::parser::Parser;
@@ -30,8 +31,16 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static COUNTING: Counting = Counting;
 
+/* The allocator counts every thread and the tests run side by side, so their runs take turns and none reads another's bytes. */
+static TURN: Mutex<()> = Mutex::new(());
+
+fn turn() -> MutexGuard<'static, ()> {
+    TURN.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /* What `build` holds once it ran, by the model and for real, both past an empty program of the same shape. */
 fn held(build: &str) -> (usize, usize) {
+    let _turn = turn();
     let run = |src: &str| {
         let (tokens, _) = lex(src);
         let (chunk, errs) = Parser::new(src, tokens.into_iter()).parse();
@@ -39,7 +48,7 @@ fn held(build: &str) -> (usize, usize) {
         let before = LIVE.load(Ordering::Relaxed);
         let mut vm = VM::with_limits(&chunk, Limits::sandbox());
         vm.run().unwrap();
-        (vm.memory(), LIVE.load(Ordering::Relaxed) - before)
+        (vm.memory(), LIVE.load(Ordering::Relaxed).saturating_sub(before))
     };
     let (model, real) = run(&build.replace("N", "100000"));
     let (model0, real0) = run(&build.replace("N", "0"));
@@ -70,6 +79,7 @@ fn the_memory_model_never_counts_less_than_what_a_program_holds() {
 
 /* What `src` holds once it ran and the most it held at once, both by the memory model. */
 fn peaked(src: &str) -> (usize, usize) {
+    let _turn = turn();
     let (tokens, _) = lex(src);
     let (chunk, errs) = Parser::new(src, tokens.into_iter()).parse();
     assert!(errs.is_empty(), "{src}");
