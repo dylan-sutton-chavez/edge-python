@@ -5,8 +5,9 @@ export const BOT = `${RESOURCE_HASH}-bot`
 export const BOT_DB = `${BOT}-db`
 export const ASK_DOMAIN = `ask.${ZONE}`
 
-// Always the published site, since the bot answers one server and reads what everybody else reads.
+// Always the published site and engine, since the bot answers one server and reads what everybody else reads.
 export const SITE = `https://${ZONE}`
+export const ENGINE = `https://cdn.${ZONE}/compiler.wasm`
 
 export const GUILD = '1556245444147806249'
 

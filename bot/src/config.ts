@@ -14,6 +14,12 @@ export const MAX_PASSAGE = 1_500
 export const MAX_MESSAGE = 2_000
 export const MAX_ANSWER = 700
 
+// What a program the model runs may hold, spend and print, enough for a sum and never enough to stall a reply.
+export const RUN_MEMORY = 16 << 20
+export const RUN_OPS = 1_000_000
+export const MAX_OUTPUT = 2_000
+export const ROUNDS = 3
+
 // What a tick may answer and what a day may cost, the only two numbers that bound every model call.
 export const PER_TICK = 3
 export const PER_DAY = 500

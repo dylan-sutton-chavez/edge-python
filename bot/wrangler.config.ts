@@ -28,6 +28,8 @@ const config: Config = {
   main: 'src/index.ts',
   compatibility_date: '2026-09-01',
   compatibility_flags: ['nodejs_compat'],
+  // The engine the model runs code on, carried inside since a Worker cannot compile wasm while it runs.
+  rules: [{ type: 'CompiledWasm', globs: ['**/*.wasm'], fallthrough: false }],
   observability: { enabled: true },
   workers_dev: false,
   preview_urls: false,

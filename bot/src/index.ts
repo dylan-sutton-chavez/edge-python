@@ -1,3 +1,4 @@
+import ENGINE from '../compiler.wasm'
 import { answer } from './answer'
 import { Bot, type Env } from './bot'
 import { left, spend } from './budget'
@@ -43,7 +44,7 @@ export default {
 
     await spend(env)
 
-    const found = await answer(env, held, asked).catch((failure) => console.error('answering', failure))
+    const found = await answer({ ...env, ENGINE }, held, asked).catch((failure) => console.error('answering', failure))
     if (!found) return json({ error: 'No answer came back. Try again.' }, 502)
 
     await remember(env, id, 'http', [...held, { role: 'user', content: asked }, { role: 'assistant', content: found.text }])

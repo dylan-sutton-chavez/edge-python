@@ -107,12 +107,12 @@ function tidy(text: string) {
   return out.join('\n').trim()
 }
 
-// The cited number becomes the link inside its brackets, which renders because a number is nothing like an address.
+// The cited number becomes a link with its parentheses, which renders because a number is nothing like an address.
 const linked = (text: string, sources: string[]) =>
   prose(text, (part) =>
     part.replace(HIDDEN, '<$1>').replace(/\[(\d+)\]/g, (whole, mark: string) => {
       const url = sources[Number(mark) - 1]
-      return url ? `[[${mark}](<${url}>)]` : whole
+      return url ? `[(${mark})](<${url}>)` : whole
     })
   )
 

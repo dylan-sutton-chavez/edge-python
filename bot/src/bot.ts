@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
+import ENGINE from '../compiler.wasm'
 import { stale } from './alarm'
 import { answer } from './answer'
 import { left, spend } from './budget'
@@ -83,7 +84,7 @@ export class Bot extends DurableObject<Env> {
 
     await spend(this.env)
 
-    const found = await answer(this.env, held, message.content)
+    const found = await answer({ ...this.env, ENGINE }, held, message.content)
     const sent = await reply(this.env.DISCORD_TOKEN, channel, message.id, spoken(found))
 
     await remember(this.env, id, 'discord', [...held, { role: 'user', content: message.content }, { role: 'assistant', content: found.text }])

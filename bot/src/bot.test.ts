@@ -7,6 +7,7 @@ import { cited } from './answer'
 import { left, spend } from './budget'
 import { HISTORY_MS, MAX_QUESTION, PER_DAY, SESSION_MS, TICK_MS, TURNS } from './config'
 import { spoken } from './discord'
+import { run } from './run'
 import { search } from './search'
 import { digest, link, remember, rooted, sweep, threaded, turns, type Turn } from './session'
 
@@ -158,15 +159,24 @@ test('citations number their pages in the order they are cited', () => {
   assert.deepEqual(
     cited(
       'https://edgepython.com',
-      'Add it [see edge add], then import json [2] [2].\n```python\nprint(xs[1])\n```\nLost [see nowhere] [reference] [9].',
+      'Add it [see edge add], then import json [2] [2] as both pages say [1, 2].\n```python\nprint(xs[1])\n```\nLost [see nowhere] [reference] [9].',
       [page('/docs/a'), page('/package/json')],
       new Map([['edge add', page('/docs/reference/cli#edge-add')], ['nowhere', undefined]])
     ),
     {
-      text: 'Add it [1], then import json [2] [2].\n```python\nprint(xs[1])\n```\nLost.',
-      sources: ['https://edgepython.com/docs/reference/cli#edge-add', 'https://edgepython.com/package/json']
+      text: 'Add it [1], then import json [2] [2] as both pages say [3] [2].\n```python\nprint(xs[1])\n```\nLost.',
+      sources: ['https://edgepython.com/docs/reference/cli#edge-add', 'https://edgepython.com/package/json', 'https://edgepython.com/docs/a']
     }
   )
+})
+
+// What the model runs gets nothing granted and stops at its budget, so a loop it writes cannot stall a reply.
+test('a run prints what it computes and stops where the engine says', () => {
+  const engine = new WebAssembly.Module(readFileSync(new URL('../compiler.wasm', import.meta.url)))
+
+  assert.deepEqual(run(engine, 'print(4 * 1024**3 // (31 * 1024))'), { output: '135300\n' })
+  assert.match(run(engine, 'while True:\n    pass').error!, /budget exceeded/)
+  assert.match(run(engine, 'import time').error!, /not provided/)
 })
 
 // Discord breaks a line after a block by itself, so a blank line written there shows as two.
@@ -175,7 +185,7 @@ test('an answer reads as one chat message', () => {
 
   assert.equal(
     spoken({ text: 'Declare it [1].\n```python run\nprint(xs[1])\n```\n\n```text\nok\n```\n\nThen read `ys[1]`.\n\n\n---\nDone.', sources: [page] }),
-    `Declare it [[1](<${page}>)].\n\n\`\`\`python\nprint(xs[1])\n\`\`\`\n\`\`\`text\nok\n\`\`\`\nThen read \`ys[1]\`.\n\nDone.`
+    `Declare it [(1)](<${page}>).\n\n\`\`\`python\nprint(xs[1])\n\`\`\`\n\`\`\`text\nok\n\`\`\`\nThen read \`ys[1]\`.\n\nDone.`
   )
 
   assert.equal(

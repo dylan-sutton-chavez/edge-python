@@ -8,14 +8,15 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "config": "tsx wrangler.config.ts",
+    "engine": "tsx engine.ts",
+    "config": "npm run engine && tsx wrangler.config.ts",
     "db": "tsx db/ensure.ts",
     "types": "npm run config && wrangler types",
     "dev": "npm run config && wrangler d1 execute DB --local --file=db/schema.sql && wrangler dev --var DISCORD:0",
     "deploy": "npm run db && npm run config && wrangler deploy",
     "secrets": "tsx secrets.ts",
     "check": "npm run types && tsc --noEmit",
-    "test": "node --disable-warning=ExperimentalWarning --import tsx --test src/*.test.ts",
+    "test": "npm run engine && node --disable-warning=ExperimentalWarning --import tsx --test src/*.test.ts",
     "smoke": "tsx smoke.ts"
   },
   "devDependencies": {

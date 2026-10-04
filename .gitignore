@@ -28,9 +28,10 @@ site/wrangler.json
 site/worker-configuration.d.ts
 .dev.vars
 
-# wrangler output for the bot
+# wrangler output for the bot, and the engine it fetches
 bot/wrangler.json
 bot/worker-configuration.d.ts
+bot/compiler.wasm
 
 # WASM
 pkg/
