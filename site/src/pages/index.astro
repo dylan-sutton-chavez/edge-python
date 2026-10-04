@@ -11,6 +11,7 @@ import { avatarFor, type Palette } from '../lib/account/avatar'
 import { OWNER } from '../lib/account/handle'
 import { count } from '../lib/format'
 import { programs } from '../data/programs'
+import { hidden } from '../draft'
 
 // Repos a visitor may know, each a tag that opens Edge and rails on it.
 const repos = [['rails', 'rails/rails'], ['django', 'django/django'], ['express', 'expressjs/express'], ['flask', 'pallets/flask'], ['next.js', 'vercel/next.js']]
@@ -28,10 +29,14 @@ const sorts = [
 ]
 
 const packages = (await listed(env.DB, { asked: asked || undefined })).results
-// Every artifact the shelf can show, the packages published and the programs the site ships.
-const total = (await counted(env.DB)) + programs.length
 
-const shown = programs.filter((each) => `${each.name} ${each.description}`.toLowerCase().includes(asked.toLowerCase()))
+// A draft program is left off the shelf as it is out of search, since its page answers as missing.
+const live = programs.filter((each) => !hidden(`/program/${each.slug}`))
+
+// Every artifact the shelf can show, the packages published and the programs the site ships.
+const total = (await counted(env.DB)) + live.length
+
+const shown = live.filter((each) => `${each.name} ${each.description}`.toLowerCase().includes(asked.toLowerCase()))
 
 const authors = new Map(await Promise.all([...new Set(shown.map((each) => each.author))].map(async (handle) => {
   const found = await userByHandle(env.DB, handle)
@@ -75,7 +80,7 @@ const outline = 'flex items-center gap-2 transition border border-line text-fg-h
       </div>
     </div>
 
-    <section class="flex flex-col items-center gap-4 rounded-2xl border border-line-strong bg-page px-4 py-10">
+    <section data-group="programs" class="flex flex-col items-center gap-4 rounded-2xl border border-line-strong bg-page px-4 py-10">
       <div class="flex flex-col items-center gap-1">
         <span class="flex items-center gap-2 whitespace-nowrap text-xs text-fg-hint">
           <Icon name="tram" size="xs" class="shrink-0" />Edge and rails
