@@ -152,20 +152,21 @@ test('a search reads what it finds under /api', async (t) => {
   )
 })
 
-// A page is numbered by when it is first cited, a term finds its page, and a mark that points nowhere goes.
-test('citations number their pages in the order they are cited', () => {
-  const page = (href: string) => ({ title: '', where: '', href, snippet: '' })
+// A sentence links the passage holding its words, else the page its term names, and code and the model's own numbers never decide one.
+test('each sentence links the page it came from', () => {
+  const page = (href: string, text = '') => ({ title: '', where: '', href, snippet: '', text })
+  const memo = page('/docs/language/functions#memoization', 'Pure functions are memoized after two calls with the same arguments, and purity is detected statically.')
 
   assert.deepEqual(
     cited(
       'https://edgepython.com',
-      'Add it [see edge add], then import json [2] [2] as both pages say [1, 2].\n```python\nprint(xs[1])\n```\nLost [see nowhere] [reference] [9].',
-      [page('/docs/a'), page('/package/json')],
-      new Map([['edge add', page('/docs/reference/cli#edge-add')], ['nowhere', undefined]])
+      'Pure functions are memoized after two identical calls [2]. Add a package with `edge add`. [see edge add]\n```python\nprint(xs[1])\n```\nIt is fast [reference] [3].',
+      [memo],
+      new Map([['edge add', page('/docs/reference/cli#edge-add')]])
     ),
     {
-      text: 'Add it [1], then import json [2] [2] as both pages say [3] [2].\n```python\nprint(xs[1])\n```\nLost.',
-      sources: ['https://edgepython.com/docs/reference/cli#edge-add', 'https://edgepython.com/package/json', 'https://edgepython.com/docs/a']
+      text: 'Pure functions are memoized after two identical calls [1]. Add a package with `edge add` [2].\n```python\nprint(xs[1])\n```\nIt is fast.',
+      sources: ['https://edgepython.com/docs/language/functions#memoization', 'https://edgepython.com/docs/reference/cli#edge-add']
     }
   )
 })

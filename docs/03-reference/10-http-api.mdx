@@ -66,7 +66,7 @@ curl -X POST https://ask.edgepython.com \
 }
 ```
 
-`sources` holds only the pages the answer cited, in the order `text` numbers them, and an answer the reference carried alone cites none. A question the documentation does not cover is answered with a line saying so rather than a guess.
+`sources` holds the page each cited sentence came from, in the order `text` numbers them. A question the documentation does not cover is answered with a line saying so rather than a guess.
 
 Send `session` back on the next question and the conversation continues, which is how a follow-up like `and if it is private?` keeps what it refers to. A session is yours while you hold it, goes quiet after thirty minutes and ends after a day. Sending an id that has ended opens a new conversation rather than failing, and the one you get back is the one to keep.
 
