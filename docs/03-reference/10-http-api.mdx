@@ -61,15 +61,15 @@ curl -X POST https://ask.edgepython.com \
 ```json
 {
   "text": "Declare every module in edge.json and run edge add <name> [1]",
-  "sources": ["https://edgepython.com/docs/getting-started/quickstart#declare"],
+  "sources": ["https://edgepython.com/docs/getting-started/quickstart#import-your-first-package"],
   "session": "pK3f…"
 }
 ```
 
 `sources` holds the page each cited sentence came from, in the order `text` numbers them. A question the documentation does not cover is answered with a line saying so rather than a guess.
 
-Send `session` back on the next question and the conversation continues, which is how a follow-up like `and if it is private?` keeps what it refers to. A session is yours while you hold it, goes quiet after thirty minutes and ends after a day. Sending an id that has ended opens a new conversation rather than failing, and the one you get back is the one to keep.
+Send `session` back on the next question and the conversation continues, which is how a follow-up like `and if it is private?` keeps what it refers to. A session is yours while you hold it and ends once it has gone quiet for a while. Sending an id that has ended opens a new conversation rather than failing, and the one you get back is the one to keep.
 
-Two answers come back as `429`, and they mean different things. One address asking faster than five questions a minute is told to try again in a minute. A day that has answered all it will answer says so, and the Discord server shares that day, which is why one caller does not get to spend it. A `502` is an answer that did not come back, and asking again is all it takes.
+Two answers come back as `429`, and they mean different things. An address asking too fast is told to wait a moment. A day that has answered all it will answer says so, and the Discord server shares that day, which is why one caller does not get to spend it. A `502` is an answer that did not come back, and asking again is all it takes.
 
 The same answers are given in the [Discord server](https://discord.com/invite/WhXYnn2YRc) to a message that mentions the bot, and a reply to one of its answers carries the conversation on.
