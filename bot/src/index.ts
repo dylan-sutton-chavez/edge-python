@@ -48,7 +48,7 @@ export default {
     if (!found) return json({ error: 'No answer came back. Try again.' }, 502)
 
     await remember(env, id, 'http', [...held, { role: 'user', content: asked }, { role: 'assistant', content: found.text }])
-    return json({ ...found, session: secret })
+    return json({ text: found.text, sources: found.sources, session: secret })
   },
 
   // The alarm drives every tick, and this only re-arms one that strayed.

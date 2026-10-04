@@ -107,12 +107,12 @@ function tidy(text: string) {
   return out.join('\n').trim()
 }
 
-// The cited number becomes a link with its parentheses, which renders because a number is nothing like an address.
-const linked = (text: string, sources: string[]) =>
+// A cited number becomes the name of the page it opens, so a link reads as part of the sentence.
+const linked = (text: string, sources: string[], names: string[]) =>
   prose(text, (part) =>
     part.replace(HIDDEN, '<$1>').replace(/\[(\d+)\]/g, (whole, mark: string) => {
       const url = sources[Number(mark) - 1]
-      return url ? `[(${mark})](<${url}>)` : whole
+      return url ? `([see ${names[Number(mark) - 1]}](<${url}>))` : whole
     })
   )
 
@@ -126,4 +126,4 @@ function fits(content: string) {
   return `${line > MAX_MESSAGE / 2 ? held.slice(0, line) : held}…`
 }
 
-export const spoken = (answer: Answer) => fits(linked(tidy(answer.text), answer.sources))
+export const spoken = (answer: Answer) => fits(linked(tidy(answer.text), answer.sources, answer.names))

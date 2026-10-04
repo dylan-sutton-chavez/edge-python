@@ -4,7 +4,7 @@ import { run } from './run'
 import { closest, search, type Found, type Page } from './search'
 import type { Turn } from './session'
 
-export type Answer = { text: string; sources: string[] }
+export type Answer = { text: string; sources: string[]; names: string[] }
 
 type Reads = { AI: Ai; SITE: string; ENGINE: WebAssembly.Module }
 
@@ -145,32 +145,42 @@ function source(sentence: string, indexed: { page: Page; words: Set<string> }[])
   return most >= Math.max(2, Math.ceil(words.size * 0.4)) ? best : undefined
 }
 
-// Each sentence links the passage it came from, or else the page its term names, numbered in the order they appear.
+// What a reader sees for a link, the heading it opens on, and its page beside it when two links share a heading.
+function labels(pages: Found[]) {
+  const titles = pages.map((page) => page.title.replace(/[`[\]]/g, ''))
+  return titles.map((title, at) => (titles.indexOf(title) === titles.lastIndexOf(title) ? title : `${title} in ${pages[at]!.where.split(' · ').at(-1)}`))
+}
+
+// A run of sentences from one page links it once, after its last sentence, numbered in the order the links appear.
 export function cited(site: string, text: string, found: Page[], byTerm: Map<string, Found | undefined>): Answer {
   const indexed = found.map((page) => ({ page, words: keys(page.text) }))
   const { hidden, shown, uncoded } = held(text)
-  const hrefs: string[] = []
+  const linked: Found[] = []
 
-  const cite = (sentence: string) => {
+  const traced = (sentence: string) => {
     const terms = [...sentence.matchAll(SEE)].map((each) => each[1]!.trim())
     const plain = sentence.replace(SEE, '').replace(STRAY, '')
-    if (!uncoded(plain).trim()) return plain
+    const page = uncoded(plain).trim() ? (source(shown(plain), indexed) ?? terms.map((term) => byTerm.get(term)).find(Boolean)) : undefined
+    return { plain, page }
+  }
 
-    const page = source(shown(plain), indexed) ?? terms.map((term) => byTerm.get(term)).find((each) => each !== undefined)
-    if (!page) return plain
-
-    if (!hrefs.includes(page.href)) hrefs.push(page.href)
+  const mark = (plain: string, page: Found) => {
+    let at = linked.findIndex((each) => each.href === page.href)
+    if (at < 0) at = linked.push(page) - 1
     const end = plain.search(/[.!?:]*\s*$/)
-    return `${plain.slice(0, end)} [${hrefs.indexOf(page.href) + 1}]${plain.slice(end)}`
+    return `${plain.slice(0, end)} [${at + 1}]${plain.slice(end)}`
   }
 
   const written = hidden
     .replace(TRAILING, '$2$1')
     .split('\n')
-    .map((line) => line.split(/(?<=[.!?])(?=\s)/).map(cite).join(''))
+    .map((line) => {
+      const sentences = line.split(/(?<=[.!?])(?=\s)/).map(traced)
+      return sentences.map(({ plain, page }, at) => (page && sentences[at + 1]?.page?.href !== page.href ? mark(plain, page) : plain)).join('')
+    })
     .join('\n')
 
-  return { text: shown(written), sources: hrefs.map((href) => `${site}${href}`) }
+  return { text: shown(written), sources: linked.map((page) => `${site}${page.href}`), names: labels(linked) }
 }
 
 // A rewrite or a search out of reach only means fewer passages, since the reference carries the language on its own.
