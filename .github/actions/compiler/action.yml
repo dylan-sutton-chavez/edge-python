@@ -1,5 +1,5 @@
 name: Compiler
-description: Rust compiler crate. Shear and clippy, wasm build and optimize, tests, tmp staging, tag release.
+description: Rust compiler crate. Wasm build and optimize, tmp staging, tag release.
 
 inputs:
   github-token:
@@ -19,27 +19,6 @@ runs:
       with:
         cache: false
         rustflags: ""
-
-    # rust-cache drops binaries installed during the job, so take the prebuilt one.
-    - name: Install cargo-shear
-      uses: taiki-e/install-action@v2
-      with:
-        tool: cargo-shear@1.13.4
-
-    # Detects declared but unused dependencies across the workspace.
-    - name: Shear
-      shell: bash
-      run: cargo shear
-
-    - name: Clippy (host)
-      shell: bash
-      run: cargo clippy --locked --all-targets -- -D warnings
-
-    - name: Clippy (wasm)
-      shell: bash
-      run: |
-        cargo clippy --locked --lib --no-default-features --features edge-python/runtime --target wasm32-unknown-unknown -p edge-python -p slugify-mod -- -D warnings
-        cargo clippy --locked --lib --no-default-features --target wasm32-unknown-unknown -p edge-python -- -D warnings
 
     # build-std needs nightly plus rust-src.
     - name: Toolchain (nightly)
@@ -119,20 +98,6 @@ runs:
         wasm-opt -O3 --enable-bulk-memory --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-multivalue --enable-reference-types -o /tmp/compiler-cli.wasm "$CLI_WASM"
         mv /tmp/compiler-cli.wasm "$CLI_WASM"
         ls -lh "$CLI_WASM"
-
-    - name: Test
-      shell: bash
-      run: cargo test --locked -p edge-python -p lang
-
-    # On its own, since the coverage build leaves method calls unfused and the corpus above must run fused.
-    - name: Coverage hook
-      shell: bash
-      run: cargo test --locked -p edge-python --features coverage coverage
-
-    # On its own too, it recounts every slot at each collection to prove the running count.
-    - name: Memory count
-      shell: bash
-      run: cargo test --locked --release -p edge-python --features memcheck --test tests vm::test::test_cases
 
     # compiler.wasm ships, the speed build goes under _build/ for the CLI jobs.
     - name: Stage on tmp

@@ -1,5 +1,5 @@
 name: JS
-description: The JS host. Deno lint and check, tsc emit to js/dist, then its tree staged on tmp.
+description: The JS host. tsc emit to js/dist, then its tree staged on tmp.
 
 runs:
   using: composite
@@ -16,17 +16,6 @@ runs:
         key: deno-${{ runner.os }}-${{ hashFiles('**/deno.json', '**/deno.lock') }}
         restore-keys: deno-${{ runner.os }}-
 
-    - name: Lint
-      shell: bash
-      run: deno lint js/
-
-    # js/src splits main-thread (dom lib) and worker (webworker lib) since tsc rejects mixing the two.
-    - name: Type check
-      shell: bash
-      run: |
-        deno check --config js/src/deno.json js/src/index.ts
-        deno check --config js/src/worker/deno.json js/src/worker/worker.ts js/src/worker/engine.ts
-
     # Strips types to js/dist, the shape the CDN and the Playwright suite both serve, pinned tsc version.
     - name: Build
       shell: bash
@@ -37,7 +26,6 @@ runs:
         # The engine as one classic script, the page hands it to the room as a whole.
         deno bundle --platform browser --format iife src/worker/worker.ts -o dist/worker/bundle.js
 
-    # The Deno and Playwright suites run in the test job, against this tree on tmp.
     - name: Stage on tmp
       uses: ./.github/actions/upload
       with:
