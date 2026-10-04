@@ -151,11 +151,10 @@ function labels(pages: Found[]) {
   return titles.map((title, at) => (titles.indexOf(title) === titles.lastIndexOf(title) ? title : `${title} under ${pages[at]!.where.split(' · ').at(-1)}`))
 }
 
-// A run of sentences from one page links it once, after its last sentence, numbered in the order the links appear.
+// Each page links once per answer, after the last sentence of its first run, and a run reaches across lines.
 export function cited(site: string, text: string, found: Page[], byTerm: Map<string, Found | undefined>): Answer {
   const indexed = found.map((page) => ({ page, words: keys(page.text) }))
   const { hidden, shown, uncoded } = held(text)
-  const linked: Found[] = []
 
   const traced = (sentence: string) => {
     const terms = [...sentence.matchAll(SEE)].map((each) => each[1]!.trim())
@@ -164,21 +163,25 @@ export function cited(site: string, text: string, found: Page[], byTerm: Map<str
     return { plain, page }
   }
 
+  const lines = hidden.replace(TRAILING, '$2$1').split('\n').map((line) => line.split(/(?<=[.!?])(?=\s)/).map(traced))
+  const sourced = lines.flat().filter((each) => each.page)
+  const ends = new Set<(typeof sourced)[number]>()
+  const seen = new Set<string>()
+
+  sourced.forEach((each, at) => {
+    const href = each.page!.href
+    if (sourced[at + 1]?.page!.href === href || seen.has(href)) return
+    seen.add(href)
+    ends.add(each)
+  })
+
+  const linked: Found[] = []
   const mark = (plain: string, page: Found) => {
-    let at = linked.findIndex((each) => each.href === page.href)
-    if (at < 0) at = linked.push(page) - 1
     const end = plain.search(/[.!?:]*\s*$/)
-    return `${plain.slice(0, end)} [${at + 1}]${plain.slice(end)}`
+    return `${plain.slice(0, end)} [${linked.push(page)}]${plain.slice(end)}`
   }
 
-  const written = hidden
-    .replace(TRAILING, '$2$1')
-    .split('\n')
-    .map((line) => {
-      const sentences = line.split(/(?<=[.!?])(?=\s)/).map(traced)
-      return sentences.map(({ plain, page }, at) => (page && sentences[at + 1]?.page?.href !== page.href ? mark(plain, page) : plain)).join('')
-    })
-    .join('\n')
+  const written = lines.map((line) => line.map((each) => (ends.has(each) ? mark(each.plain, each.page!) : each.plain)).join('')).join('\n')
 
   return { text: shown(written), sources: linked.map((page) => `${site}${page.href}`), names: labels(linked) }
 }

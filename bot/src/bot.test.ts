@@ -152,20 +152,20 @@ test('a search reads what it finds under /api', async (t) => {
   )
 })
 
-// A run of sentences links the passage holding their words once, else the page its term names, and code and the model's own numbers never decide one.
-test('each run of sentences links the page it came from once', () => {
+// A page links once, after its first run even across lines, from the passage holding the words or else the term, and code and the model's numbers decide nothing.
+test('each page is linked once, where its first run ends', () => {
   const page = (href: string, title: string, text = '') => ({ title, where: 'Reference · Functions', href, snippet: '', text })
   const memo = page('/docs/language/functions#memoization', 'Memoization', 'Pure functions are memoized after two calls with the same arguments, and purity is detected statically.')
 
   assert.deepEqual(
     cited(
       'https://edgepython.com',
-      'Pure functions are memoized after two identical calls [2]. Purity is detected statically [1]. Add a package with `edge add`. [see edge add]\n```python\nprint(xs[1])\n```\nIt is fast [reference] [3].',
+      'Pure functions are memoized after two identical calls [2].\nPurity is detected statically [1]. Add a package with `edge add`. [see edge add]\n```python\nprint(xs[1])\n```\nIt is fast [reference] [3]. Purity is detected statically.',
       [memo],
       new Map([['edge add', page('/docs/reference/cli#edge-add', '`edge add`')]])
     ),
     {
-      text: 'Pure functions are memoized after two identical calls. Purity is detected statically [1]. Add a package with `edge add` [2].\n```python\nprint(xs[1])\n```\nIt is fast.',
+      text: 'Pure functions are memoized after two identical calls.\nPurity is detected statically [1]. Add a package with `edge add` [2].\n```python\nprint(xs[1])\n```\nIt is fast. Purity is detected statically.',
       sources: ['https://edgepython.com/docs/language/functions#memoization', 'https://edgepython.com/docs/reference/cli#edge-add'],
       names: ['Memoization', 'edge add']
     }
