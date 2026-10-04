@@ -4,8 +4,7 @@ name: Bot
 on:
   push:
     branches: [main]
-    # The reference ships inside the Worker, so a push that rewrites it ships a bot that answers from it.
-    paths: ['bot/**', 'skill/SKILL.md', '.github/workflows/bot.yml', '.github/actions/bot/**']
+    paths: ['bot/**', '.github/workflows/bot.yml', '.github/actions/bot/**']
   workflow_dispatch:
 
 permissions:

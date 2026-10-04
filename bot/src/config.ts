@@ -1,5 +1,8 @@
 export const MODEL = '@cf/google/gemma-4-26b-a4b-it'
 
+// How long the published reference is kept before it is read again, so a release reaches the bot without a deploy.
+export const REFERENCE_MS = 10 * 60_000
+
 export const TICK_MS = 10_000
 export const FETCH_LIMIT = 50
 

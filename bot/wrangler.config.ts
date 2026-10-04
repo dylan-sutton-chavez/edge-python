@@ -28,8 +28,6 @@ const config: Config = {
   main: 'src/index.ts',
   compatibility_date: '2026-09-01',
   compatibility_flags: ['nodejs_compat'],
-  // The reference ships inside the Worker, so it answers from the language this build was cut from.
-  rules: [{ type: 'Text', globs: ['**/*.md'], fallthrough: true }],
   observability: { enabled: true },
   workers_dev: false,
   preview_urls: false,

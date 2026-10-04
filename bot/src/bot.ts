@@ -57,7 +57,10 @@ export class Bot extends DurableObject<Env> {
       // A first pass only learns where the channel is, so nothing said before the bot arrived is answered.
       if (!after) continue
 
-      for (const message of fresh.filter((each) => !each.author.bot && calls(each, self)).slice(0, budget)) {
+      // Without the MESSAGE CONTENT intent a mention of the bot's role arrives with no text, and a question nobody can read is left alone.
+      const asked = fresh.filter((each) => !each.author.bot && each.content.trim() && calls(each, self))
+
+      for (const message of asked.slice(0, budget)) {
         // Each on its own, since the cursor has passed them all and one failure must not lose the rest.
         try {
           await this.respond(channel.id, message)

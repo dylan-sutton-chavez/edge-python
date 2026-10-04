@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { stale } from './alarm'
+import { cited } from './answer'
 import { left, spend } from './budget'
 import { HISTORY_MS, MAX_QUESTION, PER_DAY, SESSION_MS, TICK_MS, TURNS } from './config'
 import { spoken } from './discord'
@@ -128,17 +129,13 @@ test('an alarm that strayed from the next tick is armed again', () => {
   assert.equal(stale(now + 10 * 60_000, now), true, 'pushed out by retries')
 })
 
-// A hit reads as the part of the page it points at, and one that fails to read keeps its snippet.
+// Every term is searched, each page is read once as the part it points at, and one that fails to read keeps its snippet.
 test('a search reads what it finds under /api', async (t) => {
   const site = 'https://edgepython.com'
+  const groups = { title: 'Groups', where: 'Reference · Actors', href: '/docs/reference/actors#groups', snippet: '' }
   const served: Record<string, unknown> = {
-    '/api/search?q=actors': {
-      docs: [
-        { title: 'Groups', where: 'Reference · Actors', href: '/docs/reference/actors#groups', snippet: '' },
-        { title: 'Gone', where: 'Docs', href: '/docs/gone', snippet: 'a \u0001group\u0002 of actors' }
-      ],
-      packages: [{ title: 'json', where: 'Package', href: '/package/json', snippet: '' }]
-    },
+    '/api/search?q=actors': { docs: [groups, { title: 'Gone', where: 'Docs', href: '/docs/gone', snippet: 'a \u0001group\u0002 of actors' }] },
+    '/api/search?q=json': { docs: [groups], packages: [{ title: 'json', where: 'Package', href: '/package/json', snippet: '' }] },
     '/api/docs/reference/actors': { body: '# Actors\nIntro.\n## Groups\nA group runs one program.\n```python\n## not a heading\n```\n## Limits\nMemory.' },
     '/api/package/json': { name: 'json', version: '0.1.0' }
   }
@@ -149,8 +146,26 @@ test('a search reads what it finds under /api', async (t) => {
   })
 
   assert.deepEqual(
-    (await search(site, 'actors')).map((each) => each.text),
-    ['## Groups\nA group runs one program.\n```python\n## not a heading\n```', '{"name":"json","version":"0.1.0"}', 'a group of actors']
+    (await search(site, ['actors', 'json'])).map((each) => each.text),
+    ['## Groups\nA group runs one program.\n```python\n## not a heading\n```', 'a group of actors', '{"name":"json","version":"0.1.0"}']
+  )
+})
+
+// A page is numbered by when it is first cited, a term finds its page, and a mark that points nowhere goes.
+test('citations number their pages in the order they are cited', () => {
+  const page = (href: string) => ({ title: '', where: '', href, snippet: '' })
+
+  assert.deepEqual(
+    cited(
+      'https://edgepython.com',
+      'Add it [see edge add], then import json [2] [2].\n```python\nprint(xs[1])\n```\nLost [see nowhere] [reference] [9].',
+      [page('/docs/a'), page('/package/json')],
+      new Map([['edge add', page('/docs/reference/cli#edge-add')], ['nowhere', undefined]])
+    ),
+    {
+      text: 'Add it [1], then import json [2] [2].\n```python\nprint(xs[1])\n```\nLost.',
+      sources: ['https://edgepython.com/docs/reference/cli#edge-add', 'https://edgepython.com/package/json']
+    }
   )
 })
 
@@ -160,7 +175,7 @@ test('an answer reads as one chat message', () => {
 
   assert.equal(
     spoken({ text: 'Declare it [1].\n```python run\nprint(xs[1])\n```\n\n```text\nok\n```\n\nThen read `ys[1]`.\n\n\n---\nDone.', sources: [page] }),
-    `Declare it [1](<${page}>).\n\n\`\`\`python\nprint(xs[1])\n\`\`\`\n\`\`\`text\nok\n\`\`\`\nThen read \`ys[1]\`.\n\nDone.`
+    `Declare it [[1](<${page}>)].\n\n\`\`\`python\nprint(xs[1])\n\`\`\`\n\`\`\`text\nok\n\`\`\`\nThen read \`ys[1]\`.\n\nDone.`
   )
 
   assert.equal(

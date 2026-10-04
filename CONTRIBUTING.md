@@ -115,7 +115,7 @@ npm test # builds the Worker and drives it in three engines
 
 ## The bot
 
-`bot/` answers questions about Edge Python out of the published pages, over http at `ask.edgepython.com` and in the Discord server. It searches and reads the site under `/api` the way any other client does and [`bot.yml`](.github/workflows/bot.yml) ships it on a push that touches it or the `skill/SKILL.md` it carries inside, so a fix to it never waits on a release.
+`bot/` answers questions about Edge Python out of the published pages, over http at `ask.edgepython.com` and in the Discord server. It reads the published `SKILL.md` and searches the site under `/api` the way any other client does, so a release reaches it without a deploy and [`bot.yml`](.github/workflows/bot.yml) ships a fix to it on a push that touches it.
 
 ```bash
 cd bot && npm ci

@@ -34,7 +34,10 @@ async function heard(until: number): Promise<{ discord?: boolean; ticked?: numbe
   return heard(until)
 }
 
-// Checked on their own, since the reference can carry an answer and a failed read falls back to a snippet without a word.
+// The reference, the search and a read each fail quietly inside an answer, so each is checked on its own.
+const reference = await fetch(`${SITE}/SKILL.md`)
+if (!reference.ok || !(await reference.text()).trim()) throw new Error(`${SITE}/SKILL.md answered ${reference.status} with nothing to answer from`)
+
 const shelf = await fetch(`${SITE}/api/search?q=cli`)
 if (!shelf.ok) throw new Error(`${SITE}/api/search answered ${shelf.status}`)
 

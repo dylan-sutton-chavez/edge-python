@@ -10,6 +10,10 @@ const MARKS = /[\u0001\u0002]/g
 const FENCE = /^\s*```/
 const HEADING = /^#{2,3}\s+(.+?)\s*$/
 
+// The first item of every list, then the second, so no list crowds out the others.
+const interleaved = <T>(lists: T[][]) =>
+  Array.from({ length: Math.max(0, ...lists.map((list) => list.length)) }, (_, at) => lists.flatMap((list) => list[at] ?? [])).flat()
+
 // Cut at second and third level headings outside code the way the site's search cuts a page, so a hit's title names its part.
 export function section(body: string, heading?: string) {
   const parts: { heading?: string; lines: string[] }[] = [{ lines: [] }]
@@ -37,13 +41,26 @@ async function read(site: string, hit: Found) {
   return (data.body === undefined ? JSON.stringify(data) : section(data.body, anchor && hit.title)).slice(0, MAX_PASSAGE)
 }
 
-export async function search(site: string, query: string): Promise<Page[]> {
+async function shelves(site: string, query: string): Promise<Found[]> {
   const response = await fetch(`${site}/api/search?q=${encodeURIComponent(query)}`)
   if (!response.ok) throw new Error(`search answered ${response.status}`)
 
-  // One hit from each shelf in turn, so the docs that matched never crowd out a package.
-  const shelves = Object.values((await response.json()) as Record<string, Found[]>)
-  const hits = Array.from({ length: PASSAGES }, (_, at) => shelves.flatMap((shelf) => shelf[at] ?? [])).flat().slice(0, PASSAGES)
+  return interleaved(Object.values((await response.json()) as Record<string, Found[]>))
+}
 
+// Every query at once, one hit from each in turn and each page once.
+export async function find(site: string, queries: string[]) {
+  const lists = await Promise.all(queries.map((query) => shelves(site, query).catch((): Found[] => [])))
+  return [...new Map(interleaved(lists).map((hit) => [hit.href, hit])).values()]
+}
+
+export async function search(site: string, queries: string[]): Promise<Page[]> {
+  const hits = (await find(site, queries)).slice(0, PASSAGES)
   return Promise.all(hits.map(async (hit) => ({ ...hit, text: await read(site, hit) })))
+}
+
+// The page a term names, a hit titled with it before the first one found.
+export async function closest(site: string, term: string) {
+  const hits = await find(site, [term])
+  return hits.find((hit) => hit.title.replace(/`/g, '').toLowerCase() === term.toLowerCase()) ?? hits[0]
 }
