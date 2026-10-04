@@ -15,8 +15,8 @@ impl<'a> VM<'a> {
         // Scheduler-driven resumes have nothing native above.
         let resume_safe = core::mem::take(&mut self.pending_exec_safe);
         let (outer_ip, mut outer_slots, outer_stack, outer_body, outer_iters, mut sync_frames, outer_exc) =
-            if let HeapObj::Coroutine(ip, slots, stack, body, iters, sf, ef) = self.heap.get(callee) {
-                (*ip, slots.clone(), stack.clone(), *body, iters.clone(), sf.clone(), ef.clone())
+            if let HeapObj::Coroutine(c) = self.heap.get(callee) {
+                (c.ip, c.slots.clone(), c.stack.clone(), c.body, c.iters.clone(), c.syncs.clone(), c.excs.clone())
             } else {
                 return Err(cold_type("not a coroutine"));
             };
@@ -33,16 +33,6 @@ impl<'a> VM<'a> {
         // Charge the whole cloned state (stack/slots/iters/frames), not just frame count.
         self.charge_steps(sync_frames.len() + outer_stack.len() + outer_slots.len() + outer_iters.len())?;
 
-        // Names unbound at creation resolve late, against the live module bindings.
-        if let BodyRef::Fn(fi) = outer_body {
-            for (bare, slot, _) in self.body_free_loads[fi].clone() {
-                if outer_slots.get(slot).is_some_and(|v| v.is_undef())
-                    && let Some(v) = self.resolve_free_name_fallback(fi, &bare)
-                {
-                    outer_slots[slot] = v;
-                }
-            }
-        }
         self.executing_coros.push(callee.0);
 
         let saved_call_len = self.call_stack.len();
@@ -66,14 +56,6 @@ impl<'a> VM<'a> {
                 self.pending_exec_safe = resume_safe;
                 let (_, body, _, _) = self.functions[fi];
                 let ran = self.exec_from(body, &mut slots, ip);
-                // A frame that ends past a pause hands its nonlocal writes to its caller here, as a plain return does.
-                if match &ran { Ok(_) => !self.yielded, Err(e) => !matches!(e, VmErr::HostYield(_)) } {
-                    let (caller, caller_slots): (&SSAChunk, &mut [Val]) = match sync_frames.last_mut() {
-                        Some(f) => { let held = self.functions[f.fi]; (&held.1, &mut f.slots) }
-                        None => (match outer_body { BodyRef::Fn(ofi) => { let held = self.functions[ofi]; &held.1 } BodyRef::Module => self.chunk }, &mut outer_slots),
-                    };
-                    self.back_propagate_nonlocals(fi, body, func, caller, caller_slots, &slots);
-                }
                 match ran {
                     Err(e @ VmErr::HostYield(_)) => break 'drive Err(e),
                     // An escaping error re-raises at the caller's call site, so its handlers and the traceback note follow.
@@ -92,11 +74,10 @@ impl<'a> VM<'a> {
                         let frame = CallFrame {
                             fi,
                             call_byte_pos: caller.resolve_call(call_ip).or_else(|| caller.resolve(call_ip)).unwrap_or(0),
-                            caller_source: caller.source.clone(),
-                            caller_path: caller.path.clone(),
+                            caller_source: Some(caller.source.clone()),
+                            caller_path: Some(caller.path.clone()),
                             current_class: None,
                             current_self: None,
-                            cells: Vec::new(),
                         };
                         self.call_stack.insert(saved_call_len.min(self.call_stack.len()), frame);
                         self.resume_raise = Some(e);
@@ -137,7 +118,7 @@ impl<'a> VM<'a> {
         self.executing_coros.retain(|&id| id != callee.0);
         // A body that returned or raised is finished, so a later resume must not run its tail again.
         let finished = match &result { Ok(_) => !self.yielded, Err(e) => !matches!(e, VmErr::HostYield(_)) };
-        if finished && let Some(HeapObj::Coroutine(sip, ..)) = self.heap.try_get_mut(callee) { *sip = FINISHED; }
+        if finished && let Some(HeapObj::Coroutine(c)) = self.heap.try_get_mut(callee) { c.ip = FINISHED; }
         let result = match result {
             Ok(v) => v,
             Err(e) => {
@@ -155,13 +136,13 @@ impl<'a> VM<'a> {
             // Handler depths become relative, clamped when the coroutine left a shorter stack.
             let (remaining, coro_iters, coro_exc) = self.split_frames(saved_stack_len, saved_iter_len, saved_exc_len);
             // An inline-awaited coro isn't a scheduler root, so its body's GC may have freed it, if so skip the save (a freed coro is unreachable and won't resume).
-            if let Some(HeapObj::Coroutine(sip, ss, sst, _, si, sf, ef)) = self.heap.try_get_mut(callee) {
-                *sip = resume_ip;
-                *ss = outer_slots;
-                *sst = remaining;
-                *si = coro_iters;
-                *sf = sync_frames;
-                *ef = coro_exc;
+            if let Some(HeapObj::Coroutine(c)) = self.heap.try_get_mut(callee) {
+                c.ip = resume_ip;
+                c.slots = outer_slots;
+                c.stack = remaining;
+                c.iters = coro_iters;
+                c.syncs = sync_frames;
+                c.excs = coro_exc;
             }
             self.resume_ip = saved_resume_ip; // restore the caller's scratch
             Ok(result)
@@ -328,11 +309,12 @@ impl<'a> VM<'a> {
     }
 
     fn splice_outer_placeholder(&mut self, outer: Val, value: Val) {
-        if let HeapObj::Coroutine(_, _, stack, _, _, sync_frames, _) = self.heap.get_mut(outer) {
+        if let HeapObj::Coroutine(c) = self.heap.get_mut(outer) {
+            let c = &mut **c;
             // Parked inside a plain helper, the placeholder sits on the innermost helper's stack.
-            let top = match sync_frames.last_mut() {
+            let top = match c.syncs.last_mut() {
                 Some(frame) => frame.stack_delta.last_mut(),
-                None => stack.last_mut(),
+                None => c.stack.last_mut(),
             };
             if let Some(top) = top { *top = value; }
         }
@@ -407,7 +389,7 @@ impl<'a> VM<'a> {
     fn run_cancellation(&mut self, coro: Val) -> CoroState {
         // A suspended sync helper holds cleanup this unwind can't reach.
         let has_sync = matches!(self.heap.get(coro),
-            HeapObj::Coroutine(_, _, _, _, _, sf, _) if !sf.is_empty());
+            HeapObj::Coroutine(c) if !c.syncs.is_empty());
         if has_sync {
             return CoroState::Errored(VmErr::Runtime(
                 "cannot cancel a coroutine suspended inside a synchronous helper"));

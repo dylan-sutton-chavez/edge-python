@@ -1,4 +1,4 @@
-use alloc::rc::Rc;
+use alloc::{boxed::Box, rc::Rc};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::cell::RefCell;
@@ -11,7 +11,7 @@ use super::{Pending, VM};
 use super::types::*;
 
 const MAGIC: u32 = 0x4E53_5045;
-const FORMAT: u32 = 6;
+const FORMAT: u32 = 7;
 
 pub type SnapErr = String;
 
@@ -286,7 +286,7 @@ codec!(struct Pending, put_pending, get_pending {
     pos_delta: i32v,
     kw_delta: i32v,
     delta_save: [put_i32_pair, get_i32_pair],
-    call_byte_pos: opt_u32,
+    call_ip: opt_u32,
     sleep_until_ns: opt_u64,
     event_wait_request: boolean,
     host_call_request: boolean,
@@ -322,6 +322,16 @@ fn put_map(w: &mut W, m: &FxHashMap<String, Val>) {
     for (k, v) in pairs { w.str(k); w.val(*v); }
 }
 
+/* A module's bindings in index order, unbound ones kept so indices hold. */
+fn put_globals(w: &mut W, g: &super::scope::Globals) {
+    let entries: Vec<(&str, Val)> = g.entries().collect();
+    w.seq(&entries, |w, &(name, v)| { w.str(name); w.val(v); });
+}
+
+fn get_globals(r: &mut R) -> Result<super::scope::Globals, SnapErr> {
+    Ok(super::scope::Globals::from_entries(r.seq(|r| Ok((r.str()?, r.val()?)))?))
+}
+
 fn get_map(r: &mut R) -> Result<FxHashMap<String, Val>, SnapErr> {
     let n = r.count()?;
     let mut m = FxHashMap::default();
@@ -355,7 +365,7 @@ fn put_obj(w: &mut W, obj: &HeapObj) {
         HeapObj::Ellipsis => w.u8(10),
         HeapObj::Type(n) => { w.u8(11); w.str(n); }
         HeapObj::NotImplemented => w.u8(12),
-        HeapObj::LongInt(i) => { w.u8(13); w.i128v(*i); }
+        HeapObj::LongInt(i) => { w.u8(13); w.i128v(i.get()); }
         HeapObj::ExcInstance(n, args) => { w.u8(14); w.str(n); w.vals(args); }
         HeapObj::BoundMethod(recv, id) => { w.u8(15); w.val(*recv); w.u8(id.raw()); }
         HeapObj::NativeFn(id) => { w.u8(16); w.str(id.name()); }
@@ -369,9 +379,9 @@ fn put_obj(w: &mut W, obj: &HeapObj) {
         HeapObj::PropertySetter(a) => { w.u8(22); w.val(*a); }
         HeapObj::StaticMethod(a) => { w.u8(23); w.val(*a); }
         HeapObj::ClassMethod(a) => { w.u8(27); w.val(*a); }
-        HeapObj::Coroutine(ip, slots, stack, body, iters, syncs, excs) => {
-            w.u8(24); w.usz(*ip); w.vals(slots); w.vals(stack); put_body_ref(w, body);
-            w.seq(iters, put_iter_frame); w.seq(syncs, put_sync_frame); w.seq(excs, put_exc_frame);
+        HeapObj::Coroutine(c) => {
+            w.u8(24); w.usz(c.ip); w.vals(&c.slots); w.vals(&c.stack); put_body_ref(w, &c.body);
+            w.seq(&c.iters, put_iter_frame); w.seq(&c.syncs, put_sync_frame); w.seq(&c.excs, put_exc_frame);
         }
         HeapObj::Module(spec, attrs) => { w.u8(25); w.str(spec); w.seq(attrs, put_name_val); }
         HeapObj::GenericAlias(o, a) => { w.u8(29); w.val(*o); w.val(*a); }
@@ -384,6 +394,7 @@ fn put_obj(w: &mut W, obj: &HeapObj) {
             put_iter_frame(w, &frame.borrow());
         }
         HeapObj::Extern(f) => { w.u8(26); w.str(&f.name); }
+        HeapObj::Cell(v) => { w.u8(34); w.val(*v); }
     }
 }
 
@@ -408,7 +419,7 @@ fn get_obj(r: &mut R, externs: &ExternMap, fills: &mut Vec<(u32, SetFill)>, slot
         10 => HeapObj::Ellipsis,
         11 => HeapObj::Type(r.str()?),
         12 => HeapObj::NotImplemented,
-        13 => HeapObj::LongInt(r.i128v()?),
+        13 => HeapObj::LongInt(r.i128v()?.into()),
         14 => HeapObj::ExcInstance(r.str()?, r.vals()?),
         15 => {
             let recv = r.val()?;
@@ -426,10 +437,10 @@ fn get_obj(r: &mut R, externs: &ExternMap, fills: &mut Vec<(u32, SetFill)>, slot
         21 => HeapObj::Property(r.val()?, r.val()?),
         22 => HeapObj::PropertySetter(r.val()?),
         23 => HeapObj::StaticMethod(r.val()?),
-        24 => HeapObj::Coroutine(
-            r.usz()?, r.vals()?, r.vals()?, get_body_ref(r)?,
-            r.seq(get_iter_frame)?, r.seq(get_sync_frame)?, r.seq(get_exc_frame)?,
-        ),
+        24 => HeapObj::Coroutine(Box::new(Coro {
+            ip: r.usz()?, slots: r.vals()?, stack: r.vals()?, body: get_body_ref(r)?,
+            iters: r.seq(get_iter_frame)?, syncs: r.seq(get_sync_frame)?, excs: r.seq(get_exc_frame)?,
+        })),
         25 => HeapObj::Module(r.str()?, r.seq(get_name_val)?),
         26 => {
             let name = r.str()?;
@@ -444,6 +455,7 @@ fn get_obj(r: &mut R, externs: &ExternMap, fills: &mut Vec<(u32, SetFill)>, slot
             let name = *crate::value::ITER_KINDS.get(r.u8()? as usize).ok_or("snapshot names an unknown iterator")?;
             HeapObj::Iter(Rc::new(RefCell::new(get_iter_frame(r)?)), name)
         }
+        34 => HeapObj::Cell(r.val()?),
         t => return Err(s_err("unknown heap tag", itoa::Buffer::new().format(t))),
     })
 }
@@ -493,12 +505,10 @@ vm_state! {
     stack: vals,
     iter_stack: [put_iter_frame, get_iter_frame],
     yields: vals,
-    live_slots: vals,
     with_stack: vals,
     temp_roots: vals,
     event_queue: vals,
-    globals: (put_map, get_map),
-    module_state: (put_map, get_map),
+    scopes: [put_globals, get_globals],
     module_table: (put_map, get_map),
     observed_impure: [boolean],
     is_async: [boolean], // Filled by MakeCoroutine, not chunk-derivable.
@@ -524,10 +534,9 @@ vm_state! {
 fn put_call_frame(w: &mut W, f: &CallFrame) {
     w.usz(f.fi);
     w.u32(f.call_byte_pos);
-    w.str(&f.caller_path);
+    w.str(f.caller_path.as_deref().map_or("", |p| p.as_str()));
     w.opt_val(f.current_class);
     w.opt_val(f.current_self);
-    w.seq(&f.cells, put_slot_val);
 }
 
 pub fn save(vm: &VM, source: &str) -> Vec<u8> {
@@ -665,23 +674,20 @@ pub fn restore(vm: &mut VM, blob: &[u8]) -> Result<(), SnapErr> {
         let path = r.str()?;
         let current_class = r.opt_val()?;
         let current_self = r.opt_val()?;
-        let cells = r.seq(get_slot_val)?;
         let owner = sources.iter().find(|c| c.path.as_str() == path).copied().unwrap_or(chunk);
         Ok(CallFrame {
             fi,
             call_byte_pos,
-            caller_source: owner.source.clone(),
-            caller_path: owner.path.clone(),
+            caller_source: Some(owner.source.clone()),
+            caller_path: Some(owner.path.clone()),
             current_class,
             current_self,
-            cells,
         })
     })?;
 
     if r.p != r.b.len() { return Err("snapshot has trailing bytes".to_string()); }
     // Derived flag, not serialized, recompute from the restored module bindings.
-    vm.builtins_rebound = vm.module_state.keys().any(|k| NativeFnId::from_name(k).is_some());
-    if vm.builtins_rebound { vm.needs_caller_slots.fill(true); }
+    vm.builtins_rebound = vm.scopes.iter().any(|g| g.iter().any(|(k, _)| NativeFnId::from_name(k).is_some()));
     rehash(vm, fills)?;
     rebuild_mro(vm)
 }
@@ -694,7 +700,8 @@ fn check_objs(vm: &VM, fills: &[(u32, SetFill)]) -> Result<(), SnapErr> {
     if set_items.any(|&(_, v)| dangling(v)) { return Err("snapshot references a missing object or function".to_string()); }
     for obj in vm.heap.snapshot_objs().flatten() {
         let mut ok = match obj {
-            &HeapObj::Func(fi, ..) | &HeapObj::Coroutine(_, _, _, BodyRef::Fn(fi), ..) => fi < nfn,
+            &HeapObj::Func(fi, ..) => fi < nfn,
+            HeapObj::Coroutine(c) => !matches!(c.body, BodyRef::Fn(fi) if fi >= nfn),
             &HeapObj::Range(_, _, step) => step != 0,
             _ => true,
         };
@@ -772,12 +779,9 @@ fn json_array<T>(out: &mut String, items: impl IntoIterator<Item = T>, mut item:
 /* Module bindings as a {name: repr} JSON object. */
 pub fn inspect_globals(vm: &VM) -> String {
     let mut out = String::from("{");
-    let module = vm.scheduler.iter().find_map(|h| match vm.heap.try_get(h.coro) {
-        Some(HeapObj::Coroutine(_, slots, _, BodyRef::Module, ..)) => Some(slots.clone()),
-        _ => None,
-    });
-    if let Some(slots) = module {
-        for (i, (name, v)) in super::init::collect_module_attrs(vm.chunk, &slots).into_iter().enumerate() {
+    let running = vm.scheduler.iter().any(|h| matches!(vm.heap.try_get(h.coro), Some(HeapObj::Coroutine(c)) if matches!(c.body, BodyRef::Module)));
+    if running {
+        for (i, (name, v)) in super::init::collect_module_attrs(vm.chunk, &vm.scopes[0]).into_iter().enumerate() {
             if i > 0 { out.push(','); }
             json_str(&mut out, &name);
             out.push(':');
@@ -811,8 +815,8 @@ pub fn inspect_stack(vm: &VM) -> String {
             CoroState::Raising(..) => "raising",
         };
         let (function, ip, frames) = match vm.heap.try_get(h.coro) {
-            Some(HeapObj::Coroutine(ip, _, _, body, _, syncs, _)) => {
-                (match body { BodyRef::Module => "<module>", BodyRef::Fn(fi) => fn_name(*fi) }, *ip, &syncs[..])
+            Some(HeapObj::Coroutine(c)) => {
+                (match c.body { BodyRef::Module => "<module>", BodyRef::Fn(fi) => fn_name(fi) }, c.ip, &c.syncs[..])
             }
             _ => ("", 0, &[][..]),
         };

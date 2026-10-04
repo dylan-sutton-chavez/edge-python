@@ -61,9 +61,9 @@ impl Value {
         else if v.is_heap() {
             match heap.get(v) {
                 HeapObj::Str(s) => Value::Str(s.clone()),
-                HeapObj::LongInt(i) => match i64::try_from(*i) {
+                HeapObj::LongInt(i) => match i64::try_from(i.get()) {
                     Ok(n) => Value::Int(n),
-                    Err(_) => Value::Object(i.to_string()),
+                    Err(_) => Value::Object(i.get().to_string()),
                 },
                 _ => Value::Object(render(v)),
             }
@@ -85,7 +85,7 @@ impl Value {
             Value::Bool(b) => Val::bool(*b),
             Value::Int(i) => match Val::int_checked(*i) {
                 Some(v) => v,
-                None => heap.alloc(HeapObj::LongInt(*i as i128))?,
+                None => heap.alloc(HeapObj::LongInt((*i as i128).into()))?,
             },
             Value::Float(f) => Val::float(*f),
             Value::Str(s) | Value::Object(s) => heap.alloc(HeapObj::Str(s.clone()))?,

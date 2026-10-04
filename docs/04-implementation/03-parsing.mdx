@@ -254,7 +254,7 @@ self.with_fresh_chunk(|s| {
 });
 ```
 
-Free variables (non-parameters with no local binding) are looked up in the outer chunk. `MakeFunction` captures matching slots from the enclosing scope into `captures` as shared cells, 1-element heap lists registered per call frame, so sibling closures over the same variable observe each other's `nonlocal` writes. Capture propagates through any depth (`A -> B -> C` where `C` references a variable in `A`).
+Free variables (non-parameters with no local binding) are looked up in the outer chunk. `MakeFunction` captures the enclosing function's cells into `captures`, each a `HeapObj::Cell` its call created, so sibling closures over the same variable observe each other's `nonlocal` writes. Capture propagates through any depth (`A -> B -> C` where `C` references a variable in `A`).
 
 Parameter slots are `Normal`, `Star` (`*args`), `DoubleStar` (`**kwargs`), and `KwOnly`. A lone `*` separator marks following params as keyword-only. Defaults live in `HeapObj::Func.defaults` and bind to the `=`-marked params in source order, so a default before `*args` and keyword-only defaults both apply correctly. Annotations (`x: T`, `-> T`) parse and drain to `chunk.annotations` for tooling only.
 

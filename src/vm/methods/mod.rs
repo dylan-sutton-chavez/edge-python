@@ -72,8 +72,8 @@ macro_rules! methods {
     (@k "issuperset") => { MethodKind::Iterates }; (@k "isdisjoint") => { MethodKind::Iterates }; (@k $other:tt) => { MethodKind::Plain };
 }
 
-// Lookup scans by (ty, name), so order is irrelevant, group however reads best.
-pub static ALL_METHODS: &[MethodDesc] = methods! {
+// Lookup keys on (ty, name) when compiled, so group however reads best.
+const METHODS: &[MethodDesc] = methods! {
     "str" {
         "encode" => string::encode, ro, 0..1;
         "upper" => string::upper, ro, 0..0;
@@ -205,6 +205,44 @@ pub static ALL_METHODS: &[MethodDesc] = methods! {
         "__iter__" => object::iter_self, ro, 0..0;
     }
 };
+pub static ALL_METHODS: &[MethodDesc] = METHODS;
+
+/* A method's lookup key, the type and the name mixed into one word. */
+const fn method_key(ty: &str, name: &str) -> u32 {
+    let mut h: u64 = 0;
+    let mut k = 0;
+    while k < 2 {
+        let bytes = if k == 0 { ty.as_bytes() } else { name.as_bytes() };
+        let mut i = 0;
+        while i < bytes.len() {
+            h = (h.rotate_left(5) ^ bytes[i] as u64).wrapping_mul(0x517c_c1b7_2722_0a95);
+            i += 1;
+        }
+        h = (h.rotate_left(5) ^ 0xff).wrapping_mul(0x517c_c1b7_2722_0a95);
+        k += 1;
+    }
+    (h >> 32) as u32
+}
+
+/* Method keys in order beside their ids, sorted at compile time. */
+static BY_KEY: [(u32, u8); METHODS.len()] = {
+    assert!(METHODS.len() <= 256);
+    let mut keys = [(0u32, 0u8); METHODS.len()];
+    let mut i = 0;
+    while i < keys.len() {
+        let key = (method_key(METHODS[i].ty, METHODS[i].name), i as u8);
+        let mut j = i;
+        while j > 0 && keys[j - 1].0 > key.0 { keys[j] = keys[j - 1]; j -= 1; }
+        keys[j] = key;
+        i += 1;
+    }
+    let mut k = 1;
+    while k < keys.len() {
+        assert!(keys[k - 1].0 < keys[k].0, "two builtin methods share a lookup key");
+        k += 1;
+    }
+    keys
+};
 
 // Methods that run user code, `exec_bound_method` calls them with the frame this table cannot carry.
 fn framed(_: &mut VM, _: Val, _: &[Val]) -> Result<(), VmErr> { Err(cold_type("method dispatched without a frame")) }
@@ -248,11 +286,10 @@ pub(crate) fn method_frame(vm: &mut VM, id: BuiltinMethodId, n: usize) -> Result
 }
 
 pub fn lookup_method(ty: &str, attr: &str) -> Option<BuiltinMethodId> {
-    // Scan by (ty, name), order-independent, so new methods can be appended anywhere.
-    ALL_METHODS
-        .iter()
-        .position(|m| m.ty == ty && m.name == attr)
-        .map(|i| BuiltinMethodId(i as u8))
+    let k = BY_KEY.binary_search_by_key(&method_key(ty, attr), |e| e.0).ok()?;
+    let id = BY_KEY[k].1;
+    let m = &ALL_METHODS[id as usize];
+    (m.ty == ty && m.name == attr).then_some(BuiltinMethodId(id))
 }
 
 #[cold]

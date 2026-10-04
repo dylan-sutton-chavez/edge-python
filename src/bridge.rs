@@ -318,7 +318,7 @@ pub unsafe extern "C" fn host_edge_encode(tag: u32, ptr: *const u8, len: u32) ->
         EncodeRequest::Direct(bits) => put_val(Val(bits)),
         EncodeRequest::AllocStr(s) => alloc_and_put(HeapObj::Str(s.to_string())),
         EncodeRequest::AllocBytes(b) => alloc_and_put(HeapObj::Bytes(b.to_vec())),
-        EncodeRequest::AllocLongInt(i) => alloc_and_put(HeapObj::LongInt(i)),
+        EncodeRequest::AllocLongInt(i) => alloc_and_put(HeapObj::LongInt(i.into())),
         EncodeRequest::Composite(w) => {
             match with_vm(|vm| wire_to_val(vm, &w).ok()).flatten() {
                 Some(val) => put_val(val),
@@ -383,7 +383,7 @@ fn val_to_wire(vm: &crate::vm::VM, v: Val, depth: u32, seen: &mut Vec<u64>) -> O
             match vm.heap.get(v) {
                 HeapObj::Str(s) => Some(WireValue::Bytes(s.as_bytes().to_vec())),
                 HeapObj::Bytes(b) => Some(WireValue::Raw(b.clone())),
-                HeapObj::LongInt(i) => Some(WireValue::Int(*i)),
+                HeapObj::LongInt(i) => Some(WireValue::Int(i.get())),
                 HeapObj::List(rc) => {
                     seen.push(v.0);
                     let items = guard(vm, seen, &rc.borrow())?;
@@ -448,7 +448,7 @@ pub unsafe extern "C" fn host_edge_decode(h: u32, out_tag: *mut u32, dst: *mut u
             let decoded = with_vm(|vm| match vm.heap.get(v) {
                 HeapObj::Str(s) => Decoded::Str(s.clone()),
                 HeapObj::Bytes(b) => Decoded::Bytes(b.clone()),
-                HeapObj::LongInt(i) => Decoded::LongInt(*i),
+                HeapObj::LongInt(i) => Decoded::LongInt(i.get()),
                 HeapObj::List(_) | HeapObj::Tuple(_) | HeapObj::Dict(_) => {
                     match val_to_wire(vm, v, 0, &mut Vec::new()) {
                         Some(w) => {

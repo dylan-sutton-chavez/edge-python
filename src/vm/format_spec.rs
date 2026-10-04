@@ -243,7 +243,8 @@ fn int_to_decimal_parts(v: Val, heap: &HeapPool) -> Result<(bool, String), &'sta
     }
     if v.is_bool() { return Ok((false, itoa_str(v.as_bool() as i64))); }
     if v.is_heap() && let HeapObj::LongInt(i) = heap.get(v) {
-        let neg = *i < 0;
+        let i = i.get();
+        let neg = i < 0;
         let mut b = itoa::Buffer::new();
         // unsigned_abs handles i128::MIN by returning 2^127 in u128.
         let mag = b.format(i.unsigned_abs()).to_string();

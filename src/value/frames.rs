@@ -101,13 +101,12 @@ pub enum BodyRef {
 pub struct CallFrame {
     pub fi: usize,
     pub call_byte_pos: u32,
-    pub caller_source: alloc::sync::Arc<alloc::string::String>,
-    pub caller_path: alloc::sync::Arc<alloc::string::String>,
+    // The caller's source and path, taken only once the frame stays for a traceback.
+    pub caller_source: Option<alloc::sync::Arc<alloc::string::String>>,
+    pub caller_path: Option<alloc::sync::Arc<alloc::string::String>>,
     // Class where the running method was found and its implicit `self`, consumed by `super()` to walk one level up. `None` for plain function calls.
     pub current_class: Option<Val>,
     pub current_self: Option<Val>,
-    // Closure cells created by MakeFunction in this frame, keyed by canonical slot. Lets sibling closures over the same enclosing variable share one cell (Python cell semantics).
-    pub cells: alloc::vec::Vec<(usize, Val)>,
 }
 
 /* ForIter state, consumed one item per `next_item`. */

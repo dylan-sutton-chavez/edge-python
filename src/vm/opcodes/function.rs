@@ -1,9 +1,8 @@
 use crate::s;
 use super::*;
-use super::super::ParamKind;
+use super::super::{Ctor, ParamKind};
 use crate::parser::fused_native;
 
-use crate::alloc::string::ToString;
 
 // Builtin conversion-type name -> its constructor, None for exception/other types.
 fn constructor_native(name: &str) -> Option<super::super::types::NativeFnId> {
@@ -47,6 +46,30 @@ fn arity_err(id: super::super::types::NativeFnId, n: u16) -> VmErr {
     VmErr::TypeMsg(crate::s!(str id.name(), " expected at ", str word, " ", int bound, " argument", str if bound == 1 { "" } else { "s" }, ", got ", int n))
 }
 
+/* A call's arguments, up to eight inline so a call allocates nothing. */
+pub(crate) enum Args {
+    Inline(u8, [Val; 8]),
+    Heap(Vec<Val>),
+}
+
+impl Args {
+    #[inline]
+    pub(crate) fn of(vals: &[Val]) -> Self {
+        if vals.len() > 8 { return Self::Heap(vals.to_vec()); }
+        let mut inline = [Val::undef(); 8];
+        inline[..vals.len()].copy_from_slice(vals);
+        Self::Inline(vals.len() as u8, inline)
+    }
+}
+
+impl core::ops::Deref for Args {
+    type Target = [Val];
+    #[inline]
+    fn deref(&self) -> &[Val] {
+        match self { Self::Inline(n, vals) => &vals[..*n as usize], Self::Heap(v) => v }
+    }
+}
+
 impl<'a> VM<'a> {
     /* Dispatch every function-shaped opcode (Call, MakeFunction, builtins). */
     pub(crate) fn handle_function(&mut self, op: OpCode, operand: u16, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
@@ -67,8 +90,7 @@ impl<'a> VM<'a> {
         if self.builtins_rebound
             && (packed_operand || operand <= 0xFF)
             && let Some(name) = fused_native(op).map(|id| id.name())
-            && let Some(&bound) = self.module_state.get(name)
-            && !bound.is_undef()
+            && let Some(bound) = self.scopes[self.chunk_module_id(chunk)].get(name)
             && !(bound.is_heap() && matches!(self.heap.get(bound), HeapObj::NativeFn(id) if id.name() == name))
         {
             return self.call_rebound(bound, (operand & 0xFF) as usize, ((operand >> 8) & 0xFF) as usize, chunk, slots);
@@ -176,108 +198,23 @@ impl<'a> VM<'a> {
         let n_defaults = self.functions[global].2 as usize;
         let defaults = if n_defaults > 0 { self.pop_n(n_defaults)? } else { vec![] };
 
-        let (params, body, _, _) = self.functions[global];
-        let param_names: crate::util::hash::FxHashSet<String> = params.iter().map(|p| s!(str crate::parser::types::param_base_name(p), "_0")).collect();
-        let mut captures: Vec<(usize, Val)> = Vec::new();
-        // Cells only make sense for variables of an enclosing FUNCTION scope. Module and class bodies are late-bound, their names resolve live at call time, never freeze.
-        let defined_in_fn = self.body_to_fi.contains_key(&chunk_ptr);
-        let parent_locals = if defined_in_fn { Some(self.chunk_locals(chunk)) } else { None };
-        // Capture once per canonical slot, skipping formal params. Linear scan over `chunk.names` beats a HashMap at typical body sizes (<30) and avoids a per-call monomorphisation.
-        let mut seen_canonical: crate::util::hash::FxHashSet<usize> = crate::util::hash::FxHashSet::default();
-        // Root the in-progress cells, each is reachable only via this local Vec until the Func is allocated, so a GC during the loop's own allocs could otherwise sweep them.
+        // Each free variable takes its cell from the defining frame or class scope.
         let roots_base = self.temp_roots.len();
-        if let Some(locals) = parent_locals {
-            for (bi, bname) in body.names.iter().enumerate() {
-                if param_names.contains(bname.as_str()) { continue; }
-                let canon = body.alias_groups.get(bi)
-                    .and_then(|g| g.first().copied())
-                    .unwrap_or(bi as u16) as usize;
-                if !seen_canonical.insert(canon) { continue; }
-                // Only variables bound by an enclosing FUNCTION scope become cells, module names stay late-bound. A not-yet-assigned local captures an undef-seeded cell the parent's store fills later.
-                if !locals.contains(ssa_strip(bname)) && !self.lexical_ancestor_binds(chunk_ptr, ssa_strip(bname)) { continue; }
-                if let Some((si, _)) = chunk.names.iter().enumerate().find(|(_, n)| n.as_str() == bname.as_str()) {
-                    let psi = chunk.alias_groups.get(si)
-                        .and_then(|g| g.first().copied())
-                        .unwrap_or(si as u16) as usize;
-                    let v = slots.get(psi).copied().unwrap_or(Val::undef());
-                    // Capture a shared cell, not the raw value, so sibling closures over the same variable see each other's nonlocal writes. Key the registry by the canonical parent slot `psi` (stable across siblings and SSA versions), not the callee's `canon` (which differs per closure body).
-                    let cell = self.frame_cell_for(psi, v)?;
-                    self.temp_roots.push(cell);
-                    captures.push((canon, cell));
-                }
-            }
+        let mut captures: Vec<(usize, Val)> = Vec::with_capacity(self.fn_scope[global].freevars.len());
+        for k in 0..self.fn_scope[global].freevars.len() {
+            let (slot, from, ref bare) = self.fn_scope[global].freevars[k];
+            let held = match from {
+                Some(s) => slots.get(s).copied().filter(|&v| matches!(self.heap.try_get(v), Some(HeapObj::Cell(_)))),
+                None => self.class_cells.last().and_then(|cells| cells.iter().find(|(n, _)| n == bare).map(|&(_, c)| c)),
+            };
+            let cell = match held { Some(c) => c, None => self.heap.alloc(HeapObj::Cell(Val::undef()))? };
+            self.temp_roots.push(cell);
+            captures.push((slot, cell));
         }
-
         let val = self.heap.alloc(HeapObj::Func(global, defaults, captures, Rc::new(RefCell::new(Vec::new()))))?;
         self.temp_roots.truncate(roots_base);
-
-        // Entry-chunk top-level defs go into `globals` so forward refs resolve at call time. Module-level defs stay in the module's bindings (via `fn_module[fi]`) to keep cross-module helpers with the same name isolated.
-        if core::ptr::eq(chunk, self.chunk) {
-            let name_idx = self.functions[global].3 as usize;
-            if name_idx < chunk.names.len() {
-                let bare = ssa_strip(&chunk.names[name_idx]).to_string();
-                self.globals.insert(bare, val);
-            }
-        }
-
         self.push(val);
         Ok(())
-    }
-
-    /* True when a function scope strictly above `chunk` binds `bare`, pass-through frees capture, module names do not. */
-    fn lexical_ancestor_binds(&mut self, chunk_ptr: *const SSAChunk, bare: &str) -> bool {
-        let mut anc = self.body_to_fi.get(&chunk_ptr).and_then(|&fi| self.function_parents.get(fi).copied().flatten());
-        while let Some(afi) = anc {
-            let abody = &self.functions[afi].1;
-            if self.chunk_locals(abody).contains(bare) { return true; }
-            anc = self.function_parents.get(afi).copied().flatten();
-        }
-        false
-    }
-
-    /* Bare names a chunk binds itself, StoreName/Phi targets plus formal params. Cached per chunk pointer. */
-    fn chunk_locals(&mut self, chunk: &SSAChunk) -> alloc::rc::Rc<crate::util::hash::FxHashSet<String>> {
-        let key = chunk as *const SSAChunk;
-        if let Some(s) = self.chunk_local_binds.get(&key) { return s.clone(); }
-        let mut set: crate::util::hash::FxHashSet<String> = crate::util::hash::FxHashSet::default();
-        for ins in &chunk.instructions {
-            if matches!(ins.opcode, OpCode::StoreName | OpCode::Phi)
-                && let Some(n) = chunk.names.get(ins.operand as usize)
-            {
-                set.insert(ssa_strip(n).to_string());
-            }
-        }
-        if let Some(&fi) = self.body_to_fi.get(&key) {
-            for p in &self.functions[fi].0 {
-                set.insert(crate::parser::types::param_base_name(p).to_string());
-            }
-        }
-        let rc = alloc::rc::Rc::new(set);
-        self.chunk_local_binds.insert(key, rc.clone());
-        rc
-    }
-
-    // Closure cell, a 1-element heap list used as a shared mutable box. Sibling closures over the same enclosing variable capture the same cell, so a `nonlocal` write through one is visible in the others.
-    fn make_cell(&mut self, v: Val) -> Result<Val, VmErr> {
-        self.heap.alloc(HeapObj::List(Rc::new(RefCell::new(vec![v]))))
-    }
-    fn cell_get(&self, cell: Val) -> Val {
-        if cell.is_heap()
-            && let HeapObj::List(rc) = self.heap.get(cell)
-            && let Some(&v) = rc.borrow().first() {
-                return v;
-            }
-        cell
-    }
-    // Reuse the current frame's cell for parent slot `si` (so sibling closures share) or create one seeded with `v`.
-    fn frame_cell_for(&mut self, si: usize, v: Val) -> Result<Val, VmErr> {
-        if let Some(frame) = self.call_stack.last()
-            && let Some(&(_, cell)) = frame.cells.iter().find(|(s, _)| *s == si) {
-                return Ok(cell);
-            }
-        let cell = self.make_cell(v)?;
-        if let Some(frame) = self.call_stack.last_mut() { frame.cells.push((si, cell)); }
-        Ok(cell)
     }
 
     /* Calls a rebound builtin with the args a fused site stacked, the callee slotted under them. */
@@ -291,7 +228,8 @@ impl<'a> VM<'a> {
     fn call_spread_builtin(&mut self, op: OpCode, pos: usize, kw: usize, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         let name = fused_native(op).ok_or_else(|| cold_runtime("spread on an unknown fused call"))?.name();
         self.register_builtin(name);
-        let callee = self.module_state.get(name).copied().filter(|v| !v.is_undef()).or_else(|| self.global(name)).ok_or_else(|| VmErr::Name(name.into()))?;
+        let module = self.chunk_module_id(chunk);
+        let callee = self.scopes[module].get(name).or_else(|| self.global(name)).ok_or_else(|| VmErr::Name(name.into()))?;
         self.call_rebound(callee, pos, kw, chunk, slots)
     }
 
@@ -311,13 +249,13 @@ impl<'a> VM<'a> {
             && self.chunk_name_versions.iter().all(|(&chunk, names)| core::ptr::eq(chunk, self.chunk) || self.body_to_fi.contains_key(&chunk) || bound(names) == 0)
     }
 
-    /* Each free name is an unbound builtin, or bound once to an immutable value or fixed function. */
+    /* Each global read is a builtin, or bound once to a fixed value. */
     fn memo_reads_fixed(&self, fi: usize, visiting: &mut Vec<usize>) -> bool {
         if visiting.contains(&fi) { return true; }
-        let own = self.self_ref_slot[fi];
-        self.body_free_loads[fi].iter().filter(|(_, slot, _)| Some(*slot) != own).all(|(name, _, _)| match self.module_state.get(name.as_str()) {
+        let own = self.function_names.get(fi).map(String::as_str);
+        self.fn_scope[fi].reads.iter().filter(|n| Some(n.as_str()) != own).all(|name| match self.scopes[0].get(name.as_str()) {
             None => self.builtins.contains_key(name.as_str()),
-            Some(&v) => self.bound_once(name) && (cache::deeply_immutable(v, &self.heap, 0) || matches!(self.heap.try_get(v),
+            Some(v) => self.bound_once(name) && (cache::deeply_immutable(v, &self.heap, 0) || matches!(self.heap.try_get(v),
                 Some(HeapObj::Func(f, defaults, captures, attrs)) if captures.is_empty() && attrs.borrow().is_empty()
                     && defaults.iter().all(|&d| cache::deeply_immutable(d, &self.heap, 0))
                     && self.memo_ok[*f] && self.functions[*f].1.is_pure
@@ -357,18 +295,44 @@ impl<'a> VM<'a> {
     pub(crate) fn exec_call_n(&mut self, num_pos: usize, num_kw: usize, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         // Taken so nested native calls see false.
         let call_safe = core::mem::take(&mut self.pending_exec_safe);
-        let (positional, kw_flat) = self.take_args(num_pos, num_kw)?;
-
         if self.depth >= self.max_calls { return Err(cold_depth()); }
+        // A function taking exactly these positionals binds them straight off the stack.
+        if num_kw == 0
+            && let Some(at) = self.stack.len().checked_sub(num_pos + 1)
+            && let Some(&HeapObj::Func(fi, ref defaults, ref captures, _)) = self.heap.try_get(self.stack[at])
+            && self.simple_arity[fi] == Some(num_pos)
+            && !self.memo_ok[fi]
+        {
+            let callee = self.stack[at];
+            let captures = (!captures.is_empty()).then(|| captures.clone());
+            let owner = if defaults.is_empty() { Val::none() } else { callee };
+            self.charge_step()?;
+            let mut fn_slots = self.slot_pool.pop().unwrap_or_default();
+            fn_slots.clear();
+            fn_slots.extend_from_slice(&self.slot_templates[fi]);
+            for (k, &(_, slot)) in self.param_slots[fi].iter().enumerate() {
+                if let Some(s) = fn_slots.get_mut(slot) { *s = self.stack[at + 1 + k]; }
+            }
+            self.stack.truncate(at);
+            // Most bodies share no variable, so there is no cell to make.
+            if captures.is_some() || !self.fn_scope[fi].cellvars.is_empty() {
+                self.enter_scope(fi, captures.as_deref().unwrap_or(&[]), &mut fn_slots)?;
+            }
+            return self.run_call(fi, callee, fn_slots, call_safe, false, &[], &[], owner, chunk);
+        }
+        let at = self.stack.len().checked_sub(num_pos + 2 * num_kw).ok_or_else(|| cold_runtime("stack underflow"))?;
+        let (positional, kw_flat) = (Args::of(&self.stack[at..at + num_pos]), Args::of(&self.stack[at + num_pos..]));
+        self.stack.truncate(at);
+
         // Charge each call so wide recursion is op-budget bounded.
         self.charge_step()?;
 
         let callee = self.pop()?;
         if !callee.is_heap() { return Err(cold_type("object is not callable")); }
 
-        // Snapshot defaults/captures once, both are tiny (<10), and cloning beats the 3+ heap re-reads later phases would do. Back-prop still uses `get_mut` since it writes. Probing Func first skips the 9-shape non-func walk on the hottest (user function) path.
+        // Most functions have no defaults or captures, so those clone only when present.
         let (fi, defaults, captures) = match self.heap.get(callee) {
-            HeapObj::Func(i, d, c, _) => (*i, d.clone(), c.clone()),
+            HeapObj::Func(i, d, c, _) => (*i, (!d.is_empty()).then(|| d.clone()), (!c.is_empty()).then(|| c.clone())),
             _ => {
                 // Bound methods re-dispatch as tail calls.
                 if matches!(self.heap.get(callee), HeapObj::BoundUserMethod(..)) {
@@ -376,42 +340,39 @@ impl<'a> VM<'a> {
                 }
                 let dispatched = self.try_dispatch_non_func_callable(callee, &positional, &kw_flat, chunk, slots);
                 self.pending_exec_safe = false;
-                if dispatched? {
-                    return Ok(());
-                }
+                if dispatched? { return Ok(()); }
                 return Err(cold_type("object is not callable"));
             }
         };
 
         // Kwargs and closures reach past the key, and a function with defaults keys on itself.
-        let memo_ok = num_kw == 0 && captures.is_empty() && self.memo_ok.get(fi).copied().unwrap_or(false);
-        let owner = if defaults.is_empty() { Val::none() } else { callee };
+        let memo_ok = num_kw == 0 && captures.is_none() && self.memo_ok.get(fi).copied().unwrap_or(false);
+        let owner = if defaults.is_none() { Val::none() } else { callee };
+        let (defaults, captures) = (defaults.as_deref().unwrap_or(&[]), captures.as_deref().unwrap_or(&[]));
         if memo_ok && let Some(cached) = self.templates.lookup(fi, &positional, owner, &self.heap) {
             self.push(cached);
             return Ok(());
         }
 
-        self.depth += 1;
-        let (_params, body, _, _) = self.functions[fi];
         // Reuse a pooled buffer, clear + bulk copy beats a fresh alloc per call.
         let mut fn_slots = self.slot_pool.pop().unwrap_or_default();
         fn_slots.clear();
         fn_slots.extend_from_slice(&self.slot_templates[fi]);
+        self.bind_function_args(fi, defaults, &positional, &kw_flat, &mut fn_slots)?;
+        self.enter_scope(fi, captures, &mut fn_slots)?;
+        self.run_call(fi, callee, fn_slots, call_safe, memo_ok, &positional, defaults, owner, chunk)
+    }
 
-        self.bind_function_args(fi, &defaults, &captures, &positional, &kw_flat, &mut fn_slots)?;
-
-        if self.needs_caller_slots[fi] {
-            self.apply_caller_slot_propagation(fi, &captures, chunk, slots, &mut fn_slots);
-        }
-
-        self.bind_self_reference(fi, callee, &mut fn_slots);
-
+    /* Runs a bound call's body, its result left on the stack. */
+    #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
+    fn run_call(&mut self, fi: usize, callee: Val, mut fn_slots: Vec<Val>, call_safe: bool, memo_ok: bool, positional: &[Val], defaults: &[Val], owner: Val, chunk: &SSAChunk) -> Result<(), VmErr> {
+        let (_params, body, _, _) = self.functions[fi];
         // Generator/coroutine, return a suspended Coroutine instead of running. Both flags are O(1).
         let is_async_fn = self.is_async.get(fi).copied().unwrap_or(false);
         if is_async_fn || body.is_generator {
-            let coro = self.heap.alloc(HeapObj::Coroutine(0, fn_slots, Vec::new(), BodyRef::Fn(fi), Vec::new(), Vec::new(), Vec::new()))?;
+            let coro = self.heap.alloc(HeapObj::Coroutine(crate::value::Coro::fresh(fn_slots, BodyRef::Fn(fi))))?;
             self.push(coro);
-            self.depth -= 1;
             return Ok(());
         }
 
@@ -420,16 +381,18 @@ impl<'a> VM<'a> {
         let iter_base = self.iter_stack.len();
         let exc_base = self.exception_stack.len();
         let yields_before = self.yields.len();
+        self.depth += 1;
         self.pending_exec_safe = call_safe;
-        let (callee_impure, exec_result) = self.run_body_with_frame(fi, body, chunk, &mut fn_slots, slots);
+        let (frame_at, call_ip) = self.enter_body(fi);
+        let exec_result = self.exec_in(body, &mut fn_slots, self.fn_pool[fi]);
+        let callee_impure = self.leave_body(fi, frame_at, call_ip, exec_result.is_ok(), chunk);
         self.depth -= 1;
-
-        self.back_propagate_nonlocals(fi, body, callee, chunk, slots, &fn_slots);
 
         let result = exec_result?;
         if callee_impure {
             self.mark_impure();
-            if self.globals_written { self.reload_globals(chunk, slots); }
+            // A body that showed an effect keeps no result, so its calls stop trying.
+            if let Some(m) = self.memo_ok.get_mut(fi) { *m = false; }
         }
 
         if self.yielded {
@@ -446,7 +409,11 @@ impl<'a> VM<'a> {
             let val = self.heap.alloc(HeapObj::List(Rc::new(RefCell::new(fn_yields))))?;
             self.push(val);
         } else {
-            if memo_ok && body.is_pure && !callee_impure { self.memo_keep(fi, callee, &positional, &defaults, owner, result); }
+            if memo_ok && body.is_pure && !callee_impure {
+                self.memo_keep(fi, callee, positional, defaults, owner, result);
+                // A memo that stopped paying is off for good, sparing every later hash.
+                if self.templates.dead(fi) { self.memo_ok[fi] = false; }
+            }
             self.push(result);
         }
         // Recycle the frame buffer, error/suspend paths above just drop theirs.
@@ -529,20 +496,30 @@ impl<'a> VM<'a> {
             }
             // Calling a class, create an instance and run `__init__` if defined (walks bases).
             Some(HeapObj::Class(..)) => {
-                let init = self.lookup_class_member(callee, "__init__");
-                if init.is_none() && !kw_flat.is_empty() {
+                let ctor = match self.ctors.get(&callee.0) {
+                    Some(c) if c.epoch == self.class_epoch => *c,
+                    _ => {
+                        let c = Ctor { epoch: self.class_epoch, init: self.lookup_class_member(callee, "__init__"), exception: self.exc_base(callee).is_some(), attrs: 0 };
+                        self.ctors.insert(callee.0, c);
+                        c
+                    }
+                };
+                if ctor.init.is_none() && !kw_flat.is_empty() {
                     return Err(cold_type("class constructor takes no keyword arguments"));
                 }
-                let instance = self.heap.alloc(HeapObj::Instance(callee, Rc::new(RefCell::new(DictMap::new()))))?;
+                // Sized as the last instance ended, so its fields never regrow the dict.
+                let instance = self.heap.alloc(HeapObj::Instance(callee, Rc::new(RefCell::new(DictMap::with_capacity(ctor.attrs)))))?;
                 // An exception keeps its constructor arguments as `args`, a later `__init__` may reset them.
-                if self.exc_base(callee).is_some() { self.set_exc_args(instance, positional.to_vec())?; }
-                if let Some((init_fn, defining)) = init {
+                if ctor.exception { self.set_exc_args(instance, positional.to_vec())?; }
+                if let Some((init_fn, defining)) = ctor.init {
                     // Fail-fast before pushing, the inner check fires only after parse_call_args pops.
                     if self.depth >= self.max_calls { return Err(cold_depth()); }
                     self.pending.method_binding = Some((defining, instance));
                     // Keywords reach `__init__` as they reach any function, its return value is dropped.
                     self.call_with(init_fn, Some(instance), positional, kw_flat, chunk, slots)?;
                     self.pop()?;
+                    if let Some(HeapObj::Instance(_, d)) = self.heap.try_get(instance)
+                        && let Some(c) = self.ctors.get_mut(&callee.0) { c.attrs = d.borrow().len(); }
                 }
                 self.push(instance);
             }
@@ -571,9 +548,9 @@ impl<'a> VM<'a> {
                 self.pending.method_binding = Some((class, callee));
                 self.call_with(func, Some(callee), positional, kw_flat, chunk, slots)?;
             }
-            Some(HeapObj::Coroutine(_, _, _, body, ..)) => {
+            Some(HeapObj::Coroutine(c)) => {
                 // Plain `async def` (no `yield`) drives to completion via the scheduler (await semantics). Async *generators* fall through to step-wise resume like sync generators.
-                let drive_async = matches!(*body, super::super::types::BodyRef::Fn(fi)
+                let drive_async = matches!(c.body, super::super::types::BodyRef::Fn(fi)
                     if self.is_async.get(fi).copied().unwrap_or(false) && !self.functions[fi].1.is_generator);
                 if drive_async {
                     self.await_coroutine(callee)?;
@@ -589,8 +566,8 @@ impl<'a> VM<'a> {
         Ok(true)
     }
 
-    /* Bind formal params from positional/kw buffers, then fill remaining undef slots with defaults and captures. `defaults`/`captures` are pre-snapshotted by `exec_call`. */
-    fn bind_function_args(&mut self, fi: usize, defaults: &[Val], captures: &[(usize, Val)], positional: &[Val], kw_flat: &[Val], fn_slots: &mut [Val]) -> Result<(), VmErr> {
+    /* Bind formal params from positional/kw buffers, then fill remaining undef slots with defaults. */
+    fn bind_function_args(&mut self, fi: usize, defaults: &[Val], positional: &[Val], kw_flat: &[Val], fn_slots: &mut [Val]) -> Result<(), VmErr> {
         // Index by position to avoid an iterator borrow on `param_slots` across `heap.alloc`.
         let n_params = self.param_slots[fi].len();
         // Without a `*args` sink, positionals past the normal params are an error.
@@ -636,7 +613,6 @@ impl<'a> VM<'a> {
         // Kwargs binding (rare path, not optimised).
         if !kw_flat.is_empty() {
             let params = &self.functions[fi].0;
-            let body_map = &self.body_maps[fi];
             let has_double_star = self.param_slots[fi].iter().any(|(k, _)| matches!(k, ParamKind::DoubleStar));
             for pair in kw_flat.as_chunks::<2>().0 {
                 // Malformed `**`/kwarg bytecode can leave a non-string in the name slot, so guard the heap access.
@@ -645,11 +621,11 @@ impl<'a> VM<'a> {
                     _ => return Err(cold_runtime("malformed kwarg on stack")),
                 };
                 // Star/double-star params are not keyword targets. A kwarg whose name matches `*a`/`**k` goes to **kwargs.
-                if params.iter().any(|p| !p.starts_with('*') && crate::parser::types::param_base_name(p) == key.as_str()) {
-                    let pname = s!(str &key, "_0");
-                    if let Some(&s) = body_map.get(pname.as_str()) {
-                        if !fn_slots[s].is_undef() { return Err(VmErr::TypeMsg(s!("got multiple values for argument '", str &key, "'"))); }
-                        fn_slots[s] = pair[1];
+                if let Some(pi) = params.iter().position(|p| !p.starts_with('*') && crate::parser::types::param_base_name(p) == key.as_str()) {
+                    let s = self.param_slots[fi][pi].1;
+                    if let Some(slot) = fn_slots.get_mut(s) {
+                        if !slot.is_undef() { return Err(VmErr::TypeMsg(s!("got multiple values for argument '", str &key, "'"))); }
+                        *slot = pair[1];
                     }
                 } else if !has_double_star {
                     return Err(VmErr::TypeMsg(s!("got an unexpected keyword argument '", str &key, "'")));
@@ -678,232 +654,46 @@ impl<'a> VM<'a> {
             }
         }
 
-        // Closure captures follow the same rule as defaults, only fill if undef. Each capture is a shared cell, read its current value into the slot.
-        for &(bi, cell) in captures {
-            if bi < fn_slots.len() && fn_slots[bi].is_undef() {
-                fn_slots[bi] = self.cell_get(cell);
-            }
-        }
-
         Ok(())
     }
 
-    /* Push caller slots into body slots. Same scope means late-binding, overwrite freely. Different scope skips capture-filled slots (fixes stacked-decorator clobber). */
-    fn apply_caller_slot_propagation(&mut self, fi: usize, captures: &[(usize, Val)], chunk: &SSAChunk, slots: &[Val], fn_slots: &mut [Val]) {
-        let info = self.propagation_map(fi, chunk);
-        let captured_set: crate::util::hash::FxHashSet<usize> = if info.same_scope {
-            crate::util::hash::FxHashSet::default()
-        } else {
-            captures.iter().map(|(s, _)| *s).collect()
-        };
-        // Undef/captured filters stay per-call, the name matching is cached.
-        for &(si, bs) in info.pairs.iter() {
-            let bs = bs as usize;
-            if let Some(&v) = slots.get(si as usize)
-                && !v.is_undef()
-                && !captured_set.contains(&bs)
-            {
-                fn_slots[bs] = v;
-            }
+    /* Wraps a body's cell variables and hands it the cells it closed over. */
+    fn enter_scope(&mut self, fi: usize, captures: &[(usize, Val)], fn_slots: &mut [Val]) -> Result<(), VmErr> {
+        for k in 0..self.fn_scope[fi].cellvars.len() {
+            let s = self.fn_scope[fi].cellvars[k];
+            if let Some(&v) = fn_slots.get(s) { fn_slots[s] = self.heap.alloc(HeapObj::Cell(v))?; }
         }
-
-        // Free names resolve lexically, exact-version hit in the caller frame (live parent local), then the module layers (late-bound), then the latest-version net where a lexical source is plausible. Entry-chunk slots are excluded from the net since `global`/`del` writes only reach `module_state`, so those slots go stale.
-        let caller_is_module = !self.body_to_fi.contains_key(&(chunk as *const SSAChunk));
-        let caller_is_entry = core::ptr::eq(chunk, self.chunk);
-        let parent_is_fn = self.function_parents.get(fi).is_some_and(|p| p.is_some());
-        for (bare, bs, ref_ver, versions) in info.free.iter() {
-            let bs = *bs as usize;
-            if captured_set.contains(&bs) { continue; }
-            if !caller_is_module
-                && let Some(&(_, si)) = versions.iter().find(|&&(v, _)| v == *ref_ver)
-                && let Some(&v) = slots.get(si as usize)
-                && !v.is_undef()
-            {
-                fn_slots[bs] = v;
-                continue;
-            }
-            if let Some(v) = self.resolve_free_name_fallback(fi, bare) {
-                fn_slots[bs] = v;
-                continue;
-            }
-            if caller_is_entry || (!info.same_scope && !parent_is_fn) { continue; }
-            let mut latest_ver: i64 = -1;
-            let mut latest_v: Val = Val::undef();
-            for &(v, si) in versions.iter() {
-                let si = si as usize;
-                if si < slots.len() && !slots[si].is_undef() && v > latest_ver {
-                    latest_ver = v;
-                    latest_v = slots[si];
-                }
-            }
-            if !latest_v.is_undef() {
-                fn_slots[bs] = latest_v;
-            }
-        }
+        for &(s, cell) in captures { if let Some(slot) = fn_slots.get_mut(s) { *slot = cell; } }
+        Ok(())
     }
 
-    /* After a `global` store a function caller re-reads its globals, back at the entry it resets. */
-    fn reload_globals(&mut self, chunk: &SSAChunk, slots: &mut [Val]) {
-        if core::ptr::eq(chunk, self.chunk) { self.globals_written = false; return; }
-        let ptr = chunk as *const SSAChunk;
-        let Some(&cfi) = self.body_to_fi.get(&ptr) else { return };
-        if self.fn_module[cfi].is_some() { return; }
-        // Taken out for the loop, so no name is cloned to satisfy the borrow.
-        let loads = core::mem::take(&mut self.body_free_loads[cfi]);
-        for (bare, slot, _) in &loads {
-            let Some(&v) = self.module_state.get(bare.as_str()) else { continue };
-            // A name an enclosing function binds is its captured local, not the global.
-            if !self.lexical_ancestor_binds(ptr, bare) && let Some(s) = slots.get_mut(*slot) { *s = v; }
-        }
-        self.body_free_loads[cfi] = loads;
-    }
-
-    /* Build or fetch the static propagation info for (chunk, fi). Chunks are borrowed for the VM's lifetime, so the pointer key is stable. */
-    fn propagation_map(&mut self, fi: usize, chunk: &SSAChunk) -> super::super::PropagationMap {
-        let key = (chunk as *const SSAChunk, fi);
-        if let Some(m) = self.propagation_maps.get(&key) { return m.clone(); }
-        // Same-scope also requires same module, keeps top-level imports (`parent_fi == None`) isolated.
-        let caller_fi = self.body_to_fi.get(&(chunk as *const _)).copied();
-        let callee_parent_fi = self.function_parents.get(fi).and_then(|x| *x);
-        let caller_module = caller_fi.and_then(|cf| self.fn_module.get(cf).and_then(|m| m.as_deref()));
-        let callee_module = self.fn_module.get(fi).and_then(|m| m.as_deref());
-        let same_scope = caller_fi == callee_parent_fi && caller_module == callee_module;
-        // Another top-level function lends only the globals it reads itself, never one of its locals.
-        let lent: &[(String, usize, i64)] = match caller_fi {
-            Some(cf) if !same_scope && caller_module == callee_module && self.function_parents[cf].is_none() => &self.body_free_loads[cf],
-            _ => &[],
-        };
-        let canon = |si: usize| chunk.alias_groups.get(si).and_then(|g| g.first().copied()).unwrap_or(si as u16) as u32;
-        let lends = |si: u32| same_scope || lent.iter().any(|&(_, s, _)| s == si as usize);
-        let body_map = &self.body_maps[fi];
-        let param_bm = &self.is_param_slot[fi];
-        let mut pairs: Vec<(u32, u32)> = body_map.iter()
-            .filter_map(|(name, &bs)| {
-                let si = chunk.slot_of(name)? as usize;
-                if param_bm.get(bs).copied().unwrap_or(false) || !lends(canon(si)) { return None; }
-                Some((si as u32, bs as u32))
-            })
-            .collect();
-        // Caller slot order, so a later version still wins a shared body slot.
-        pairs.sort_unstable();
-        // Free loads with their caller-chunk (version, slot) candidates resolved once. Candidate slots canonicalise because operand rewriting stores values at the version chain's root.
-        let name_index = self.chunk_name_versions.get(&(chunk as *const _));
-        let free: Vec<super::super::FreeLoadEntry> = self.body_free_loads[fi].iter()
-            .map(|(bare, bs, ref_ver)| {
-                let versions = name_index
-                    .and_then(|idx| idx.get(bare.as_str()))
-                    .map(|v| v.iter().map(|&(ver, si)| (ver, canon(si))).filter(|&(_, si)| lends(si)).collect())
-                    .unwrap_or_default();
-                (bare.clone(), *bs as u32, *ref_ver, versions)
-            })
-            .collect();
-        let map: super::super::PropagationMap = alloc::rc::Rc::new(super::super::PropInfo { same_scope, pairs, free });
-        self.propagation_maps.insert(key, map.clone());
-        map
-    }
-
-    /* Slow layers for a bare free-load name after the caller-slot layer missed, callee module attrs -> entry module state -> globals. First hit wins. Centralised so the order is auditable. */
-    pub(crate) fn resolve_free_name_fallback(&self, fi: usize, bare: &str) -> Option<Val> {
-        // Layer 2 checks the callee's module attrs, keeping `a.helper` and `b.helper` isolated.
-        if let Some(Some(spec)) = self.fn_module.get(fi).cloned()
-            && let Some(mod_val) = self.module_table.get(&spec).copied()
-            && mod_val.is_heap()
-            && let HeapObj::Module(_, attrs) = self.heap.get(mod_val)
-            && let Some((_, v)) = attrs.iter().find(|(n, _)| n == bare)
-        {
-            return Some(*v);
-        }
-        // Layer 3 checks entry-module bindings, live-mirrored on every store. Beats `globals` so rebinding a def'd name is seen.
-        if self.fn_module.get(fi).is_none_or(|m| m.is_none())
-            && let Some(&v) = self.module_state.get(bare)
-            && !v.is_undef()
-        {
-            return Some(v);
-        }
-        // Layer 4 checks globals, catching forward-ref mutual recursion in the entry chunk.
-        self.global(bare)
-    }
-
-    /* Bind the function's own name slot to `callee` so recursive calls skip the global lookup. No-op for lambdas or when an earlier phase already filled the slot. */
-    fn bind_self_reference(&self, fi: usize, callee: Val, fn_slots: &mut [Val]) {
-        if let Some(slot) = self.self_ref_slot.get(fi).copied().flatten()
-            && slot < fn_slots.len()
-            && fn_slots[slot].is_undef()
-        {
-            fn_slots[slot] = callee;
-        }
-    }
-
-    /* Run the body with caller slots pinned in `live_slots` (GC roots) and a CallFrame on `call_stack` (traceback). Frame popped on success only, the dispatch catch clears it on swallowed exceptions. Returns `(callee_impure, exec_result)`. */
-    fn run_body_with_frame(&mut self, fi: usize, body: &SSAChunk, chunk: &SSAChunk, fn_slots: &mut [Val], slots: &[Val]) -> (bool, Result<Val, VmErr>) {
-        // GC roots come from `active_slots` (every live exec frame), `live_slots` only feeds `globals()`, which reads the entry chunk's slots at the bottom. Copy just that frame.
-        let snap = self.live_slots.len();
-        if snap == 0 && core::ptr::eq(chunk, self.chunk) {
-            self.live_slots.extend_from_slice(slots);
-        }
-
-        // Frame snapshots caller's source/path so render doesn't borrow live chunk pointers.
-        let call_byte_pos = self.pending.call_byte_pos.take().unwrap_or(0);
+    /* Pushes the traceback frame a body runs under, for `leave_body`. */
+    pub(crate) fn enter_body(&mut self, fi: usize) -> (usize, Option<u32>) {
+        let call_ip = self.pending.call_ip.take();
+        let at = self.call_stack.len();
         // Method-call paths set `method_binding` immediately before invoking `exec_call`, plain function calls leave it `None`.
         let (current_class, current_self) = match self.pending.method_binding.take() {
             Some((c, s)) => (Some(c), Some(s)),
             None => (None, None),
         };
-        self.call_stack.push(super::super::types::CallFrame {
-            fi,
-            call_byte_pos,
-            caller_source: chunk.source.clone(),
-            caller_path: chunk.path.clone(),
-            current_class,
-            current_self,
-            cells: Vec::new(),
-        });
+        self.call_stack.push(super::super::types::CallFrame { fi, call_byte_pos: 0, caller_source: None, caller_path: None, current_class, current_self });
+        self.observed_impure.push(self.fn_scope.get(fi).is_some_and(|s| s.declares));
+        (at, call_ip)
+    }
 
-        self.observed_impure.push(false);
-        let exec_result = self.exec(body, fn_slots);
-        let callee_impure = self.observed_impure.pop().unwrap_or(true);
-        self.live_slots.truncate(snap);
-        if exec_result.is_ok() {
+    /* Pops what `enter_body` pushed, whether the body showed an effect. */
+    pub(crate) fn leave_body(&mut self, fi: usize, at: usize, call_ip: Option<u32>, ok: bool, chunk: &SSAChunk) -> bool {
+        let impure = self.observed_impure.pop().unwrap_or(true);
+        if ok {
             self.call_stack.pop();
+        } else if let Some(frame) = self.call_stack.get_mut(at).filter(|f| f.fi == fi) {
+            // The frame snapshots its caller's text, so a render never borrows a live chunk.
+            frame.call_byte_pos = call_ip.and_then(|ip| chunk.resolve_call(ip).or_else(|| chunk.resolve(ip))).unwrap_or(0);
+            frame.caller_source = Some(chunk.source.clone());
+            frame.caller_path = Some(chunk.path.clone());
         }
-        (callee_impure, exec_result)
+        impure
     }
-
-    /* Back-propagate `nonlocal` writes to the caller's slots and sync the callee Func's capture entries so the next call sees the new value. No-op if no `nonlocal`. */
-    pub(crate) fn back_propagate_nonlocals(&mut self, fi: usize, body: &SSAChunk, callee: Val, chunk: &SSAChunk, slots: &mut [Val], fn_slots: &[Val]) {
-        if self.nonlocal_tables[fi].is_empty() { return; }
-        // Snapshot to release borrows on self before the `heap.get_mut` writes.
-        let nl_pairs: Vec<(usize, usize)> = self.nonlocal_tables[fi].clone();
-        let name_index = self.chunk_name_versions.get(&(chunk as *const _));
-        for (canon_body, ni) in nl_pairs {
-            let Some(&val) = fn_slots.get(canon_body) else { continue };
-            if val.is_undef() { continue; }
-            // Each nonlocal writes back into its own name only.
-            if let Some(idx) = name_index && let Some(versions) = body.nonlocals.get(ni).and_then(|base| idx.get(base.as_str())) {
-                for &(_, si) in versions {
-                    if si < slots.len() { slots[si] = val; }
-                }
-            }
-            // Write into the shared cell so sibling closures over this variable observe the nonlocal write. Access `self.heap` directly (not via &mut self helpers) so it stays disjoint from the `name_index` borrow above.
-            let cell = if let HeapObj::Func(_, _, caps, _) = self.heap.get(callee) {
-                caps.iter().find(|(ci, _)| *ci == canon_body).map(|(_, c)| *c)
-            } else { None };
-            match cell {
-                Some(c) => if let HeapObj::List(rc) = self.heap.get(c) {
-                    self.heap.growing(&mut *rc.borrow_mut(), |b| if b.is_empty() { b.push(val); } else { b[0] = val; });
-                },
-                // Nonlocal target not captured at MakeFunction (rare), attach a fresh cell so the next call sees it.
-                None => if let Ok(c) = self.heap.alloc(HeapObj::List(Rc::new(RefCell::new(vec![val]))))
-                    && let HeapObj::Func(_, _, caps, _) = self.heap.get_mut(callee) {
-                        let before = caps.bytes();
-                        caps.push((canon_body, c));
-                        let grown = caps.bytes() - before;
-                        self.heap.charge(grown);
-                    },
-            }
-        }
-    }
-
 
     /* CallExtern's operand packs `(extern_idx<<8)|(kw<<4)|pos`. Pop kw `name,val` pairs then `pos` positional vals, pack pairs into a heap dict via `pack_kw_dict` and hand it off as the explicit `Option<Val>` kwargs slot. Pure externs leave the impurity flag alone, bodies whose only side-effects are pure externs stay memoizable. */
     pub(crate) fn call_extern(&mut self, operand: u16, chunk: &SSAChunk) -> Result<(), VmErr> {

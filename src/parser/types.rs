@@ -65,6 +65,25 @@ pub enum OpCode {
     MatchMap,
     // `Call` whose args hold a `*` or `**`, closing the spread frame its first spread opened.
     CallSpread,
+    /* Register forms only the VM lowering writes, each reads and writes frame slots. */
+    Move, PushRegs,
+    AddR, SubR, MulR, DivR, ModR, FloorDivR, InPlaceAddR, InPlaceSubR,
+    BitAndR, BitOrR, BitXorR, ShlR, ShrR, PowR,
+    EqR, NotEqR, LtR, LtEqR, GtR, GtEqR,
+    MinusR, NotR, JumpIfFalseR, ReturnR,
+    GetItemR, StoreItemR, GetAttrR, SetAttrR,
+    LoadGlobalR, StoreGlobalR, LoadCellR, StoreCellR,
+    InR, NotInR, IsR, IsNotR, LenR,
+    // Adds registers to the comprehension accumulator on the stack top.
+    ListAppendR, SetAddR, MapAddR,
+    // Unpacks the stack top into the `x` locals named by a, b and c.
+    UnpackR,
+    // Pops the stack top into a slot, a module binding when `x` is set.
+    StoreTopR,
+    // Steps the innermost iterator into a register, jumping out once it ends.
+    ForIterR,
+    // Compare two registers and jump when the comparison is false.
+    JumpUnlessEq, JumpUnlessNotEq, JumpUnlessLt, JumpUnlessLtEq, JumpUnlessGt, JumpUnlessGtEq,
 }
 
 // Each fused builtin opcode and the builtin it runs, with the name that alone picks the opcode.
@@ -112,6 +131,9 @@ impl OpCode {
     pub const fn is_jump(self) -> bool {
         matches!(self, Self::Jump | Self::JumpIfFalse | Self::JumpIfFalseOrPop | Self::JumpIfTrueOrPop | Self::ForIter | Self::SetupExcept | Self::SetupFinally)
     }
+
+    /* One of the register forms only the VM lowering writes. */
+    pub const fn is_register(self) -> bool { self as u8 >= Self::Move as u8 }
 }
 
 // One bytecode instruction, opcode + 16-bit operand.
@@ -229,9 +251,6 @@ impl SSAChunk {
         self.name_index.insert(n.to_string(), i);
         i
     }
-
-    /* The slot of `n` in this chunk, None when the chunk never named it. */
-    pub(crate) fn slot_of(&self, n: &str) -> Option<u16> { self.name_index.get(n).copied() }
 
     /* Builds `prev_slots`, coalesces SSA versions to canonical root, rewrites operands, builds `phi_map`. */
     pub fn finalize_prev_slots(&mut self) {

@@ -41,30 +41,21 @@ impl<'a> VM<'a> {
         for &v in current_slots { self.heap.mark(v); }
         #[cfg(all(target_arch = "wasm32", feature = "runtime"))]
         crate::bridge::mark_handles(self as *const Self as *const u8, &mut self.heap);
-        for &v in &self.live_slots { self.heap.mark(v); }
-        // Closure cells live on the active call frames until the closures that capture them are built.
-        for frame in &self.call_stack { for &(_, c) in &frame.cells { self.heap.mark(c); } }
         for &v in &self.template_roots { self.heap.mark(v); }
-        for &v in self.globals.values().chain(self.builtins.values()) { self.heap.mark(v); }
-        for &v in self.module_state.values() { self.heap.mark(v); }
+        for &v in self.builtins.values() { self.heap.mark(v); }
+        for scope in &self.scopes { for (_, v) in scope.iter() { self.heap.mark(v); } }
+        // A class body's methods may still close over the cells around it.
+        for cells in &self.class_cells { for &(_, c) in cells { self.heap.mark(c); } }
         // A `from x import` binds no name to the module, yet its functions still read their globals through this table.
         for &v in self.module_table.values() { self.heap.mark(v); }
         let heap = &mut self.heap; // split borrow, lets closures take &mut heap while iterating other fields
         for frame in &self.iter_stack { frame.for_each_val(&mut |v| heap.mark(v)); }
         for sf in &self.pending_sync_frames { sf.for_each_val(&mut |v| heap.mark(v)); }
-        for cache in self.opcode_caches.values().flat_map(|p| p.caches()) {
-            if let Some(consts) = cache.const_vals_opt() {
-                for &v in consts { self.heap.mark(v); }
-            }
-            // keep the IC's cached class + method Vals alive so a promoted slot can't reference a swept-and-reused slot.
-            for v in cache.inst_roots() { self.heap.mark(v); }
+        for pool in &self.pools { for &v in pool.consts.iter().flatten() { self.heap.mark(v); } }
+        for cache in self.pools.iter().flat_map(|p| p.caches()) {
+            for v in cache.site_roots() { self.heap.mark(v); }
         }
-        // SAFETY each ptr is live for its exec() frame and the Vec's alloc is move-stable.
-        for i in 0..self.active_const_pools.len() {
-            let consts: &[Val] = unsafe { &*self.active_const_pools[i] };
-            for &v in consts { self.heap.mark(v); }
-        }
-        // SAFETY same invariant, roots every active frame's live (mutating) slots, not just the innermost current_slots.
+        // SAFETY each pointer lives while its frame runs, so every running frame stays rooted.
         for i in 0..self.active_slots.len() {
             let frame_slots: &[Val] = unsafe { &*self.active_slots[i] };
             for &v in frame_slots { self.heap.mark(v); }

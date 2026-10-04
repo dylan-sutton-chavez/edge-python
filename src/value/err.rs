@@ -88,11 +88,11 @@ impl VmErr {
         for f in frames.iter().rev() {
             let fname = function_names.get(f.fi).map(|s| s.as_str()).unwrap_or("<anonymous>");
             let pos = f.call_byte_pos as usize;
-            let path: Option<&str> = if f.caller_path.is_empty() { None } else { Some(f.caller_path.as_str()) };
+            let path: Option<&str> = f.caller_path.as_deref().map(|p| p.as_str()).filter(|p| !p.is_empty());
             let note = crate::parser::Diagnostic {
                 start: pos, end: pos,
                 msg: alloc::format!("called from {}()", fname),
-            }.render(f.caller_source.as_str(), path);
+            }.render(f.caller_source.as_deref().map_or("", |s| s.as_str()), path);
             // Demote chained-frame prefix so only the top line reads as `error:`.
             let note = note.replacen("error:", "note:", 1);
             out.push('\n');

@@ -53,8 +53,7 @@ impl<'a> VM<'a> {
         }
         // A name read at run time may be a builtin the program never wrote, give it its slot first.
         self.register_builtin(name);
-        let callee = self.module_state.get(name).copied()
-            .or_else(|| self.global(name))
+        let callee = self.global(name)
             .ok_or_else(|| VmErr::Name(name.into()))?;
         // Stack layout for a Call, callee at the bottom then positionals, exec_call pops them back.
         let chunk: &crate::parser::SSAChunk = unsafe { &*(self.chunk as *const _) };
@@ -178,9 +177,9 @@ impl<'a> VM<'a> {
         slots
     }
 
-    /* A global by its bare name, what the program bound shadowing the builtin under it. */
+    /* An entry module binding by name, the builtin under it otherwise. */
     pub(crate) fn global(&self, bare: &str) -> Option<Val> {
-        self.globals.get(bare).or_else(|| self.builtins.get(bare)).copied()
+        self.scopes[0].get(bare).or_else(|| self.builtins.get(bare).copied())
     }
 
     /* The global a slot starts from, a builtin also answering to its version-0 name. */

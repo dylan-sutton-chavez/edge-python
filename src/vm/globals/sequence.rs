@@ -114,6 +114,7 @@ impl<'a> VM<'a> {
 
     /* Root the operands (comparators can run GC-triggering user code), stable-sort `keys` via `sort_lt`, and return the index permutation. `extra_roots` keeps caller-only values (e.g. the items in a keyed sort) alive across comparisons. First comparison error wins, later comparisons degrade to Equal. */
     fn sorted_order(&mut self, keys: &[Val], extra_roots: &[Val], reverse: bool, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Vec<usize>, VmErr> {
+        if let Some(order) = plain_order(keys, reverse, &self.heap) { return Ok(order); }
         let roots_base = self.temp_roots.len();
         // Only an instance key runs user code that could collect.
         if self.any_instance(keys) { self.temp_roots.extend(keys.iter().chain(extra_roots).copied()); }
@@ -501,4 +502,61 @@ impl<'a> VM<'a> {
         self.alloc_and_push_tuple(items)
     }
 
+}
+
+/* A key's kind to a comparison no user code decides, per tuple position. */
+#[derive(PartialEq)]
+enum Plain { Num, Str, Tuple(Vec<Plain>) }
+
+fn plain_kind(v: Val, heap: &HeapPool, depth: usize) -> Option<Plain> {
+    if v.is_int() || v.is_bool() || v.is_float() && !v.as_float().is_nan() { return Some(Plain::Num); }
+    match heap.try_get(v)? {
+        HeapObj::Str(_) => Some(Plain::Str),
+        HeapObj::Tuple(items) if depth < 4 => items.iter().map(|&x| plain_kind(x, heap, depth + 1)).collect::<Option<Vec<_>>>().map(Plain::Tuple),
+        _ => None,
+    }
+}
+
+fn num(v: Val) -> f64 { if v.is_float() { v.as_float() } else if v.is_bool() { v.as_bool() as i64 as f64 } else { v.as_int() as f64 } }
+
+/* Two plain keys of one kind, ordered as Python orders them. */
+fn plain_cmp(a: Val, b: Val, heap: &HeapPool) -> core::cmp::Ordering {
+    use core::cmp::Ordering;
+    if a.is_int() && b.is_int() { return a.as_int().cmp(&b.as_int()); }
+    match (heap.try_get(a), heap.try_get(b)) {
+        (Some(HeapObj::Str(x)), Some(HeapObj::Str(y))) => x.as_str().cmp(y.as_str()),
+        (Some(HeapObj::Tuple(x)), Some(HeapObj::Tuple(y))) => {
+            for (&p, &q) in x.iter().zip(y) {
+                let o = plain_cmp(p, q, heap);
+                if o != Ordering::Equal { return o; }
+            }
+            x.len().cmp(&y.len())
+        }
+        _ => num(a).partial_cmp(&num(b)).unwrap_or(Ordering::Equal),
+    }
+}
+
+/* Stable order of keys compared without user code, None for dunders or mixes. */
+fn plain_order(keys: &[Val], reverse: bool, heap: &HeapPool) -> Option<Vec<usize>> {
+    let first = plain_kind(*keys.first()?, heap, 0)?;
+    // Mixed kinds raise or need the full protocol, which the general path gives.
+    for &k in &keys[1..] { if plain_kind(k, heap, 0)? != first { return None; } }
+    let mut order: Vec<usize> = (0..keys.len()).collect();
+    match first {
+        Plain::Num if keys.iter().all(|k| k.is_int()) => {
+            let mut v: Vec<(i64, usize)> = keys.iter().map(|k| k.as_int()).zip(0..).collect();
+            if reverse { v.sort_by_key(|e| core::cmp::Reverse(e.0)); } else { v.sort_by_key(|e| e.0); }
+            return Some(v.into_iter().map(|e| e.1).collect());
+        }
+        Plain::Num => {
+            let mut v: Vec<(f64, usize)> = keys.iter().map(|&k| num(k)).zip(0..).collect();
+            // No NaN reaches here, and -0.0 equals 0.0 as it does in Python.
+            let by = |x: f64, y: f64| x.partial_cmp(&y).unwrap_or(core::cmp::Ordering::Equal);
+            if reverse { v.sort_by(|a, b| by(b.0, a.0)); } else { v.sort_by(|a, b| by(a.0, b.0)); }
+            return Some(v.into_iter().map(|e| e.1).collect());
+        }
+        _ if reverse => order.sort_by(|&a, &b| plain_cmp(keys[b], keys[a], heap)),
+        _ => order.sort_by(|&a, &b| plain_cmp(keys[a], keys[b], heap)),
+    }
+    Some(order)
 }

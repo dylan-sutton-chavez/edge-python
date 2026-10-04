@@ -122,7 +122,7 @@ impl<'a> VM<'a> {
 
         // Wide ints hash by value through the same rule, the i64 branch keeps hash(n)==n.
         let wide = if o.is_heap() {
-            if let HeapObj::LongInt(i) = self.heap.get(o) { Some(*i) } else { None }
+            if let HeapObj::LongInt(i) = self.heap.get(o) { Some(i.get()) } else { None }
         } else { None };
         if let Some(i) = wide {
             let v = self.int_to_val(Some(py_int_hash(i)))?;

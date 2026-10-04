@@ -1,7 +1,6 @@
 use super::*;
 
 use cache::OpcodeCache;
-use value_ops::cached_binop;
 
 /* IC, same for comparison opcodes, reflected pairs collapse to the forward name. */
 fn compare_dunder_name(op: OpCode) -> Option<&'static str> {
@@ -57,11 +56,6 @@ impl<'a> VM<'a> {
             }
             self.push(r);
             return Ok(());
-        }
-
-        // Register-based FastOps (Add/Sub/Mul/Mod/FloorDiv) are cached, Div/Pow are not.
-        if matches!(op, OpCode::Add | OpCode::Sub | OpCode::Mul | OpCode::Mod | OpCode::FloorDiv) {
-            cached_binop!(self.heap, rip, &op, a, b, cache);
         }
 
         // Sets of user-hashed items subtract through their own `__eq__`.
@@ -345,7 +339,8 @@ impl<'a> VM<'a> {
         if shift < 0 { return Err(cold_value("negative shift count")); }
         if shift >= 128 { return Err(cold_overflow()); }
         let ai = self.as_i128(a).ok_or_else(|| cold_type("<< requires an integer"))?;
-        self.int_to_val(ai.checked_shl(shift as u32))
+        // Bits shifted past the top overflow, which `checked_shl` alone lets through.
+        self.int_to_val(ai.checked_shl(shift as u32).filter(|r| r >> shift == ai))
     }
 
     fn exec_shr(&mut self, a: Val, b: Val) -> Result<Val, VmErr> {
@@ -359,8 +354,6 @@ impl<'a> VM<'a> {
 
     pub(crate) fn handle_compare(&mut self, op: OpCode, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
         let (a, b) = self.pop2()?;
-        // Record type-key for every compare op, `cache::specialize` picks the FastOp variant.
-        cached_binop!(self.heap, rip, &op, a, b, cache);
 
         let dunder = self.try_compare_dunder(op, a, b, chunk, slots);
 

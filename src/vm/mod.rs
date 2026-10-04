@@ -6,6 +6,10 @@ pub use crate::value as types;
 pub use crate::optimizer;
 
 mod cache;
+mod lower;
+mod registers;
+pub(crate) mod scope;
+mod sites;
 mod value_ops;
 mod format_spec;
 pub(crate) mod globals;
@@ -19,7 +23,6 @@ mod helpers;
 mod init;
 mod keys;
 
-use crate::s;
 use crate::parser::{SSAChunk, builtin_type};
 use crate::util::hash::FxHashMap as HashMap;
 
@@ -41,8 +44,8 @@ pub(crate) struct Pending {
     pub kw_delta: i32,
     // Saved enclosing spread deltas (BeginArgs).
     pub delta_save: alloc::vec::Vec<(i32, i32)>,
-    /* Current Call's byte offset, consumed by the traceback renderer. */
-    pub call_byte_pos: Option<u32>,
+    /* The current call's ip, turned into a byte offset only for a traceback. */
+    pub call_ip: Option<u32>,
     /* Wakeup deadline set by `sleep()` and consumed by the scheduler. */
     pub sleep_until_ns: Option<u64>,
     /* Set by `receive()` on empty queue, transitions the coro to `WaitingEvent`. */
@@ -67,7 +70,7 @@ impl Pending {
             pos_delta: 0,
             kw_delta: 0,
             delta_save: alloc::vec::Vec::new(),
-            call_byte_pos: None,
+            call_ip: None,
             sleep_until_ns: None,
             event_wait_request: false,
             host_call_request: false,
@@ -83,31 +86,28 @@ impl Pending {
 /* `bare_name -> [(version, slot), ...]` for one chunk's `chunk.names`. */
 pub(crate) type NameVersionIndex = crate::util::hash::FxHashMap<String, Vec<(i64, usize)>>;
 
-/* Free-load propagation entry (bare name, body slot, referenced version, caller [(version, slot)] candidates). */
-pub(crate) type FreeLoadEntry = (String, u32, i64, Vec<(i64, u32)>);
-
-/* Static caller->callee propagation data for one (caller chunk, callee fi) pair, built once, then per call is pure slot reads (no string hashing). */
-pub(crate) struct PropInfo {
-    /* Caller/callee share the lexical scope and module, so late binding overwrites freely. */
-    pub same_scope: bool,
-    /* (caller slot, body slot) exact-name matches. */
-    pub pairs: Vec<(u32, u32)>,
-    pub free: Vec<FreeLoadEntry>,
-}
-pub(crate) type PropagationMap = alloc::rc::Rc<PropInfo>;
-
 pub struct VM<'a> {
     pub(crate) stack: Vec<Val>,
     pub(crate) heap: HeapPool,
     pub(crate) iter_stack: Vec<IterFrame>,
     pub(crate) yields: Vec<Val>,
     pub(crate) chunk: &'a SSAChunk,
-    pub(crate) globals: HashMap<String, Val>,
+    /* Each module's bindings, the entry module first, by the index each name keeps. */
+    pub(crate) scopes: Vec<scope::Globals>,
+    /* Module spec -> its index in `scopes`. */
+    pub(crate) scope_ids: HashMap<String, usize>,
+    /* Chunk -> the module whose bindings its code reads. */
+    pub(crate) chunk_module: HashMap<*const SSAChunk, usize>,
+    /* How each function body's names resolve, indexed by fi. */
+    pub(crate) fn_scope: Vec<scope::FnScope>,
+    /* The chunk each function is defined in, whose frame its closure cells come from. */
+    pub(crate) fn_definer: Vec<*const SSAChunk>,
+    /* Class bodies, whose names stay a namespace in slots. */
+    pub(crate) class_chunks: crate::util::hash::FxHashSet<*const SSAChunk>,
+    /* The cells around each running class body, which its methods close over. */
+    pub(crate) class_cells: Vec<Vec<(String, Val)>>,
     /* The builtins under the globals, keyed by their static names and never rebound. */
     pub(crate) builtins: HashMap<&'static str, Val>,
-    /* User-mutated module-level state, keyed by bare name, mirrors entry-chunk stores and backs `global` declarations. */
-    pub(crate) module_state: HashMap<String, Val>,
-    pub(crate) live_slots: Vec<Val>,
     pub(crate) templates: Templates,
     pub(crate) budget: usize,
     pub(crate) depth: usize,
@@ -128,40 +128,36 @@ pub struct VM<'a> {
     // function_parents maps to the lexical enclosing fi (None at module level), body_to_fi maps chunk->fi.
     pub(crate) function_parents: Vec<Option<usize>>,
     pub(crate) body_to_fi: HashMap<*const SSAChunk, usize>,
-    pub(crate) body_maps: Vec<HashMap<String, usize>>,
     pub(crate) param_slots: Vec<Vec<(ParamKind, usize)>>,
+    /* A function's positional count when every parameter is plain. */
+    pub(crate) simple_arity: Vec<Option<usize>>,
     pub(crate) slot_templates: Vec<Vec<Val>>,
     /* Deduped template values, templates are static after init, so the GC marks this flat list instead of every per-function template. */
     pub(crate) template_roots: Vec<Val>,
-    pub(crate) nonlocal_tables: Vec<Vec<(usize, usize)>>,
     /* Recycled fn_slots buffers, popped in exec_call, pushed back on normal return. Never a GC root (entries are cleared before reuse). */
     pub(crate) slot_pool: Vec<Vec<Val>>,
-    pub(crate) needs_caller_slots: Vec<bool>,
     /* Whether `fi` may memoize, a call that shows its result can change turns it off. */
     pub(crate) memo_ok: Vec<bool>,
-    /* Bitmap of slots bound to a formal parameter, protected from caller-slot propagation. */
-    pub(crate) is_param_slot: Vec<Vec<bool>>,
-    /* Free-variable body slots (bare_name, slot, referenced version), used for caller-chunk base-name fallback. */
-    pub(crate) body_free_loads: Vec<Vec<(String, usize, i64)>>,
-    /* Per-chunk bare names the chunk itself binds (stores, Phi, params), drives closure-cell capture. */
-    pub(crate) chunk_local_binds: HashMap<*const SSAChunk, alloc::rc::Rc<crate::util::hash::FxHashSet<String>>>,
     /* Coroutines currently inside `resume_coroutine`, re-entry raises like Python's already-executing guard. Transient, never snapshotted. */
     pub(crate) executing_coros: Vec<u64>,
-    /* True once any builtin name is rebound at module scope, fused call sites then consult `module_state` first. */
+    /* Bumped by any class member change, voiding every site keyed on a class. */
+    pub(crate) class_epoch: u32,
+    /* Set by a hot loop in unlowered code, its frame then carries on lowered. */
+    pub(crate) tier_up: bool,
+    /* A call the register loop made that failed, raised at that call. */
+    pub(crate) reg_error: Option<VmErr>,
+    /* What calling each class needs, valid while the class epoch holds. */
+    pub(crate) ctors: crate::util::hash::FxHashMap<u64, Ctor>,
+    /* True once a builtin name is rebound, fused calls then check module bindings first. */
     pub(crate) builtins_rebound: bool,
-    /* A `global` store ran, so function callers re-read their globals until the entry frame. */
-    pub(crate) globals_written: bool,
     pub(crate) is_async: Vec<bool>,
     pub(crate) default_slots: Vec<Vec<(usize, Val)>>,
-    /* Pre-resolved `<name>_0` body slot for self-reference binding, None for lambdas. */
-    pub(crate) self_ref_slot: Vec<Option<usize>>,
-    pub(crate) opcode_caches: HashMap<*const SSAChunk, CachePool>,
-    /* Per-chunk `bare -> [(version, slot)]` index for the free-load fallback. */
+    /* Each chunk's code and caches, indexed through `pool_ids` or `fn_pool`. */
+    pub(crate) pools: Vec<CachePool>,
+    pub(crate) pool_ids: HashMap<*const SSAChunk, usize>,
+    pub(crate) fn_pool: Vec<usize>,
+    /* Per-chunk `bare -> [(version, slot)]` index, telling a name bound once from rebound. */
     pub(crate) chunk_name_versions: HashMap<*const SSAChunk, NameVersionIndex>,
-    /* Cached per (caller chunk, callee fi), name matching is static, so hash it once, not per call. */
-    pub(crate) propagation_maps: HashMap<(*const SSAChunk, usize), PropagationMap>,
-    /* Const-pool ptrs for caches currently checked out by live exec() frames. */
-    pub(crate) active_const_pools: Vec<*const [Val]>,
     /* Slot-slice ptrs for every live exec() frame, GC roots so a frame's mutating locals survive a nested resume. */
     pub(crate) active_slots: Vec<*const [Val]>,
     pub(crate) with_stack: Vec<Val>,
@@ -220,6 +216,15 @@ pub struct VM<'a> {
     pub(crate) executed: HashMap<*const SSAChunk, Vec<u64>>,
 }
 
+/* What calling a class needs, its `__init__`, exception kind and attribute count. */
+#[derive(Clone, Copy)]
+pub(crate) struct Ctor {
+    pub epoch: u32,
+    pub init: Option<(Val, Val)>,
+    pub exception: bool,
+    pub attrs: usize,
+}
+
 impl<'a> VM<'a> {
     pub fn new(chunk: &'a SSAChunk) -> Self { Self::with_limits(chunk, Limits::sandbox()) }
 
@@ -236,10 +241,14 @@ impl<'a> VM<'a> {
             yields: Vec::new(),
             chunk,
             heap: HeapPool::new(limits.memory),
-            globals: HashMap::default(),
+            scopes: alloc::vec![scope::Globals::default()],
+            scope_ids: HashMap::default(),
+            chunk_module: HashMap::default(),
+            fn_scope: Vec::new(),
+            fn_definer: Vec::new(),
+            class_chunks: Default::default(),
+            class_cells: Vec::new(),
             builtins: HashMap::default(),
-            module_state: HashMap::default(),
-            live_slots: Vec::new(),
             templates: Templates::new(),
             budget: limits.ops,
             depth: 0,
@@ -287,27 +296,24 @@ impl<'a> VM<'a> {
             fn_index: Vec::new(),
             function_parents: Vec::new(),
             body_to_fi: HashMap::default(),
-            body_maps: Vec::new(),
             param_slots: Vec::new(),
+            simple_arity: Vec::new(),
             slot_templates: Vec::new(),
             template_roots: Vec::new(),
-            nonlocal_tables: Vec::new(),
             slot_pool: Vec::new(),
-            needs_caller_slots: Vec::new(),
             memo_ok: Vec::new(),
-            is_param_slot: Vec::new(),
-            body_free_loads: Vec::new(),
-            chunk_local_binds: HashMap::default(),
             executing_coros: Vec::new(),
+            class_epoch: 0,
+            tier_up: false,
+            reg_error: None,
+            ctors: Default::default(),
             builtins_rebound: false,
-            globals_written: false,
             is_async: Vec::new(),
             default_slots: Vec::new(),
-            self_ref_slot: Vec::new(),
-            opcode_caches: HashMap::default(),
+            pools: Vec::new(),
+            pool_ids: HashMap::default(),
+            fn_pool: Vec::new(),
             chunk_name_versions: HashMap::default(),
-            propagation_maps: HashMap::default(),
-            active_const_pools: Vec::new(),
             active_slots: Vec::new(),
         };
         vm.build_function_table(chunk, None, None);
@@ -328,14 +334,8 @@ impl<'a> VM<'a> {
     /* Derived per-function tables for functions[start..], the REPL re-invokes this to extend them for each adopted chunk. */
     pub(crate) fn index_functions(&mut self, start: usize) {
         let end = self.functions.len();
-        let new: Vec<HashMap<String, usize>> = self.functions[start..end].iter().map(|(_, body, _, _)| {
-            body.names.iter().enumerate().map(|(i, n)| (n.clone(), i)).collect()
-        }).collect();
-        self.body_maps.truncate(start);
-        self.body_maps.extend(new);
         let new: Vec<Vec<(ParamKind, usize)>> = (start..end).map(|fi| {
-            let (params, _, _, _) = self.functions[fi];
-            let bm = &self.body_maps[fi];
+            let (params, body, _, _) = self.functions[fi];
             params.iter().map(|p| {
                 // `~` prefix marks kw-only parameters (after a lone `*`).
                 let kind = if p.starts_with("**") {
@@ -347,82 +347,20 @@ impl<'a> VM<'a> {
                 } else {
                     ParamKind::Normal
                 };
-                // Strips both prefix and the `=` default marker for slot lookup.
+                // A parameter binds the first version of its bare name.
                 let bare = crate::parser::types::param_base_name(p);
-                let slot = bm.get(&s!(str bare, "_0")).copied().unwrap_or(usize::MAX);
+                let slot = body.names.iter().position(|n| n.strip_suffix("_0") == Some(bare)).unwrap_or(usize::MAX);
                 (kind, slot)
             }).collect()
         }).collect();
         self.param_slots.truncate(start);
         self.param_slots.extend(new);
-
-        // Pre-compute nonlocal resolution (canonical body slot, index of the name in `nonlocals`).
-        let new: Vec<Vec<(usize, usize)>> = self.functions[start..end].iter().map(|(_, body, _, _)| {
-            body.nonlocals.iter().enumerate().filter_map(|(ni, base)| {
-                // Require an explicit `_<digits>` suffix, bare Nonlocal-operand slots aren't canonical.
-                let canon = body.names.iter().enumerate()
-                    .find(|(_, n)| crate::parser::SsaName::parse(n).map(|s| s.bare) == Some(base.as_str()))
-                    .map(|(i, _)| body.alias_groups.get(i).and_then(|g| g.first().copied()).unwrap_or(i as u16) as usize)?;
-                Some((canon, ni))
-            }).collect()
-        }).collect();
-        self.nonlocal_tables.truncate(start);
-        self.nonlocal_tables.extend(new);
-
-        // True iff the body references names not in params/builtins/captures, or a builtin was rebound.
-        let new: Vec<bool> = (start..end).map(|fi| {
-            let (params, body, _, _) = self.functions[fi];
-            let param_names: crate::util::hash::FxHashSet<&str> = params.iter().map(|p| crate::parser::types::param_base_name(p)).collect();
-            // Attribute names never come from a caller.
-            body.names.iter().zip(body.attr_only_names()).any(|(n, attr)| {
-                !attr && !param_names.contains(crate::parser::ssa_strip(n)) && self.global_slot(n).is_none()
-            }) || self.builtins_rebound
-        }).collect();
-        self.needs_caller_slots.truncate(start);
-        self.needs_caller_slots.extend(new);
-
-        // Bitmap of param-bound slots, avoids per-call BTreeSet allocation.
-        let new: Vec<Vec<bool>> = (start..end).map(|fi| {
-            let (_, body, _, _) = self.functions[fi];
-            let n_slots = body.names.len();
-            let mut bm = alloc::vec![false; n_slots];
-            for &(_, slot) in &self.param_slots[fi] { if slot < n_slots { bm[slot] = true; } }
-            bm
-        }).collect();
-        self.is_param_slot.truncate(start);
-        self.is_param_slot.extend(new);
-
-        // Canonical, non-param, never-written slots.
-        let new: Vec<Vec<(String, usize, i64)>> = (start..end).map(|fi| {
-            let (_, body, _, _) = self.functions[fi];
-            let param_bm = &self.is_param_slot[fi];
-            let mut written: crate::util::hash::FxHashSet<usize> = crate::util::hash::FxHashSet::default();
-            for ins in &body.instructions {
-                if matches!(ins.opcode, crate::parser::OpCode::StoreName | crate::parser::OpCode::Phi) {
-                    written.insert(ins.operand as usize);
-                }
-            }
-            body.names.iter().enumerate().filter_map(|(slot, name)| {
-                let canon = body.alias_groups.get(slot).and_then(|g| g.first().copied()).unwrap_or(slot as u16) as usize;
-                if canon != slot { return None; }
-                if param_bm.get(slot).copied().unwrap_or(false) { return None; }
-                if written.contains(&slot) { return None; }
-                let parsed = crate::parser::SsaName::parse(name)?;
-                Some((parsed.bare.to_string(), slot, parsed.version as i64))
-            }).collect()
-        }).collect();
-        self.body_free_loads.truncate(start);
-        self.body_free_loads.extend(new);
-
-        // Self-reference slot, resolved once to avoid per-call `<base>_0` allocation.
         let new: Vec<Option<usize>> = (start..end).map(|fi| {
-            let bare = self.function_names.get(fi)?;
-            if bare.is_empty() { return None; }
-            let key = s!(str bare, "_0");
-            self.body_maps[fi].get(key.as_str()).copied()
+            let params = &self.param_slots[fi];
+            params.iter().all(|&(k, s)| matches!(k, ParamKind::Normal) && s != usize::MAX).then_some(params.len())
         }).collect();
-        self.self_ref_slot.truncate(start);
-        self.self_ref_slot.extend(new);
+        self.simple_arity.truncate(start);
+        self.simple_arity.extend(new);
 
         // Default-slot table of (slot, placeholder) entries the call path overwrites.
         let new: Vec<Vec<(usize, Val)>> = (start..end).map(|fi| {
@@ -436,19 +374,24 @@ impl<'a> VM<'a> {
         }).collect();
         self.default_slots.truncate(start);
         self.default_slots.extend(new);
+        self.analyze_scopes(start);
     }
 
     /* Templates read `globals`, so they build after builtin registration, rebuilding the deduped roots is cheap. */
     pub(crate) fn index_templates(&mut self, start: usize) {
-        let new: Vec<Vec<Val>> = self.functions[start..].iter().map(|(_, body, _, _)| {
-            self.fill_builtins(&body.names)
+        // Only a plain local starts from a builtin, cells and globals read live.
+        let new: Vec<Vec<Val>> = (start..self.functions.len()).map(|fi| {
+            let mut template = self.fill_builtins(&self.functions[fi].1.names);
+            for (v, k) in template.iter_mut().zip(self.fn_scope[fi].kinds.iter()) { if *k != scope::Kind::Local { *v = Val::undef(); } }
+            template
         }).collect();
         self.slot_templates.truncate(start);
         self.slot_templates.extend(new);
-        // A nested or imported body reads only its own name, any other could be an enclosing local.
+        // Cells change behind a cached result, and an import reads other globals.
         let new: Vec<bool> = (start..self.functions.len()).map(|fi| {
-            (self.function_parents[fi].is_none() && self.fn_module[fi].is_none())
-                || self.body_free_loads[fi].iter().all(|(bare, _, _)| self.function_names.get(fi).is_some_and(|n| n == bare))
+            let scope = &self.fn_scope[fi];
+            scope.freevars.is_empty()
+                && (self.fn_module[fi].is_none() || scope.reads.iter().all(|bare| self.function_names.get(fi).is_some_and(|n| n == bare)))
         }).collect();
         self.memo_ok.truncate(start);
         self.memo_ok.extend(new);
@@ -461,12 +404,13 @@ impl<'a> VM<'a> {
 
     /* A builtin name the program binds or deletes voids every result memoized under the old binding. */
     pub(crate) fn note_builtin_binding(&mut self, bare: &str) {
-        if NativeFnId::from_name(bare).is_some() {
-            self.builtins_rebound = true;
-            // A body that read only builtins skipped propagation, the name may be a global now.
-            self.needs_caller_slots.fill(true);
-            self.templates.clear();
-        }
+        if NativeFnId::from_name(bare).is_some() { self.rebind_builtin(); }
+    }
+
+    /* A builtin's name holds a program value, fused calls check bindings, memos clear. */
+    pub(crate) fn rebind_builtin(&mut self) {
+        self.builtins_rebound = true;
+        self.templates.clear();
     }
 
     /* Gives `bare` a heap slot when it names a builtin, so a program pays only for the builtins it uses. */
@@ -521,7 +465,7 @@ impl<'a> VM<'a> {
         for (name, &idx) in chunk.extern_index.iter() {
             if let Some(b) = chunk.extern_table.get(idx as usize) {
                 let v = self.heap.alloc(HeapObj::Extern(b.clone()))?;
-                self.module_state.insert(name.clone(), v);
+                self.scopes[0].set(name, v);
             }
         }
         Ok(())

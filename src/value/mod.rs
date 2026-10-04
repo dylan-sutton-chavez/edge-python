@@ -1,4 +1,4 @@
-use alloc::{rc::Rc, string::String, vec::Vec};
+use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 use core::cell::{Cell, RefCell};
 use crate::util::hash::FxHashMap as HashMap;
 
@@ -215,7 +215,7 @@ pub enum HeapObj {
     // `NotImplemented` singleton, dunder return sentinel that triggers the reflected operator fallback.
     NotImplemented,
     /* Wide-int slow path (i128), `int_to_val` canonicalises so 48-bit values stay inline. */
-    LongInt(i128),
+    LongInt(Wide),
     /* Exception instance, type name + ctor args (exposed via `.args`). */
     ExcInstance(String, Vec<Val>),
     BoundMethod(Val, BuiltinMethodId),
@@ -236,7 +236,7 @@ pub enum HeapObj {
     // `classmethod(func)`, attribute lookup binds the class.
     ClassMethod(Val),
     // Trailing `Vec<SyncFrame>` stacks suspended sync sub-calls (innermost-last). Resume walks inside-out, each return lands on next frame's Call site. `BodyRef` discriminates user-fn coros from the implicit module-body coro. Final `Vec<ExceptionFrame>` carries try/except across yields.
-    Coroutine(usize, Vec<Val>, Vec<Val>, BodyRef, Vec<IterFrame>, Vec<SyncFrame>, Vec<ExceptionFrame>),
+    Coroutine(Box<Coro>),
     /* Produced by `import m`, attr access via LoadAttr, calls fuse through CallMethod. */
     Module(String, Vec<(String, Val)>),
     /* A native binding lifted to a first-class callable. */
@@ -251,6 +251,42 @@ pub enum HeapObj {
     TypeVar(String),
     // A builtin iterator such as `iter(xs)` or `map(f, xs)`, its frame shared by every name for it.
     Iter(Rc<RefCell<IterFrame>>, &'static str),
+    // A variable a closure shares with the frame binding it, undef while unbound.
+    Cell(Val),
+}
+
+/* A generator or coroutine body, where it resumes and the state it resumes with. */
+#[derive(Clone, Debug)]
+pub struct Coro {
+    pub ip: usize,
+    pub slots: Vec<Val>,
+    pub stack: Vec<Val>,
+    pub body: BodyRef,
+    pub iters: Vec<IterFrame>,
+    pub syncs: Vec<SyncFrame>,
+    pub excs: Vec<ExceptionFrame>,
+}
+
+impl Coro {
+    /* A body not yet started, its frame bound. */
+    pub fn fresh(slots: Vec<Val>, body: BodyRef) -> Box<Self> {
+        Box::new(Self { ip: 0, slots, stack: Vec::new(), body, iters: Vec::new(), syncs: Vec::new(), excs: Vec::new() })
+    }
+}
+
+/* An i128 at eight-byte alignment, so it does not widen every heap object. */
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[repr(Rust, packed(8))]
+pub struct Wide(i128);
+
+impl Wide {
+    #[inline]
+    pub fn get(self) -> i128 { self.0 }
+}
+
+impl From<i128> for Wide {
+    #[inline]
+    fn from(i: i128) -> Self { Self(i) }
 }
 
 /* Type names a builtin iterator can carry, the index is how a snapshot stores one. */
@@ -395,11 +431,15 @@ pub struct DictMap {
     rich: bool,
 }
 
+/* Entries a dict scans before keeping an index, most instances stay under it. */
+const SMALL_DICT: usize = 8;
+
 impl DictMap {
     pub fn new() -> Self { Self::with_capacity(0) }
 
     pub fn with_capacity(cap: usize) -> Self {
-        Self { entries: Vec::with_capacity(cap), index: hashbrown::HashTable::with_capacity(cap), live: 0, rich: false }
+        let index = if cap > SMALL_DICT { hashbrown::HashTable::with_capacity(cap) } else { hashbrown::HashTable::new() };
+        Self { entries: Vec::with_capacity(cap), index, live: 0, rich: false }
     }
 
     /* Entries with their stored hashes, `rebuild_index` once the heap lives. */
@@ -418,19 +458,29 @@ impl DictMap {
     }
 
     fn reindex(&mut self) {
+        if !self.indexed() { self.index = hashbrown::HashTable::new(); return; }
         self.index.clear();
         let e = &self.entries;
         for i in 0..e.len() {
-            if e[i].0.is_undef() { continue; }
-            self.index.insert_unique(e[i].2, i, |&j| e[j].2);
+            if !e[i].0.is_undef() { self.index.insert_unique(e[i].2, i, |&j| e[j].2); }
         }
+    }
+
+    /* Whether the index holds every live entry, a small dict scanning its entries instead. */
+    #[inline]
+    fn indexed(&self) -> bool { self.entries.len() > SMALL_DICT }
+
+    /* The live entry under hash `h` that `eq` accepts. */
+    #[inline]
+    fn slot(&self, h: u64, eq: impl Fn(Val) -> bool) -> Option<usize> {
+        let e = &self.entries;
+        if !self.indexed() { return e.iter().position(|x| x.2 == h && !x.0.is_undef() && eq(x.0)); }
+        self.index.find(h, |&i| e[i].2 == h && eq(e[i].0)).copied()
     }
 
     #[inline]
     fn find(&self, key: Val, heap: &HeapPool) -> Option<usize> {
-        let e = &self.entries;
-        let h = hash_val_with_heap(key, heap);
-        self.index.find(h, |&i| e[i].2 == h && eq_member(e[i].0, key, heap)).copied()
+        self.slot(hash_val_with_heap(key, heap), |k| eq_member(k, key, heap))
     }
 
     pub fn get(&self, key: &Val, heap: &HeapPool) -> Option<&Val> {
@@ -443,29 +493,33 @@ impl DictMap {
 
     pub fn insert(&mut self, key: Val, value: Val, heap: &HeapPool) {
         let h = hash_val_with_heap(key, heap);
-        let e = &self.entries;
-        if let Some(&i) = self.index.find(h, |&i| e[i].2 == h && eq_member(e[i].0, key, heap)) {
-            self.entries[i].1 = value;
-            return;
+        match self.slot(h, |k| eq_member(k, key, heap)) {
+            Some(i) => self.entries[i].1 = value,
+            None => self.push_hashed(key, value, h, false),
         }
-        self.push_hashed(key, value, h, false);
     }
 
     pub fn remove(&mut self, key: &Val, heap: &HeapPool) -> Option<Val> {
-        let h = hash_val_with_heap(*key, heap);
-        let e = &self.entries;
-        let i = self.index.find_entry(h, |&i| e[i].2 == h && eq_member(e[i].0, *key, heap)).ok()?.remove().0;
-        Some(self.tombstone(i))
+        let i = self.slot(hash_val_with_heap(*key, heap), |k| eq_member(k, *key, heap))?;
+        Some(self.remove_at(i))
     }
 
     /* Indices of live entries stored under hash `h`, the ones a probe for a key with that hash compares against. */
     pub(crate) fn candidates(&self, h: u64) -> Vec<usize> {
-        let mut out = Vec::new();
         let e = &self.entries;
+        if !self.indexed() { return (0..e.len()).filter(|&i| e[i].2 == h && !e[i].0.is_undef()).collect(); }
+        let mut out = Vec::new();
         self.index.find(h, |&i| { if e[i].2 == h { out.push(i); } false });
         out
     }
     pub(crate) fn key_at(&self, i: usize) -> Val { self.entries.get(i).map_or(Val::undef(), |e| e.0) }
+    pub(crate) fn hash_at(&self, i: usize) -> u64 { self.entries.get(i).map_or(0, |e| e.2) }
+    /* Entries ever stored, removed ones included until a compaction drops them. */
+    pub(crate) fn entry_count(&self) -> usize { self.entries.len() }
+    /* The entry holding the string key `name` under its hash `h`. */
+    pub(crate) fn position_str(&self, name: &str, h: u64, heap: &HeapPool) -> Option<usize> {
+        self.slot(h, |k| matches!(heap.try_get(k), Some(HeapObj::Str(s)) if s == name))
+    }
     pub(crate) fn value_at(&self, i: usize) -> Val { self.entries[i].1 }
     pub(crate) fn set_value_at(&mut self, i: usize, v: Val) { self.entries[i].1 = v; }
     pub fn is_rich(&self) -> bool { self.rich }
@@ -476,13 +530,14 @@ impl DictMap {
         let i = self.entries.len();
         self.entries.push((key, value, h));
         self.live += 1;
-        let e = &self.entries;
-        self.index.insert_unique(h, i, |&j| e[j].2);
+        // Growing past the scan size builds the index over everything stored.
+        if self.entries.len() == SMALL_DICT + 1 { self.reindex(); }
+        else if self.indexed() { let e = &self.entries; self.index.insert_unique(h, i, |&j| e[j].2); }
     }
 
     /* Drops entry `i` and returns its value, compacting once tombstones outnumber live entries. */
     pub(crate) fn remove_at(&mut self, i: usize) -> Val {
-        if let Ok(entry) = self.index.find_entry(self.entries[i].2, |&j| j == i) { entry.remove(); }
+        if self.indexed() && let Ok(entry) = self.index.find_entry(self.entries[i].2, |&j| j == i) { entry.remove(); }
         self.tombstone(i)
     }
 
@@ -574,11 +629,11 @@ pub(crate) fn for_each_val(obj: &HeapObj, mut f: impl FnMut(Val)) {
             f(*cls);
             for (k, v) in attrs.borrow().iter() { f(k); f(v); }
         }
-        HeapObj::Coroutine(_, slots, stack, _, iters, sub_frames, _) => {
-            for &v in slots { f(v); }
-            for &v in stack { f(v); }
-            for fr in iters { fr.for_each_val(&mut f); }
-            for sf in sub_frames { sf.for_each_val(&mut f); }
+        HeapObj::Coroutine(c) => {
+            for &v in &c.slots { f(v); }
+            for &v in &c.stack { f(v); }
+            for fr in &c.iters { fr.for_each_val(&mut f); }
+            for sf in &c.syncs { sf.for_each_val(&mut f); }
         }
         HeapObj::Func(_, defaults, captures, attrs) => {
             for (_, v) in attrs.borrow().iter() { f(*v); }
@@ -595,7 +650,12 @@ pub(crate) fn for_each_val(obj: &HeapObj, mut f: impl FnMut(Val)) {
         | HeapObj::Type(_) | HeapObj::NativeFn(_) | HeapObj::Range(..)
         | HeapObj::Extern(_) | HeapObj::Ellipsis | HeapObj::NotImplemented | HeapObj::TypeVar(_) => {}
         HeapObj::Iter(frame, _) => frame.borrow().for_each_val(&mut f),
+        HeapObj::Cell(v) => f(*v),
     }
+}
+
+fn slot_str_hash(slots: &[HeapSlot], i: u32) -> u64 {
+    match &slots[i as usize].obj { Some(HeapObj::Str(t)) => eq::hash_key(t), _ => 0 }
 }
 
 /* Removes `key` unless another slot owns its entry, one hash on the common path. */
@@ -630,7 +690,8 @@ pub struct HeapPool {
     // The first collection whose running count missed the recount, as the two totals.
     #[cfg(feature = "memcheck")]
     drift: Option<(usize, usize)>,
-    strings: HashMap<String, u32>,
+    /* Interns short strings by content, each entry the slot holding one. */
+    strings: hashbrown::HashTable<u32>,
     /* Interns short bytes literals so equal `b"..."` share a Val (Hash uses raw bits). */
     bytes_intern: HashMap<Vec<u8>, u32>,
     /* Interns LongInt by value so equal i128s share a Val and stay hash/eq consistent. */
@@ -657,7 +718,7 @@ impl HeapPool {
     pub fn int(&mut self, i: i128) -> Result<Val, VmErr> {
         match i64::try_from(i).ok().and_then(Val::int_checked) {
             Some(v) => Ok(v),
-            None => self.alloc(HeapObj::LongInt(i)),
+            None => self.alloc(HeapObj::LongInt(i.into())),
         }
     }
 
@@ -673,7 +734,7 @@ impl HeapPool {
             limit,
             #[cfg(feature = "memcheck")]
             drift: None,
-            strings: HashMap::default(),
+            strings: hashbrown::HashTable::new(),
             bytes_intern: HashMap::default(),
             longints: HashMap::default(),
             types: HashMap::default(),
@@ -691,9 +752,9 @@ impl HeapPool {
     #[inline]
     fn intern_lookup(&self, obj: &HeapObj) -> Option<u32> {
         match obj {
-            HeapObj::Str(s) if s.len() <= 128 => self.strings.get(s).copied(),
+            HeapObj::Str(s) if s.len() <= 128 => self.string_slot(s),
             HeapObj::Bytes(b) if b.len() <= 128 => self.bytes_intern.get(b).copied(),
-            HeapObj::LongInt(i) => self.longints.get(i).copied(),
+            HeapObj::LongInt(i) => self.longints.get(&i.get()).copied(),
             HeapObj::Type(name) => self.types.get(name).copied(),
             HeapObj::Ellipsis => self.ellipsis_idx,
             HeapObj::NotImplemented => self.notimpl_idx,
@@ -703,12 +764,22 @@ impl HeapPool {
         }
     }
 
+    /* The slot interning text `s`, each candidate compared by its own text. */
+    #[inline]
+    fn string_slot(&self, s: &str) -> Option<u32> {
+        let slots = &self.slots;
+        self.strings.find(eq::hash_key(s), |&i| matches!(&slots[i as usize].obj, Some(HeapObj::Str(t)) if t == s)).copied()
+    }
+
     /* Register `idx` in the intern and singleton tables its object belongs to. */
     fn intern_insert(&mut self, idx: u32) {
         match self.slots[idx as usize].obj.as_ref() {
-            Some(HeapObj::Str(s)) if s.len() <= 128 => { self.strings.insert(s.clone(), idx); }
+            Some(HeapObj::Str(s)) if s.len() <= 128 => {
+                let slots = &self.slots;
+                self.strings.insert_unique(eq::hash_key(s), idx, |&i| slot_str_hash(slots, i));
+            }
             Some(HeapObj::Bytes(b)) if b.len() <= 128 => { self.bytes_intern.insert(b.clone(), idx); }
-            Some(HeapObj::LongInt(i)) => { self.longints.insert(*i, idx); }
+            Some(HeapObj::LongInt(i)) => { self.longints.insert(i.get(), idx); }
             Some(HeapObj::Type(name)) => { self.types.insert(name.clone(), idx); }
             Some(HeapObj::Ellipsis) => { self.ellipsis_idx = Some(idx); }
             Some(HeapObj::NotImplemented) => { self.notimpl_idx = Some(idx); }
@@ -721,9 +792,11 @@ impl HeapPool {
     /* Drop `idx` from the tables `intern_insert` filled, long strings and bytes never entered one. */
     fn intern_remove(&mut self, idx: u32) {
         match self.slots[idx as usize].obj.as_ref() {
-            Some(HeapObj::Str(s)) if s.len() <= 128 => unintern(&mut self.strings, s, idx),
+            Some(HeapObj::Str(s)) if s.len() <= 128 => {
+                if let Ok(e) = self.strings.find_entry(eq::hash_key(s), |&i| i == idx) { e.remove(); }
+            }
             Some(HeapObj::Bytes(b)) if b.len() <= 128 => unintern(&mut self.bytes_intern, b, idx),
-            Some(HeapObj::LongInt(i)) => unintern(&mut self.longints, i, idx),
+            Some(HeapObj::LongInt(i)) => unintern(&mut self.longints, &i.get(), idx),
             Some(HeapObj::Type(name)) => unintern(&mut self.types, name, idx),
             Some(HeapObj::Ellipsis) if self.ellipsis_idx == Some(idx) => { self.ellipsis_idx = None; }
             Some(HeapObj::NotImplemented) if self.notimpl_idx == Some(idx) => { self.notimpl_idx = None; }
@@ -746,6 +819,12 @@ impl HeapPool {
     }
 
     pub fn alloc(&mut self, obj: HeapObj) -> Result<Val, VmErr> { self.admit(obj, true) }
+
+    /* The shared Val for text `s`, found before any copy of it is made. */
+    pub fn intern_str(&mut self, s: &str) -> Result<Val, VmErr> {
+        if let Some(i) = self.string_slot(s) { return Ok(Val::heap(i)); }
+        self.alloc(HeapObj::Str(s.into()))
+    }
 
     /* Reserved for constructing the exception that reports the limit itself, skips the soft limit but not the hard slot cap. */
     pub fn alloc_emergency(&mut self, obj: HeapObj) -> Result<Val, VmErr> { self.admit(obj, false) }
@@ -952,14 +1031,6 @@ impl HeapPool {
     }
 
 
-    /* Inline-cache tag for the types binops specialise on, int 1, float 2, str 3, the rest 0. */
-    #[inline(always)]
-    pub fn val_tag(&self, v: Val) -> u8 {
-        if v.is_int() { 1 } else if v.is_float() { 2 }
-        else if v.is_heap() && matches!(self.slots[v.as_heap() as usize].obj, Some(HeapObj::Str(_))) { 3 }
-        else { 0 }
-    }
-
     /* Identity probe for the `NotImplemented` singleton, consumed by the dunder dispatch protocol. */
     #[inline(always)]
     pub fn is_not_implemented(&self, v: Val) -> bool {
@@ -983,7 +1054,7 @@ pub fn as_i128(v: Val, heap: &HeapPool) -> Option<i128> {
     else if v.is_bool() { Some(v.as_bool() as i128) }
     else if v.is_heap() {
         match heap.get(v) {
-            HeapObj::LongInt(i) => Some(*i),
+            HeapObj::LongInt(i) => Some(i.get()),
             _ => None,
         }
     }
@@ -993,5 +1064,5 @@ pub fn as_i128(v: Val, heap: &HeapPool) -> Option<i128> {
 /* Wide-int payload only, skips inline ints and bools unlike as_i128. */
 #[inline]
 pub fn as_long_int(v: Val, heap: &HeapPool) -> Option<i128> {
-    if v.is_heap() && let HeapObj::LongInt(i) = heap.get(v) { Some(*i) } else { None }
+    if v.is_heap() && let HeapObj::LongInt(i) = heap.get(v) { Some(i.get()) } else { None }
 }

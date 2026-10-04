@@ -72,16 +72,6 @@ fn coerce_floats(a: Val, b: Val, heap: &HeapPool) -> Option<(f64, f64)> {
     Some((num_as_f64(a, heap)?, num_as_f64(b, heap)?))
 }
 
-/* Record heap type tags so the IC can promote a stable binop to FastOp. */
-macro_rules! cached_binop {
-    ($heap:expr, $rip:expr, $opcode:expr, $a:expr, $b:expr, $cache:expr) => {{
-        let ta = $heap.val_tag($a);
-        let tb = $heap.val_tag($b);
-        $cache.record($rip, $opcode, ta, tb);
-    }};
-}
-pub(crate) use cached_binop;
-
 use super::VM;
 
 impl<'a> VM<'a> {
@@ -93,7 +83,7 @@ impl<'a> VM<'a> {
         match self.heap.get(v) {
             HeapObj::Str(s) => !s.is_empty(),
             HeapObj::Bytes(b) => !b.is_empty(),
-            HeapObj::LongInt(i) => *i != 0,
+            HeapObj::LongInt(i) => i.get() != 0,
             HeapObj::List(l) => !l.borrow().is_empty(),
             HeapObj::Tuple(t) => !t.is_empty(),
             HeapObj::Dict(d) => !d.borrow().is_empty(),
@@ -106,7 +96,7 @@ impl<'a> VM<'a> {
             | HeapObj::StaticMethod(..) | HeapObj::ClassMethod(..) | HeapObj::Instance(..) | HeapObj::Coroutine(..)
             | HeapObj::Module(..) | HeapObj::Extern(_) | HeapObj::ExcInstance(..)
             | HeapObj::Ellipsis | HeapObj::NotImplemented | HeapObj::GenericAlias(..) | HeapObj::TypeAlias(..)
-            | HeapObj::Union(_) | HeapObj::TypeVar(_) | HeapObj::Iter(..) => true,
+            | HeapObj::Union(_) | HeapObj::TypeVar(_) | HeapObj::Iter(..) | HeapObj::Cell(_) => true,
         }
     }
 
@@ -237,6 +227,7 @@ impl<'a> VM<'a> {
             HeapObj::Union(_) => "UnionType",
             HeapObj::TypeVar(_) => "TypeVar",
             HeapObj::Iter(_, name) => name,
+            HeapObj::Cell(_) => "cell",
         }}
     }
 
@@ -312,7 +303,7 @@ impl<'a> VM<'a> {
         match self.heap.get(v) {
             HeapObj::Str(s) => s.clone(),
             HeapObj::Bytes(b) => format_bytes(b),
-            HeapObj::LongInt(i) => i128_to_dec(*i),
+            HeapObj::LongInt(i) => i128_to_dec(i.get()),
             HeapObj::Type(name) => s!("<class '", str name, "'>"),
             HeapObj::Func(i, ..) => {
                 // Empty name means lambda, same convention as the snapshot restore.
@@ -384,6 +375,7 @@ impl<'a> VM<'a> {
             HeapObj::FrozenSet(s) => self.set_repr(v, true, s.len(), s.iter(), seen),
             HeapObj::Ellipsis => "Ellipsis".into(),
             HeapObj::NotImplemented => "NotImplemented".into(),
+            HeapObj::Cell(_) => "<cell>".into(),
         }
     }
 
@@ -593,7 +585,7 @@ impl<'a> VM<'a> {
 
     pub fn mul_vals(&mut self, a: Val, b: Val) -> Result<Val, VmErr> {
         if a.is_int() && b.is_int()
-            && let Some(r) = a.as_int().checked_mul(b.as_int())
+            && let Some(r) = super::registers::mul_exact(a.as_int(), b.as_int())
             && (Val::INT_MIN..=Val::INT_MAX).contains(&r) {
             return Ok(Val::int(r));
         }

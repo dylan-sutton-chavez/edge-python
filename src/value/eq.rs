@@ -23,7 +23,10 @@ pub fn eq_vals_with_heap(a: Val, b: Val, heap: &HeapPool) -> bool {
 /* Equality of a container member, identity first as in `x is e or x == e`. */
 #[inline]
 pub fn eq_member(a: Val, b: Val, heap: &HeapPool) -> bool {
-    a.0 == b.0 || eq_vals_depth(a, b, heap, 0, &mut false)
+    if a.0 == b.0 { return true; }
+    // Two strings, the common dict and set key, compare their text straight away.
+    if let (Some(HeapObj::Str(x)), Some(HeapObj::Str(y))) = (heap.try_get(a), heap.try_get(b)) { return x == y; }
+    eq_vals_depth(a, b, heap, 0, &mut false)
 }
 
 /* Content equality, None when a `False` came from a pair only user code can settle, a `__eq__` or a dict keyed by one. */
@@ -80,6 +83,22 @@ pub fn hash_set_parts(parts: impl Iterator<Item = u64>) -> u64 {
 pub fn hash_val_with_heap(v: Val, heap: &HeapPool) -> u64 {
     hash_depth(v, heap, 0)
 }
+
+/* The hash a string Val holds, taken from the text alone. */
+pub fn hash_str(s: &str) -> u64 {
+    use core::hash::Hasher;
+    let mut h = crate::util::hash::FxHasher::default();
+    h.write_u8(1);
+    h.write(s.as_bytes());
+    h.finish()
+}
+
+/* The hash a table keyed by text probes with, folded so similar texts spread. */
+#[inline]
+pub fn hash_key(s: &str) -> u64 {
+    let h = hash_str(s);
+    (h ^ h >> 32).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+}
 fn hash_depth(v: Val, heap: &HeapPool, depth: usize) -> u64 {
     use core::hash::Hasher;
     let mut h = crate::util::hash::FxHasher::default();
@@ -97,7 +116,7 @@ fn hash_depth(v: Val, heap: &HeapPool, depth: usize) -> u64 {
     }
     if !v.is_heap() || depth > EQ_DEPTH_MAX { h.write_u64(v.0); return h.finish(); }
     match heap.get(v) {
-        HeapObj::LongInt(i) => write_i128(&mut h, *i),
+        HeapObj::LongInt(i) => write_i128(&mut h, i.get()),
         HeapObj::Str(s) => { h.write_u8(1); h.write(s.as_bytes()); }
         HeapObj::Bytes(b) => { h.write_u8(2); h.write(b); }
         HeapObj::Tuple(t) => return hash_tuple_parts(&t.iter().map(|&e| hash_depth(e, heap, depth + 1)).collect::<alloc::vec::Vec<_>>()),
@@ -144,7 +163,7 @@ pub(crate) fn num_as_f64(v: Val, heap: &HeapPool) -> Option<f64> {
     if v.is_float() { Some(v.as_float()) }
     else if v.is_int() { Some(v.as_int() as f64) }
     else if v.is_bool() { Some(v.as_bool() as i64 as f64) }
-    else if v.is_heap() { if let HeapObj::LongInt(i) = heap.get(v) { Some(*i as f64) } else { None } }
+    else if v.is_heap() { if let HeapObj::LongInt(i) = heap.get(v) { Some(i.get() as f64) } else { None } }
     else { None }
 }
 

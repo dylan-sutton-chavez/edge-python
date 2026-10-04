@@ -62,6 +62,7 @@ impl<'a> VM<'a> {
 
     /* Shared attribute removal for `delattr()` and `del obj.attr`, AttributeError when absent. */
     fn delete_attr_named(&mut self, obj: Val, name: &str) -> Result<(), VmErr> {
+        if matches!(self.heap.try_get(obj), Some(HeapObj::Class(..))) { self.class_epoch = self.class_epoch.wrapping_add(1); }
         let removed = match self.heap.try_get(obj) {
             Some(HeapObj::Class(_, _, members) | HeapObj::Func(_, _, _, members)) => {
                 self.heap.growing(&mut *members.borrow_mut(), |m| {
@@ -127,46 +128,33 @@ impl<'a> VM<'a> {
         self.alloc_and_push_dict(dm)
     }
 
-    /* `globals()`, module-level bindings as a dict. User top-level names only (entry-chunk slots + module state), builtins live in a separate namespace, matching Python. Returned dict is a copy. */
-    pub fn call_globals(&mut self, chunk: &crate::parser::SSAChunk, slots: &[Val]) -> Result<(), VmErr> {
-        let mut out: crate::util::hash::FxHashMap<String, Val> = crate::util::hash::FxHashMap::default();
-        // Inside a function, entry slots sit at the bottom of `live_slots`, at top-level, use `slots` as-is.
-        let (entry_chunk, entry_slots): (&crate::parser::SSAChunk, &[Val]) =
-            if core::ptr::eq(chunk as *const _, self.chunk as *const _) {
-                (chunk, slots)
-            } else {
-                let n = self.chunk.names.len().min(self.live_slots.len());
-                (self.chunk, &self.live_slots[..n])
-            };
-        for (i, name) in entry_chunk.names.iter().enumerate() {
-            if name.starts_with('#') { continue; }
-            let v = match entry_slots.get(i) {
-                Some(v) if !v.is_undef() => *v,
-                _ => continue,
-            };
-            let bare = crate::parser::ssa_strip(name).to_string();
-            // User assignment overrides the builtin entry of the same name.
-            out.insert(bare, v);
-        }
-        // Module state (user-mutated via `global` from inside functions) overrides entry-chunk snapshots.
-        for (k, v) in self.module_state.iter() {
-            out.insert(k.clone(), *v);
-        }
-        let mut dm = DictMap::with_capacity(out.len());
-        for (k, v) in out {
+    /* `globals()`, a copy of the module's bindings, builtins kept apart. */
+    pub fn call_globals(&mut self, chunk: &crate::parser::SSAChunk, _slots: &[Val]) -> Result<(), VmErr> {
+        let module = self.chunk_module_id(chunk);
+        let bound: alloc::vec::Vec<(String, Val)> = self.scopes[module].iter()
+            .filter(|(n, _)| !n.starts_with('#'))
+            .map(|(n, v)| (String::from(n), v))
+            .collect();
+        let mut dm = DictMap::with_capacity(bound.len());
+        for (k, v) in bound {
             let key = self.heap.alloc(HeapObj::Str(k))?;
             dm.insert(key, v, &self.heap);
         }
         self.alloc_and_push_dict(dm)
     }
 
-    /* `locals()`, frame bindings as a dict. Dedupes SSA versions (`x_0`, `x_1`, ...) to the highest live one. Filters synthetic `#`-slots and unrebound builtins (same Val as the global). */
+    /* `locals()`, a copy of the frame's own and closed-over variables. */
     pub fn call_locals(&mut self, chunk: &crate::parser::SSAChunk, slots: &[Val]) -> Result<(), VmErr> {
+        // A module's locals are its bindings, a class body's its namespace slots.
+        let fi = self.body_to_fi.get(&(chunk as *const _)).copied();
+        if fi.is_none() && !self.class_chunks.contains(&(chunk as *const _)) { return self.call_globals(chunk, slots); }
         // Map bare-name -> (best version, val) so we keep only the latest.
         let mut latest: crate::util::hash::FxHashMap<String, (i64, Val)> = crate::util::hash::FxHashMap::default();
         for (i, name) in chunk.names.iter().enumerate() {
-            let v = match slots.get(i) {
-                Some(v) if !v.is_undef() => *v,
+            let kind = fi.and_then(|fi| self.fn_scope[fi].kinds.get(i).copied());
+            if matches!(kind, Some(crate::vm::scope::Kind::Global(_))) { continue; }
+            let v = match slots.get(i).map(|&v| if kind == Some(crate::vm::scope::Kind::Cell) { self.deref(v) } else { v }) {
+                Some(v) if !v.is_undef() => v,
                 _ => continue,
             };
             // Synthetic `#`-slots are matcher scratch, never user-visible.

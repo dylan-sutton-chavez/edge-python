@@ -1,62 +1,37 @@
 use super::types::{Val, HeapObj, HeapPool, VmErr, EQ_DEPTH_MAX};
-use crate::parser::{OpCode, SSAChunk, Instruction, Value};
+use crate::parser::{SSAChunk, Value};
 
-use alloc::{vec, vec::Vec, string::ToString};
+use alloc::{boxed::Box, rc::Rc, vec, vec::Vec};
 
-/* Type-specialised binop variants reachable from the inline cache. */
-#[derive(Debug, Clone, Copy)]
-pub enum FastOp {
-    AddInt, AddFloat, AddStr,
-    SubInt, SubFloat,
-    MulInt, MulFloat,
-    LtInt, LtFloat,
-    GtInt, LtEqInt, GtEqInt,
-    EqInt, EqStr,
-    NotEqInt,
-    ModInt, FloorDivInt
-}
-
-/* Promote to `fast` after this many hits with a stable type key. */
-const QUICK_THRESH: u8 = 4;
-
-/* Per-site monomorphic instance-dunder cache. Records the receiver's class heap idx and the pre-resolved method Val, once `hits >= QUICK_THRESH` the slot promotes and the hot dispatch skips the class lookup entirely. `arity` is the total operand count consumed from the stack (1 for unary, 2 for binary like `__add__`/`__getitem__`). */
-#[derive(Clone, Copy)]
-pub struct InstanceCache {
-    pub class: u32,
-    // The class that defines the method, what `super()` inside it resumes from.
-    pub owner: u32,
-    pub method_bits: u64,
-    pub arity: u8,
-    hits: u8,
-    promoted: bool,
-}
-
-#[derive(Clone, Default)]
-struct CacheSlot {
-    type_key: u8,
-    hits: u8,
-    fast: Option<FastOp>,
-    // Instance-dunder cache, orthogonal to `fast`, dispatch checks it after scalar specialisation misses.
-    inst: Option<InstanceCache>,
-}
+use super::{lower::Code, sites::Site};
 
 /* One chunk's caches, each running frame holds one and returns it here. */
 #[derive(Default)]
 pub struct CachePool {
+    /* The chunk's lowered code, which every frame running it shares. */
+    pub code: Option<Rc<Code>>,
+    /* The chunk's constants as values, made once and kept for good. */
+    pub consts: Option<Box<[Val]>>,
+    /* Set once a frame ran the chunk, its next call lowers it. */
+    pub ran: bool,
+    /* Back-edges and resumes its unlowered frames took, a resume past `HOT_LOOP` lowers it. */
+    pub heat: u32,
     active: u32,
-    main: Option<OpcodeCache>,
+    // Boxed, so handing a cache to a frame and back moves one pointer.
+    main: Option<Box<OpcodeCache>>,
     /* Only a recursion fills it, so a plain call never allocates here. */
-    spare: Vec<OpcodeCache>,
+    #[allow(clippy::vec_box)]
+    spare: Vec<Box<OpcodeCache>>,
 }
 
 impl CachePool {
-    pub fn take(&mut self, chunk: &SSAChunk) -> OpcodeCache {
+    pub fn take(&mut self, len: usize) -> Box<OpcodeCache> {
         self.active += 1;
-        self.main.take().or_else(|| self.spare.pop()).unwrap_or_else(|| OpcodeCache::new(chunk))
+        self.main.take().or_else(|| self.spare.pop()).unwrap_or_else(|| Box::new(OpcodeCache::new(len)))
     }
 
     /* The outermost frame returning keeps one cache and frees the rest. */
-    pub fn put(&mut self, cache: OpcodeCache) {
+    pub fn put(&mut self, cache: Box<OpcodeCache>) {
         self.active -= 1;
         if self.active == 0 {
             self.spare.clear();
@@ -68,164 +43,46 @@ impl CachePool {
         }
     }
 
-    pub fn caches(&self) -> impl Iterator<Item = &OpcodeCache> { self.main.iter().chain(&self.spare) }
+    pub fn caches(&self) -> impl Iterator<Item = &OpcodeCache> { self.main.iter().chain(&self.spare).map(|c| &**c) }
+}
+
+/* A chunk's constants as values, each string interned. */
+pub(crate) fn const_vals(chunk: &SSAChunk, heap: &mut HeapPool) -> Result<Box<[Val]>, VmErr> {
+    let mut out = Vec::with_capacity(chunk.constants.len());
+    for c in &chunk.constants {
+        out.push(match c {
+            // A wide literal that fits inline demotes so hash and eq stay in sync with the short form.
+            Value::Int(i) => heap.int(*i as i128)?,
+            Value::LongInt(i) => heap.int(*i)?,
+            Value::Float(f) => Val::float(*f),
+            Value::Bool(b) => Val::bool(*b),
+            Value::None => Val::none(),
+            Value::Str(s) => heap.intern_str(s)?,
+            Value::Bytes(b) => heap.alloc(HeapObj::Bytes(b.clone()))?,
+        });
+    }
+    Ok(out.into_boxed_slice())
 }
 
 pub struct OpcodeCache {
-    slots: Vec<CacheSlot>,
-    fused: Option<Vec<Instruction>>,
-    /* Pre-materialised const pool so LoadConst is one indexed load, no per-iter alloc. */
-    const_vals: Option<Vec<Val>>,
-    /* Length of each name without its version suffix, cut on the first module-scope access. */
-    bare_len: Option<Vec<u32>>,
+    len: usize,
+    /* Attribute and operator sites by ip, made on the first one learned. */
+    sites: Vec<Site>,
 }
 
 impl OpcodeCache {
-    pub fn new(chunk: &SSAChunk) -> Self {
-        Self {
-            slots: vec![CacheSlot::default(); chunk.instructions.len()],
-            fused: None,
-            const_vals: None,
-            bare_len: None,
-        }
-    }
+    pub fn new(len: usize) -> Self { Self { len, sites: Vec::new() } }
 
-    /* The bare name of `names[i]`, its version suffix cut once per chunk rather than on every access. */
-    pub fn bare<'c>(&mut self, chunk: &'c SSAChunk, i: usize) -> Option<&'c str> {
-        let lens = self.bare_len.get_or_insert_with(|| chunk.names.iter().map(|n| crate::parser::ssa_strip(n).len() as u32).collect());
-        let len = *lens.get(i)? as usize;
-        chunk.names.get(i).map(|n| &n[..len])
-    }
-
-    /* Compile the fused instruction stream on first access, reuse afterwards. */
-    pub fn ensure_fused(&mut self, chunk: &SSAChunk) -> &[Instruction] {
-        if self.fused.is_none() {
-            // A coverage build runs what the compiler wrote, so each ip it marks is that instruction.
-            self.fused = Some(if cfg!(feature = "coverage") { chunk.instructions.clone() } else { fuse_method_calls(chunk) });
-        }
-        self.fused.as_ref().unwrap()
-    }
-
-    /* Direct access (caller must have called ensure_fused). */
-    pub fn fused_ref(&self) -> &[Instruction] {
-        self.fused.as_ref().expect("fused code not compiled")
-    }
-
-    /* Build the const pool, scalars inline, Str/LongInt heap-allocated once and shared. */
-    pub fn ensure_const_vals(&mut self, chunk: &SSAChunk, heap: &mut HeapPool) -> Result<&[Val], VmErr> {
-        if self.const_vals.is_none() {
-            let mut out = Vec::with_capacity(chunk.constants.len());
-            for c in &chunk.constants {
-                let v = match c {
-                    // A wide literal that fits inline demotes so hash and eq stay in sync with the short form.
-                    Value::Int(i) => heap.int(*i as i128)?,
-                    Value::LongInt(i) => heap.int(*i)?,
-                    Value::Float(f) => Val::float(*f),
-                    Value::Bool(b) => Val::bool(*b),
-                    Value::None => Val::none(),
-                    Value::Str(s) => heap.alloc(HeapObj::Str(s.to_string()))?,
-                    Value::Bytes(b) => heap.alloc(HeapObj::Bytes(b.clone()))?,
-                };
-                out.push(v);
-            }
-            self.const_vals = Some(out);
-        }
-        Ok(self.const_vals.as_ref().unwrap())
-    }
-
-    /* Direct access (caller must have called ensure_const_vals). */
-    pub fn const_vals_ref(&self) -> &[Val] {
-        self.const_vals.as_ref().expect("const pool not materialized")
-    }
-
-    pub fn const_vals_opt(&self) -> Option<&[Val]> {
-        self.const_vals.as_deref()
-    }
-
-    pub fn record(&mut self, ip: usize, opcode: &OpCode, ta: u8, tb: u8) {
-        let Some(s) = self.slots.get_mut(ip) else { return };
-        let key = (ta << 4) | (tb & 0xF);
-        if s.type_key == key {
-            s.hits = s.hits.saturating_add(1);
-            if s.hits >= QUICK_THRESH && s.fast.is_none() {
-                s.fast = Self::specialize(opcode, ta, tb);
-            }
-        } else {
-            // Preserve `inst`, its lifecycle is independent of scalar specialisation.
-            s.type_key = key;
-            s.hits = 1;
-            s.fast = None;
-        }
-    }
-
+    /* The site at `ip`. */
     #[inline]
-    pub fn get_fast(&self, ip: usize) -> Option<FastOp> {
-        self.slots.get(ip).and_then(|s| s.fast)
+    pub(crate) fn site(&self, ip: usize) -> Site { self.sites.get(ip).copied().unwrap_or_default() }
+
+    pub(crate) fn set_site(&mut self, ip: usize, site: Site) {
+        if self.sites.is_empty() { self.sites = vec![Site::Empty; self.len]; }
+        if let Some(s) = self.sites.get_mut(ip) { *s = site; }
     }
 
-    pub fn invalidate(&mut self, ip: usize) {
-        // Preserve `inst` so the instance-dunder cache survives a scalar specialisation miss at the same site.
-        if let Some(s) = self.slots.get_mut(ip) {
-            s.type_key = 0;
-            s.hits = 0;
-            s.fast = None;
-        }
-    }
-
-    /* Monomorphic instance-dunder hit counter, promotes after `QUICK_THRESH` consecutive hits with the same class + method pair. Polymorphic sites churn (`record_inst` overwrites on mismatch) but never wedge. */
-    pub fn record_inst(&mut self, ip: usize, class: u32, owner: u32, method: Val, arity: u8) {
-        let Some(s) = self.slots.get_mut(ip) else { return };
-        match s.inst.as_mut() {
-            Some(c) if c.class == class && c.method_bits == method.0 && c.arity == arity => {
-                c.hits = c.hits.saturating_add(1);
-                if c.hits >= QUICK_THRESH { c.promoted = true; }
-            }
-            _ => {
-                s.inst = Some(InstanceCache {
-                    class,
-                    owner,
-                    method_bits: method.0,
-                    arity,
-                    hits: 1,
-                    promoted: false,
-                });
-            }
-        }
-    }
-
-    #[inline]
-    pub fn get_inst(&self, ip: usize) -> Option<InstanceCache> {
-        self.slots.get(ip).and_then(|s| s.inst).filter(|c| c.promoted)
-    }
-
-    pub fn invalidate_inst(&mut self, ip: usize) {
-        if let Some(s) = self.slots.get_mut(ip) { s.inst = None; }
-    }
-
-    /* GC root iterator for `InstanceCache` entries, yielding the cached method Val and class Val so the collector keeps both alive while the cache holds them. */
-    pub fn inst_roots(&self) -> impl Iterator<Item = Val> + '_ {
-        self.slots.iter().filter_map(|s| s.inst).flat_map(|c| {
-            // SAFETY `method_bits` was recorded from a live `Val`, class Val is reconstructed from the stored heap idx.
-            let method = unsafe { Val::from_raw(c.method_bits) };
-            [method, Val::heap(c.class), Val::heap(c.owner)].into_iter()
-        })
-    }
-
-    fn specialize(opcode: &OpCode, ta: u8, tb: u8) -> Option<FastOp> {
-        match (opcode, ta, tb) {
-            (OpCode::Add, 1, 1) => Some(FastOp::AddInt), (OpCode::Add, 2, 2) => Some(FastOp::AddFloat),
-            (OpCode::Add, 3, 3) => Some(FastOp::AddStr), (OpCode::Sub, 1, 1) => Some(FastOp::SubInt),
-            (OpCode::Sub, 2, 2) => Some(FastOp::SubFloat), (OpCode::Mul, 1, 1) => Some(FastOp::MulInt),
-            (OpCode::Mul, 2, 2) => Some(FastOp::MulFloat), (OpCode::Lt, 1, 1) => Some(FastOp::LtInt),
-            (OpCode::Lt, 2, 2) => Some(FastOp::LtFloat), (OpCode::Eq, 1, 1) => Some(FastOp::EqInt),
-            (OpCode::Eq, 3, 3) => Some(FastOp::EqStr), (OpCode::Gt, 1, 1) => Some(FastOp::GtInt),
-            (OpCode::LtEq, 1, 1) => Some(FastOp::LtEqInt), (OpCode::GtEq, 1, 1) => Some(FastOp::GtEqInt),
-            (OpCode::NotEq, 1, 1) => Some(FastOp::NotEqInt),
-            (OpCode::Mod, 1, 1) => Some(FastOp::ModInt),
-            (OpCode::FloorDiv, 1, 1) => Some(FastOp::FloorDivInt),
-            _ => None,
-        }
-    }
+    pub(crate) fn site_roots(&self) -> impl Iterator<Item = Val> + '_ { self.sites.iter().flat_map(|s| s.roots()) }
 }
 
 // Template memoization for pure functions.
@@ -246,14 +103,14 @@ fn hash_args(args: &[Val], heap: &HeapPool) -> u64 {
     args.iter().fold(0xcbf29ce484222325, |h, &v| mix(h, if v.is_heap() { key_hash(v, heap, 0) } else { v.0 }))
 }
 
-/* Long strings, bytes and tuples hash by content, everything else by its bits. */
+/* Strings, bytes and tuples hash by content, everything else by its bits. */
 #[inline]
 fn key_hash(v: Val, heap: &HeapPool, depth: usize) -> u64 {
     let fold = |seed: u64, bytes: &[u8]| bytes.iter().fold(seed, |h, &b| mix(h, b as u64));
     if !v.is_heap() || depth > EQ_DEPTH_MAX { return v.0; }
     match heap.try_get(v) {
-        Some(HeapObj::Str(s)) if s.len() > 128 => fold(1, s.as_bytes()),
-        Some(HeapObj::Bytes(b)) if b.len() > 128 => fold(2, b),
+        Some(HeapObj::Str(s)) => fold(1, s.as_bytes()),
+        Some(HeapObj::Bytes(b)) => fold(2, b),
         Some(HeapObj::Tuple(items)) => items.iter().fold(3, |h, &x| mix(h, key_hash(x, heap, depth + 1))),
         _ => v.0,
     }
@@ -296,10 +153,17 @@ pub struct Templates { slots: Vec<Vec<TplEntry>>, meta: Vec<u64> }
 impl Templates {
     pub fn new() -> Self { Self { slots: Vec::new(), meta: Vec::new() } }
 
-    pub fn clear(&mut self) { *self = Self::new(); }
+    /* Drops every table, nothing to do when no call reached one. */
+    pub fn clear(&mut self) { if !self.slots.is_empty() || !self.meta.is_empty() { *self = Self::new(); } }
 
-    fn dead(&self, fi: usize) -> bool {
+    pub fn dead(&self, fi: usize) -> bool {
         self.meta.get(SEEN + fi).is_some_and(|&m| m >= MISS_LIMIT)
+    }
+
+    /* Counts calls the cache could not serve, a useful one resets the count. */
+    fn note(&mut self, fi: usize, useful: bool) {
+        if self.meta.len() <= SEEN + fi { self.meta.resize(SEEN + fi + 1, 0); }
+        if useful { self.meta[SEEN + fi] = 0; } else { self.meta[SEEN + fi] += 1; }
     }
 
     pub fn lookup(&mut self, fi: usize, args: &[Val], owner: Val, heap: &HeapPool) -> Option<Val> {
@@ -309,15 +173,9 @@ impl Templates {
         let hit = entries.iter()
             .find(|e| args_match(e, args, owner, h, heap))
             .map(|e| e.result);
-        if self.meta.len() <= SEEN + fi { self.meta.resize(SEEN + fi + 1, 0); }
-        match hit {
-            Some(_) => self.meta[SEEN + fi] = 0,
-            None => {
-                self.meta[SEEN + fi] += 1;
-                // Reclaim the dead table, entries would otherwise stay GC roots forever.
-                if self.meta[SEEN + fi] >= MISS_LIMIT { self.slots[fi] = Vec::new(); }
-            }
-        }
+        self.note(fi, hit.is_some());
+        // Reclaim the dead table, entries would otherwise stay GC roots forever.
+        if self.dead(fi) { self.slots[fi] = Vec::new(); }
         hit
     }
 
@@ -329,7 +187,9 @@ impl Templates {
         let mark = (h ^ owner.0 ^ fi as u64).wrapping_mul(0x9e3779b97f4a7c15);
         if self.meta.len() < SEEN { self.meta.resize(SEEN, 0); }
         let seen = &mut self.meta[(mark >> (64 - SEEN.ilog2())) as usize];
-        if *seen != mark { *seen = mark; return None; }
+        // A first sighting counts as a miss, so unrepeated keys end the memo.
+        if *seen != mark { *seen = mark; self.note(fi, false); return None; }
+        self.note(fi, true);
         Some(h)
     }
 
@@ -349,49 +209,4 @@ impl Templates {
             }
         }
     }
-}
-
-/* Fuse LoadAttr + [single-push arg loads] + Call into CallMethod+CallMethodArgs. Arg loads shift left one slot so the pair sits adjacent at the Call. Only pure single-push opcodes relocate, and never across a jump target. */
-fn fuse_method_calls(chunk: &SSAChunk) -> Vec<Instruction> {
-    let src = &chunk.instructions;
-    let n = src.len();
-    let mut out = src.clone();
-
-    // Instruction indices any jump/handler/unwind can enter, relocation across them is unsafe.
-    let mut targeted = vec![false; n + 1];
-    for (k, ins) in src.iter().enumerate() {
-        match ins.opcode {
-            op if op.is_jump() => {
-                let t = ins.operand as usize;
-                if t <= n { targeted[t] = true; }
-            }
-            // Unwind::Goto resumes at the instruction after UnwindFinally.
-            OpCode::UnwindFinally => targeted[k + 1] = true,
-            _ => {}
-        }
-    }
-
-    const MAX_WINDOW: usize = 8;
-    let mut i = 0;
-    while i + 1 < n {
-        if src[i].opcode != OpCode::LoadAttr { i += 1; continue; }
-        // Scan the run of relocatable single-push arg loads after the LoadAttr.
-        let mut j = i + 1;
-        while j < n
-            && j - i - 1 < MAX_WINDOW
-            && !targeted[j]
-            && matches!(src[j].opcode, OpCode::LoadConst | OpCode::LoadName | OpCode::LoadTrue | OpCode::LoadFalse | OpCode::LoadNone)
-        {
-            j += 1;
-        }
-        if j >= n || src[j].opcode != OpCode::Call || targeted[j] { i += 1; continue; }
-        // Every arg must be exactly one allowed push, else stack layout breaks.
-        let raw = src[j].operand as usize;
-        if (raw & 0xFF) + 2 * ((raw >> 8) & 0xFF) != j - i - 1 { i += 1; continue; }
-        out[i..(j - 1)].copy_from_slice(&src[(i + 1)..j]);
-        out[j - 1] = Instruction { opcode: OpCode::CallMethod, operand: src[i].operand };
-        out[j] = Instruction { opcode: OpCode::CallMethodArgs, operand: src[j].operand };
-        i = j + 1;
-    }
-    out
 }

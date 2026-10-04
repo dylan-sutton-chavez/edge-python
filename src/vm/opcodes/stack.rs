@@ -140,18 +140,6 @@ impl<'a> VM<'a> {
                         return Err(VmErr::Name(name.into()));
                     }
                 }
-                // At module scope, drop it from module_state too so later reads see the deletion.
-                if core::ptr::eq(chunk, self.chunk) && let Some(n) = chunk.names.get(slot) {
-                    self.module_state.remove(ssa_strip(n));
-                    self.templates.clear();
-                    self.note_builtin_binding(ssa_strip(n));
-                }
-                // Unbind the shared closure cell too, so closures over this name see the deletion.
-                let cell = self.call_stack.last()
-                    .and_then(|f| f.cells.iter().find(|(s, _)| *s == slot).map(|&(_, c)| c));
-                if let Some(cell) = cell && cell.is_heap() && let HeapObj::List(rc) = self.heap.get(cell) {
-                    rc.borrow_mut()[0] = Val::undef(); // cells are 1-element boxes
-                }
             }
             OpCode::Global | OpCode::Nonlocal => self.mark_impure(),
             OpCode::Raise | OpCode::RaiseFrom => {

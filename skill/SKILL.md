@@ -19,7 +19,7 @@ This document is self-verifying and its examples follow the cells v1 grammar. A 
 }
 ```
 
-Edge Python is a sandboxed Python subset compiled in a single pass to bytecode and executed by a stack VM. It is one WebAssembly binary, hosted by the JS host, a JavaScript package built on the browser's sandbox model that runs in browsers and in JavaScript runtimes such as Deno, and by the `edge` CLI. There is no bundled stdlib, every module is an external package declared in `edge.json` and resolved at compile time, the official packages included. Programs are deterministic, there is no file, network or environment access unless a declared module grants it.
+Edge Python is a sandboxed Python subset compiled in a single pass to bytecode and executed by a register VM. It is one WebAssembly binary, hosted by the JS host, a JavaScript package built on the browser's sandbox model that runs in browsers and in JavaScript runtimes such as Deno, and by the `edge` CLI. There is no bundled stdlib, every module is an external package declared in `edge.json` and resolved at compile time, the official packages included. Programs are deterministic, there is no file, network or environment access unless a declared module grants it.
 
 Use this skill to write correct Edge Python on the first try. The language looks like Python 3 but is a strict subset, and the differences matter more than the similarities. Read the delta section before writing non-trivial code.
 

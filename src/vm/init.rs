@@ -5,9 +5,8 @@ use crate::parser::{OpCode, SSAChunk, ssa_strip, ImportKind};
 use super::VM;
 use super::types::*;
 
-/* Collect top-level StoreName bindings as module attrs, `seen` keeps the latest per bare name. */
-// `_`-prefixed names stay, the free-name fallback resolves module functions here.
-pub(crate) fn collect_module_attrs(chunk: &SSAChunk, slots: &[Val]) -> Vec<(String, Val)> {
+/* A module's top-level bindings as its attrs, in store order. */
+pub(crate) fn collect_module_attrs(chunk: &SSAChunk, bound: &super::scope::Globals) -> Vec<(String, Val)> {
     let mut attrs: Vec<(String, Val)> = Vec::new();
     let mut seen: crate::util::hash::FxHashSet<String> = crate::util::hash::FxHashSet::default();
     for ins in &chunk.instructions {
@@ -15,10 +14,7 @@ pub(crate) fn collect_module_attrs(chunk: &SSAChunk, slots: &[Val]) -> Vec<(Stri
         let Some(name) = chunk.names.get(ins.operand as usize) else { continue; };
         let bare = ssa_strip(name).to_string();
         if !seen.insert(bare.clone()) { continue; }
-        if let Some(&v) = slots.get(ins.operand as usize) && !v.is_undef()
-        {
-            attrs.push((bare, v));
-        }
+        if let Some(v) = bound.get(&bare) { attrs.push((bare, v)); }
     }
     attrs
 }
@@ -27,11 +23,16 @@ impl<'a> VM<'a> {
 
     /* Flatten nested defs into one table (DFS), also build parent/body-pointer maps so `exec_call` can tell lexical-parent calls (late-bind) from foreign closures (captures stick). */
     pub(crate) fn build_function_table(&mut self, chunk: &'a SSAChunk, parent_fi: Option<usize>, module_spec: Option<&str>) {
+        let module = self.module_scope(module_spec);
+        self.chunk_module.insert(chunk as *const _, module);
         let mut indices = Vec::with_capacity(chunk.functions.len());
         for desc in chunk.functions.iter() {
             let global = self.functions.len() as u32;
             self.functions.push(desc);
             self.function_parents.push(parent_fi);
+            self.fn_definer.push(chunk as *const _);
+            let pool = self.pool_of(&desc.1);
+            self.fn_pool.push(pool);
             self.fn_module.push(module_spec.map(String::from));
             self.body_to_fi.insert(&desc.1 as *const _, global as usize);
             // Bare function name (SSA suffix stripped) for tracebacks.
@@ -55,6 +56,7 @@ impl<'a> VM<'a> {
         }
         self.chunk_name_versions.insert(chunk as *const _, name_versions);
         for class_body in chunk.classes.iter() {
+            self.class_chunks.insert(class_body as *const _);
             self.build_function_table(class_body, parent_fi, module_spec);
         }
         // Recurse into code-module imports, each fn carries its spec so namespaces stay separate.
@@ -92,8 +94,9 @@ impl<'a> VM<'a> {
     /* Writes `val` over the stack top of a parked coroutine and marks it Ready. */
     fn deliver_host_result(&mut self, idx: usize, val: Val) {
         let coro = self.scheduler[idx].coro;
-        if let HeapObj::Coroutine(_, _, saved_stack, _, _, sub_frames, _) = self.heap.get_mut(coro) {
-            let target_stack = if let Some(frame) = sub_frames.last_mut() { &mut frame.stack_delta } else { saved_stack };
+        if let HeapObj::Coroutine(c) = self.heap.get_mut(coro) {
+            let c = &mut **c;
+            let target_stack = if let Some(frame) = c.syncs.last_mut() { &mut frame.stack_delta } else { &mut c.stack };
             if let Some(top) = target_stack.last_mut() { *top = val; } else { target_stack.push(val); }
         }
         self.scheduler[idx].state = CoroState::Ready;
@@ -146,11 +149,7 @@ impl<'a> VM<'a> {
             self.init_modules(self.chunk, &mut in_progress)?;
             // Wrap the module body as an implicit coroutine, lets top-level statements suspend on deferred host calls (DOM, sleep, receive) through the same scheduler path as `async def`.
             let slots = self.fill_builtins(&self.chunk.names);
-            let coro = self.heap.alloc(HeapObj::Coroutine(
-                0, slots, Vec::new(),
-                BodyRef::Module,
-                Vec::new(), Vec::new(), Vec::new(),
-            ))?;
+            let coro = self.heap.alloc(HeapObj::Coroutine(Coro::fresh(slots, BodyRef::Module)))?;
             self.scheduler.push(CoroutineHandle {
                 coro,
                 state: CoroState::Ready,
@@ -159,7 +158,7 @@ impl<'a> VM<'a> {
         self.top_loop()?;
         // Inspect the module body's outcome (BodyRef::Module). Single entry point for both fresh and resume.
         let module_coro = self.scheduler.iter().find(|h| {
-            matches!(self.heap.get(h.coro), HeapObj::Coroutine(_, _, _, BodyRef::Module, _, _, _))
+            matches!(self.heap.get(h.coro), HeapObj::Coroutine(c) if matches!(c.body, BodyRef::Module))
         }).map(|h| (h.coro, h.state.clone()));
         if let Some((_coro, state)) = module_coro {
             // Clear the scheduler only once the module body is terminal, otherwise we're mid-yield and need to keep it for the next resume.
@@ -214,15 +213,12 @@ impl<'a> VM<'a> {
                 ImportKind::Code(sub_chunk) => {
                     self.init_modules(sub_chunk, in_progress)?;
                     let mut sub_slots = self.fill_builtins(&sub_chunk.names);
-                    // Set `__name__` to the module spec so `if __name__ == "__main__":` works.
+                    // `__name__` is the module spec, so a main guard skips on import.
                     let spec_val = self.heap.alloc(HeapObj::Str(entry.spec.clone()))?;
-                    for (i, name) in sub_chunk.names.iter().enumerate() {
-                        if ssa_strip(name) == "__name__" {
-                            sub_slots[i] = spec_val;
-                        }
-                    }
+                    let module = self.chunk_module_id(sub_chunk);
+                    self.scopes[module].set("__name__", spec_val);
                     self.exec(sub_chunk, &mut sub_slots)?;
-                    let attrs = collect_module_attrs(sub_chunk, &sub_slots);
+                    let attrs = collect_module_attrs(sub_chunk, &self.scopes[module]);
                     let val = self.heap.alloc(HeapObj::Module(entry.spec.clone(), attrs))?;
                     self.module_table.insert(entry.spec.clone(), val);
                 }
