@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro'
 import { env } from 'cloudflare:workers'
-import { cached, json, tooMany } from '../../../lib/server/http'
-import { downloaded, keyOf, packageByName, versionsOf } from '../../../lib/server/packages'
+import { cached, json, tooMany } from '../../../../lib/server/http'
+import { downloaded, keyOf, packageByName, versionsOf } from '../../../../lib/server/packages'
 
 // How long an answer that counts nothing may be reused, since it changes only when a version is published.
 const CACHE_SECONDS = 60

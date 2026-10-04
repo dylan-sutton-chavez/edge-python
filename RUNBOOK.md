@@ -21,3 +21,9 @@ A push to `main` promotes to dev and a `v` tag ships to production, and either o
 A schema change edits `site/db/schema.sql` and adds its step to `site/db/migrations/` in the same commit, since production keeps its rows. The next `v` tag runs the step before the Worker ships, and after that release you delete the file by hand, which the Database job warns about until you do.
 
 `npm run schema` in `infra/` reads production and checks that it plus the pending migrations matches `schema.sql`. The Database job warns about a mismatch on `main` and enforces it on a tag.
+
+## The Discord bot
+
+`DISCORD_TOKEN` and `DISCORD_APP_ID` are repository secrets without an environment prefix, since one Discord app serves both deploys. Resetting the token in the developer portal invalidates the old one at once, so the secret changes in the same move.
+
+The bot holds a gateway connection, which a Worker cannot keep open, so it runs in a container, and Discord allows one session per app, so exactly one instance runs and a restart reconnects it with nothing kept in memory. The app is private and `GUILD` in `infra/src/constants.ts` fixes the one server it serves, which its commands register against rather than globally.

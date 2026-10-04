@@ -36,11 +36,11 @@ function made(asked: string): Found[] {
   const asks = asked.toLowerCase()
 
   return programs
-    .filter((each) => !hidden(`/programs/${each.slug}`) && `${each.name} ${each.description}`.toLowerCase().includes(asks))
+    .filter((each) => !hidden(`/program/${each.slug}`) && `${each.name} ${each.description}`.toLowerCase().includes(asks))
     .slice(0, KEEP)
     .map((each) => {
       const at = each.description.toLowerCase().indexOf(asks)
-      return { title: each.name, where: 'Program', href: `/programs/${each.slug}`, snippet: at < 0 ? each.description : around(each.description, at, asked.length) }
+      return { title: each.name, where: 'Program', href: `/program/${each.slug}`, snippet: at < 0 ? each.description : around(each.description, at, asked.length) }
     })
 }
 

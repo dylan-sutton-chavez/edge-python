@@ -20,7 +20,7 @@ fn release(name: &str, version: Option<&str>, refresh: bool) -> Result<Entry> {
         true => String::new(),
         false => format!("?{asked}"),
     };
-    let source = site(&format!("/api/packages/{name}{query}"));
+    let source = site(&format!("/api/resolve/package/{name}{query}"));
 
     let mut response = get(&source).map_err(|e| match (e, version) {
         (ureq::Error::StatusCode(404), Some(v)) => anyhow!("'{name}' has no version {v}"),

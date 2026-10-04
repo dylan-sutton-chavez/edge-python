@@ -145,7 +145,7 @@ test('shelves programs beside the packages under Community and sends std to its 
   const { name } = await published(request)
 
   await page.goto('/')
-  await expect(page.locator('[data-cards]').getByRole('link', { name: 'Edge and rails' })).toHaveAttribute('href', '/programs/edge-and-rails')
+  await expect(page.locator('[data-cards]').getByRole('link', { name: 'Edge and rails' })).toHaveAttribute('href', '/program/edge-and-rails')
   await expect(page.locator(`[data-cards] a[href="/package/${name}"]`)).toHaveCount(1)
 
   await page.locator('[data-shelf] input').fill('nothing like it')

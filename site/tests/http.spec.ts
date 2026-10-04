@@ -15,6 +15,23 @@ test.describe('pages', () => {
     expect((await request.get('/docs/nope/nope')).status()).toBe(404)
   })
 
+  /* What the briefing promises an agent, which is the page path with /api in front of it, plus the reference it is sent to first. */
+  test('answers every read address at the page address under /api', async ({ request }) => {
+    const skill = await request.get('/SKILL.md')
+    expect(skill.headers()['content-type']).toContain('text/markdown')
+    expect(await skill.text()).toContain('# Edge Python')
+
+    const index = await (await request.get('/api/docs')).json()
+    expect(index.docs.map((each: { slug: string }) => each.slug)).toContain('getting-started/introduction')
+
+    expect(await (await request.get('/api/docs/getting-started/introduction')).json()).toMatchObject({ slug: 'getting-started/introduction' })
+    expect(await (await request.get('/api/program/edge-and-rails')).json()).toMatchObject({ slug: 'edge-and-rails' })
+
+    for (const missing of ['/api/docs/nope/nope', '/api/program/nope', '/api/@nobody']) {
+      expect((await request.get(missing)).status(), missing).toBe(404)
+    }
+  })
+
   test('sends /docs to the first page for good', async ({ request }) => {
     const response = await request.get('/docs', { maxRedirects: 0 })
 
@@ -66,9 +83,9 @@ test.describe('the api while signed out', () => {
   })
 
   test('knows which handles are free', async ({ request }) => {
-    expect(await (await request.get('/api/handles/unclaimed')).json()).toEqual({ available: false })
-    expect(await (await request.get('/api/handles/docs')).json()).toEqual({ available: false })
-    expect(await (await request.get(`/api/handles/${unique()}`)).json()).toEqual({ available: true })
+    expect(await (await request.get('/api/me/handle?name=unclaimed')).json()).toEqual({ available: false })
+    expect(await (await request.get('/api/me/handle?name=docs')).json()).toEqual({ available: false })
+    expect(await (await request.get(`/api/me/handle?name=${unique()}`)).json()).toEqual({ available: true })
   })
 
   test('refuses anything that needs an account', async ({ request }) => {
@@ -278,8 +295,12 @@ test.describe('deleting an account', () => {
     const code = await mailedCode(request, email, arriving(), 'delete_account')
     expect(await (await request.delete('/api/me', { data: { code } })).json()).toEqual({ ok: true })
 
-    expect((await request.get(`/api/packages/${name}`)).status()).toBe(200)
+    expect((await request.get(`/api/resolve/package/${name}`)).status()).toBe(200)
+    expect(await (await request.get(`/api/package/${name}`)).json()).toMatchObject({ name, handle: 'unclaimed' })
     expect(await (await request.get('/@unclaimed')).text()).toContain(name)
+
+    const shelf = await (await request.get('/api/@unclaimed')).json()
+    expect(shelf.packages.map((each: { name: string }) => each.name)).toContain(name)
   })
 })
 
@@ -305,12 +326,12 @@ test.describe('changing a handle', () => {
     expect(await (await request.get(`/@${held}`)).text()).toContain('still editable')
 
     // The one they left is theirs to take back, since others still link to it and nobody else should answer there.
-    expect(await (await request.get(`/api/handles/${left}`)).json()).toEqual({ available: true })
+    expect(await (await request.get(`/api/me/handle?name=${left}`)).json()).toEqual({ available: true })
 
     await request.post('/api/auth/signout')
     await signIn(request)
 
-    expect(await (await request.get(`/api/handles/${left}`)).json()).toEqual({ available: false })
+    expect(await (await request.get(`/api/me/handle?name=${left}`)).json()).toEqual({ available: false })
     const stranger = await request.patch('/api/me', { data: profile(left) })
     expect(stranger.status()).toBe(409)
     expect((await stranger.json()).error).toBe(`@${left} was given up recently and is held for now.`)
@@ -441,11 +462,15 @@ test.describe('publishing', () => {
     expect((await send(request, token, release(name, '0.2.0'))).status()).toBe(201)
 
     // What `edge add` reads, carrying the digest it will pin.
-    const looked = await request.get(`/api/packages/${name}`)
+    const looked = await request.get(`/api/resolve/package/${name}`)
     expect(looked.status()).toBe(200)
     expect(await looked.json()).toMatchObject({ name, version: '0.2.0' })
-    expect(await (await request.get(`/api/packages/${name}?v=0.1.0`)).json()).toMatchObject({ name, version: '0.1.0', digest })
-    expect((await request.get(`/api/packages/${name}?v=9.9.9`)).status()).toBe(404)
+    expect(await (await request.get(`/api/resolve/package/${name}?v=0.1.0`)).json()).toMatchObject({ name, version: '0.1.0', digest })
+    expect((await request.get(`/api/resolve/package/${name}?v=9.9.9`)).status()).toBe(404)
+
+    // The same name read rather than resolved, which answers with every live release instead of one digest.
+    expect(await (await request.get(`/api/package/${name}`)).json())
+      .toMatchObject({ name, version: '0.2.0', versions: [{ version: '0.2.0' }, { version: '0.1.0' }] })
 
     // A name someone holds is theirs, and a shape the registry cannot serve is refused.
     await request.post('/api/auth/signout')
@@ -584,10 +609,11 @@ test.describe('publishing', () => {
   })
 
   test('says nothing is there for a package that was never published', async ({ request }) => {
-    expect((await request.get(`/api/packages/${naming()}`)).status()).toBe(404)
+    expect((await request.get(`/api/resolve/package/${naming()}`)).status()).toBe(404)
+    expect((await request.get(`/api/package/${naming()}`)).status()).toBe(404)
   })
 
-  /* A reach counts where `edge add` asks what to declare, once a day for each visitor, which is somebody putting the package in a project. Reading the page is not that, and neither is `edge lock` resolving what a project already took. */
+  /* A reach counts where `edge add` asks what to declare, once a day for each visitor, which is somebody putting the package in a project. Reading the page is not that, neither is `edge lock` resolving what a project already took, and neither is reading the package over the api, which is why the two live at addresses of their own. */
   test('counts a reach once a day for each visitor and not a look at the page', async ({ request }) => {
     const { name } = await published(request)
     const shown = async () => (await (await request.get(`/package/${name}`)).text()).match(/([\d.k]+) downloads/)?.[1]
@@ -595,7 +621,7 @@ test.describe('publishing', () => {
     expect(await shown()).toBe('0')
 
     for (const [from, want] of [['203.0.113.1', '1'], ['203.0.113.1', '1'], ['203.0.113.2', '2']]) {
-      const asked = await request.get(`/api/packages/${name}`, { headers: { 'cf-connecting-ip': from! } })
+      const asked = await request.get(`/api/resolve/package/${name}`, { headers: { 'cf-connecting-ip': from! } })
       expect(asked.status()).toBe(200)
       expect(await shown(), `after ${from} asked`).toBe(want)
 
@@ -603,9 +629,15 @@ test.describe('publishing', () => {
       expect(asked.headers()['cache-control']).toBeUndefined()
     }
 
-    const refresh = await request.get(`/api/packages/${name}?lock=1`)
+    const refresh = await request.get(`/api/resolve/package/${name}?lock=1`)
     expect(refresh.status()).toBe(200)
     expect(await shown(), 'after a lock refresh').toBe('2')
     expect(refresh.headers()['cache-control']).toMatch(/^public, max-age=\d+$/)
+
+    // Reading is not taking, so a stranger reading the same name sees the count without moving it.
+    const read = await request.get(`/api/package/${name}`, { headers: { 'cf-connecting-ip': '203.0.113.3' } })
+    expect(await read.json()).toMatchObject({ name, description: 'Turn text into a slug.', downloads: 2 })
+    expect(await shown(), 'after a read').toBe('2')
+    expect(read.headers()['cache-control']).toMatch(/^public, max-age=\d+$/)
   })
 })

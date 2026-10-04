@@ -104,7 +104,8 @@ export const ensure_read_cache = async () =>
     rules: [
       {
         action: 'set_cache_settings',
-        expression: '(http.request.uri.path eq "/api/search" or starts_with(http.request.uri.path, "/api/packages/"))',
+        expression:
+          '(http.request.uri.path in {"/api/search" "/api/docs" "/SKILL.md"} or starts_with(http.request.uri.path, "/api/package/") or starts_with(http.request.uri.path, "/api/program/") or starts_with(http.request.uri.path, "/api/docs/") or starts_with(http.request.uri.path, "/api/@") or starts_with(http.request.uri.path, "/api/resolve/"))',
         action_parameters: { cache: true, edge_ttl: { mode: 'respect_origin' } }
       }
     ]

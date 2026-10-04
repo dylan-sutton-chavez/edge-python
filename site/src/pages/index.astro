@@ -40,7 +40,7 @@ const authors = new Map(await Promise.all([...new Set(shown.map((each) => each.a
 
 // Programs and packages share one row, a program has no license and no installs.
 const rows = [
-  ...shown.map((each) => ({ name: each.name, href: `/programs/${each.slug}`, description: each.description as string | null, handle: each.author, avatar: authors.get(each.author)!, license: null as string | null, downloads: null as number | null })),
+  ...shown.map((each) => ({ name: each.name, href: `/program/${each.slug}`, description: each.description as string | null, handle: each.author, avatar: authors.get(each.author)!, license: null as string | null, downloads: null as number | null })),
   ...packages.map((item) => ({ name: item.name, href: `/package/${item.name}`, description: item.description, handle: item.handle, avatar: item.avatar_icon && item.avatar_palette ? { icon: item.avatar_icon, palette: item.avatar_palette as Palette } : avatarFor(item.name), license: item.license, downloads: item.downloads as number | null }))
 ]
 
@@ -82,7 +82,7 @@ const outline = 'flex items-center gap-2 transition border border-line text-fg-h
       </div>
 
       {/* A repo sent from here lands on the Edge and rails page. */}
-      <form data-trace action="/programs/edge-and-rails" class="w-full max-w-[520px]">
+      <form data-trace action="/program/edge-and-rails" class="w-full max-w-[520px]">
         <label class="flex h-9 items-center gap-2.5 rounded-full border border-line-emphasis bg-surface px-4 text-sm transition-shadow hover:border-link/60 hover:ring-2 hover:ring-link/20 focus-within:border-link/60 focus-within:ring-2 focus-within:ring-link/20">
           <span class="sr-only">Git repo</span>
           <Icon name="fork" size="sm" class="shrink-0 text-fg-placeholder" />
@@ -92,7 +92,7 @@ const outline = 'flex items-center gap-2 transition border border-line text-fg-h
       </form>
 
       <div class="flex flex-wrap justify-center gap-2">
-        {repos.map(([label, repo]) => <a href={`/programs/edge-and-rails?repo=${repo}`} data-repo={repo} class="rounded-full border border-line-strong px-3 py-1 text-xs text-fg-faint transition hover:text-fg">{label}</a>)}
+        {repos.map(([label, repo]) => <a href={`/program/edge-and-rails?repo=${repo}`} data-repo={repo} class="rounded-full border border-line-strong px-3 py-1 text-xs text-fg-faint transition hover:text-fg">{label}</a>)}
       </div>
     </section>
 

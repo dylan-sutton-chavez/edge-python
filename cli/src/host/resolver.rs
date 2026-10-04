@@ -116,7 +116,7 @@ fn registered(names: &[String]) -> Vec<String> {
             .filter(|name| rules::named(name))
             .map(|name| {
                 scope.spawn(move || {
-                    let url = site(&format!("/api/packages/{name}?lock=1"));
+                    let url = site(&format!("/api/resolve/package/{name}?lock=1"));
                     ureq::get(&url).config().timeout_global(Some(HINT_TIMEOUT)).build().call().is_ok().then(|| name.clone())
                 })
             })

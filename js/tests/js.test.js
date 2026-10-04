@@ -38,7 +38,7 @@ async function lockOf(imports) {
     const lock = {};
     for (const [name, version] of Object.entries(imports)) {
         if (!/^\d+\.\d+\.\d+$/.test(version)) continue;
-        const res = await fetch(`${SITE}/api/packages/${name}?v=${version}&lock=1`);
+        const res = await fetch(`${SITE}/api/resolve/package/${name}?v=${version}&lock=1`);
         if (!res.ok) throw new Error(`the registry has no ${name} ${version}, it answered ${res.status}`);
         const { url, digest } = await res.json();
         lock[name] = { version, url, digest: `sha256-${digest}` };

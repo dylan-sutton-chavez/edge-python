@@ -16,7 +16,7 @@ async function lock(imports: Record<string, string>): Promise<Record<string, str
   const pinned = await Promise.all(Object.entries(imports).map(async ([name, target]) => {
     if (!RELEASE.test(target)) return [name, target]
 
-    const response = await fetch(`/api/packages/${encodeURIComponent(name)}?v=${target}&lock=1`, { signal: AbortSignal.timeout(LOAD_MS) })
+    const response = await fetch(`/api/resolve/package/${encodeURIComponent(name)}?v=${target}&lock=1`, { signal: AbortSignal.timeout(LOAD_MS) })
     const answer = (await response.json().catch(() => ({}))) as { error?: string; url?: string; digest?: string }
     if (response.status === 404) throw new Error(`'${name}' has no version ${target}`)
     if (!response.ok) throw new Error(answer.error ?? `asking the registry about '${name}' answered ${response.status}`)

@@ -186,7 +186,7 @@ fn answer_registry(mut stream: std::net::TcpStream, answer: &str, key: &str, bun
     let other = query.split('&').filter_map(|pair| pair.strip_prefix("v=")).any(|asked| asked != version);
     let head = |kind: &str, len: usize| format!("HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n");
     let body = match route {
-        "/api/packages/greet" if !other => Some((head("application/json", answer.len()), answer.as_bytes().to_vec())),
+        "/api/resolve/package/greet" if !other => Some((head("application/json", answer.len()), answer.as_bytes().to_vec())),
         p if p == key => Some((head("application/octet-stream", bundle.len()), bundle.to_vec())),
         _ => None,
     };
