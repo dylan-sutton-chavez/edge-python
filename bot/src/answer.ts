@@ -74,7 +74,7 @@ function read(answer: unknown) {
 const chat = async (ai: Ai, messages: Message[], tokens: number, tools?: object[]) =>
   read(await (ai.run as (model: string, input: object) => Promise<unknown>)(MODEL, { messages, max_tokens: tokens, tools, chat_template_kwargs: { enable_thinking: false } }))
 
-// The index matches each query as one phrase and the pages are English, so a question becomes the words its pages would use.
+// The pages are English, so a question becomes the words its pages would use.
 async function terms(ai: Ai, turns: Turn[], question: string) {
   const { text } = await chat(
     ai,

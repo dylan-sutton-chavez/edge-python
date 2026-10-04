@@ -172,8 +172,13 @@ export type Hit = { package: string; path: string; title: string; section: strin
 /* What brackets the matched run inside a snippet. Control characters, not tags, because the body they surround is markdown from a stranger and a client that reads them builds text nodes rather than markup. */
 export const MARK = { open: '\u0001', close: '\u0002' }
 
-// Trigrams take the query as one phrase, so a quote inside it would end the phrase early.
-const phrased = (asked: string) => `"${asked.replaceAll('"', '""')}"`
+// Every word must match, in any order, and one under three characters has no trigram.
+const phrased = (asked: string) =>
+  asked
+    .split(/\s+/)
+    .filter((word) => word.length >= 3)
+    .map((word) => `"${word.replaceAll('"', '""')}"`)
+    .join(' ')
 
 /* Where a query lands inside the published documentation, one row per section so a result opens at the words rather than at the top of the page. A heading outranks a title and both outrank the prose, since someone typing `receive` wants the section about it before a page that mentions it once. */
 export const searched = (db: D1Database, asked: string, limit = 6) =>
