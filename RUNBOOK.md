@@ -24,6 +24,6 @@ A schema change edits `site/db/schema.sql` and adds its step to `site/db/migrati
 
 ## The Discord bot
 
-`DISCORD_TOKEN` and `DISCORD_APP_ID` are repository secrets without an environment prefix, since one Discord app serves both deploys. Resetting the token in the developer portal invalidates the old one at once, so the secret changes in the same move.
+`DISCORD_TOKEN` is the only secret the bot needs, without an environment prefix since one Discord app serves both deploys. It answers a mention or a reply and registers no commands, so nothing else about the app reaches the code. Resetting the token in the developer portal invalidates the old one at once, so the secret changes in the same move.
 
-The bot holds a gateway connection, which a Worker cannot keep open, so it runs in a container, and Discord allows one session per app, so exactly one instance runs and a restart reconnects it with nothing kept in memory. The app is private and `GUILD` in `infra/src/constants.ts` fixes the one server it serves, which its commands register against rather than globally.
+The bot holds a gateway connection, which a Worker cannot keep open, so it runs in a container, and Discord allows one session per app, so exactly one instance runs and a restart reconnects it with nothing kept in memory. The app is private and `GUILD` in `infra/src/constants.ts` fixes the one server it serves, which it leaves any other it is added to.
