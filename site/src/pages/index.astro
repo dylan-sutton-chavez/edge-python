@@ -77,8 +77,11 @@ const outline = 'flex items-center gap-2 transition border border-line text-fg-h
 
     <section class="flex flex-col items-center gap-4 rounded-2xl border border-line-strong bg-page px-4 py-10">
       <div class="flex flex-col items-center gap-1">
-        <h2 class="flex items-center gap-2 whitespace-nowrap text-sm"><Icon name="tram" size="sm" class="text-fg-hint" />Edge and rails</h2>
-        <p class="text-2xs text-fg-hint">Trace a repo to its vulnerabilities</p>
+        <span class="flex items-center gap-2 whitespace-nowrap text-xs text-fg-hint">
+          <Icon name="tram" size="xs" class="shrink-0" />Edge and rails
+        </span>
+        
+        <p class="text-sm">Edge Python reads your repo code as a graph, not as text.</p>
       </div>
 
       {/* A repo sent from here lands on the Edge and rails page. */}
