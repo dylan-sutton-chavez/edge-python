@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "bench"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -304,7 +304,7 @@ dependencies = [
 
 [[package]]
 name = "edge-python"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "dlmalloc",
  "hashbrown 0.17.1",
@@ -505,7 +505,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "lang"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "edge-python",
 ]
@@ -780,7 +780,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "skill"
-version = "0.8.0"
+version = "0.8.1"
 
 [[package]]
 name = "slab"
@@ -897,7 +897,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "wasm-abi"
-version = "0.8.0"
+version = "0.8.1"
 
 [[package]]
 name = "wasm-encoder"
@@ -911,7 +911,7 @@ dependencies = [
 
 [[package]]
 name = "wasm-pdk"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "linked_list_allocator",
  "lol_alloc",
@@ -921,7 +921,7 @@ dependencies = [
 
 [[package]]
 name = "wasm-pdk-macros"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "proc-macro2",
  "quote",
