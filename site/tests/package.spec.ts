@@ -66,6 +66,9 @@ test('renders a published package from its row and its artifact', async ({ page,
   await expect(page.locator('[data-playground] [data-manifest] textarea')).toHaveValue(new RegExp(`"${name}": "0\\.1\\.0"`))
   await expect(page.locator('.prose code.language-bash')).toHaveText('edge add slugify\n')
 
+  // The bare address shows the first page, so it hands that page the one address the two of them share.
+  await expect(page.locator('link[rel=canonical]')).toHaveAttribute('href', new RegExp(`/package/${name}/getting-started/introduction$`))
+
   // The aside orders both pages and every link stays inside the package.
   const links = page.locator('aside[data-sticky] a')
   await expect(links).toHaveText(['Introduction', 'Installation'])
@@ -100,14 +103,19 @@ test('shows an email account the room it gets and how to ask for more', async ({
   await expect(panel.getByRole('link', { name: 'Ask for more room' })).toHaveAttribute('href', /^mailto:.*subject=/)
 })
 
-test('lists a documented package and its author in the sitemap, and leaves an undocumented one out', async ({ request }) => {
+test('lists every page of a documented package and its author in the sitemap, and leaves an undocumented one out', async ({ request }) => {
   const documented = await published(request, DOCS)
   const bare = await published(request)
   const sitemap = await (await request.get('/sitemap.xml')).text()
 
-  expect(sitemap).toContain(`/package/${documented.name}</loc>`)
+  expect(sitemap).toContain(`/package/${documented.name}/getting-started/introduction</loc>`)
+  expect(sitemap).toContain(`/package/${documented.name}/getting-started/installation</loc>`)
   expect(sitemap).toContain(`/@${documented.handle}</loc>`)
-  expect(sitemap).not.toContain(`/package/${bare.name}</loc>`)
+
+  // The bare address points at the first page, so sending both would be sending the same page twice.
+  expect(sitemap).not.toContain(`/package/${documented.name}</loc>`)
+
+  expect(sitemap).not.toContain(`/package/${bare.name}`)
   expect(sitemap).not.toContain(`/@${bare.handle}</loc>`)
 })
 

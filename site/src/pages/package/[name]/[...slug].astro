@@ -48,6 +48,7 @@ const own = { [name]: viewed.version }
 const sections = tree(entries(artifact.docs), '')
 const docs = sections.flatMap((section) => section.docs)
 
+// The bare address shows the first page, so it names that page as the one to index rather than standing in for it.
 const doc = Astro.params.slug ? docs.find((each) => each.slug === Astro.params.slug) : docs[0]
 if (Astro.params.slug && !doc) return Astro.rewrite('/404')
 
@@ -85,7 +86,7 @@ const head = `${cell} font-normal text-fg-subtle`
 const row = `${cell} border-t border-line-strong`
 ---
 
-<Base title={`${name} ${viewed.version}`} description={description ?? `The ${name} package on Edge Python.`} index={viewed === latest} gap="lg" class="flex-1">
+<Base title={`${name} ${viewed.version}`} description={description ?? `The ${name} package on Edge Python.`} index={viewed === latest} canonical={!Astro.params.slug && doc ? `${base}/${doc.slug}` : undefined} gap="lg" class="flex-1">
   <Schema slot="head" item={release} />
 
   <div>

@@ -188,18 +188,19 @@ export const searched = (db: D1Database, asked: string, limit = 6) =>
     .bind(MARK.open, MARK.close, phrased(asked), limit)
     .all<Hit>()
 
-/* A package worth a crawl, its newest live version described and documented, beside the author who holds it. */
+/* Every page worth a crawl, one row for each one the newest live version documents, beside the author who holds it. */
 export const indexable = (db: D1Database) =>
   db
     .prepare(
-      `select distinct p.name, u.handle from package p
+      `select distinct p.name, u.handle, s.path from package p
          join user u on u.id = p.user_id
          join version v on v.package = p.name
          join page_search s on s.package = p.name
        where v.description != ''
-         and v.published_at = (select max(published_at) from version where package = p.name and yanked_at is null)`
+         and v.published_at = (select max(published_at) from version where package = p.name and yanked_at is null)
+       order by p.name, s.path`
     )
-    .all<{ name: string; handle: string }>()
+    .all<{ name: string; handle: string; path: string }>()
 
 // The same room, split by package, which is what a panel shows.
 export const stored = (db: D1Database, userId: string) =>

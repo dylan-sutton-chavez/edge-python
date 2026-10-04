@@ -12,15 +12,16 @@ interface Props {
   title?: string
   description?: string
   index?: boolean
+  canonical?: string
   gap?: keyof typeof GAPS
   class?: string
 }
 
-const { title, description = 'Packages for Edge Python, pinned by sha256.', index = true, gap = 'sm', class: className } = Astro.props
+const { title, description = 'Packages for Edge Python, pinned by sha256.', index = true, canonical, gap = 'sm', class: className } = Astro.props
 
 // A preview reads absolute addresses, and a query string never names a different page.
 const heading = title ? `${title} on Edge Python` : 'Edge Python'
-const page = new URL(Astro.url.pathname, Astro.url).href
+const page = new URL(canonical ?? Astro.url.pathname, Astro.url).href
 const card = new URL('/og.png', Astro.url).href
 ---
 
