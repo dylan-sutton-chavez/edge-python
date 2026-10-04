@@ -1,0 +1,75 @@
+---
+title: "HTTP API"
+description: "Reading the registry and the documentation over HTTP, and asking a question of them."
+---
+
+# HTTP API
+
+Everything the site shows answers as data at the same address under `/api`, so a page you can open has a reading of itself one prefix away. Nothing here needs a token and nothing here counts against a package.
+
+```bash
+curl 'https://edgepython.com/api/search?q=snapshot'
+curl https://edgepython.com/api/package/json
+curl https://edgepython.com/api/docs/reference/cli
+```
+
+## Searching
+
+`GET /api/search?q=<term>` is one query over four shelves, and it answers with `docs`, `people`, `programs` and `packages`. A hit carries the address it was found at, so the reading of it is that address under `/api`.
+
+```json
+{
+  "docs": [
+    {
+      "title": "Save, persist, restore",
+      "where": "Language · Snapshots",
+      "href": "/docs/language/snapshots#save-persist-restore",
+      "snippet": "…a worker keeps its heap between calls…"
+    }
+  ],
+  "people": [], "programs": [], "packages": []
+}
+```
+
+The index is trigram based, so it matches the words a page actually contains and nothing else. A term shorter than three characters reaches names and headings only.
+
+## Reading
+
+| Address | Answers |
+|---|---|
+| `GET /api/docs` | every page of this reference |
+| `GET /api/docs/<path>` | one page, as the markdown it was written in |
+| `GET /api/package/<name>` | what a package is, its live versions and the index of its own pages |
+| `GET /api/package/<name>/<slug>` | one of those pages |
+| `GET /api/@<handle>` | a person and the shelf they publish |
+| `GET /api/program/<name>` | one program |
+
+A `?v=` reads an older release of a package, and the bare address always reads the newest one still live.
+
+Reading a package never moves its download number. That is counted where [`edge add`](/docs/reference/cli) takes one into a project, at an address of its own that the CLI holds and nothing else needs.
+
+## Asking
+
+`POST https://ask.edgepython.com` answers a question out of these same pages, in the language it was asked in.
+
+```bash
+curl -X POST https://ask.edgepython.com \
+  -H 'content-type: application/json' \
+  -d '{"question": "how do I declare a package?"}'
+```
+
+```json
+{
+  "text": "Declare every module in edge.json and run edge add <name> [1]",
+  "sources": ["https://edgepython.com/docs/getting-started/quickstart#declare"],
+  "session": "pK3f…"
+}
+```
+
+`sources` holds only the pages the answer cited, in the order `text` numbers them, and an answer the reference carried alone cites none. A question the documentation does not cover is answered with a line saying so rather than a guess.
+
+Send `session` back on the next question and the conversation continues, which is how a follow-up like `and if it is private?` keeps what it refers to. A session is yours while you hold it, goes quiet after thirty minutes and ends after a day. Sending an id that has ended opens a new conversation rather than failing, and the one you get back is the one to keep.
+
+Two answers come back as `429`, and they mean different things. One address asking faster than five questions a minute is told to try again in a minute. A day that has answered all it will answer says so, and the Discord server shares that day, which is why one caller does not get to spend it. A `502` is an answer that did not come back, and asking again is all it takes.
+
+The same answers are given in the [Discord server](https://discord.com/invite/WhXYnn2YRc) to a message that mentions the bot, and a reply to one of its answers carries the conversation on.

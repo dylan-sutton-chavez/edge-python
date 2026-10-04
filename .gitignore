@@ -28,6 +28,10 @@ site/wrangler.json
 site/worker-configuration.d.ts
 .dev.vars
 
+# wrangler output for the bot
+bot/wrangler.json
+bot/worker-configuration.d.ts
+
 # WASM
 pkg/
 **/pkg/

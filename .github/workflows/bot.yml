@@ -1,0 +1,58 @@
+name: Bot
+
+# Its own cadence and its own install, since the bot reads the registry over http the way any other client does.
+on:
+  push:
+    branches: [main]
+    # The reference ships inside the Worker, so a push that rewrites it ships a bot that answers from it.
+    paths: ['bot/**', 'skill/SKILL.md', '.github/workflows/bot.yml', '.github/actions/bot/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+
+defaults:
+  run:
+    working-directory: bot
+
+jobs:
+  # No credentials, so the config binds a local database and nothing here reaches Cloudflare.
+  check:
+    name: Check
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/bot
+
+      - run: npm run check
+      - run: npm test
+
+  ship:
+    name: Ship
+    needs: [check]
+    runs-on: ubuntu-26.04
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/bot
+
+      # The database is created or brought to the schema before the config reads its id to bind it.
+      - run: npm run deploy
+      - run: npm run secrets
+
+  smoke:
+    name: Smoke
+    needs: [ship]
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/bot
+
+      # One real question, which is the only thing here that reaches a model.
+      - run: npm run smoke

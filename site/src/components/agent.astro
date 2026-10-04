@@ -11,6 +11,7 @@ Nothing resolves unless edge.json declares it, so run edge add <name> before imp
 Run the entry point with edge run main.py and every *_test.py with edge test.
 Search the docs, people, programs and packages with GET https://edgepython.com/api/search?q=<term>
 Read what it finds by putting /api before the href, so /package/<name>, /package/<name>/<slug>, /@<handle>, /program/<name> and /docs/<path> all answer as data, and GET /api/docs lists the reference.
+Ask a question in any language with POST https://ask.edgepython.com {"question": "..."}, which answers from those pages and returns a session to send back with a follow-up.
 Pack and ship with edge build, then edge publish app.edge
 `
 

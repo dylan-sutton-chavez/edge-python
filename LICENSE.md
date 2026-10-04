@@ -20,7 +20,7 @@ A personal tool, a hobby, research or teaching needs nothing from anyone. A prod
 
 ## The products
 
-`site/` `infra/`
+`site/` `infra/` `bot/`
 
 Copyright 2026 Dylan Sutton Chavez. All rights reserved.
 

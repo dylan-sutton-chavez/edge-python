@@ -73,7 +73,7 @@ The root crate is the engine, lexer, parser, VM and WebAssembly exports, tested 
 
 The engine is open source under the Apache 2.0 License. That covers `src/`, `tests/`, `abi/`, `pdk/`, `cli/`, `js/`, `fuzz/`, `bench/`, `skill/` and `docs/`, so running it, embedding `compiler.wasm` and writing plugins for it need nothing from anyone.
 
-`lang/` is under the PolyForm Noncommercial License, free for personal use, research and teaching, while a product or a project others may sell needs a written agreement. The products in `site/` and `infra/` are published to be read, not to be used. They carry no license, and using them needs a written agreement. See [LICENSE.md](LICENSE.md).
+`lang/` is under the PolyForm Noncommercial License, free for personal use, research and teaching, while a product or a project others may sell needs a written agreement. The products in `site/`, `infra/` and `bot/` are published to be read, not to be used. They carry no license, and using them needs a written agreement. See [LICENSE.md](LICENSE.md).
 
 ## Sponsors
 

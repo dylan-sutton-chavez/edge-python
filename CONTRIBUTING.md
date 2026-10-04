@@ -10,7 +10,7 @@ Include a minimal failing script, the command used to run it, and the expected a
 
 For a large change, open an issue or email [c.sutton.dylan@gmail.com](mailto:c.sutton.dylan@gmail.com) first so it can be accepted once ready.
 
-Pull requests are welcome in every part under the Apache 2.0 License, which is all but `lang/`, `site/` and `infra/`. Those three stay free of anyone else's copyright, so a patch to them is closed with thanks and written again by the maintainer, while an issue about them is always welcome. The licenses are in [README.md](README.md#license).
+Pull requests are welcome in every part under the Apache 2.0 License, which is all but `lang/`, `site/`, `infra/` and `bot/`. Those four stay free of anyone else's copyright, so a patch to them is closed with thanks and written again by the maintainer, while an issue about them is always welcome. The licenses are in [README.md](README.md#license).
 
 - New behavior comes with tests.
 - Docs describe the code as it is after the change.
@@ -112,6 +112,21 @@ npm test # builds the Worker and drives it in three engines
 - [`site/src/draft.ts`](site/src/draft.ts) names what is still being built, a path for a page and a fragment for a surface inside one. Under `EDGE_ENV=prod` a page answers 404 and the rest is rewritten out of the html.
 - An `edge-python` code block followed by an `output` block becomes a playground on the real engine, so every example and its output stay a verifiable pair.
 - A page nests one folder deep at most, carries a numeric prefix on every path segment, opens with a closed frontmatter block holding a `title` and a `description`, and has exactly one top-level heading. `npm run build` refuses a page that breaks any of it, and `edge build` holds the `docs` directory of a package to the same rules. Both read [`convention.ts`](site/src/lib/docs/convention.ts) and [`docs.rs`](cli/src/docs.rs), kept in step by [`docs.json`](tests/cases/docs.json), so a rule changed on one side fails on the other.
+
+## The bot
+
+`bot/` answers questions about Edge Python out of the published pages, over http at `ask.edgepython.com` and in the Discord server. It reads `/api/search` the way any other client does and [`bot.yml`](.github/workflows/bot.yml) ships it on a push that touches it or the `skill/SKILL.md` it carries inside, so a fix to it never waits on a release.
+
+```bash
+cd bot && npm ci
+npm run check # types and the wrangler config
+npm test      # what it keeps and how a reply reads, on the schema itself
+npm run dev   # the http side on a local database, with the model through your wrangler login
+```
+
+A test reaches no runtime and holds no credential, since D1 is SQLite and `node:sqlite` runs the same schema the deploy creates. What the model answers is read by hand through that http side instead.
+
+`DISCORD` in [`names.ts`](bot/names.ts) set to anything but `1` ships that http side alone, the way `npm run dev` always runs it. What it keeps between questions is [`db/schema.sql`](bot/db/schema.sql), and how it is bound and silenced is in [RUNBOOK.md](RUNBOOK.md#the-discord-bot).
 
 ## Infra and CI
 

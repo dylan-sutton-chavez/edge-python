@@ -1,10 +1,9 @@
 import { fileURLToPath } from 'node:url'
+import { RESOURCE_HASH, ZONE } from './public'
 
-// Fixed forever and never tied to a human-facing name.
-export const RESOURCE_HASH = '506cf1'
+export { RESOURCE_HASH, ZONE }
 
 export const ENV = process.env.EDGE_ENV === 'prod' ? 'prod' : 'dev'
-export const ZONE = 'edgepython.com'
 
 // Production keeps what people made, its rows and published packages, and dev keeps nothing between promotes.
 export const keeps = (env: string) => env === 'prod'
