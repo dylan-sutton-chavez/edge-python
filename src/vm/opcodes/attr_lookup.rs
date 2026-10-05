@@ -1,5 +1,4 @@
 use super::*;
-use crate::alloc::string::ToString;
 use crate::s;
 
 pub use crate::vm::methods::BuiltinMethodId;
@@ -291,7 +290,7 @@ impl<'a> VM<'a> {
     /* instance fallback via `__getattr__(name)`. Called by `LoadAttr` / `CallMethod` after the normal lookup raises `AttributeError`. */
     pub(crate) fn try_getattr_fallback(&mut self, obj: Val, name: &str, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Option<Val>, VmErr> {
         if !obj.is_heap() || !matches!(self.heap.get(obj), HeapObj::Instance(..)) { return Ok(None); }
-        let name_val = self.heap.alloc(HeapObj::Str(name.to_string()))?;
+        let name_val = self.heap.intern_str(name)?;
         self.try_call_dunder(obj, "__getattr__", &[name_val], chunk, slots)
     }
 

@@ -7,7 +7,7 @@ description: "What Edge Python is, what it is not, and where to go next."
 
 Edge Python is a sandboxed subset of Python. The compiler and the virtual machine are written in Rust. You write ordinary Python syntax. The compiler turns it into bytecode, and a register VM runs it.
 
-The engine is one WebAssembly binary of about 200 KB, and two hosts run it:
+The engine is one WebAssembly binary of about 250 KB, and two hosts run it:
 
 - The JS host, the JavaScript package. It is built on the browser's sandbox model over Web APIs, so it runs in browsers and in JavaScript runtimes that offer the same APIs, such as Deno.
 - The `edge` command line interface, a Rust binary that embeds the same engine, built from the same source for speed, precompiled and run under wasmtime.

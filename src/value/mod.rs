@@ -663,16 +663,18 @@ fn unintern<K: Eq + core::hash::Hash + Clone>(map: &mut HashMap<K, u32>, key: &K
     if let Some(owner) = map.remove(key) && owner != idx { map.insert(key.clone(), owner); }
 }
 
-/* Arena allocator with mark-sweep GC and string interning (<=128 bytes). */
+/* Arena allocator with mark-sweep GC, names, constants and single characters interned. */
 struct HeapSlot {
     obj: Option<HeapObj>,
     marked: bool,
     /* ASCII-only Str, 0 unknown, 1 yes, 2 no, classified on first use. */
     ascii: u8,
+    /* Whether `strings` holds this slot, a name, constant or one-character string. */
+    interned: bool,
 }
 
 impl HeapSlot {
-    fn new(obj: Option<HeapObj>) -> Self { Self { obj, marked: false, ascii: 0 } }
+    fn new(obj: Option<HeapObj>) -> Self { Self { obj, marked: false, ascii: 0, interned: false } }
 }
 
 pub struct HeapPool {
@@ -748,11 +750,12 @@ impl HeapPool {
         }
     }
 
-    /* Existing interned/singleton slot for `obj`, if any. Str/Bytes intern only when small. */
+    /* Existing interned/singleton slot for `obj`, longer strings only through `intern_str`. */
     #[inline]
     fn intern_lookup(&self, obj: &HeapObj) -> Option<u32> {
         match obj {
-            HeapObj::Str(s) if s.len() <= 128 => self.string_slot(s),
+            // Every one-character and empty string shares one slot.
+            HeapObj::Str(s) if s.len() <= 1 => self.string_slot(s),
             HeapObj::Bytes(b) if b.len() <= 128 => self.bytes_intern.get(b).copied(),
             HeapObj::LongInt(i) => self.longints.get(&i.get()).copied(),
             HeapObj::Type(name) => self.types.get(name).copied(),
@@ -774,10 +777,7 @@ impl HeapPool {
     /* Register `idx` in the intern and singleton tables its object belongs to. */
     fn intern_insert(&mut self, idx: u32) {
         match self.slots[idx as usize].obj.as_ref() {
-            Some(HeapObj::Str(s)) if s.len() <= 128 => {
-                let slots = &self.slots;
-                self.strings.insert_unique(eq::hash_key(s), idx, |&i| slot_str_hash(slots, i));
-            }
+            Some(HeapObj::Str(s)) if s.len() <= 1 => self.intern_text(idx, eq::hash_key(s)),
             Some(HeapObj::Bytes(b)) if b.len() <= 128 => { self.bytes_intern.insert(b.clone(), idx); }
             Some(HeapObj::LongInt(i)) => { self.longints.insert(i.get(), idx); }
             Some(HeapObj::Type(name)) => { self.types.insert(name.clone(), idx); }
@@ -792,7 +792,7 @@ impl HeapPool {
     /* Drop `idx` from the tables `intern_insert` filled, long strings and bytes never entered one. */
     fn intern_remove(&mut self, idx: u32) {
         match self.slots[idx as usize].obj.as_ref() {
-            Some(HeapObj::Str(s)) if s.len() <= 128 => {
+            Some(HeapObj::Str(s)) if self.slots[idx as usize].interned => {
                 if let Ok(e) = self.strings.find_entry(eq::hash_key(s), |&i| i == idx) { e.remove(); }
             }
             Some(HeapObj::Bytes(b)) if b.len() <= 128 => unintern(&mut self.bytes_intern, b, idx),
@@ -820,10 +820,21 @@ impl HeapPool {
 
     pub fn alloc(&mut self, obj: HeapObj) -> Result<Val, VmErr> { self.admit(obj, true) }
 
-    /* The shared Val for text `s`, found before any copy of it is made. */
+    /* The shared Val for a name or constant `s`, runtime strings never enter. */
     pub fn intern_str(&mut self, s: &str) -> Result<Val, VmErr> {
+        if s.len() > 128 { return self.alloc(HeapObj::Str(s.into())); }
         if let Some(i) = self.string_slot(s) { return Ok(Val::heap(i)); }
-        self.alloc(HeapObj::Str(s.into()))
+        let v = self.alloc(HeapObj::Str(s.into()))?;
+        // A one-character string entered on allocation.
+        if !self.slots[v.as_heap() as usize].interned { self.intern_text(v.as_heap(), eq::hash_key(s)); }
+        Ok(v)
+    }
+
+    /* Indexes slot `idx`, a string under hash `h`, in the intern table. */
+    fn intern_text(&mut self, idx: u32, h: u64) {
+        self.slots[idx as usize].interned = true;
+        let slots = &self.slots;
+        self.strings.insert_unique(h, idx, |&i| slot_str_hash(slots, i));
     }
 
     /* Reserved for constructing the exception that reports the limit itself, skips the soft limit but not the hard slot cap. */

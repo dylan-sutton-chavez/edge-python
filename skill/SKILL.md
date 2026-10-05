@@ -21,7 +21,7 @@ This document is self-verifying and its examples follow the cells v1 grammar. A 
 
 Edge Python is a sandboxed Python subset compiled in a single pass to bytecode and executed by a register VM. It is one WebAssembly binary, hosted by the JS host, a JavaScript package built on the browser's sandbox model that runs in browsers and in JavaScript runtimes such as Deno, and by the `edge` CLI. There is no bundled stdlib, every module is an external package declared in `edge.json` and resolved at compile time, the official packages included. Programs are deterministic, there is no file, network or environment access unless a declared module grants it.
 
-Use this skill to write correct Edge Python on the first try. The language looks like Python 3 but is a strict subset, and the differences matter more than the similarities. Read the delta section before writing non-trivial code.
+Use this skill to write correct Edge Python on the first try. The language looks like the latest CPython version but is a strict subset, and the differences matter more than the similarities. Read the delta section before writing non-trivial code.
 
 ## The working loop
 
@@ -134,7 +134,7 @@ Interactive removal of the binary and PATH entries.
 
 ## The Python delta
 
-Edge Python parses like Python 3 but deliberately drops parts of the language. This section is the one to internalize, because everything here is valid CPython that fails or behaves differently in Edge Python.
+Edge Python parses like the latest CPython version but deliberately drops parts of the language. This section is the one to internalize, because everything here is valid CPython that fails or behaves differently in Edge Python.
 
 ### Not supported at all
 

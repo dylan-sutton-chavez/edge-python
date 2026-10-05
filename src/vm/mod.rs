@@ -390,7 +390,7 @@ impl<'a> VM<'a> {
         // Cells change behind a cached result, and an import reads other globals.
         let new: Vec<bool> = (start..self.functions.len()).map(|fi| {
             let scope = &self.fn_scope[fi];
-            scope.freevars.is_empty()
+            self.functions[fi].1.is_pure && scope.freevars.is_empty()
                 && (self.fn_module[fi].is_none() || scope.reads.iter().all(|bare| self.function_names.get(fi).is_some_and(|n| n == bare)))
         }).collect();
         self.memo_ok.truncate(start);

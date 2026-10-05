@@ -117,7 +117,7 @@ impl<'a> VM<'a> {
             Source::Module(items) => {
                 let mut out = Vec::with_capacity(items.len());
                 for (name, v) in items {
-                    let key = self.heap.alloc(HeapObj::Str(name))?;
+                    let key = self.heap.intern_str(&name)?;
                     out.push((key, v));
                 }
                 out
@@ -170,7 +170,7 @@ impl<'a> VM<'a> {
         }
         let mut dm = DictMap::with_capacity(latest.len());
         for (name, (_, v)) in latest {
-            let key = self.heap.alloc(HeapObj::Str(name))?;
+            let key = self.heap.intern_str(&name)?;
             dm.insert(key, v, &self.heap);
         }
         self.alloc_and_push_dict(dm)
