@@ -408,15 +408,15 @@ pub(crate) fn unstage(cx: &mut impl AsContextMut<Data = State>, ex: &Exports, pt
 mod tests {
     use super::*;
 
-    // A staged run reads everything it built from tmp, and a package from wherever its registry is.
+    // A staged run reads everything it built from the staged CDN, and a package from wherever its registry is.
     #[test]
-    fn a_staged_run_reads_tmp_but_the_real_registrys_packages() {
-        let tmp = "https://cdn.tmp.edgepython.com/7";
+    fn a_staged_run_reads_its_cdn_but_the_real_registrys_packages() {
+        let staged = "http://127.0.0.1:8788";
         for path in ["/compiler.wasm", "/js/src/index.js", "/cli/install.sh"] {
-            assert_eq!(rebase(&format!("{ORIGIN}{path}"), Some(tmp), false), format!("{tmp}{path}"));
+            assert_eq!(rebase(&format!("{ORIGIN}{path}"), Some(staged), false), format!("{staged}{path}"));
         }
         let pkg = format!("{ORIGIN}/pkg/test/0.1.0/app.edge");
-        assert_eq!(rebase(&pkg, Some(tmp), false), pkg);
-        assert_eq!(rebase(&pkg, Some(tmp), true), format!("{tmp}/pkg/test/0.1.0/app.edge"));
+        assert_eq!(rebase(&pkg, Some(staged), false), pkg);
+        assert_eq!(rebase(&pkg, Some(staged), true), format!("{staged}/pkg/test/0.1.0/app.edge"));
     }
 }

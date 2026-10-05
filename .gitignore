@@ -20,8 +20,6 @@ dist/
 pkg/
 **/pkg/
 
-.wrangler/
-
 /_cdn/
 
 .env
