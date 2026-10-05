@@ -81,3 +81,19 @@ export function scrollbar(bar: HTMLElement, axis: 'x' | 'y', seek: (offset: numb
     }
   }
 }
+
+/* Wires each `[data-bar]` under `root` to the `[data-scroller]` in its box, `edge` short of each end. */
+export function thumbs(root: ParentNode, edge = EDGE) {
+  root.querySelectorAll<HTMLElement>('[data-bar]').forEach((bar) => {
+    const box = bar.parentElement!
+    const scroller = box.querySelector<HTMLElement>('[data-scroller]')!
+    const x = bar.dataset.bar === 'x'
+    const span = (): Span => x
+      ? { offset: scroller.scrollLeft, view: scroller.clientWidth, total: scroller.scrollWidth, track: box.clientWidth }
+      : { offset: scroller.scrollTop, view: scroller.clientHeight, total: scroller.scrollHeight, track: box.clientHeight }
+    const { moved, held } = scrollbar(bar, x ? 'x' : 'y', (to) => scroller.scrollTo(x ? { left: to } : { top: to }), edge)
+    box.addEventListener('pointerenter', (event) => { if (event.pointerType === 'mouse') held(span()) })
+    box.addEventListener('pointerleave', (event) => { if (event.pointerType === 'mouse') held(null) })
+    scroller.addEventListener('scroll', () => moved(span()), { passive: true })
+  })
+}

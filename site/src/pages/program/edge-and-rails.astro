@@ -6,6 +6,13 @@ import Icon from '../../components/ui/icon.astro'
 import Mark from '../../assets/mark.svg'
 import Header from '../../components/header.astro'
 import SignIn from '../../components/sign-in.astro'
+import Scrollbar from '../../components/ui/scrollbar.astro'
+import Thumb from '../../components/ui/thumb.astro'
+import Footer from '../../components/footer.astro'
+import PlanPicker from '../../components/plan-picker.astro'
+import Agent from '../../components/agent.astro'
+import { languages } from '../../data/languages'
+import { COLORS } from '../../lib/docs/shiki'
 
 // Repos a visitor may know, each a tag that fills the bar.
 const examples = [
@@ -15,8 +22,51 @@ const examples = [
   ['express', 'expressjs/express'], ['rails', 'rails/rails'], ['curl', 'curl/curl'], ['openssl', 'openssl/openssl'], ['git', 'git/git']
 ]
 
-// Taller than a form field, lit while the pointer rests on it and held lit while it has the focus.
-const bar ='[&>span]:py-2.5 [&>span]:transition-shadow [&>span]:hover:border-link/60 [&>span]:hover:ring-2 [&>span]:hover:ring-link/20 [&>span]:focus-within:border-link/60 [&>span]:focus-within:ring-2 [&>span]:focus-within:ring-link/20'
+// What the pill above the title says, one note at a time.
+const notes = ['Configure a free alarm for your repo', 'Built on Edge Python']
+
+// Weakness classes a trace follows, each by its CWE number and linked to its definition.
+const weaknesses = [
+  [89, 'SQL injection'], [78, 'Command injection'], [79, 'Cross-site scripting'], [22, 'Path traversal'],
+  [918, 'Server-side request forgery'], [502, 'Unsafe deserialization'], [94, 'Code injection'], [611, 'XML external entities'],
+  [798, 'Hardcoded credentials'], [601, 'Open redirect'], [1321, 'Prototype pollution'], [352, 'Request forgery'],
+  [327, 'Broken cryptography'], [200, 'Information exposure'], [434, 'Unrestricted upload']
+] as const
+// The classes past the grid, counted in its last cell.
+const more = 150
+
+// The playground replayed, a scan of a Rails app ready to run and then the trace its run leaves.
+const snippet = 'import fs\n\nsinks = {"send_file params": "CWE-22", "order(params": "CWE-89", ".html_safe": "CWE-79"}\nfor path in fs.list("shop/app"):\n    code = fs.read(path)\n    for sink, cwe in sinks.items():\n        if sink in code:\n            print(cwe, path)'
+// The code and the trace share one card of the playground, each rising over the other in turn.
+const face = 'absolute inset-0 bg-page'
+// Padding on what scrolls and not on the box, so it counts at the far end.
+const pane = 'grid h-full overflow-auto font-mono [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+const rim = 'pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-line-strong opacity-0'
+// One finding walked through its own code, each step lighting the line it stands on.
+const controller = ['class FilesController < ApplicationController', '  def show', '    name = params[:name]', '    return head(:not_found) unless name.end_with?(".pdf")', '    send_file File.join(root, name)', '  end', 'end']
+const proof = [
+  { name: 'source', detail: 'params[:name] ↦ α', result: '', line: 3 },
+  { name: 'branch', detail: 'α.end_with?(".pdf")', result: 'sat', line: 4 },
+  { name: 'sink', detail: 'send_file(File.join(root, α))', result: 'CWE-22', line: 5 }
+]
+const witness = '"../../storage/invoices/0042.pdf"'
+const guide = 'absolute border-fg-placeholder'
+// Drafts until the product answers them for real.
+const questions = [
+  ['Does my code leave the sandbox?', 'No. A trace runs inside Edge Python holding one grant, to read the repo, so it reaches no network and no secret.'],
+  ['How is this different from a scanner that matches rules?', 'A rule finds code that looks like a bug someone already named. A trace solves every path from where a request enters to where it does harm, so it also reaches bugs nobody named yet.'],
+  ['What does a finding include?', 'The path it took through files and branches, the line it ends on, its CWE, and the input that walks it.'],
+  ['Which repos can it trace?', 'Any git repo you can paste the address of, on GitHub or any other host.'],
+  ['What does the free alarm do?', 'It traces the repo again on every push and writes to you only when a new path opens.']
+]
+const cell = 'flex flex-wrap content-center items-baseline justify-center gap-x-2 bg-page px-4 py-10 text-center text-lg text-fg-hint'
+const figure = 'text-[32px] leading-none text-fg sm:text-[40px]'
+// Every title on the page and the line under it, the first screen included.
+const heading = 'text-[24px] text-fg sm:text-[27px]'
+const lead = 'mt-1 text-md text-fg-hint sm:text-[16px]'
+
+// A size above a form field, lit while the pointer rests on it and held lit while it has the focus.
+const bar = '[&>span]:px-4 [&>span]:py-2.5 [&>span]:text-base sm:[&>span]:px-5 sm:[&>span]:py-3 sm:[&>span]:text-md [&>span]:transition-shadow [&>span]:hover:border-link/60 [&>span]:hover:ring-2 [&>span]:hover:ring-link/20 [&>span]:focus-within:border-link/60 [&>span]:focus-within:ring-2 [&>span]:focus-within:ring-link/20'
 const tag = 'shrink-0 whitespace-nowrap rounded-full border border-line-strong px-3 py-1 text-xs text-fg-faint transition hover:text-fg'
 const arrow = 'absolute top-0 flex size-7 items-center justify-center rounded-full border border-line bg-page text-fg-subtle transition enabled:hover:text-fg disabled:text-fg-disabled'
 const edge = 'pointer-events-none absolute inset-y-0 w-16 from-page to-transparent opacity-0 backdrop-blur-[2px] transition-opacity data-shown:opacity-100'
@@ -37,53 +87,204 @@ const edge = 'pointer-events-none absolute inset-y-0 w-16 from-page to-transpare
     document.documentElement.dataset.theme = localStorage.getItem('theme') ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
   </script>
 </head>
-<body class="bg-page text-fg flex min-h-dvh items-center justify-center p-3.5">
-  {/* The site header out of the flow like the footer, so the bar keeps the middle of the screen. */}
+<body class="bg-page text-fg">
+  {/* The site header out of the flow, so the bar keeps the middle of the first screen. */}
   <div class="fixed inset-x-0 top-0 z-10">
     <Header />
     <SignIn />
   </div>
 
-  {/* Lines from both edges into the bar, left out below 1024px. */}
-  <canvas data-flow aria-hidden="true" class="pointer-events-none fixed inset-0 hidden size-full lg:block"></canvas>
+  {/* Exactly one screen tall, holding the bar alone, and the page goes on below it. */}
+  <section class="relative flex h-svh items-center justify-center p-3.5">
+    {/* Lines from both edges into the bar, left out below 1024px. */}
+    <canvas data-flow aria-hidden="true" class="pointer-events-none absolute inset-0 hidden size-full lg:block"></canvas>
 
-  {/* The hidden label keeps its row, so its gap goes too or the bar sits low. */}
-  <form role="search" class="relative w-full max-w-[600px] text-base [&>div]:gap-0">
-    {/* Above and below the bar out of the flow, so the bar keeps the middle of the screen. */}
-    <div class="absolute inset-x-0 bottom-full mb-8 text-center">
-      <h1 class="text-xl text-fg">Trace a repo to its vulnerabilities</h1>
-      <p class="mt-1 text-fg-hint">Edge Python reads its code as a graph, not as text.</p>
-    </div>
-
-    <Field name="repo" label="Git repo" hideLabel placeholder="Paste any git repo URL" icon="fork" autocomplete="off" autocapitalize="off" spellcheck="false" class={bar}>
-      {/* Solid in the colour of the text, shown only once the bar holds something to send. */}
-      <button type="submit" aria-label="Trace" class="-my-1.5 -mr-2.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-fg text-page transition hover:bg-solid-hover peer-placeholder-shown:hidden">
-        <Icon name="up" size="sm" />
-      </button>
-    </Field>
-
-    {/* As wide as the bar, the tags running under the round arrows, which cut them on their own curve. */}
-    <div class="absolute inset-x-0 top-full mt-4 h-7">
-      <div data-examples class="flex h-full items-center gap-2 overflow-x-auto scroll-smooth px-9 motion-reduce:scroll-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {examples.map(([label, repo]) => <button type="button" data-repo={repo} class={tag}>{label}</button>)}
+    {/* The hidden label keeps its row, so its gap goes too or the bar sits low. */}
+    <form role="search" class="relative w-full max-w-[600px] text-base [&>div]:gap-0">
+      {/* Above and below the bar out of the flow, so the bar keeps the middle of the screen. */}
+      <div class="absolute inset-x-0 bottom-full mb-8 text-center">
+        {/* White glass over whatever runs behind it, softer in the dark theme so it never glares. */}
+        <span data-notes={JSON.stringify(notes)} class="mb-7 inline-flex items-center overflow-hidden whitespace-nowrap rounded-full border border-white/70 bg-white/60 px-3 py-1 text-xs text-fg shadow-sm backdrop-blur-md dark:border-white/15 dark:bg-white/10"><span>{notes[0]}</span></span>
+        <h1 class={heading}>Trace a repo to its vulnerabilities</h1>
+        <p class={lead}>Edge and rails reads its code as a graph, not as text.</p>
       </div>
 
-      {/* A soft edge on each side, shown while tags hide behind its arrow. */}
-      <span aria-hidden="true" data-edge="-1" class:list={[edge, 'left-0 bg-linear-to-r [mask-image:linear-gradient(to_right,black_45%,transparent)]']}></span>
-      <span aria-hidden="true" data-edge="1" class:list={[edge, 'right-0 bg-linear-to-l [mask-image:linear-gradient(to_left,black_45%,transparent)]']}></span>
+      <Field name="repo" label="Git repo" hideLabel placeholder="Paste any git repo URL" autocomplete="off" autocapitalize="off" spellcheck="false" class={bar}>
+        {/* Solid in the colour of the text, shown only once the bar holds something to send. */}
+        <button type="submit" aria-label="Trace" class="-my-1.5 -mr-2.5 flex size-7 shrink-0 sm:-my-2 sm:-mr-3.5 sm:size-8 items-center justify-center rounded-full bg-fg text-page transition hover:bg-solid-hover peer-placeholder-shown:hidden">
+          <Icon name="up" size="md" />
+        </button>
+      </Field>
 
-      <button type="button" data-scroll="-1" aria-label="Earlier examples" class:list={[arrow, 'left-0']}><Icon name="next" size="sm" class="rotate-180" /></button>
-      <button type="button" data-scroll="1" aria-label="More examples" class:list={[arrow, 'right-0']}><Icon name="next" size="sm" /></button>
+      {/* As wide as the bar, the tags running under the round arrows, which cut them on their own curve. */}
+      <div class="absolute inset-x-0 top-full mt-4 h-7">
+        <div data-examples class="flex h-full items-center gap-2 overflow-x-auto scroll-smooth px-9 motion-reduce:scroll-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {examples.map(([label, repo]) => <button type="button" data-repo={repo} class={tag}>{label}</button>)}
+        </div>
+
+        {/* A soft edge on each side, shown while tags hide behind its arrow. */}
+        <span aria-hidden="true" data-edge="-1" class:list={[edge, 'left-0 bg-linear-to-r [mask-image:linear-gradient(to_right,black_45%,transparent)]']}></span>
+        <span aria-hidden="true" data-edge="1" class:list={[edge, 'right-0 bg-linear-to-l [mask-image:linear-gradient(to_left,black_45%,transparent)]']}></span>
+
+        <button type="button" data-scroll="-1" aria-label="Earlier examples" class:list={[arrow, 'left-0']}><Icon name="next" size="sm" class="rotate-180" /></button>
+        <button type="button" data-scroll="1" aria-label="More examples" class:list={[arrow, 'right-0']}><Icon name="next" size="sm" /></button>
+      </div>
+    </form>
+
+    <div class="absolute inset-x-0 bottom-0 flex flex-col items-center gap-2 py-6 text-xs text-fg-disabled">
+      <a href="/" class="flex items-center gap-2"><Mark class="h-3.5 w-auto" aria-hidden="true" />Edge Python</a>
+      <p class="text-2xs">By tracing a repo, you accept our <a href="/terms" class="underline transition hover:text-fg-hint">Terms and Conditions</a>.</p>
+      <Icon name="down" size="lg" class="mt-2 animate-bob motion-reduce:animate-none" />
     </div>
-  </form>
+  </section>
 
-  <footer class="fixed inset-x-0 bottom-0 flex flex-col items-center gap-2 py-6 text-xs text-fg-disabled">
-    <a href="/" class="flex items-center gap-2"><Mark class="h-3.5 w-auto" aria-hidden="true" />Edge Python</a>
-    <p class="text-2xs">By tracing a repo, you accept our <a href="/terms" class="underline transition hover:text-fg-hint">Terms and Conditions</a>.</p>
-  </footer>
+  {/* Hairline cells, the line colour showing through a one pixel gap between them. */}
+  <section class="mx-auto flex max-w-[1200px] flex-col gap-3.5 px-3.5 pb-24 pt-24">
+    <div class="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-4 lg:grid-cols-8">
+      {[...weaknesses.map(([id, name]) => [`CWE-${id}`, name, `https://cwe.mitre.org/data/definitions/${id}.html`]), ['CWE', `And ${more} more`, 'https://cwe.mitre.org/data/index.html']].map(([code, name, href]) => (
+        <a href={href} target="_blank" rel="noopener noreferrer" class="group relative flex flex-col items-center justify-center gap-1 bg-page px-3 py-8 text-center transition hover:bg-surface">
+          <span class="font-mono text-2xs text-fg-faint">{code}</span>
+          <span class="text-sm text-fg-subtle transition group-hover:text-fg">{name}</span>
+          <Icon name="arrow" size="xs" class="absolute right-3 top-3 -rotate-45 text-fg-faint opacity-0 transition group-hover:opacity-100" />
+        </a>
+      ))}
+    </div>
+
+    <div class="grid gap-px overflow-hidden rounded-2xl border border-line bg-line lg:grid-cols-2">
+      <div class="grid gap-px sm:grid-cols-2">
+        <p class={cell}>Traced over <span class={figure}>17k</span> repos</p>
+        <p class={cell}>Reaches <span class={figure}>0-days</span> by solving paths, not matching rules</p>
+        <p class:list={[cell, 'items-center sm:col-span-2']}>Reads any repo on <span class="inline-flex items-center gap-1.5 text-fg"><Icon name="github" size="lg" />GitHub</span> or any git host</p>
+      </div>
+
+      <div data-demo class="flex flex-col justify-center bg-page p-5">
+        {/* Its own stack of layers, so the line and the faces never rise over the header. */}
+        <div class="relative isolate h-full overflow-hidden rounded-2xl border border-line-strong bg-page text-xs">
+          <div data-face class={face}>
+            <span data-rim aria-hidden="true" class={rim}></span>
+            <div data-scroller class:list={[pane, 'whitespace-pre leading-code']}>
+              <pre class:list={[COLORS, 'p-4']}><code data-lang="python">{snippet}</code></pre>
+            </div>
+            <Thumb axis="x" data-bar="x" />
+            <Thumb axis="y" data-bar="y" />
+          </div>
+
+          <div data-face class={face} style="translate: 0 100%">
+            <span data-rim aria-hidden="true" class={rim}></span>
+            <div data-scroller class:list={[pane, '@container text-2xs leading-5']}>
+              <div data-rows class="w-max min-w-[max(100%,24rem)] p-4"></div>
+            </div>
+            <Thumb axis="x" data-bar="x" />
+            <Thumb axis="y" data-bar="y" />
+          </div>
+
+          <div data-progress aria-hidden="true" class="absolute inset-x-0 top-0 z-10 h-0.5 origin-left scale-x-0 bg-link"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {/* Twice over in one track, so sliding it by half loops with no seam. */}
+  <div class="mx-auto max-w-[1200px] overflow-hidden px-3.5 pb-24 [mask-image:linear-gradient(to_right,transparent,black_12%,black_88%,transparent)]">
+    <ul aria-label="Languages a trace reads" class="flex w-max animate-marquee motion-reduce:animate-none">
+      {[...languages, ...languages].map(([name, path], at) => (
+        <li aria-hidden={at >= languages.length ? 'true' : undefined} class="flex shrink-0 items-center gap-2 pr-10 text-sm text-fg-hint">
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="size-5 fill-current"><path d={path} /></svg>
+          {name}
+        </li>
+      ))}
+    </ul>
+  </div>
+
+  {/* The code a finding walks beside the path it took, then the input that proves it. */}
+  <section class="mx-auto flex max-w-[1200px] flex-col gap-10 px-3.5 pb-24">
+    <div class="text-center">
+      <h2 class={heading}>Every finding comes with the input that proves it</h2>
+      <p class={lead}>Solving a path hands back the value that walks it, so a finding is never a guess.</p>
+    </div>
+
+    <div data-proof class="grid grid-cols-1 gap-px overflow-hidden rounded-2xl border border-line bg-line lg:grid-cols-2">
+      <div class="relative min-w-0 bg-page">
+        <div data-scroller class="flex overflow-x-auto py-6 font-mono text-xs leading-code [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <ol aria-hidden="true" class="shrink-0 select-none pl-6 pr-4 text-right text-fg-placeholder">
+            {controller.map((_, at) => <li data-number class="transition-colors data-on:text-link data-hit:text-danger">{at + 1}</li>)}
+          </ol>
+          <pre class:list={[COLORS, 'grow pr-6 [&_.line]:inline-block [&_.line]:min-w-full [&_.line]:transition-colors [&_.line]:data-on:bg-link/8 [&_.line]:data-hit:bg-danger/10']}><code data-listing data-lang="ruby">{controller.map((line, at) => <>{at ? '\n' : ''}<span class="line">{line}</span></>)}</code></pre>
+        </div>
+        <Thumb axis="x" data-bar="x" />
+      </div>
+
+      <div class="flex flex-col bg-page p-6 font-mono text-xs">
+        {proof.map((step, at) => (
+          <div data-step data-line={step.line} data-hit={step.result.startsWith('CWE') ? '' : undefined} data-more={at > 0 && at < proof.length - 1 ? '' : undefined} class="group grid min-h-8 grid-cols-[1fr_auto] items-center gap-3">
+            <span class="flex min-w-0 items-center self-stretch">
+              {at > 0 && (
+                <span class="relative w-5 shrink-0 self-stretch">
+                  {/* Down to the elbow, and on to the next sibling once that one is shown. */}
+                  <span class:list={[guide, 'left-1/2 top-0 h-[calc(50%-6px)] border-l group-data-more:h-full']}></span>
+                  <span class:list={[guide, 'left-1/2 top-[calc(50%-6px)] h-1.5 w-1/2 rounded-bl-[6px] border-b border-l']}></span>
+                </span>
+              )}
+              <span class:list={['ml-1 shrink-0', step.result.startsWith('CWE') && 'text-danger']}>{step.name}</span>
+              <span class="ml-2 truncate text-fg-hint">{step.detail}</span>
+            </span>
+            <span class="flex items-center gap-2">
+              <span class:list={[step.result.startsWith('CWE') ? 'text-danger' : 'text-fg-hint']}>{step.result}</span>
+              <span class="shrink-0 rounded-full border border-line-strong px-1.5 text-2xs text-fg-subtle">line {step.line}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Always one line, cut short with an ellipsis where the screen runs out. */}
+      <p class="flex min-w-0 items-baseline gap-x-3 whitespace-nowrap bg-page px-6 py-5 font-mono text-xs lg:col-span-2">
+        <span class="shrink-0 font-sans text-sm text-fg-hint">The input that proves it</span>
+        <span class="min-w-0 truncate"><span class="text-fg-subtle">params[:name] = </span><span data-witness data-solved class="text-fg-hint data-solved:text-link">{witness}</span></span>
+      </p>
+    </div>
+  </section>
+
+  {/* The same plans as their own page, switch and cards alike. */}
+  <section class="mx-auto flex max-w-[1200px] flex-col gap-10 px-3.5 pb-24">
+    <div class="text-center">
+      <h2 class={heading}>Plans</h2>
+      <p class={lead}>What you keep, for how long, and how provable it is.</p>
+    </div>
+
+    <PlanPicker />
+  </section>
+
+  {/* One answer open at a time, then a way to ask anything the list leaves out. */}
+  <section class="mx-auto flex w-full max-w-[760px] flex-col gap-10 px-3.5 pb-24">
+    <h2 class:list={[heading, 'text-center']}>Questions</h2>
+
+    <div class="flex flex-col gap-px overflow-hidden rounded-2xl border border-line bg-line">
+      {questions.map(([question, answer]) => (
+        <details name="questions" class="group bg-page">
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-4 text-sm text-fg-subtle transition select-none hover:text-fg group-open:text-fg [&::-webkit-details-marker]:hidden">
+            {question}
+            <Icon name="next" size="sm" class="shrink-0 rotate-90 text-fg-hint transition-transform group-open:-rotate-90" />
+          </summary>
+          <p class="px-6 pb-5 text-sm text-fg-hint">{answer}</p>
+        </details>
+      ))}
+    </div>
+
+    <p class="text-center text-sm text-fg-hint">
+      Get <button type="button" data-dialog-open="agent" class="underline transition hover:text-fg">machine learning assistance</button> or maybe... <a href="mailto:c.sutton.dylan@gmail.com" class="underline transition hover:text-fg">human assistance</a>?
+    </p>
+  </section>
+
+  <Agent />
+  <Scrollbar always />
+  <Footer />
 
   <script>
     import { flow } from '../../lib/programs/flow'
+    import { notes } from '../../lib/programs/notes'
+    import { proof } from '../../lib/programs/proof'
+    import { replay } from '../../lib/programs/replay'
+    import { thumbs } from '../../lib/scrollbar'
 
     const canvas = document.querySelector<HTMLCanvasElement>('[data-flow]')!
     const input = document.querySelector<HTMLInputElement>('input[name="repo"]')!
@@ -91,7 +292,15 @@ const edge = 'pointer-events-none absolute inset-y-0 w-16 from-page to-transpare
     const arrows = document.querySelectorAll<HTMLButtonElement>('[data-scroll]')
     const edges = document.querySelectorAll<HTMLElement>('[data-edge]')
 
+    const demo = document.querySelector<HTMLElement>('[data-demo]')!
+    const finding = document.querySelector<HTMLElement>('[data-proof]')!
+
     flow(canvas, input.parentElement!)
+    notes(document.querySelector<HTMLElement>('[data-notes]')!)
+    replay(demo)
+    proof(finding)
+    // Kept clear of the rounded corners of the cards they run along.
+    for (const root of [demo, finding]) thumbs(root, 16)
 
     // Nothing runs a trace yet, so sending keeps the page where it is.
     input.form!.addEventListener('submit', (event) => event.preventDefault())

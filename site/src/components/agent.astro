@@ -1,6 +1,7 @@
 ---
 import Icon from './ui/icon.astro'
 import Dialog from './ui/dialog.astro'
+import Thumb from './ui/thumb.astro'
 
 // A mock briefing until the real one is generated.
 const briefing = `
@@ -15,14 +16,13 @@ Ask a question in any language with POST https://ask.edgepython.com {"question":
 Pack and ship with edge build, then edge publish app.edge
 `
 
-// The native bar stays hidden, so this one shows while the briefing scrolls sideways.
-const xbar = 'pointer-events-none absolute bottom-0.5 left-0 h-1 rounded-full bg-fg-disabled opacity-0 transition-[opacity,background-color] duration-200 before:absolute before:inset-x-0 before:-inset-y-1.5 hover:bg-fg-hint data-dragging:bg-fg-hint data-shown:pointer-events-auto data-shown:opacity-100'
 ---
 
 <Dialog id="agent" title="Connect an agent" subtitle="Copy and paste this into your agent session.">
   <div class="relative rounded-2xl border border-line-emphasis bg-surface overflow-hidden p-4">
     <pre data-briefing class="-m-4 p-4 overflow-auto whitespace-pre font-mono text-xs leading-code [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{briefing}</pre>
-    <div data-briefing-bar aria-hidden="true" class={xbar}></div>
+    {/* The native bar stays hidden, so this one shows while the briefing scrolls sideways. */}
+    <Thumb axis="x" data-briefing-bar />
   </div>
 
   <button type="button" data-agent-copy class="flex items-center justify-center gap-2 px-4 py-2 rounded-full transition bg-fg text-page hover:bg-solid-hover border border-transparent">

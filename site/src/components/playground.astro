@@ -1,6 +1,8 @@
 ---
 import { env } from 'cloudflare:workers'
 import Icon from './ui/icon.astro'
+import Thumb from './ui/thumb.astro'
+import { COLORS } from '../lib/docs/shiki'
 
 interface Props {
   // The example's edge-manifest as written, an empty one when it declares none.
@@ -51,10 +53,6 @@ const manifest = (() => {
 
 const panel = 'bg-panel rounded-2xl mb-6'
 const card = 'relative bg-page border border-line-strong rounded-2xl overflow-hidden p-4'
-// Along the foot and the right of a box while a pointer rests in it or its file scrolls that way.
-const thumb = 'pointer-events-none absolute rounded-full bg-fg-disabled opacity-0 transition-[opacity,background-color] duration-200 before:absolute hover:bg-fg-hint data-dragging:bg-fg-hint data-shown:pointer-events-auto data-shown:opacity-100'
-const xbar = `${thumb} bottom-0.5 left-0 h-1 before:inset-x-0 before:-inset-y-1.5`
-const ybar = `${thumb} right-0.5 top-0 w-1 before:inset-y-0 before:-inset-x-1.5`
 const footer = 'flex items-center justify-between py-3 px-[17px] text-2xs text-fg-hint'
 // The header's own menu, shown while the script below marks its group open.
 const menu = 'invisible absolute left-0 top-full z-10 pt-2 opacity-0 -translate-y-1 transition-all group-data-open/file:visible group-data-open/file:opacity-100 group-data-open/file:translate-y-0'
@@ -63,7 +61,6 @@ const pick = 'block w-full px-4 py-1 text-left text-fg-subtle hover:bg-line-stro
 // Each file is a textarea over the highlighted copy of itself.
 const pane = '-m-4 grid overflow-auto font-mono leading-code [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
 const paint = 'pointer-events-none col-start-1 row-start-1 m-0 whitespace-pre p-4 font-mono leading-code'
-const colors = '[&_span]:text-(--shiki-light) dark:[&_span]:text-(--shiki-dark)'
 const field = 'col-start-1 row-start-1 w-full resize-none overflow-hidden whitespace-pre border-0 bg-transparent p-4 font-mono leading-code text-transparent caret-fg outline-none placeholder:text-fg-placeholder selection:bg-link/30 selection:text-transparent'
 const tall = `max-height:calc(${maxLines} * var(--leading-code) + 2rem)`
 // The output and the trace share one box, so switching between them never moves the page.
@@ -74,19 +71,19 @@ const box = `min-height:calc(${minLines} * var(--leading-code) + 2rem);max-heigh
   <div class={panel}>
     <div class:list={[card, 'text-xs']}>
       <div class={pane} style={tall}>
-        <pre aria-hidden="true" class={paint}><code data-view class={colors}></code></pre>
+        <pre aria-hidden="true" class={paint}><code data-view class={COLORS}></code></pre>
         <textarea
           data-input name={name} rows={rows} placeholder={placeholder} spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="Edge Python source"
           class={field}>{code}</textarea>
       </div>
 
       <div data-manifest hidden class={pane} style={tall}>
-        <pre aria-hidden="true" class={paint}><code class={colors}></code></pre>
+        <pre aria-hidden="true" class={paint}><code class={COLORS}></code></pre>
         <textarea rows={rows} spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="edge.json" class={field}>{manifest}</textarea>
       </div>
 
-      <div data-bar="x" aria-hidden="true" class={xbar}></div>
-      <div data-bar="y" aria-hidden="true" class={ybar}></div>
+      <Thumb axis="x" data-bar="x" />
+      <Thumb axis="y" data-bar="y" />
     </div>
 
     <div class={footer}>
@@ -124,8 +121,8 @@ const box = `min-height:calc(${minLines} * var(--leading-code) + 2rem);max-heigh
         <div data-rows class="w-max min-w-[max(100%,24rem)]"></div>
       </div>
 
-      <div data-bar="x" aria-hidden="true" class={xbar}></div>
-      <div data-bar="y" aria-hidden="true" class={ybar}></div>
+      <Thumb axis="x" data-bar="x" />
+      <Thumb axis="y" data-bar="y" />
     </div>
 
     <div class={footer}>

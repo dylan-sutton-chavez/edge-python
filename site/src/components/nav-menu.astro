@@ -1,6 +1,7 @@
 ---
 import Icon from './ui/icon.astro'
 import Sheet from './ui/sheet.astro'
+import { hidden } from '../draft'
 
 type Entry = { label: string; href: string; match?: string; blank?: boolean }
 
@@ -9,7 +10,7 @@ interface Props {
   class?: string
 }
 
-const links: { label: string; pages: Entry[] }[] = [
+const groups: { label: string; pages: Entry[] }[] = [
   {
     label: 'Docs',
     pages: [
@@ -26,8 +27,17 @@ const links: { label: string; pages: Entry[] }[] = [
       { label: 'GitHub', href: 'https://github.com/dylan-sutton-chavez/edge-python', blank: true },
       { label: 'Discord', href: 'https://discord.com/invite/WhXYnn2YRc', blank: true }
     ]
+  },
+  {
+    label: 'Products',
+    pages: [
+      { label: 'Edge and Rails', href: '/program/edge-and-rails' }
+    ]
   }
 ]
+
+// A group whose pages are all still drafts leaves the nav along with them.
+const links = groups.map((group) => ({ ...group, pages: group.pages.filter((page) => !hidden(page.href)) })).filter((group) => group.pages.length > 0)
 
 const { current, class: className } = Astro.props
 const { user } = Astro.locals

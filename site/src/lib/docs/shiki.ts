@@ -7,4 +7,7 @@ export const ALIAS: Record<string, string> = { 'edge-python': 'python', 'edge-ma
 // Plain text has no grammar, so a block asking for it is escaped and left alone.
 export const PLAIN = 'text'
 
+// Each span takes the colour of the theme in use, since the highlight leaves both on it.
+export const COLORS = '[&_span]:text-(--shiki-light) dark:[&_span]:text-(--shiki-dark)'
+
 export const shikiConfig = { themes: THEMES, defaultColor: false as const, langAlias: ALIAS }

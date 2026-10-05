@@ -68,6 +68,16 @@
   --leading-code: 21px;
 
   --default-transition-duration: 200ms;
+
+  --animate-marquee: marquee 20s linear infinite;
+  @keyframes marquee {
+    to { transform: translateX(-50%); }
+  }
+
+  --animate-bob: bob 1.6s ease-in-out infinite;
+  @keyframes bob {
+    50% { transform: translateY(4px); }
+  }
 }
 
 @theme inline {

@@ -12,11 +12,14 @@ const ARRIVE = 0.09
 const DOTS = 3
 const BLUE = 4
 // What a square travels each second as a share of the screen width, measured on the original.
-const SPEED = 0.022
-// How many times faster the squares run while the bar is lit, and how quickly they get there.
-const BOOST = 20
-const EASE = 6
-const SIZE = 3
+const SPEED = 0.0317
+// How many times faster the squares run while the bar is lit, and the seconds they ease up and back down over.
+const BOOST = 15.6
+const RAMP = 1.5
+const FALL = 1.2
+const SIZE = 4.6
+// Lines wider than a hairline, in step with the squares.
+const WIDTH = 1.53
 // How far a square fades in from the edge and out into the bar, so none of them pops.
 const FADE = 24
 const SAMPLES = 48
@@ -60,6 +63,8 @@ export function flow(canvas: HTMLCanvasElement, target: HTMLElement) {
   let paths: Path[] = []
   let dots: Dot[] = []
   let colors = { line: '', dot: '', blue: '' }
+  // Measured from the canvas and not the window, since the canvas scrolls away with the first screen.
+  let box = new DOMRect()
 
   const read = () => {
     const style = getComputedStyle(document.documentElement)
@@ -68,19 +73,20 @@ export function flow(canvas: HTMLCanvasElement, target: HTMLElement) {
 
   const layout = () => {
     const ratio = devicePixelRatio
-    canvas.width = innerWidth * ratio
-    canvas.height = innerHeight * ratio
+    box = canvas.getBoundingClientRect()
+    canvas.width = box.width * ratio
+    canvas.height = box.height * ratio
     context.setTransform(ratio, 0, 0, ratio, 0, 0)
 
     const bar = target.getBoundingClientRect()
-    const middle = bar.top + bar.height / 2
+    const middle = bar.top - box.top + bar.height / 2
     const radius = bar.height / 2
     // How far in from the end of the bar its rounded edge sits at a given height, so a line meets the curve and not the box.
     const inset = (rise: number) => radius - Math.sqrt(Math.max(0, radius * radius - rise * rise))
     paths = []
-    for (const [edge, side, inward] of [[0, bar.left, 1], [innerWidth, bar.right, -1]] as const) {
+    for (const [edge, side, inward] of [[0, bar.left - box.left, 1], [box.width, bar.right - box.left, -1]] as const) {
       for (let line = 0; line < LINES; line++) {
-        const from = { x: edge, y: innerHeight * (TOP + ((BOTTOM - TOP) * line) / (LINES - 1)) }
+        const from = { x: edge, y: box.height * (TOP + ((BOTTOM - TOP) * line) / (LINES - 1)) }
         const rise = (line - (LINES - 1) / 2) * bar.height * ARRIVE
         const to = { x: side + inward * inset(rise), y: middle + rise }
         paths.push(curve(from, to))
@@ -91,8 +97,8 @@ export function flow(canvas: HTMLCanvasElement, target: HTMLElement) {
   }
 
   const draw = (travel: number) => {
-    context.clearRect(0, 0, innerWidth, innerHeight)
-    context.lineWidth = 1
+    context.clearRect(0, 0, box.width, box.height)
+    context.lineWidth = WIDTH
     context.strokeStyle = colors.line
     for (const path of paths) {
       context.beginPath()
@@ -114,7 +120,7 @@ export function flow(canvas: HTMLCanvasElement, target: HTMLElement) {
 
   // How far the squares have run, summed frame by frame since their speed changes.
   let travel = 0
-  let boost = 1
+  let rise = 0
   let last = 0
 
   const frame = (now: number) => {
@@ -122,8 +128,8 @@ export function flow(canvas: HTMLCanvasElement, target: HTMLElement) {
     last = now
     // Fast while the pointer rests on the bar, while it holds the focus or while it holds a repo, and eased so the squares never jump.
     const lit = target.matches(':hover, :focus-within') || Boolean(field?.value)
-    boost += ((lit ? BOOST : 1) - boost) * Math.min(1, seconds * EASE)
-    travel += seconds * SPEED * innerWidth * boost
+    rise = Math.min(1, Math.max(0, rise + (lit ? seconds / RAMP : -seconds / FALL)))
+    travel += seconds * SPEED * box.width * (1 + (BOOST - 1) * rise * rise * (3 - 2 * rise))
     // Hidden below 1024px, where the loop keeps its place but draws nothing. A still page runs this once, at no distance.
     if (canvas.clientWidth > 0) draw(travel)
     if (!still.matches) requestAnimationFrame(frame)
