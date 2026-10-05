@@ -8,10 +8,14 @@ export type Message = {
   author: { id: string; bot?: boolean }
   mentions: { id: string }[]
   mention_roles: string[]
-  referenced_message?: { id: string; author: { id: string } }
+  referenced_message?: { id: string; content: string; author: { id: string; bot?: boolean } }
 }
 
 export type Self = { id: string; role?: string }
+
+// A mention under somebody else's question asks that question, quoted ahead of what the mention adds.
+export const asking = (message: Message, quoted?: { content: string }) =>
+  quoted ? `${quoted.content.split('\n').map((line) => `> ${line}`).join('\n')}\n\n${message.content}` : message.content
 
 async function call<T>(token: string, path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${DISCORD_API}${path}`, {

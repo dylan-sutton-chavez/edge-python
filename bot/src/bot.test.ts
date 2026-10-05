@@ -6,7 +6,7 @@ import { stale } from './alarm'
 import { cited } from './answer'
 import { left, spend } from './budget'
 import { HISTORY_MS, MAX_QUESTION, PER_DAY, SESSION_MS, TICK_MS, TURNS } from './config'
-import { spoken } from './discord'
+import { asking, spoken } from './discord'
 import { run } from './run'
 import { search } from './search'
 import { digest, link, remember, rooted, sweep, threaded, turns, type Turn } from './session'
@@ -179,6 +179,13 @@ test('a run prints what it computes and stops where the engine says', () => {
   assert.deepEqual(run(engine, 'print(4 * 1024**3 // (31 * 1024))'), { output: '135300\n' })
   assert.match(run(engine, 'while True:\n    pass').error!, /budget exceeded/)
   assert.match(run(engine, 'import time').error!, /not provided/)
+})
+
+test('a mention under somebody else asks their question', () => {
+  const mention = { id: '2', content: '@bot help them', author: { id: 'b' }, mentions: [], mention_roles: [] }
+
+  assert.equal(asking(mention, { content: 'How do I install\nthe CLI?' }), '> How do I install\n> the CLI?\n\n@bot help them')
+  assert.equal(asking(mention), '@bot help them')
 })
 
 // Discord breaks a line after a block by itself, so a blank line written there shows as two.

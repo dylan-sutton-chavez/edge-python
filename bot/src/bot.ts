@@ -4,7 +4,7 @@ import { stale } from './alarm'
 import { answer } from './answer'
 import { left, spend } from './budget'
 import { FIRST_MS, PER_TICK, TICK_MS } from './config'
-import { born, calls, channels, reply, since, spoken, whoami, type Message } from './discord'
+import { asking, born, calls, channels, reply, since, spoken, whoami, type Message } from './discord'
 import { link, remember, rooted, sweep, threaded, turns } from './session'
 
 export type Env = { AI: Ai; DB: D1Database; DISCORD_TOKEN: string; GUILD: string; SITE: string }
@@ -85,16 +85,21 @@ export class Bot extends DurableObject<Env> {
 
   // A reply carries on the thread it answers, and anything else opens one rooted at itself.
   private async respond(channel: string, message: Message) {
-    const parent = message.referenced_message?.id
-    const id = (parent && (await threaded(this.env, parent))) || (await rooted(message.id))
+    const parent = message.referenced_message
+    const session = parent && (await threaded(this.env, parent.id))
+    const id = session || (await rooted(message.id))
+
+    // A reply to a person rather than to the bot carries their question, and the answer goes under it.
+    const quoted = parent && !session && !parent.author.bot && parent.content.trim() ? parent : undefined
+    const question = asking(message, quoted)
     const held = await turns(this.env, id, 'discord')
 
     await spend(this.env)
 
-    const found = await answer({ ...this.env, ENGINE }, held, message.content)
-    const sent = await reply(this.env.DISCORD_TOKEN, channel, message.id, spoken(found))
+    const found = await answer({ ...this.env, ENGINE }, held, question)
+    const sent = await reply(this.env.DISCORD_TOKEN, channel, (quoted ?? message).id, spoken(found))
 
-    await remember(this.env, id, 'discord', [...held, { role: 'user', content: message.content }, { role: 'assistant', content: found.text }])
+    await remember(this.env, id, 'discord', [...held, { role: 'user', content: question }, { role: 'assistant', content: found.text }])
     await link(this.env, sent.id, id)
   }
 }
