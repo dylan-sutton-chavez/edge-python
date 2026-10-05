@@ -6,6 +6,9 @@ export const REFERENCE_MS = 10 * 60_000
 export const TICK_MS = 10_000
 export const FETCH_LIMIT = 50
 
+// How far back a place the bot sees for the first time is answered, so the question that opened it is not lost and its history is not replayed.
+export const FIRST_MS = 5 * 60_000
+
 // How many hits a search reads and how much of each it keeps.
 export const PASSAGES = 5
 export const MAX_PASSAGE = 1_500

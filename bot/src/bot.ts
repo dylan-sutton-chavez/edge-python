@@ -3,8 +3,8 @@ import ENGINE from '../compiler.wasm'
 import { stale } from './alarm'
 import { answer } from './answer'
 import { left, spend } from './budget'
-import { PER_TICK, TICK_MS } from './config'
-import { calls, channels, reply, since, spoken, whoami, type Message } from './discord'
+import { FIRST_MS, PER_TICK, TICK_MS } from './config'
+import { born, calls, channels, reply, since, spoken, whoami, type Message } from './discord'
 import { link, remember, rooted, sweep, threaded, turns } from './session'
 
 export type Env = { AI: Ai; DB: D1Database; DISCORD_TOKEN: string; GUILD: string; SITE: string }
@@ -56,10 +56,15 @@ export class Bot extends DurableObject<Env> {
       const fresh = await since(token, channel.id, after).catch(() => [])
       if (!fresh.length) continue
 
-      // A first pass only learns where the channel is, and without the MESSAGE CONTENT intent a mention of the bot's role arrives with no text to answer.
-      const asked = after ? fresh.filter((each) => !each.author.bot && each.content.trim() && calls(each, self)) : []
+      // A place seen for the first time answers only its last few minutes, and a mention with no text, which a role brings without the MESSAGE CONTENT intent, is logged instead of answered.
+      const asked = fresh.filter((each) => !each.author.bot && calls(each, self) && (after !== null || born(each.id) > Date.now() - FIRST_MS))
 
       for (const message of asked) {
+        if (!message.content.trim()) {
+          console.log('no text', message.id)
+          continue
+        }
+
         // What this tick cannot afford waits for the next, since the cursor has not passed it yet.
         if (budget <= 0) return
         budget -= 1

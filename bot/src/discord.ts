@@ -31,12 +31,24 @@ export async function whoami(token: string, guild: string): Promise<Self> {
   return { id, role: roles.find((each) => each.tags?.bot_id === id)?.id }
 }
 
-export const channels = async (token: string, guild: string) =>
-  (await call<{ id: string; type: number }[]>(token, `/guilds/${guild}/channels`)).filter((each) => each.type === 0)
+// Every place a message is written, text and announcement channels and the threads open in them, forum posts included.
+const WRITTEN = new Set([0, 5, 10, 11, 12])
+
+export async function channels(token: string, guild: string) {
+  const [listed, open] = await Promise.all([
+    call<{ id: string; type: number }[]>(token, `/guilds/${guild}/channels`),
+    call<{ threads: { id: string; type: number }[] }>(token, `/guilds/${guild}/threads/active`).catch(() => ({ threads: [] }))
+  ])
+
+  return [...listed, ...open.threads].filter((each) => WRITTEN.has(each.type))
+}
 
 // Oldest first, because a cursor only moves forward.
 export const since = async (token: string, channel: string, after: string | null) =>
-  (await call<Message[]>(token, `/channels/${channel}/messages${after ? `?after=${after}&limit=${FETCH_LIMIT}` : '?limit=1'}`)).reverse()
+  (await call<Message[]>(token, `/channels/${channel}/messages?limit=${FETCH_LIMIT}${after ? `&after=${after}` : ''}`)).reverse()
+
+// When a message was written, which Discord keeps in the top bits of its id.
+export const born = (id: string) => Number(BigInt(id) >> 22n) + 1_420_070_400_000
 
 export const calls = (message: Message, self: Self) =>
   message.mentions.some((each) => each.id === self.id) ||

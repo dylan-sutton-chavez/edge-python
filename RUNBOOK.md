@@ -24,6 +24,6 @@ A schema change edits `site/db/schema.sql` and adds its step to `site/db/migrati
 
 ## The Discord bot
 
-`DISCORD_TOKEN` is the only secret the bot needs, and it has no environment of its own since it answers one server. It registers no commands and reads messages over the REST API, so the MESSAGE CONTENT intent is what the token depends on rather than anything in the code. Resetting the token in the developer portal invalidates the old one at once, so the secret changes in the same move.
+`DISCORD_TOKEN` is its only secret, and the token needs the MESSAGE CONTENT intent turned on in the developer portal. Resetting the token there invalidates the old one at once, so the secret changes in the same move.
 
-A Durable Object alarm asks Discord what was said since it last read, so nothing is held open and a restart or a deploy picks up where it left off. `bot.yml` ships it on a push that touches `bot/` and never on a tag, since the bot reads the site over http the way any reader does. The `compiler.wasm` it runs code on is fetched at deploy, since a Worker cannot compile wasm while it runs, so a release reaches it with the next push to `bot/`. It answers a mention or a reply in any channel it can read, and `GUILD` fixes the one server. The `quiet` switch in `budget` silences both doors with no deploy, and every new day keeps it.
+`bot.yml` ships it on a push to `bot/` and never on a tag, so a release reaches its engine with the next push there. `GUILD` in `bot/names.ts` fixes the one server, and `quiet` set to 1 on the newest row of `budget` silences it with no deploy.
