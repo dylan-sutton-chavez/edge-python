@@ -158,8 +158,8 @@ const edge = 'pointer-events-none absolute inset-y-0 w-16 from-page to-transpare
       </div>
 
       <div data-demo class="flex flex-col justify-center bg-page p-5">
-        {/* Its own stack of layers, so the line and the faces never rise over the header. */}
-        <div class="relative isolate h-full overflow-hidden rounded-2xl border border-line-strong bg-page text-xs">
+        {/* Its own layers, so nothing in it rises over the header, and a fixed height once stacked. */}
+        <div class="relative isolate h-52 overflow-hidden rounded-2xl border border-line-strong bg-page text-xs lg:h-full">
           <div data-face class={face}>
             <span data-rim aria-hidden="true" class={rim}></span>
             <div data-scroller class:list={[pane, 'whitespace-pre leading-code']}>
