@@ -15,7 +15,7 @@ curl https://edgepython.com/api/docs/reference/cli
 
 ## Searching
 
-`GET /api/search?q=<term>` is one query over four shelves, and it answers with `docs`, `people`, `programs` and `packages`. A hit carries the address it was found at, so the reading of it is that address under `/api`.
+`GET /api/search?q=<term>` is one query over four shelves, and it answers with `docs`, `people`, `services` and `packages`. A hit carries the address it was found at, so the reading of it is that address under `/api`.
 
 ```json
 {
@@ -27,7 +27,7 @@ curl https://edgepython.com/api/docs/reference/cli
       "snippet": "…a worker keeps its heap between calls…"
     }
   ],
-  "people": [], "programs": [], "packages": []
+  "people": [], "services": [], "packages": []
 }
 ```
 
@@ -42,7 +42,7 @@ A query matches the words a page contains, all of them in any order, and on thes
 | `GET /api/package/<name>` | what a package is, its live versions and the index of its own pages |
 | `GET /api/package/<name>/<slug>` | one of those pages |
 | `GET /api/@<handle>` | a person and the shelf they publish |
-| `GET /api/program/<name>` | one program |
+| `GET /api/service/<name>` | one service |
 
 A `?v=` reads an older release of a package, and the bare address always reads the newest one still live.
 
