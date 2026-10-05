@@ -1,0 +1,19 @@
+{
+  "name": "cdn",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "stage": "tsx src/stage.ts",
+    "serve": "tsx src/serve.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "miniflare": "5.20260918.0-alpha",
+    "tsx": "^4.23.13",
+    "typescript": "^6.0.3"
+  }
+}

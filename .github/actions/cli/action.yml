@@ -17,13 +17,16 @@ inputs:
 runs:
   using: composite
   steps:
-    # cli/build.rs embeds the speed compiler from tmp.
+    # cli/build.rs embeds the speed compiler the compiler job staged.
     - name: Fetch the build inputs
+      uses: actions/download-artifact@v8
+      with:
+        name: cdn-compiler
+        path: _inputs
+
+    - name: Point the build at them
       shell: bash
-      run: |
-        mkdir -p _inputs
-        curl -fsSL --retry 3 "$EDGE_CDN_BASE/_build/compiler-cli.wasm" -o _inputs/compiler-cli.wasm
-        echo "EDGE_COMPILER_WASM=$GITHUB_WORKSPACE/_inputs/compiler-cli.wasm" >> "$GITHUB_ENV"
+      run: echo "EDGE_COMPILER_WASM=$GITHUB_WORKSPACE/_inputs/_build/compiler-cli.wasm" >> "$GITHUB_ENV"
 
     # mozjs builds SpiderMonkey from source on every target, which needs clang, python and llvm-objdump.
     - name: SpiderMonkey build tools
@@ -131,11 +134,12 @@ runs:
         tar -C "target/$TARGET/release" -czf "edge-$TARGET.tar.gz" edge
 
     # The tarball and the install scripts land under cli/.
-    - name: Stage on tmp
+    - name: Stage
       if: inputs.mode == 'release'
-      uses: ./.github/actions/upload
+      uses: ./.github/actions/stage
       with:
         part: cli
+        name: cdn-cli-${{ inputs.target }}
 
     # The plugin suite in plugins.json loads this pdk/example build from the root target dir.
     - name: Build the plugin fixture

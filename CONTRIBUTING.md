@@ -10,7 +10,7 @@ Include a minimal failing script, the command used to run it, and the expected a
 
 For a large change, open an issue or email [c.sutton.dylan@gmail.com](mailto:c.sutton.dylan@gmail.com) first so it can be accepted once ready.
 
-Pull requests are welcome in every part under the Apache 2.0 License, which is all but `lang/`, `site/`, `infra/` and `bot/`. Those four stay free of anyone else's copyright, so a patch to them is closed with thanks and written again by the maintainer, while an issue about them is always welcome. The licenses are in [README.md](README.md#license).
+Pull requests are welcome in every part under the Apache 2.0 License. The licenses are in [README.md](README.md#license).
 
 - New behavior comes with tests.
 - Docs describe the code as it is after the change.
@@ -35,7 +35,7 @@ Comments are one line, at most one per block, and deleted when redundant. No fil
 
 ## Building
 
-The root Cargo workspace holds the engine, `abi`, `pdk`, `skill`, `lang` and `bench`, and `cli/` and `fuzz/` are workspaces of their own. `rust-toolchain.toml` pins every build to one Rust release, so the bench counts the same `compiler.wasm` everywhere.
+The root Cargo workspace holds the engine, `abi`, `pdk`, `skill` and `bench`, and `cli/` and `fuzz/` are workspaces of their own. `rust-toolchain.toml` pins every build to one Rust release, so the bench counts the same `compiler.wasm` everywhere.
 
 ```bash
 cargo wasm # compiler.wasm, CI ships a smaller build
@@ -77,7 +77,7 @@ Every run prints how the cases already in the snapshot moved, even when another 
 The JS, CLI and skill suites read the builds from a CDN, the way CI does. Stage what you built and serve it locally with no credentials, then point the suites at it. A suite without `EDGE_CDN_BASE` fails before it starts, so no test reaches the production CDN.
 
 ```bash
-cd infra && npm ci && npm run stage -- ../_cdn && npm run cdn:local -- ../_cdn # keep it running
+cd cdn && npm ci && npm run stage -- ../_cdn && npm run serve -- ../_cdn # keep it running
 ```
 
 ```bash
@@ -96,40 +96,13 @@ The lock cases of the CLI serve their own registry on loopback through `EDGE_SIT
 - `fuzz/` runs coverage-guided fuzzing of the lexer, parser, and VM on [cargo-afl](https://github.com/rust-fuzz/afl.rs). Campaigns and crash triage are in [Fuzzing](https://edgepython.com/docs/implementation/fuzzing).
 - [`miri.yml`](.github/workflows/miri.yml) interprets the same corpora under [Miri](https://github.com/rust-lang/miri) once a day, on a nightly of its own, for undefined behavior the native build runs past. Run one module with `cargo +nightly miri test -p edge-python --test tests vm::`.
 
-## Site and Docs
+## Docs
 
-`docs/` holds MDX pages ordered by numeric prefix, and `site/` renders them under `/docs`. The site is Astro on Cloudflare Workers with a D1 database, and runs locally on miniflare with no credentials, printing the sign-in code to the terminal.
+`docs/` holds MDX pages ordered by numeric prefix.
 
-```bash
-cd site && npm ci
-npm run dev # port 4322
-EDGE_ENV=prod npm run dev # the same tree as production sees it
-npm run check
-npx playwright install --with-deps chromium firefox webkit # once
-npm test # builds the Worker and drives it in three engines
-```
-
-- [`site/src/draft.ts`](site/src/draft.ts) names what is still being built, a path for a page and a fragment for a surface inside one. Under `EDGE_ENV=prod` a page answers 404 and the rest is rewritten out of the html.
 - An `edge-python` code block followed by an `output` block becomes a playground on the real engine, so every example and its output stay a verifiable pair.
-- A page nests one folder deep at most, carries a numeric prefix on every path segment, opens with a closed frontmatter block holding a `title` and a `description`, and has exactly one top-level heading. `npm run build` refuses a page that breaks any of it, and `edge build` holds the `docs` directory of a package to the same rules. Both read [`convention.ts`](site/src/lib/docs/convention.ts) and [`docs.rs`](cli/src/docs.rs), kept in step by [`docs.json`](tests/cases/docs.json), so a rule changed on one side fails on the other.
+- A page nests one folder deep at most, carries a numeric prefix on every path segment, opens with a closed frontmatter block holding a `title` and a `description`, and has exactly one top-level heading, and `edge build` holds the `docs` directory of a package to the same rules.
 
-## The bot
+## CI
 
-`bot/` answers questions about Edge Python out of the published pages, over http at `ask.edgepython.com` and in the Discord server. It reads the site the way any other client does, runs what it computes on the published `compiler.wasm`, which each command below fetches first, and [`bot.yml`](.github/workflows/bot.yml) ships it on a push that touches it.
-
-```bash
-cd bot && npm ci
-npm run check # types and the wrangler config
-npm test      # the store, the search, the engine and how a reply reads
-npm run dev   # the http side on a local database, with the model through your wrangler login
-```
-
-A test reaches no runtime and holds no credential, since D1 is SQLite and `node:sqlite` runs the same schema the deploy creates. What the model answers is read by hand through that http side instead.
-
-`DISCORD` in [`names.ts`](bot/names.ts) set to anything but `1` ships that http side alone, the way `npm run dev` always runs it. What it keeps between questions is [`db/schema.sql`](bot/db/schema.sql), and how it is bound and silenced is in [RUNBOOK.md](RUNBOOK.md#the-discord-bot).
-
-## Infra and CI
-
-- `infra/` declares every Cloudflare resource in code and is checked with `npm run check` and `npm test`. `stage` and `cdn:local` run locally, and the other scripts deploy with `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
-- [`main.yml`](.github/workflows/main.yml) runs CI and CD, each part a composite action under [`.github/actions/`](.github/actions). Build jobs stage their outputs on `cdn.tmp.edgepython.com`, test jobs run every suite against them, and a push to `main` promotes the tested tree to `dev.edgepython.com`.
-- [`site/db/schema.sql`](site/db/schema.sql) is the whole database as it stands, and every local, test and dev database is built from it. How production takes a schema change is in [RUNBOOK.md](RUNBOOK.md#migrations).
+[`main.yml`](.github/workflows/main.yml) runs CI, each part a composite action under [`.github/actions/`](.github/actions). Build jobs stage their part of the CDN tree as artifacts of the run, test jobs serve the tree on loopback through [`cdn/`](cdn) and run every suite against it, and a tag attaches the tested tree to its release. Nothing in it holds a secret, so a pull request from a fork runs it whole.

@@ -1,5 +1,5 @@
 name: Compiler
-description: Rust compiler crate. Shear and clippy, wasm build and optimize, tests, tmp staging, tag release.
+description: Rust compiler crate. Shear and clippy, wasm build and optimize, tests, staging, tag release.
 
 inputs:
   github-token:
@@ -122,7 +122,7 @@ runs:
 
     - name: Test
       shell: bash
-      run: cargo test --locked -p edge-python -p lang
+      run: cargo test --locked -p edge-python
 
     # On its own, since the coverage build leaves method calls unfused and the corpus above must run fused.
     - name: Coverage hook
@@ -135,10 +135,11 @@ runs:
       run: cargo test --locked --release -p edge-python --features memcheck --test tests vm::test::test_cases
 
     # compiler.wasm ships, the speed build goes under _build/ for the CLI jobs.
-    - name: Stage on tmp
-      uses: ./.github/actions/upload
+    - name: Stage
+      uses: ./.github/actions/stage
       with:
         part: compiler
+        name: cdn-compiler
 
     - name: Upload WASM Release
       if: startsWith(github.ref, 'refs/tags/')

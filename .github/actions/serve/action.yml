@@ -1,0 +1,33 @@
+name: Serve
+description: The CDN tree this run staged, merged from its artifacts and served on loopback the way the CDN serves it.
+
+runs:
+  using: composite
+  steps:
+    - name: Fetch the tree
+      uses: actions/download-artifact@v8
+      with:
+        pattern: cdn-*
+        merge-multiple: true
+        path: _cdn
+
+    - name: Setup Node
+      uses: actions/setup-node@v7
+      with:
+        node-version-file: cdn/.node-version
+        cache: npm
+        cache-dependency-path: cdn/package-lock.json
+
+    # In the background for the rest of the job, ready once the compiler answers.
+    - name: Serve
+      shell: bash
+      working-directory: cdn
+      run: |
+        npm ci
+        nohup npm run serve -- ../_cdn > "$RUNNER_TEMP/cdn.log" 2>&1 &
+        for _ in $(seq 60); do
+          curl -fsS -o /dev/null "$EDGE_CDN_BASE/compiler.wasm" && exit 0
+          sleep 1
+        done
+        cat "$RUNNER_TEMP/cdn.log"
+        exit 1

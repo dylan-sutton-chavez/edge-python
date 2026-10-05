@@ -1,0 +1,6 @@
+{
+  "name": "edge-python",
+  "private": true,
+  "description": "The parts a project built around Edge Python takes from this repo as a git dependency.",
+  "files": ["js/src/system", "docs", "skill/SKILL.md", "tests/cases/docs.json", "cdn/src/tree.ts"]
+}

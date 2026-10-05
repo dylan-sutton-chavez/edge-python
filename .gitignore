@@ -1,73 +1,41 @@
-# Rust
 **/target/
 
-# macOS
 .DS_Store
 **/.DS_Store
 ._*
 
-# Windows
 Thumbs.db
 [Dd]esktop.ini
 
-# Editors
 .vscode/
 .idea/
 *.swp
 *~
 
-# Node (site and infra)
 node_modules/
 **/node_modules/
 dist/
 *.log
 
-# Astro and wrangler output for the site
-site/.astro/
-site/wrangler.json
-site/worker-configuration.d.ts
-.dev.vars
-
-# wrangler output for the bot, and the engine it fetches
-bot/wrangler.json
-bot/worker-configuration.d.ts
-bot/compiler.wasm
-
-# WASM
 pkg/
 **/pkg/
 
-# Cloudflare
 .wrangler/
 
-# A CDN tree staged by infra for local tests
 /_cdn/
 
-# Secrets
 .env
 .env.*
 
-# Actor durable message log and scratch
 tmp/
 
-# Fuzz
 fuzz/in/
 fuzz/out/
 fuzz/logs/
 fuzz/edge.dict
 
-# MicroPython differential corpus (scratch, not part of this repo)
 _micropython/
 
-# deno writes lockfiles on the fly when running npm packages
 **/deno.lock
 
-# the social card is rasterized from src/assets/og.svg on every build
-site/public/og.png
-
-# playwright writes these per run, the report only survives a failure in CI
-site/test-results/
-site/playwright-report/
-
-# local engine backlog, kept out of the repo
 /backlog.json

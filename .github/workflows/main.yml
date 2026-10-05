@@ -1,6 +1,6 @@
-name: CI / CD
+name: CI
 
-# Builds stage into this run's tmp CDN prefix, tests read it back, main ships to dev and a tag to prod.
+# Builds stage their part of the CDN tree as artifacts, tests serve it on loopback, and a tag ships the tested tree with its release.
 
 on:
   push:
@@ -16,8 +16,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
 
 env:
-  EDGE_RUN: ${{ github.run_id }}
-  EDGE_CDN_BASE: https://cdn.tmp.edgepython.com/${{ github.run_id }}
+  EDGE_CDN_BASE: http://127.0.0.1:8788
 
 jobs:
   compiler:
@@ -25,9 +24,6 @@ jobs:
     runs-on: ubuntu-26.04
     permissions:
       contents: write
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v7
 
@@ -56,14 +52,11 @@ jobs:
     name: JS
     needs: [compiler]
     runs-on: ubuntu-26.04
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/js
 
-  # cli/build.rs embeds the compiler and std builds this run staged on tmp.
+  # cli/build.rs embeds the compiler and std builds the compiler job staged.
   cli:
     name: CLI / ${{ matrix.entry }}
     needs: [js]
@@ -91,9 +84,6 @@ jobs:
             target: x86_64-apple-darwin
             runner: macos-15
     runs-on: ${{ matrix.runner }}
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/cli
@@ -101,7 +91,7 @@ jobs:
           mode: ${{ matrix.mode }}
           target: ${{ matrix.target }}
 
-  # Every suite runs against the tmp CDN this run staged, never the deployed one.
+  # Every suite runs against the tree this run staged, served on loopback, never the deployed one.
   test:
     name: Test / ${{ matrix.entry }}
     needs: [cli]
@@ -122,6 +112,7 @@ jobs:
             cli: skill
     steps:
       - uses: actions/checkout@v7
+      - uses: ./.github/actions/serve
       - if: matrix.suite
         uses: ./.github/actions/test
       - if: matrix.cli
@@ -129,14 +120,6 @@ jobs:
         with:
           mode: test
           suite: ${{ matrix.cli }}
-
-  site:
-    name: Site
-    needs: [compiler]
-    runs-on: ubuntu-26.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/site
 
   # Holds the engine to the reference seconds of bench/.snapshot once its tests pass.
   bench:
@@ -147,77 +130,36 @@ jobs:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/bench
 
-  # Typechecks the deploy scripts and proves dev and prod can never name the same resource.
-  infra:
-    name: Infra
-    runs-on: ubuntu-26.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: site/.node-version
-          cache: npm
-          cache-dependency-path: infra/package-lock.json
-
-      - name: Install
-        working-directory: infra
-        run: npm ci
-
-      - name: Check
-        working-directory: infra
-        run: npm run check && npm test
-
-  # Pushes only, since pull requests get no secrets. Main warns about a difference and a tag refuses to ship one.
-  database:
-    name: Database
-    needs: [infra]
+  # Pushes only, the tested parts merged into the one tree a deploy takes, and a tag attaches it to its release.
+  tree:
+    name: Tree
+    needs: [test]
     if: github.event_name == 'push'
     runs-on: ubuntu-26.04
-    env:
-      EDGE_ENV: prod
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/database
+      - name: Merge the parts
+        uses: actions/download-artifact@v8
         with:
-          strict: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          pattern: cdn-*
+          merge-multiple: true
+          path: _cdn
 
-  # Main pushes only, the tested tmp tree and the site ship together to dev.
-  promote:
-    name: Promote
-    needs: [test, site, infra]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-26.04
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_ACCESS_EMAILS: ${{ secrets.DEV_CLOUDFLARE_ACCESS_EMAILS }}
-      OAUTH_GITHUB_ID: ${{ secrets.DEV_OAUTH_GITHUB_ID }}
-      OAUTH_GITHUB_SECRET: ${{ secrets.DEV_OAUTH_GITHUB_SECRET }}
-      OAUTH_GOOGLE_ID: ${{ secrets.DEV_OAUTH_GOOGLE_ID }}
-      OAUTH_GOOGLE_SECRET: ${{ secrets.DEV_OAUTH_GOOGLE_SECRET }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/promote
+      - name: Keep the tree
+        uses: actions/upload-artifact@v7
+        with:
+          name: cdn
+          path: _cdn
+          if-no-files-found: error
 
-  # A v tag ships the same tested tree to production, no Access gate and its own OAuth apps.
-  ship:
-    name: Ship
-    needs: [test, site, infra, database]
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-26.04
-    # Required reviewers on this environment hold the run until the migrations are approved.
-    environment: production
-    env:
-      EDGE_ENV: prod
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      OAUTH_GITHUB_ID: ${{ secrets.PROD_OAUTH_GITHUB_ID }}
-      OAUTH_GITHUB_SECRET: ${{ secrets.PROD_OAUTH_GITHUB_SECRET }}
-      OAUTH_GOOGLE_ID: ${{ secrets.PROD_OAUTH_GOOGLE_ID }}
-      OAUTH_GOOGLE_SECRET: ${{ secrets.PROD_OAUTH_GOOGLE_SECRET }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/promote
+      - name: Pack for the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: tar -C _cdn -czf cdn.tar.gz .
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: cdn.tar.gz
+          fail_on_unmatched_files: true

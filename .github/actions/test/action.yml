@@ -1,5 +1,5 @@
 name: Test
-description: The Deno and Chromium suites of the JS host, against this run's tmp CDN.
+description: The Deno and Chromium suites of the JS host, against the CDN tree this run staged.
 
 runs:
   using: composite

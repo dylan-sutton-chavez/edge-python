@@ -1,0 +1,34 @@
+name: Stage
+description: Lay one part of the CDN tree out from this checkout's build outputs and keep it as an artifact of the run.
+
+inputs:
+  part:
+    description: "compiler | js | cli"
+    required: true
+  name:
+    description: The artifact name, one per job, every one of them starting cdn-.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v7
+      with:
+        node-version-file: cdn/.node-version
+        cache: npm
+        cache-dependency-path: cdn/package-lock.json
+
+    - name: Stage
+      shell: bash
+      working-directory: cdn
+      run: |
+        npm ci
+        npm run stage -- ../_cdn ${{ inputs.part }}
+
+    - name: Keep
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.name }}
+        path: _cdn
+        if-no-files-found: error

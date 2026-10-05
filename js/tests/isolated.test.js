@@ -2,9 +2,9 @@
 import { chromium } from "npm:playwright@latest";
 import { Buffer } from "node:buffer";
 
-// The staged CDN this run tests, a tmp prefix in CI or the local one from infra.
+// The staged CDN this run tests, served on loopback from cdn/ in CI and locally alike.
 const BASE = Deno.env.get("EDGE_CDN_BASE")?.replace(/\/$/, "");
-if (!BASE) throw new Error("set EDGE_CDN_BASE (npm run cdn:local in infra)");
+if (!BASE) throw new Error("set EDGE_CDN_BASE (npm run serve in cdn)");
 // The host arrives as an argument, a literal import would have Deno fetch it too.
 const HOST = "https://cdn.edgepython.com/js/src/index.js";
 

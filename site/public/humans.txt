@@ -1,6 +1,0 @@
-/* TEAM */
-Creator: Dylan Sutton Chavez
-GitHub: dylan-sutton-chavez
-
-/* THANKS */
-James Parrot

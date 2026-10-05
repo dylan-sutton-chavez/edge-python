@@ -1,5 +1,5 @@
 name: JS
-description: The JS host. Deno lint and check, tsc emit to js/dist, then its tree staged on tmp.
+description: The JS host. Deno lint and check, tsc emit to js/dist, then its tree staged.
 
 runs:
   using: composite
@@ -37,8 +37,9 @@ runs:
         # The engine as one classic script, the page hands it to the room as a whole.
         deno bundle --platform browser --format iife src/worker/worker.ts -o dist/worker/bundle.js
 
-    # The Deno and Playwright suites run in the test job, against this tree on tmp.
-    - name: Stage on tmp
-      uses: ./.github/actions/upload
+    # The Deno and Playwright suites run in the test job, against this tree served on loopback.
+    - name: Stage
+      uses: ./.github/actions/stage
       with:
         part: js
+        name: cdn-js
