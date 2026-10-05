@@ -5,6 +5,7 @@ import { cached, json, tooMany } from '../../lib/server/http'
 import { MARK, searched } from '../../lib/server/packages'
 import { parts } from '../../lib/docs/sections'
 import { slugOf, tree } from '../../lib/docs/tree'
+import { holds, landing, root, roots, words } from '../../lib/server/words'
 import { programs } from '../../data/programs'
 import { hidden } from '../../draft'
 
@@ -18,25 +19,6 @@ const KEEP = 6
 const CACHE_SECONDS = 30
 
 export type Found = { title: string; where: string; href: string; snippet: string }
-
-// Every word must match, in any order.
-const words = (asked: string) => asked.toLowerCase().split(/\s+/).filter(Boolean)
-
-const holds = (text: string, asked: string) => words(asked).every((word) => text.toLowerCase().includes(word))
-
-// Where the whole query or else its first word lands, so the snippet opens on it.
-function landing(text: string, asked: string): [number, number] {
-  const lower = text.toLowerCase()
-  const whole = lower.indexOf(asked.toLowerCase())
-  if (whole >= 0) return [whole, asked.length]
-
-  for (const word of words(asked)) {
-    const at = lower.indexOf(word)
-    if (at >= 0) return [at, word.length]
-  }
-
-  return [-1, 0]
-}
 
 /* One query over two corpora, because a visitor asking about `receive` does not know whether the answer is in the reference or in somebody's package. The site's pages ship inside this worker, so they are scanned here, while a package's pages live in the index the publish route fills. */
 export const GET: APIRoute = async ({ url, request }) => {
@@ -166,9 +148,13 @@ function ranked(asked: string, title: string, section: string, body: string) {
   if (title.toLowerCase().includes(asks)) score += 40
   if (at >= 0) score += 20 - Math.min(20, Math.floor(at / 200))
 
-  // Scattered words rank by where they land.
+  // Scattered words rank by where they land, and so does a word a heading holds only as another form of itself.
   const many = words(asked)
-  if (many.length > 1) for (const word of many) score += section.toLowerCase().includes(word) ? 30 : title.toLowerCase().includes(word) ? 15 : 0
+  for (const word of many) {
+    const literal = section.toLowerCase().includes(word) || title.toLowerCase().includes(word)
+    if (literal && many.length > 1) score += section.toLowerCase().includes(word) ? 30 : 15
+    else if (!literal) score += roots(section).has(root(word)) ? 30 : roots(title).has(root(word)) ? 15 : 0
+  }
 
   return score
 }

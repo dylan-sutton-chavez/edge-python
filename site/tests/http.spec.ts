@@ -5,6 +5,7 @@ import { expect, type APIRequestContext } from '@playwright/test'
 import { MAILS, arriving, mailedCode, mintToken, packed, published, signIn, test, unique } from './helpers'
 import { MAX_ARTIFACT, MAX_NOTICE } from '../src/lib/server/packages'
 import { OWNER } from '../src/lib/account/handle'
+import { holds } from '../src/lib/server/words'
 
 const DOCS = fileURLToPath(new URL('../../docs/', import.meta.url))
 
@@ -30,6 +31,20 @@ test.describe('pages', () => {
     for (const missing of ['/api/docs/nope/nope', '/api/program/nope', '/api/@nobody']) {
       expect((await request.get(missing)).status(), missing).toBe(404)
     }
+
+    // A word is found as any form of itself, so installation reaches the section that says install.
+    const searched = await (await request.get('/api/search?q=installation')).json()
+    expect(searched.docs.map((each: { href: string }) => each.href)).toContain('/docs/getting-started/quickstart#install-the-cli')
+  })
+
+  /* Ten forms of one word in four casings, and every one of them finds a page that says any other, while another word finds none. */
+  test('finds a word by any form of it', () => {
+    const forms = ['install', 'installs', 'installed', 'installing', 'installation', 'installations', 'installer', 'installers', 'installable', 'installment']
+    const ways = forms.flatMap((form) => [form, form[0]!.toUpperCase() + form.slice(1), form.toUpperCase(), [...form].map((char, at) => (at % 2 ? char.toUpperCase() : char)).join('')])
+    expect(ways).toHaveLength(40)
+
+    for (const asked of ways) for (const written of ways) expect(holds(`Run the ${written} step first.`, asked), `${asked} finds ${written}`).toBe(true)
+    expect(holds('Run the install step first.', 'remove')).toBe(false)
   })
 
   test('sends /docs to the first page for good', async ({ request }) => {

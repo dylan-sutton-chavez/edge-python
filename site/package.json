@@ -31,6 +31,7 @@
     "astro-seo-schema": "^7.0.0",
     "schema-dts": "^1.1.0",
     "shiki": "^4.4.3",
+    "stemmer": "^2.0.1",
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
