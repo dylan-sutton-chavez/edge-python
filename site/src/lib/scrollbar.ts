@@ -83,7 +83,7 @@ export function scrollbar(bar: HTMLElement, axis: 'x' | 'y', seek: (offset: numb
 }
 
 /* Wires each `[data-bar]` under `root` to the `[data-scroller]` in its box, `edge` short of each end. */
-export function thumbs(root: ParentNode, edge = EDGE) {
+export function thumbs(root: HTMLElement, edge = EDGE) {
   root.querySelectorAll<HTMLElement>('[data-bar]').forEach((bar) => {
     const box = bar.parentElement!
     const scroller = box.querySelector<HTMLElement>('[data-scroller]')!
