@@ -1,6 +1,11 @@
 use anyhow::{anyhow, bail, Context, Result};
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use compiler::util::sha256::{hex_encode, sha256};
+use ring::signature::Ed25519KeyPair;
 use std::fs;
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::host::site;
 
@@ -14,9 +19,10 @@ pub fn run(artifact: &Path) -> Result<()> {
         bail!("{name} carries '{path}', which is JavaScript, ship a .py or a .wasm");
     }
 
+    let authorization = signature(&token, &bytes, SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())?;
     let sp = crate::ui::spinner(&format!("publishing {name}"));
 
-    match send(&token, &bytes) {
+    match send(&authorization, &bytes) {
         Ok(published) => {
             sp.done(&format!("published {} {}", published.name, published.version));
             crate::ui::note(&format!("add it with  edge add {}", published.name));
@@ -46,6 +52,14 @@ fn javascript_in(artifact: &[u8]) -> Option<String> {
     files.into_iter().map(|f| f.path).find(|path| matches!(path.rsplit('.').next(), Some("js" | "mjs")))
 }
 
+/* The secret signs the digest of the artifact at this second instead of travelling, since the registry keeps only its public key. */
+fn signature(token: &str, artifact: &[u8], at: u64) -> Result<String> {
+    let (id, secret) = token.strip_prefix("edge_pat_").and_then(|rest| rest.split_once('.')).ok_or_else(|| anyhow!("EDGE_TOKEN is not a token from edgepython.com/settings#tokens"))?;
+    let key = Ed25519KeyPair::from_seed_unchecked(&sha256(secret.as_bytes())).map_err(|e| anyhow!("deriving the signing key: {e}"))?;
+    let signed = format!("edge publish\n{id}\n{at}\n{}", hex_encode(&sha256(artifact)));
+    Ok(format!("Edge {id}.{at}.{}", URL_SAFE_NO_PAD.encode(key.sign(signed.as_bytes()))))
+}
+
 /* What the registry made of the artifact, which is where the name and version come from now that it reads them itself. */
 struct Published {
     name: String,
@@ -54,13 +68,13 @@ struct Published {
 }
 
 /* The artifact as it sits on disk is the whole body. */
-fn send(token: &str, artifact: &[u8]) -> Result<Published> {
+fn send(authorization: &str, artifact: &[u8]) -> Result<Published> {
     // A refusal still carries a body, the registry's own words for what went wrong.
     let mut response = ureq::post(site("/api/publish").as_str())
         .config()
         .http_status_as_error(false)
         .build()
-        .header("authorization", &format!("Bearer {token}"))
+        .header("authorization", authorization)
         .header("content-type", "application/octet-stream")
         .send(artifact)
         .map_err(|e| anyhow!("reaching the registry: {e}"))?;
@@ -89,6 +103,13 @@ mod tests {
         assert_eq!(javascript_in(&packed("https://x/y.mjs")).as_deref(), Some("https://x/y.mjs"));
         assert_eq!(javascript_in(&packed("util.py")), None);
         assert_eq!(javascript_in(b"not a bundle"), None);
+    }
+
+    #[test]
+    fn the_signature_is_the_one_webcrypto_makes_for_the_registry() {
+        let token = "edge_pat_abcdefgh.Rk9vYmFyYmF6cXV4cXV1eGNvcmdlZ3JhdWx0Z2FycGw";
+        assert_eq!(signature(token, b"EDGEPKG\x01", 1_700_000_000).unwrap(), "Edge abcdefgh.1700000000.L7yfHbh4meiykXFNQrVFfe0SfY5h4qpSWQyLUUqR0lH-mWq6fH8AoF_JBS6xBFISTT9U-IlHsDyqz38gwGnfAA");
+        assert!(signature("not-a-token", b"", 0).is_err());
     }
 
     #[test]

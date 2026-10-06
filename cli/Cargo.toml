@@ -3,7 +3,7 @@
 
 [package]
 name = "edge"
-version = "0.9.1"
+version = "0.9.2"
 edition = "2024"
 description = "The Edge Python developer CLI. Runs, tests, and scaffolds scripts on the same compiler.wasm the browser uses, hosted under wasmtime, packs apps into standalone binaries or bundles, and runs cooperative actor pools."
 
@@ -27,6 +27,9 @@ anyhow = "1"
 rustyline = "17.0.0"
 # HTTPS for URL imports and `edge build` vendoring.
 ureq = { version = "3", features = ["brotli"] }
+# Signs a publish with the token secret, on the ring and base64 ureq already brings.
+ring = "0.17"
+base64 = "0.22"
 # Stable actor keys that survive removal, so the scheduler queues never dangle.
 slab = "0.4"
 # A unique temp file for the uninstall script, a predictable path invites symlink squatting.

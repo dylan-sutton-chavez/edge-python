@@ -31,7 +31,7 @@
   },
   {
     "given": { "app.edge": "EDGEPKG\u0001" },
-    "env": { "EDGE_TOKEN": "not-a-token" },
+    "env": { "EDGE_TOKEN": "edge_pat_nope.nope" },
     "run": ["publish", "app.edge"],
     "fails": ["That token is not valid."]
   },

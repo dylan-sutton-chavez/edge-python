@@ -189,7 +189,7 @@ Flags: `--out <path>` (mode-specific default), `--app`, `--web`.
 
 ## `edge publish`: send it to the registry
 
-Uploads a `.edge` packed by `edge build`. The `name` and `version` come from the manifest inside the bundle, so the artifact carries what it is published as, and the doc pages travel beside it for the site to render. Set `EDGE_TOKEN` to a token from [the settings](https://edgepython.com/settings#tokens) first.
+Uploads a `.edge` packed by `edge build`. The `name` and `version` come from the manifest inside the bundle, so the artifact carries what it is published as, and the doc pages travel beside it for the site to render. Set `EDGE_TOKEN` to a token from [the settings](https://edgepython.com/settings#tokens) first. The CLI signs each publish with it rather than sending it, so the registry keeps only a public key and the token never leaves your machine.
 
 The artifact is the whole request. The CLI declares nothing beside it, and the registry opens the bundle and reads the name, the version, the description, the repository, the `LICENSE` and the doc pages out of the bytes it is about to store, so a listing can only ever show what you shipped.
 

@@ -113,7 +113,7 @@ Three mutually exclusive modes.
 
 ### edge publish
 
-`edge publish app.edge` uploads a `.edge` packed by `edge build`, reading `EDGE_TOKEN` for a token made at `/settings#tokens`. The artifact is the whole request. The registry opens it and reads the `name`, the `version`, the description, the repository, the `LICENSE` and the pages under `@docs/` out of the bytes it is about to store, so nothing is declared twice and a listing shows what you shipped. A name is first come and permanent, a version is never overwritten, and the bundle is stored exactly as packed. One artifact is 10 MB at most, an account claims 10 names and publishes 60 versions a day, and its packages add up to 50 MB when it signs in by address alone or a gigabyte with GitHub or Google linked.
+`edge publish app.edge` uploads a `.edge` packed by `edge build`, reading `EDGE_TOKEN` for a token made at `/settings#tokens`, which signs the request and never leaves the machine. The artifact is the whole request. The registry opens it and reads the `name`, the `version`, the description, the repository, the `LICENSE` and the pages under `@docs/` out of the bytes it is about to store, so nothing is declared twice and a listing shows what you shipped. A name is first come and permanent, a version is never overwritten, and the bundle is stored exactly as packed. One artifact is 10 MB at most, an account claims 10 names and publishes 60 versions a day, and its packages add up to 50 MB when it signs in by address alone or a gigabyte with GitHub or Google linked.
 
 Where a package runs is not declared and not yet worked out, so a release carries no claim about its hosts.
 
