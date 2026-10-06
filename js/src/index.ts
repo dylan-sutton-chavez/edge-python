@@ -1,6 +1,7 @@
 import type { Limits, RunOpts, ExecResult, WorkerRequest, WorkerMessage } from './protocol.ts';
 import type { Permissions } from './system/grants.ts';
 import type { TraceEvent } from './system/trace.ts';
+import { roomScript } from './room.ts';
 
 export type { TraceEvent };
 
@@ -182,25 +183,6 @@ async function rootOf(opts: CreateWorkerOpts, base: string | null): Promise<{ sp
     const locked = Object.values(await json('edge.lock')).map((entry) => String((entry as { url?: unknown } | null)?.url ?? ''));
     return { specs: [...specs, ...locked], permissions: (manifest['permissions'] ?? {}) as Permissions };
 }
-
-/* The room's only script, it runs the engine its page hands over and relays both ways through the port. */
-const roomScript = `
-addEventListener('message', function start({ source, data, ports: [port] }) {
-    if (source !== parent || !port) return;
-    removeEventListener('message', start);
-    try {
-        const url = URL.createObjectURL(new Blob([data], { type: 'application/javascript' }));
-        // Chrome refuses a module worker from a blob in an opaque origin, the engine is a classic script.
-        const worker = new Worker(url);
-        setTimeout(() => URL.revokeObjectURL(url), 0);
-        worker.onmessage = (e) => port.postMessage(e.data);
-        worker.onerror = (e) => port.postMessage({ type: 'error', message: e.message || 'worker error' });
-        port.onmessage = (e) => worker.postMessage(e.data);
-    } catch (e) {
-        port.postMessage({ type: 'error', message: 'the room could not start its worker, ' + e.message });
-    }
-});
-`;
 
 // A policy names only plain origins and hosts, anything else stays out of reach.
 const PLAIN_ORIGIN = /^https?:\/\/[a-z0-9.-]+(:\d+)?$/;
