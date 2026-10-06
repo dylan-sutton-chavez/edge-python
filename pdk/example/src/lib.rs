@@ -18,13 +18,14 @@ fn panic(_: &core::panic::PanicInfo) -> ! { core::arch::wasm32::unreachable() }
 #[plugin_const]
 fn version() -> i64 { 1 }
 
-/// Variadic join over `parts`, separated by `sep`. Showcases the trailing `Args` param.
+/// Variadic join over `parts`, separated by `sep`, each written as `"{}".format` writes it. Showcases the trailing `Args` param and `Handle::call`.
 #[plugin_fn]
 fn join_all(sep: String, parts: Args) -> Result<String> {
+    let template = "{}".into_handle()?;
     let mut out = String::new();
     for (i, h) in parts.0.iter().enumerate() {
         if i > 0 { out.push_str(&sep); }
-        out.push_str(&String::from_handle(h.raw())?);
+        out.push_str(&String::from_handle(template.call("format", &[h.raw()])?.raw())?);
     }
     Ok(out)
 }

@@ -2,7 +2,7 @@
 
 use crate::abi::{classify_decode, classify_encode, DecodeBits, EncodeRequest, ErrorKind, ErrorStash, HandleTable, Op, PrimitiveBytes, TAG_INVALID};
 use crate::vm::types::{DictMap, HeapObj, Val, VmErr};
-use crate::vm::methods::{lookup_method, dispatch_method};
+use crate::vm::methods::lookup_method;
 use crate::vm::VM;
 use alloc::{rc::Rc, string::{String, ToString}, vec::Vec};
 use core::cell::RefCell;
@@ -209,7 +209,9 @@ fn dispatch_call(recv_h: u32, name: &str, args: &[Val]) -> Result<Val, VmErr> {
         }
         let ty = vm.type_name(recv);
         let mid = lookup_method(ty, name).ok_or_else(|| VmErr::Attribute(s!("'", str ty, "' object has no method '", str name, "'")))?;
-        take_result(vm, "edge_op call: method left no result", |vm| dispatch_method(vm, mid, recv, args, &[]))
+        // The path a script call takes, so `str.format` or `list.sort` gets the frame its user code runs in.
+        let chunk = vm.chunk;
+        take_result(vm, "edge_op call: method left no result", |vm| vm.exec_bound_method(recv, mid, args, &[], chunk, &mut []))
     })
 }
 

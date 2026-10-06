@@ -248,7 +248,7 @@ static BY_KEY: [(u32, u8); METHODS.len()] = {
 fn framed(_: &mut VM, _: Val, _: &[Val]) -> Result<(), VmErr> { Err(cold_type("method dispatched without a frame")) }
 
 #[inline]
-pub(crate) fn dispatch_method(vm: &mut VM, id: BuiltinMethodId, recv: Val, pos: &[Val], kw: &[Val]) -> Result<(), VmErr> {
+pub(in crate::vm) fn dispatch_method(vm: &mut VM, id: BuiltinMethodId, recv: Val, pos: &[Val], kw: &[Val]) -> Result<(), VmErr> {
     let m = &ALL_METHODS[id.0 as usize];
     if !kw.is_empty() {
         // Only `dict.update(**kwargs)` reaches the dispatcher with keywords (`list.sort` keywords are intercepted before dispatch), pack them into a dict and append as a positional, which `dict::update` already merges.

@@ -29,6 +29,15 @@
   {
     "given": {
       "edge.json": "{ \"imports\": { \"slugify_mod\": \"./slugify_mod.wasm\" } }\n",
+      "main.py": "from slugify_mod import join_all\nclass Price:\n    def __format__(self, spec):\n        return \"$10\"\nprint(join_all(\"-\", \"a\", 1.5, Price()))\n"
+    },
+    "copy": { "slugify_mod.wasm": "target/wasm32-unknown-unknown/release/slugify_mod.wasm" },
+    "run": ["run", "main.py"],
+    "stdout": ["a-1.5-$10"]
+  },
+  {
+    "given": {
+      "edge.json": "{ \"imports\": { \"slugify_mod\": \"./slugify_mod.wasm\" } }\n",
       "lib.py": "from slugify_mod import Slugger\n",
       "main.py": "from .lib import Slugger\ns = Slugger()\ns.add(\"Via A Module\")\nprint(s.build())\n"
     },
