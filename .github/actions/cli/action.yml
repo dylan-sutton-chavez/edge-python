@@ -39,7 +39,7 @@ runs:
           macOS) mkdir -p "$RUNNER_TEMP/bin" && ln -sf /usr/bin/objdump "$RUNNER_TEMP/bin/llvm-objdump" && echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH" ;;
         esac
 
-    # The host is TypeScript and strips in seconds, so it is built here rather than fetched.
+    # The host is TypeScript and strips in seconds, so make builds it here rather than fetching it.
     - name: Deno
       uses: denoland/setup-deno@v2
       with:
@@ -51,16 +51,6 @@ runs:
         path: ~/.cache/deno
         key: deno-${{ runner.os }}-${{ hashFiles('**/deno.json', '**/deno.lock') }}
         restore-keys: deno-${{ runner.os }}-
-
-    # js/src splits main-thread and worker since tsc rejects mixing the dom and webworker libs.
-    - name: Build the JS host
-      shell: bash
-      working-directory: js
-      run: |
-        deno run -A npm:typescript@5.9.3/tsc -p tsconfig.json
-        deno run -A npm:typescript@5.9.3/tsc -p tsconfig.worker.json
-        # The engine as one classic script, the page hands it to the room as a whole.
-        deno bundle --platform browser --format iife src/worker/worker.ts -o dist/worker/bundle.js
 
     - name: Toolchain
       uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -103,35 +93,12 @@ runs:
     - name: Clippy and check
       if: inputs.mode == 'lint'
       shell: bash
-      working-directory: cli
-      run: |
-        cargo clippy --locked --all-targets -- -D warnings
-        cargo check
+      run: make lint-cli
 
     - name: Build release
       if: inputs.mode == 'release'
       shell: bash
-      working-directory: cli
-      env:
-        TARGET: ${{ inputs.target }}
-      run: |
-        case "$TARGET" in
-          # musl-gcc has no C++, so the static Linux build runs in Alpine, whose libc is musl.
-          *linux-musl)
-            docker run --rm -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE/cli" -e EDGE_COMPILER_WASM -e MOZJS_ARCHIVE -e MOZJS_CREATE_ARCHIVE -e OWNER="$(id -u):$(id -g)" \
-              rust:alpine sh -c 'sh ../.github/actions/cli/musl.sh && chown -R "$OWNER" target'
-            mkdir -p "target/$TARGET/release" && cp target/release/edge "target/$TARGET/release/edge" ;;
-          *) cargo build --locked --release --target "$TARGET" ;;
-        esac
-
-    - name: Tar
-      if: inputs.mode == 'release'
-      shell: bash
-      working-directory: cli
-      env:
-        TARGET: ${{ inputs.target }}
-      run: |
-        tar -C "target/$TARGET/release" -czf "edge-$TARGET.tar.gz" edge
+      run: make cli-release TARGET=${{ inputs.target }}
 
     # The tarball and the install scripts land under cli/.
     - name: Stage
@@ -141,12 +108,6 @@ runs:
         part: cli
         name: cdn-cli-${{ inputs.target }}
 
-    # The plugin suite in plugins.json loads this pdk/example build from the root target dir.
-    - name: Build the plugin fixture
-      if: inputs.mode == 'test' && (inputs.suite == 'engine' || inputs.suite == '')
-      shell: bash
-      run: cargo build --locked --release --target wasm32-unknown-unknown -p slugify-mod
-
     # The web suite drives a real browser, and the runner image is not a contract, so one is installed.
     - name: Install Chromium
       if: inputs.mode == 'test' && (inputs.suite == 'engine' || inputs.suite == '')
@@ -155,16 +116,8 @@ runs:
         sudo apt-get update
         sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium
 
-    # engine runs cli and run minus the network corpus, network runs that corpus, actors and skill theirs.
+    # The engine suite also builds the pdk example its plugin cases load.
     - name: Test
       if: inputs.mode == 'test'
       shell: bash
-      working-directory: cli
-      run: |
-        case "${{ inputs.suite }}" in
-          engine)  cargo test --locked --bin edge --test cli --test run -- --skip builtin_corpora_mirror_the_web_api ;;
-          network) cargo test --locked --test run builtin_corpora_mirror_the_web_api ;;
-          actors)  cargo test --locked --test actor ;;
-          skill)   cargo build --locked && (cd ../skill && SKILL_EDGE="$GITHUB_WORKSPACE/cli/target/debug/edge" cargo test --locked) ;;
-          *)       cargo test --locked ;;
-        esac
+      run: make test-cli SUITE=${{ inputs.suite }}

@@ -9,7 +9,7 @@ readme = "README.md"
 autotests = false
 autobins = false
 
-# `cargo wasm` builds compiler.wasm as a cdylib, so a crate depending on this one links a plain rlib.
+# `make wasm` builds compiler.wasm as a cdylib, so a crate depending on this one links a plain rlib.
 [lib]
 name = "compiler"
 doctest = false

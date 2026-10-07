@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "Holds compiler.wasm to its last run of tests/cases/vm.json, build it with cargo wasm-cli and run with cargo run -p bench --profile cli."
+description = "Holds compiler.wasm to its last run of tests/cases/vm.json, run it with make bench."
 
 [dependencies]
 wasmtime = { version = "48", default-features = false, features = ["runtime", "std", "cranelift"] }

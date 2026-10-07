@@ -49,7 +49,7 @@ fn main() {
     let wasm = std::env::var_os("EDGE_COMPILER_WASM").map(PathBuf::from).unwrap_or_else(|| Path::new(ROOT).join("target/wasm32-unknown-unknown/cli/compiler.wasm"));
     let built = std::fs::metadata(&wasm).and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH);
     if built < newest(&Path::new(ROOT).join("src")) {
-        println!("{} is older than src, build it with cargo wasm-cli", wasm.display());
+        println!("{} is older than src, build it with make wasm-cli", wasm.display());
         std::process::exit(1);
     }
     let bytes = std::fs::read(&wasm).expect("reading compiler.wasm");

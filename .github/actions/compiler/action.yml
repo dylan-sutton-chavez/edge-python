@@ -10,6 +10,17 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Setup Deno
+      uses: denoland/setup-deno@v2
+      with:
+        deno-version: v2.x
+
+    # A tag names the release the CLI reports, so the earliest job refuses one the manifests disagree with.
+    - name: Check the version
+      if: startsWith(github.ref, 'refs/tags/v')
+      shell: bash
+      run: make version TAG=${{ github.ref_name }}
+
     - name: Cache Rust
       uses: Swatinem/rust-cache@v2
 
@@ -26,20 +37,10 @@ runs:
       with:
         tool: cargo-shear@1.13.4
 
-    # Detects declared but unused dependencies across the workspace.
-    - name: Shear
+    # Shear detects declared but unused dependencies, then clippy runs for the host and for wasm.
+    - name: Lint
       shell: bash
-      run: cargo shear
-
-    - name: Clippy (host)
-      shell: bash
-      run: cargo clippy --locked --all-targets -- -D warnings
-
-    - name: Clippy (wasm)
-      shell: bash
-      run: |
-        cargo clippy --locked --lib --no-default-features --features edge-python/runtime --target wasm32-unknown-unknown -p edge-python -p slugify-mod -- -D warnings
-        cargo clippy --locked --lib --no-default-features --target wasm32-unknown-unknown -p edge-python -- -D warnings
+      run: make lint-rust
 
     # build-std needs nightly plus rust-src.
     - name: Toolchain (nightly)
@@ -56,83 +57,19 @@ runs:
           | tar -xz --strip-components=2 -C /usr/local/bin binaryen-version_121/bin/wasm-opt
         wasm-opt --version
 
+    # The small compiler.wasm that ships, and the speed copy the CLI precompiles to native code.
     - name: Build
       shell: bash
-      run: |
-        RUSTFLAGS="-Z location-detail=none -Z fmt-debug=none -Z unstable-options -C panic=immediate-abort" \
-        cargo +nightly rustc \
-          --target wasm32-unknown-unknown \
-          --lib \
-          --release \
-          -p edge-python \
-          --no-default-features \
-          --features runtime \
-          --crate-type cdylib \
-          -Z build-std=std,panic_abort \
-          -Z build-std-features=optimize_for_size
-
-    - name: Size (unoptimized)
-      shell: bash
-      run: ls -lh target/wasm32-unknown-unknown/release/compiler.wasm
-
-    # Three passes, -Oz, reflatten for a fresh CFG, then a converge sweep. Traps stay, they guard bounds.
-    - name: Optimize
-      shell: bash
-      run: |
-        INPUT=target/wasm32-unknown-unknown/release/compiler.wasm
-
-        wasm-opt -Oz --converge \
-          --generate-global-effects \
-          --strip-debug --strip-producers \
-          --enable-bulk-memory-opt \
-          --enable-nontrapping-float-to-int \
-          --enable-sign-ext \
-          -o /tmp/wasm_stage1.wasm "$INPUT"
-
-        wasm-opt --flatten --rereloop -Oz -Oz \
-          --enable-bulk-memory-opt \
-          --enable-nontrapping-float-to-int \
-          --enable-sign-ext \
-          -o /tmp/wasm_stage2.wasm /tmp/wasm_stage1.wasm
-
-        wasm-opt -Oz --converge \
-          --enable-bulk-memory-opt \
-          --enable-nontrapping-float-to-int \
-          --enable-sign-ext \
-          -o "$INPUT" /tmp/wasm_stage2.wasm
-
-        rm /tmp/wasm_stage1.wasm /tmp/wasm_stage2.wasm
+      run: make wasm-ship
 
     # A notice survives on the run page, a job summary would be buried among the other jobs.
     - name: Size
       shell: bash
-      run: |
-        wasm=target/wasm32-unknown-unknown/release/compiler.wasm
-        echo "::notice title=compiler.wasm::served as brotli-11: $(( $(brotli -q 11 -c "$wasm" | wc -c) / 1024 )) KB (raw $(( $(wc -c < "$wasm") / 1024 )) KB)"
-
-    # The CLI precompiles its compiler.wasm to native code, so this build trades size for speed.
-    - name: Build (CLI)
-      shell: bash
-      run: |
-        cargo rustc --locked --profile cli --target wasm32-unknown-unknown -p edge-python --lib --no-default-features --features runtime --crate-type cdylib
-        CLI_WASM=target/wasm32-unknown-unknown/cli/compiler.wasm
-        wasm-opt -O3 --enable-bulk-memory --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-multivalue --enable-reference-types -o /tmp/compiler-cli.wasm "$CLI_WASM"
-        mv /tmp/compiler-cli.wasm "$CLI_WASM"
-        ls -lh "$CLI_WASM"
+      run: echo "::notice title=compiler.wasm::served as $(make -s size)"
 
     - name: Test
       shell: bash
-      run: cargo test --locked -p edge-python
-
-    # On its own, since the coverage build leaves method calls unfused and the corpus above must run fused.
-    - name: Coverage hook
-      shell: bash
-      run: cargo test --locked -p edge-python --features coverage coverage
-
-    # On its own too, it recounts every slot at each collection to prove the running count.
-    - name: Memory count
-      shell: bash
-      run: cargo test --locked --release -p edge-python --features memcheck --test tests vm::test::test_cases
+      run: make test
 
     # compiler.wasm ships, the speed build goes under _build/ for the CLI jobs.
     - name: Stage

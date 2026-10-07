@@ -17,8 +17,8 @@ fn main() {
     let engine = wasmtime::Engine::new(&cfg).expect("wasmtime engine");
     let compiler = std::env::var("EDGE_COMPILER_WASM")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| manifest.join("../target/wasm32-unknown-unknown/release/compiler.wasm"));
-    precompile(&engine, &compiler, &out.join("compiler.cwasm"), "run cargo wasm first");
+        .unwrap_or_else(|_| manifest.join("../target/wasm32-unknown-unknown/cli/compiler.wasm"));
+    precompile(&engine, &compiler, &out.join("compiler.cwasm"), "run make wasm-cli first");
     // A browser runs the module itself, never the precompile, so a dist and a headless run carry a raw copy.
     std::fs::copy(&compiler, out.join("compiler.wasm")).unwrap_or_else(|e| panic!("copying {}: {e}", compiler.display()));
     let js_dist = std::env::var("EDGE_JS_DIST").map(PathBuf::from).unwrap_or_else(|_| manifest.join("../js/dist"));
@@ -28,7 +28,7 @@ fn main() {
 /* The compiled JS host the binary carries, keyed by the path the CDN serves each file at, so a page's imports read the same from a dist, from a headless run, or from the CDN. */
 fn js_host(dist: &Path, out: &Path) {
     println!("cargo:rerun-if-changed={}", dist.display());
-    let hint = "run tsc in js first, see CONTRIBUTING.md";
+    let hint = "run make js first";
     let root = std::fs::canonicalize(dist).unwrap_or_else(|e| panic!("cannot read {}: {e}, {hint}", dist.display()));
 
     let mut found = Vec::new();

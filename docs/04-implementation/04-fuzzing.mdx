@@ -26,7 +26,7 @@ cargo afl fuzz -i in -o out -x edge.dict target/release/afl-pipeline  # runs unt
 cargo afl whatsup out        # status summary; run in another terminal while fuzzing
 ```
 
-For a parallel run across the host cores, `./deploy.sh` builds, regenerates seeds, and launches one `-M` plus N-1 `-S` instances sharing one `out/`. It runs one instance per logical core by default. Override with `JOBS`. `DURATION`, `FRESH`, and `TIMEOUT_MS` are optional too. The same target runs on a daily schedule in CI via [`.github/workflows/fuzzer.yml`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/.github/workflows/fuzzer.yml), which calls `deploy.sh` directly on the runner (no container) and fails the run on any saved crash.
+For a parallel run across the host cores, `make fuzz` from the repo root runs `./deploy.sh`, which builds, regenerates seeds, and launches one `-M` plus N-1 `-S` instances sharing one `out/`. It runs one instance per logical core by default. Override with `JOBS`. `DURATION`, `FRESH`, and `TIMEOUT_MS` are optional too. The same target runs on a daily schedule in CI via [`.github/workflows/fuzzer.yml`](https://github.com/dylan-sutton-chavez/edge-python/tree/main/.github/workflows/fuzzer.yml), which calls `make fuzz` directly on the runner (no container) and fails the run on any saved crash.
 
 | Variable | Default | Description |
 |----------|---------|-------------|

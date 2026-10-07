@@ -23,19 +23,12 @@ jobs:
         include:
           # vm and snapshot each walk the whole vm corpus, so they get a runner apiece.
           - entry: vm
-            args: "-p edge-python --test tests vm::"
           - entry: snapshot
-            args: "-p edge-python --test tests snapshot::"
           - entry: modules
-            args: "-p edge-python --test tests modules::"
           - entry: parser
-            args: "-p edge-python --test tests parser::"
           - entry: lexer
-            args: "-p edge-python --test tests lexer::"
           - entry: abi
-            args: "-p edge-python --test tests abi::"
           - entry: lang
-            args: "-p lang"
     steps:
       - uses: actions/checkout@v7
 
@@ -52,7 +45,7 @@ jobs:
 
       # Building the sysroot is its own step, so its minutes never read as interpreting time.
       - name: Sysroot
-        run: cargo +nightly miri setup
+        run: make miri-setup
 
       - name: Interpret
-        run: cargo +nightly miri test ${{ matrix.args }}
+        run: make miri SUITE=${{ matrix.entry }}

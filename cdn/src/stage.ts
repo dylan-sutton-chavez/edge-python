@@ -20,12 +20,12 @@ function copy(from: string, to: string) {
 const STAGERS: Record<Part, (out: string) => void> = {
   compiler(out) {
     const target = join(REPO_DIR, 'target/wasm32-unknown-unknown')
-    copy(need(join(target, 'release/compiler.wasm'), 'run cargo wasm'), join(out, 'compiler.wasm'))
+    copy(need(join(target, 'release/compiler.wasm'), 'run make wasm'), join(out, 'compiler.wasm'))
     // The CLI embeds the speed build, later jobs read it from the staged tree and a deploy skips it.
-    if (existsSync(join(target, 'cli/compiler.wasm'))) copy(join(target, 'cli/compiler.wasm'), join(out, '_build/compiler-cli.wasm'))
+    if (existsSync(join(target, 'cli/compiler-cli.wasm'))) copy(join(target, 'cli/compiler-cli.wasm'), join(out, '_build/compiler-cli.wasm'))
   },
   js(out) {
-    copy(need(join(REPO_DIR, 'js/dist'), 'run tsc in js'), join(out, 'js/src'))
+    copy(need(join(REPO_DIR, 'js/dist'), 'run make js'), join(out, 'js/src'))
   },
   cli(out) {
     for (const script of ['install.sh', 'uninstall.sh']) copy(join(REPO_DIR, 'cli/setup', script), join(out, 'cli', script))
@@ -42,7 +42,7 @@ export function stage(out: string, parts: readonly Part[] = PARTS) {
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const [out, ...parts] = process.argv.slice(2)
-  if (!out) throw new Error('Pass the output directory and optional parts, for example "npm run stage -- ../_cdn js".')
+  if (!out) throw new Error('Pass the output directory and optional parts, for example "make stage PARTS=js".')
 
   const unknown = parts.find((part) => !(PARTS as readonly string[]).includes(part))
   if (unknown) throw new Error(`Unknown part "${unknown}", pick from ${PARTS.join(', ')}.`)

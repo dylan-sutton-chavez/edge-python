@@ -466,7 +466,7 @@ fn a_plugin_awaits_a_system_call_and_resumes() {
     let port = spawn_fixture();
     let dir = scratch("plugin-net");
     let plugin = concat!(env!("CARGO_MANIFEST_DIR"), "/../target/wasm32-unknown-unknown/release/slugify_mod.wasm");
-    std::fs::copy(plugin, dir.join("slugify_mod.wasm")).expect("the plugin fixture, cargo build --release --target wasm32-unknown-unknown -p slugify-mod");
+    std::fs::copy(plugin, dir.join("slugify_mod.wasm")).expect("the plugin fixture, make plugin");
     std::fs::write(dir.join("edge.json"), r#"{ "imports": { "slugify_mod": "./slugify_mod.wasm" }, "permissions": { "main": ["net:127.0.0.1"] } }"#).unwrap();
     let src = format!("from slugify_mod import status_of\nprint(status_of('http://127.0.0.1:{port}/text'))\ntry:\n    status_of('http://127.0.0.1:1/')\nexcept OSError as e:\n    print(type(e).__name__)\n");
     std::fs::write(dir.join("main.py"), src).unwrap();

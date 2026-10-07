@@ -25,7 +25,7 @@ runs:
 
     - name: Install Chromium
       shell: bash
-      run: deno run -A npm:playwright install --with-deps chromium
+      run: make browsers
 
     # The Deno suite loads the pdk example to prove a plugin reaches and awaits system calls.
     - name: Toolchain
@@ -34,11 +34,7 @@ runs:
         cache: false
         rustflags: ""
 
-    - name: Build the plugin fixture
-      shell: bash
-      run: cargo build --locked --release --target wasm32-unknown-unknown -p slugify-mod
-
     # Every JS host suite, the Deno ones with no browser and the Playwright ones in Chromium.
     - name: JS host
       shell: bash
-      run: deno test --allow-all js/tests/
+      run: make test-js

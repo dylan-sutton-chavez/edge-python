@@ -12,14 +12,14 @@ fn edge_binary() -> String {
         return local.to_string();
     }
     let on_path = Command::new("edge").arg("--version").output().is_ok_and(|o| o.status.success());
-    assert!(on_path, "no edge binary found, run cd cli && cargo build or set SKILL_EDGE");
+    assert!(on_path, "no edge binary found, run make test-skill or set SKILL_EDGE");
     "edge".to_string()
 }
 
 #[test]
 fn skill_md() {
     // The cells import JavaScript libraries, which every suite reads from a staged CDN.
-    assert!(std::env::var("EDGE_CDN_BASE").is_ok(), "set EDGE_CDN_BASE (npm run serve in cdn)");
+    assert!(std::env::var("EDGE_CDN_BASE").is_ok(), "set EDGE_CDN_BASE (make serve)");
     let edge = edge_binary();
     let doc = concat!(env!("CARGO_MANIFEST_DIR"), "/SKILL.md");
     let out = Command::new(env!("CARGO_BIN_EXE_skill"))

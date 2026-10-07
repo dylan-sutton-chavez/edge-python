@@ -27,23 +27,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # A tag names the release the CLI reports, so the earliest job refuses one the manifests disagree with.
-      - name: Check the version
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          tag="${GITHUB_REF_NAME#v}"
-          # An edge floor names engine releases, so a release follows the rule every edge.json version does.
-          if ! [[ "$tag" =~ ^(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)$ ]]; then
-            echo "tag $GITHUB_REF_NAME is not major.minor.patch with each part 0 to 99 and no leading zeros" >&2
-            exit 1
-          fi
-          root=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
-          cli=$(grep -m1 '^version = ' cli/Cargo.toml | cut -d'"' -f2)
-          if [ "$root" != "$tag" ] || [ "$cli" != "$tag" ]; then
-            echo "tag $GITHUB_REF_NAME ships $tag, Cargo.toml says $root and cli/Cargo.toml says $cli" >&2
-            exit 1
-          fi
-
       - uses: ./.github/actions/compiler
         with:
           github-token: ${{ github.token }}

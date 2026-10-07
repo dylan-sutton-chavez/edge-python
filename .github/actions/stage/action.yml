@@ -21,10 +21,7 @@ runs:
 
     - name: Stage
       shell: bash
-      working-directory: cdn
-      run: |
-        npm ci
-        npm run stage -- ../_cdn ${{ inputs.part }}
+      run: make stage PARTS=${{ inputs.part }}
 
     - name: Keep
       uses: actions/upload-artifact@v7

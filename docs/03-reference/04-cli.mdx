@@ -36,7 +36,7 @@ cargo install --path cli
 
 Pass a release to install that one instead of the latest, `curl -fsSL https://cdn.edgepython.com/cli/install.sh | sh -s v1.0.0`. Every release from 1.0 keeps a frozen copy of itself on the CDN, which is what a version reads and what a downgrade needs.
 
-Building from source embeds `compiler.wasm`, so run `cargo wasm` first, or point `EDGE_COMPILER_WASM` at a copy. The build fetches nothing.
+Building from source embeds `compiler.wasm` and the JS host, so run `make wasm-cli js` first, or point `EDGE_COMPILER_WASM` at a copy. The build fetches nothing.
 
 ## `edge run`: run a script
 

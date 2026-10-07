@@ -22,7 +22,7 @@ export default {
 `
 
 const [tree, port = '8788'] = process.argv.slice(2)
-if (!tree) throw new Error('Pass a staged tree, for example "npm run serve -- ../_cdn".')
+if (!tree) throw new Error('Pass a staged tree, for example "make serve".')
 
 const mf = new Miniflare(convertV4MiniflareOptions({ modules: true, script: WORKER, compatibilityDate: '2026-09-01', r2Buckets: ['CDN'], host: '127.0.0.1', port: Number(port) }))
 // Miniflare types the proxy loosely, only put is needed here.

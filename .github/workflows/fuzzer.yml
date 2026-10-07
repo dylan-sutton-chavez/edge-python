@@ -37,8 +37,7 @@ jobs:
         run: cargo install cargo-afl
 
       - name: Fuzz
-        working-directory: fuzz
-        run: bash ./deploy.sh
+        run: make fuzz
 
       - name: Triage
         working-directory: fuzz

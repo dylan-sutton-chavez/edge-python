@@ -1,5 +1,0 @@
-# `cargo wasm` build edge-python release WebAssembly artifact.
-[alias]
-wasm = "rustc --release --target wasm32-unknown-unknown -p edge-python --lib --no-default-features --features runtime --crate-type cdylib"
-# `cargo wasm-cli` builds the speed-tuned copy released CLIs embed.
-wasm-cli = "rustc --profile cli --target wasm32-unknown-unknown -p edge-python --lib --no-default-features --features runtime --crate-type cdylib"

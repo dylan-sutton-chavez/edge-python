@@ -7,7 +7,7 @@ const BIN: &str = env!("CARGO_BIN_EXE_edge");
 
 /* The edge binary with a private cache, remote modules resolve through the local CDN. */
 fn edge() -> Command {
-    let base = std::env::var("EDGE_CDN_BASE").unwrap_or_else(|_| panic!("set EDGE_CDN_BASE (npm run serve in cdn)"));
+    let base = std::env::var("EDGE_CDN_BASE").unwrap_or_else(|_| panic!("set EDGE_CDN_BASE (make serve)"));
     let cache = std::env::temp_dir().join(format!("edge-actor-cache-{}", std::process::id()));
     let mut cmd = Command::new(BIN);
     cmd.env("EDGE_CDN_BASE", base).env("XDG_CACHE_HOME", cache);

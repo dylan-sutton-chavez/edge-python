@@ -1,6 +1,6 @@
 /* The engine under Deno with no browser, undeclared names fail and missing Web APIs name themselves. */
 const BASE = Deno.env.get("EDGE_CDN_BASE")?.replace(/\/$/, "");
-if (!BASE) throw new Error("set EDGE_CDN_BASE (npm run serve in cdn)");
+if (!BASE) throw new Error("set EDGE_CDN_BASE (make serve)");
 const WASM = `${BASE}/compiler.wasm`;
 
 // A fresh engine per test, the query string keeps the module state apart.
@@ -210,7 +210,7 @@ Deno.test("deno: net reaches only the hosts its package holds", async () => {
     if (got.out !== "" || got.text !== "200 b'got /items' None\n'main' has no net:localhost, edge.json grants it net:127.0.0.1") throw new Error(`unexpected ${JSON.stringify(got)}`);
 });
 
-// The pdk example, built by `cargo build --release --target wasm32-unknown-unknown -p slugify-mod`.
+// The pdk example, built by `make plugin`.
 const PLUGIN = new URL("../../target/wasm32-unknown-unknown/release/slugify_mod.wasm", import.meta.url);
 
 Deno.test("deno: a plugin reaches system calls and awaits the ones that wait", async () => {

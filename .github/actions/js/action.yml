@@ -18,24 +18,12 @@ runs:
 
     - name: Lint
       shell: bash
-      run: deno lint js/
-
-    # js/src splits main-thread (dom lib) and worker (webworker lib) since tsc rejects mixing the two.
-    - name: Type check
-      shell: bash
-      run: |
-        deno check --config js/src/deno.json js/src/index.ts
-        deno check --config js/src/worker/deno.json js/src/worker/worker.ts js/src/worker/engine.ts
+      run: make lint-js
 
     # Strips types to js/dist, the shape the CDN and the Playwright suite both serve, pinned tsc version.
     - name: Build
       shell: bash
-      working-directory: js
-      run: |
-        deno run -A npm:typescript@5.9.3/tsc -p tsconfig.json
-        deno run -A npm:typescript@5.9.3/tsc -p tsconfig.worker.json
-        # The engine as one classic script, the page hands it to the room as a whole.
-        deno bundle --platform browser --format iife src/worker/worker.ts -o dist/worker/bundle.js
+      run: make js
 
     # The Deno and Playwright suites run in the test job, against this tree served on loopback.
     - name: Stage

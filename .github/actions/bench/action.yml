@@ -13,11 +13,7 @@ runs:
         cache: false
         rustflags: ""
 
-    # The build the snapshot was taken from, never the wasm-opt one the Compiler job stages.
-    - name: Build compiler.wasm
-      shell: bash
-      run: cargo wasm-cli --locked
-
+    # Runs on the build the snapshot was taken from, never the wasm-opt one the Compiler job stages.
     - name: Bench
       shell: bash
-      run: cargo run --locked -p bench --profile cli
+      run: make bench
