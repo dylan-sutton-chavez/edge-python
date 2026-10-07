@@ -3,7 +3,7 @@ name: edge-python-afl
 services:
   fuzzer:
     build:
-      context: ../..
+      context: ..
       dockerfile: fuzz/Dockerfile
     restart: unless-stopped
     volumes:

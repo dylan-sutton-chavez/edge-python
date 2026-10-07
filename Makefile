@@ -24,7 +24,7 @@ MIRI_abi := -p edge-python --test tests abi::
 
 unix_only = $(if $(filter Windows_NT,$(OS)),$(error AFL runs on Linux and macOS only))
 
-.PHONY: wasm wasm-cli wasm-ship wasm-small wasm-cli-opt size js lint lint-rust lint-js lint-cli test bench bench-update plugin cli cli-release stage serve browsers test-js test-cli test-skill miri miri-setup fuzz seeds lucide version check
+.PHONY: wasm wasm-cli wasm-ship wasm-small wasm-cli-opt size js lint lint-rust lint-js lint-cli test bench bench-update plugin cli cli-release stage serve browsers test-js test-cli test-skill miri miri-setup fuzz fuzz-status fuzz-triage fuzz-replay fuzz-container fuzz-stop seeds lucide version check
 
 wasm:
 	cargo rustc --locked --release $(RUNTIME)
@@ -132,9 +132,31 @@ miri: miri-setup
 	$(if $(MIRI_$(SUITE)),,$(error SUITE is one of vm snapshot modules parser lexer abi))
 	cargo +nightly miri test --locked $(MIRI_$(SUITE))
 
+# One AFL instance per core, JOBS, DURATION, FRESH and TIMEOUT_MS tune the campaign.
 fuzz:
 	$(unix_only)
 	cd fuzz && bash ./deploy.sh
+
+fuzz-status:
+	$(unix_only)
+	cd fuzz && cargo afl whatsup -s out
+
+fuzz-triage:
+	$(unix_only)
+	cd fuzz && bash ./triage.sh
+
+fuzz-replay: export RUST_BACKTRACE = 1
+fuzz-replay:
+	$(unix_only)
+	$(if $(CASE),,$(error pass CASE, a saved input such as out/m0/crashes/id))
+	cd fuzz && ./target/release/afl-pipeline < $(CASE)
+
+# The same campaign detached in Docker, surviving reboots with its findings in a volume.
+fuzz-container:
+	cd fuzz && docker compose up --build -d
+
+fuzz-stop:
+	cd fuzz && docker compose down
 
 seeds:
 	$(unix_only)

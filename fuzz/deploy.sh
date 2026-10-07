@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Monitor a running campaign from another shell with: cargo afl whatsup out
+# make fuzz-status watches a running campaign from another shell.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-JOBS="${JOBS:-$(nproc)}" # One instance per logical core.
+JOBS="${JOBS:-$(getconf _NPROCESSORS_ONLN)}" # One instance per logical core.
 DURATION="${DURATION:-0}"
 FRESH="${FRESH:-0}"
 TIMEOUT_MS="${TIMEOUT_MS:-5000}" # > max bounded run, so slow-but-terminating inputs aren't false hangs
@@ -14,7 +14,7 @@ export AFL_NO_UI=1
 export AFL_AUTORESUME=1 # resume existing out/ on restart instead of aborting; FRESH=1 wipes it first
 
 (( JOBS < 1 )) && JOBS=1
-echo "logical cores: $(nproc), instances: $JOBS"
+echo "logical cores: $(getconf _NPROCESSORS_ONLN), instances: $JOBS"
 
 # Regenerate the seed corpus / dictionary if absent, then build the instrumented target.
 [ -d in ] && [ -n "$(ls -A in 2>/dev/null)" ] || bash ./seeds.sh
@@ -22,7 +22,7 @@ cargo afl build --release
 
 # Rebuild invalidates resume; force clean start.
 bin=target/release/afl-pipeline
-newhash=$(sha1sum "$bin" | cut -d' ' -f1)
+newhash=$(shasum "$bin" | cut -d' ' -f1)
 if [ -s out/.binary-hash ] && [ "$(cat out/.binary-hash)" != "$newhash" ]; then
   echo "instrumented binary changed; forcing FRESH start"
   FRESH=1
@@ -49,5 +49,6 @@ for i in $(seq 1 $(( JOBS - 1 ))); do
   pids+=($!)
 done
 
-echo "running $JOBS instance(s); logs in ./logs, status: cargo afl whatsup out"
-wait
+echo "running $JOBS instance(s), logs in ./logs, make fuzz-status shows them"
+# An instance that aborts fails the campaign instead of leaving it silently short.
+for pid in "${pids[@]}"; do wait "$pid"; done
