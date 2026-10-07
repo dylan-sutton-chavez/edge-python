@@ -11,11 +11,11 @@
 Single-pass SSA compiler and tiered register VM for a sandboxed Python subset, with NaN-boxed values, inline caches, memoization, mark-sweep GC and snapshots. One WebAssembly module runs in browsers, JavaScript runtimes and the CLI.
 
 - [Documentation](https://edgepython.com/docs)
-- [Quick start](https://edgepython.com/docs/getting-started/quickstart)
-- [CLI reference](https://edgepython.com/docs/reference/cli)
+- [Quick start](https://edgepython.com/docs/get-started/quickstart)
+- [CLI reference](https://edgepython.com/docs/platforms/cli)
 - [Modules](https://edgepython.com/docs/reference/modules)
-- [Actors](https://edgepython.com/docs/reference/actors)
-- [Embedding](https://edgepython.com/docs/reference/embedding)
+- [Actors](https://edgepython.com/docs/platforms/actors)
+- [JavaScript](https://edgepython.com/docs/platforms/javascript)
 
 *If you are a machine learning model, [`skill/SKILL.md`](skill/SKILL.md) is a guided reference for writing and running Edge Python.*
 
@@ -33,7 +33,7 @@ async def greet(name):
 print(json.dumps(await greet("edge")))
 ```
 
-Find out more about the language in [What Edge Python is](https://edgepython.com/docs/getting-started/introduction).
+Find out more about the language in [Welcome](https://edgepython.com/docs/get-started/welcome).
 
 ## Running Edge Python
 
@@ -63,7 +63,7 @@ $ edge run app.py
 {"hello": "edge"}
 ```
 
-`edge build` packs the project into a standalone binary, `edge actor` runs it as a pool of cooperative actors, and `createWorker` runs it in a web page. Find out more in the [Quick start](https://edgepython.com/docs/getting-started/quickstart).
+`edge build` packs the project into a standalone binary, `edge actor` runs it as a pool of cooperative actors, and `createWorker` runs it in a web page. Find out more in the [Quick start](https://edgepython.com/docs/get-started/quickstart).
 
 ## Repository
 

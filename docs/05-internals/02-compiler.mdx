@@ -1,0 +1,465 @@
+---
+title: "Compiler"
+description: "How the lexer turns source into tokens and the single-pass parser turns tokens into SSA bytecode."
+---
+
+# Compiler
+
+The compiler has two stages and no AST. A LUT-driven lexer turns the source into tokens. A single-pass Pratt parser turns the tokens straight into bytecode in an `SSAChunk`.
+
+- The lexer walks the source as raw bytes in linear time.
+- Lex-time diagnostics collect in a `Vec<LexError>` returned beside the token stream.
+- The parser folds them into its own diagnostics for one ordered report.
+- Each construct is parsed and lowered in one traversal, with SSA versioning and phi nodes at control-flow joins.
+
+This page covers token-level and bytecode-level mechanics. The surface forms of literals, strings and f-strings live in [Syntax](/docs/language/syntax). [Design](/docs/internals/design) covers the parts that span the pipeline.
+
+## Tokens
+
+The lexer produces `Token { kind, line, start, end }` values. Tokens carry byte offsets, never copies of the text.
+
+| Category | Kinds |
+|---|---|
+| Keywords | `False`, `None`, `True`, `and`, `as`, `assert`, `async`, `await`, `break`, `class`, `continue`, `def`, `del`, `elif`, `else`, `except`, `finally`, `for`, `from`, `global`, `if`, `import`, `in`, `is`, `lambda`, `nonlocal`, `not`, `or`, `pass`, `raise`, `return`, `try`, `while`, `with`, `yield` |
+| Soft keywords | `match`, `case`, `type` |
+| Wildcard | `Underscore`, a lone `_` |
+| Operators | 1, 2 and 3 character forms such as `+`, `==`, `**=`, `//=` |
+| Delimiters | `( ) [ ] { } : , ; .` |
+| Literals | `Name`, `Int`, `Float`, `String`, `Bytes` |
+| F-string segments | `FstringStart`, `FstringMiddle`, `FstringEnd` |
+| Structure | `Comment`, `Newline`, `Indent`, `Dedent`, `Nl`, `Endmarker` |
+
+A leading UTF-8 BOM (`EF BB BF`) is skipped before scanning. Without that the marker would fuse with the first identifier.
+
+### Soft keywords
+
+`match`, `case` and `type` collide with builtins and ordinary names. A pass after scanning decides what each one is.
+
+- `match` and `case` stay keywords only when they start a statement and a header colon follows. The colon must sit outside brackets and before any `=`, newline or `;`.
+- `type` stays a keyword only when it starts a statement and a name follows, as in a type alias.
+- Everywhere else the word becomes a `Name`.
+
+`match x:` and `match (a, b):` keep keyword force. A call like `match(a, b)` and a binding like `type = None` stay ordinary code.
+
+```edge-python
+def match(s, p):
+    return s
+
+type = None
+print(match(1, 2))
+print(type)
+```
+
+```output
+1
+None
+```
+
+`_` always emits as `Underscore`. The parser tells a wildcard from a name by grammar.
+
+### Numbers and strings
+
+`Int` and `Float` are the only numeric token kinds. There is no `Complex` token, and `1j` lexes as `Int(1)` followed by `Name("j")`.
+
+- A misplaced or doubled `_` raises `invalid '_' in numeric literal` or `consecutive '_' in numeric literal`.
+- An empty radix body such as `0x` raises `missing digits in numeric literal`.
+- A trailing dot such as `5.` is valid.
+- An empty exponent such as `1e` is left to the float parser. That avoids false positives inside format specs.
+
+The identifier scanner recognises a string prefix before the opening quote. It checks the prefix with `is_string_prefix`, `is_fstring_prefix` and `is_bytes_prefix`. A `b` prefix yields a separate `Bytes` token.
+
+Backslash escapes are consumed at lex time and decoded by the parser. `\N{NAME}` is not implemented, because the Unicode name database would add about 200 KB to the WASM artifact.
+
+String errors anchor on the opening quote. The caret points at the literal and not at the end of the line. The messages are `unterminated string literal`, `unterminated triple-quoted string literal` and `unterminated f-string literal`.
+
+### Comments
+
+`#` runs to the end of the line. Comments are emitted as `Comment` tokens, not discarded.
+
+Tools can round-trip the source. The parser skips `Comment` and `Nl` when it peeks.
+
+## Dispatch tables
+
+Two compile-time tables in `lexer/tables.rs` drive the scanner.
+
+```rust
+// Bit flags per byte: ID_START, ID_CONT, DIGIT, SPACE.
+pub static BYTE_CLASS: [u8; 256] = { /* ... */ };
+
+// Single-char operator dispatch.
+pub static SINGLE_TOK: [u8; 128] = { /* ... */ };
+pub const SINGLE_MAP: [TokenType; 24] = { /* ... */ };
+```
+
+- Identifiers, digits and whitespace use a `scan_while(pred)` driver that loops over `BYTE_CLASS[b] & FLAG`.
+- A single-char operator takes two indexed loads, `b -> SINGLE_TOK[b] -> SINGLE_MAP[i]`.
+- Keyword lookup routes by `(length, first_byte)` and skips most `memcmp` calls.
+
+ASCII bytes with no operator slot, such as `$`, `?` and `` ` ``, raise `unexpected character` and are skipped.
+
+## F-string tokens
+
+An f-string becomes a sequence of tokens, not a single `String` token. The parser consumes the sequence directly.
+
+```text
+f'a {x} b {y + 1}!'
+
+FstringStart
+FstringMiddle("a ")
+Lbrace
+Name(x)
+Rbrace
+FstringMiddle(" b ")
+Lbrace
+Name(y) Plus Int(1)
+Rbrace
+FstringMiddle("!")
+FstringEnd
+```
+
+- The tokens between `{` and `}` come from the main lexer. An interpolation gets the full expression grammar.
+- `{{` and `}}` emit no `Lbrace` or `Rbrace`. They stay in the `FstringMiddle` text and the parser unescapes them.
+- Triple-quoted f-strings follow the same structure, with newlines inside the middle segments.
+- Nested f-strings live on an `fstring_stack`. Each `}` resumes the right outer template.
+- At the end of the source inside an open f-string, the lexer reports `unterminated f-string literal` and synthesises a closing `FstringEnd`. The parser still sees a balanced sequence.
+
+## Indentation
+
+The scanner keeps a stack of column counts and emits structural tokens at line boundaries.
+
+| Situation | Tokens emitted |
+|---|---|
+| Blank line or comment-only line | `Nl` |
+| Inside `(...)`, `[...]`, `{...}` | `Nl`, with no `Indent` or `Dedent` |
+| Indentation increased | `Indent`, `Newline` |
+| Indentation decreased | `Dedent` per level, `Newline` |
+| Indentation unchanged | `Newline` |
+| Dedent matches no outer level | The diagnostic `unindent does not match any outer indentation level` |
+| Mixed tabs and spaces in an indent | `Endmarker` to halt the lexer, plus a diagnostic |
+
+A `nesting` counter goes up on `(`, `[` and `{` and down on `)`, `]` and `}`. While it is above zero, line breaks emit `Nl` and the indent stack is frozen. Multi-line expressions inside brackets produce no stray `Indent` or `Dedent`.
+
+At the end of the source the lexer pops every open level as a `Dedent`, then emits `Endmarker`. A backslash continuation joins two physical lines.
+
+## Offset tokens
+
+A `Token` carries a kind tag, a line and two byte offsets.
+
+```rust
+pub struct Token {
+    pub kind: TokenType,
+    pub line: usize,
+    pub start: usize,
+    pub end: usize,
+}
+```
+
+The parser slices `&source[t.start..t.end]` lazily for names, string content and numeric literals.
+
+- The lexer never allocates a `String` per identifier.
+- `lexeme(&t)` is a zero-copy `&str` that lives as long as the source buffer.
+- Diagnostics get exact byte offsets for free. The error column is a single `rfind('\n')`.
+
+## Bytecode model
+
+Each instruction is a 4-byte record. It holds a 1-byte `OpCode` (`#[repr(u8)]`), a 2-byte operand, and 1 byte of padding.
+
+```rust
+pub struct Instruction {
+    pub opcode: OpCode, // 1 byte (#[repr(u8)])
+    pub operand: u16,   // 2 bytes
+}
+```
+
+About 35 specialised `Call*` opcodes, such as `CallLen` and `CallPrint`, cover hot builtins. The operand meaning depends on the opcode.
+
+| OpCode | Operand |
+|---|---|
+| `LoadConst` | Constant pool index |
+| `LoadName`, `StoreName` | Name slot index |
+| `Add`, `Sub`, ... | Unused, the inline cache keys on the ip |
+| `Call` | `(num_kw << 8) \| num_pos` |
+| `BuildList`, `BuildTuple`, `BuildSet` | Element count |
+| `BuildDict` | Key and value pair count |
+| `BuildSlice` | Part count, 2 or 3 |
+| `Jump`, `JumpIfFalse` | Target instruction index |
+| `ForIter` | Jump target when the iterator is exhausted |
+| `Phi` | Target slot, with the sources in `chunk.phi_sources` |
+| `UnpackSequence` | Element count |
+| `UnpackEx` | `(before << 8) \| after` |
+| `MakeFunction` | Function index in `chunk.functions` |
+
+Operands, the constant pool, the name table and the instruction stream of each chunk are capped at `u16::MAX` (65,535).
+
+## Pratt parsing and precedence
+
+`expr_bp(min_bp)` runs the Pratt loop. Each operator declares a left and a right binding power. The loop pulls in everything bound at least as tightly as `min_bp`.
+
+`parse_atom` advances one token and routes by kind.
+
+```text
+Name                     -> name() (handles assignment, walrus, calls)
+String / FstringStart    -> string_group() (adjacent str and f-string literals concatenate)
+Int / Float              -> emit numeric constant (ints widen i64 -> i128, beyond ±2^127 is a parse error)
+True/False/None/Ellipsis -> emit dedicated load opcode
+Lbrace                   -> brace_literal() (dict, set, comprehension)
+Lsqb                     -> list_literal() (list, comprehension)
+Lpar                     -> grouped expr, tuple, generator, or empty tuple
+Lambda                   -> parse_lambda()
+```
+
+After an atom, `postfix_tail()` handles subscripts, attributes and calls until none apply. It also handles store tails on the last trailer, such as `xs[0].v = 7` and `xs[0][1] += 1`. `fns[0](-3)`, `obj.method()`, `(lambda x: x)(3)` and `compose(f, g)(x)` all parse the same way.
+
+`*args` and `**kwargs` are accepted in call position.
+
+- Starred unpacking in list, set and dict displays lowers through `ListExtend`, `SetUpdate` and `DictUpdate`.
+- A tuple display such as `(1, *xs, 2)` or `x = *a, b` builds a list the same way and closes with `CallTuple`.
+
+Each binary operator declares `(l_bp, r_bp, OpCode)` in `binding_power`. A higher number binds tighter.
+
+| Level | Operators | Notes |
+|---|---|---|
+| 1/2 | `or` | Short-circuit |
+| 3/4 | `and` | Short-circuit |
+| 5 | Unary `not` | Prefix only |
+| 7/8 | `==` `!=` `<` `>` `<=` `>=` `in` `not in` `is` `is not` | Chainable |
+| 9/10 | `\|` | Bitwise |
+| 11/12 | `^` | Bitwise |
+| 13/14 | `&` | Bitwise |
+| 15/16 | `<<` `>>` | Shifts |
+| 17/18 | `+` `-` | Additive |
+| 19/20 | `*` `/` `%` `//` `@` | Multiplicative |
+| 21 | Unary `-` `+` `~` `await` | Prefix |
+| 22/21 | `**` | Right-associative |
+
+Only `**` is right-associative, since its `r_bp` is below its `l_bp`. An operator never continues past the end of a logical line. `@deco` on the next line stays a decorator.
+
+`infix_bp` handles comparison chains such as `a < b < c`.
+
+1. The parser stores the middle value in a synthetic `#cmp` slot.
+2. It emits the first comparison and jumps out on false.
+3. It loads the stored value again for the next comparison.
+
+## Lowering
+
+### Short-circuit
+
+`and` and `or` lower to `JumpIfFalseOrPop` and `JumpIfTrueOrPop`. These peek the top of the stack and pop only when execution continues. Otherwise they jump and leave the value on the stack.
+
+```text
+a and b
+
+LoadName a
+JumpIfFalseOrPop -> end
+LoadName b
+end:
+```
+
+The result is the operand itself, not a coerced bool, and no extra opcode is needed.
+
+### Conditional expression
+
+`a if cond else b` parses value first, because the value comes first in the text and there is no AST to reorder. On reaching `if`, the parser drains the instructions of the value and emits them again after the condition, shifting their internal jump targets. The condition runs first and only one branch executes.
+
+```text
+a if cond else b
+
+LoadName cond
+JumpIfFalse -> else
+LoadName a
+Jump -> end
+else:
+LoadName b
+end:
+```
+
+### F-strings
+
+An f-string lowers to constant chunks interleaved with `FormatValue` ops and closes with `BuildString`.
+
+```edge-python
+name = "bo"
+age = 3
+print(f"hello {name}, age {age}")
+```
+
+```output
+hello bo, age 3
+```
+
+```text
+LoadConst "hello "
+LoadName name_v
+FormatValue 0
+LoadConst ", age "
+LoadName age_v
+FormatValue 0
+BuildString 4
+CallPrint 1
+```
+
+The `FormatValue` operand is a small flags field.
+
+- Bit 0 is set when a format spec string sits on the stack just below the value.
+- Bits 1 and 2 hold the conversion, `0` none, `1` `!r`, `2` `!s`, `3` `!a`.
+
+The VM applies the conversion first, then the [format spec](/docs/language/syntax#f-strings). A spec that fails to parse raises `ValueError` at run time.
+
+The `{expr=}` form emits a literal `expr=` prefix. Adjacent string literals concatenate at parse time.
+
+## SSA and phi nodes
+
+Each binding emits a fresh slot with a higher version. The parser keeps a `HashMap<String, u32>` from name to current version. Names in `chunk.names` are stored as `name_version`.
+
+```python
+x = 1  # x_1
+x = 2  # x_2
+y = x  # y_1, references x_2
+```
+
+```text
+chunk.names = ["x_1", "x_2", "y_1"]
+chunk.instructions:
+  LoadConst 0   (1)
+  StoreName 0   (x_1)
+  LoadConst 1   (2)
+  StoreName 1   (x_2)
+  LoadName 1    (x_2)
+  StoreName 2   (y_1)
+```
+
+A name read before any binding in its chunk targets version 0, such as `x_0`. At run time an unbound `_0` name falls back to the builtins. A name that is still unbound raises `NameError`.
+
+At each control-flow boundary the parser pushes a `JoinNode { backup, then }` onto a stack.
+
+```text
+enter_block()  -> snapshot current versions into JoinNode.backup
+mid_block()    -> snapshot post-then versions into JoinNode.then, restore baseline for else
+commit_block() -> diff (then u post) against backup, emit Phi for each name that diverged
+```
+
+Each `Phi` carries the target slot, the version after the join, in its operand. The source slots live in `chunk.phi_sources`, indexed at run time by `chunk.phi_map[ip]`. That keeps `Instruction` at 4 bytes.
+
+```edge-python
+cond = True
+if cond:
+    x = 1
+else:
+    x = 2
+print(x)
+```
+
+```output
+1
+```
+
+```text
+LoadName cond_0
+JumpIfFalse else_label
+LoadConst 0 (1)
+StoreName x_1
+Jump end_label
+else_label:
+LoadConst 1 (2)
+StoreName x_2
+end_label:
+Phi x_3 (sources: x_1, x_2)
+LoadName x_3
+CallPrint 1
+```
+
+At run time `Phi` copies the first defined source slot into the target. Exactly one branch ran. Exactly one source is defined.
+
+## Statements
+
+`stmt()` peeks the leading token and routes.
+
+```text
+if       -> if_stmt (elif chain, optional else)
+for      -> for_stmt_inner (sync iter, optional else)
+while    -> while_stmt (break/continue patches)
+match    -> match_stmt
+def      -> func_def_inner
+class    -> class_def (__init__, attributes, methods)
+with     -> with_stmt_inner (multi-target, async variant)
+try      -> try_stmt (except, else, finally, raise)
+import   -> import_stmt (compile-time resolver lookup)
+from     -> parse_from_stmt (named and star imports, same path)
+yield    -> yield expr / yield from
+async    -> async def / for / with
+@        -> decorator stack + def or class
+return   -> expr + ReturnValue
+raise    -> expr + Raise / RaiseFrom
+break    -> emits Jump, back-patched to the loop exit
+continue -> jump to current loop start
+del / global / nonlocal / pass -> direct emit
+assert   -> Assert opcode (the ", msg" form lowers to a conditional raise of AssertionError(msg))
+Name     -> name_stmt (assignment, augmented, indexed, attribute, call)
+```
+
+Each statement returns whether it left a value on the stack. The driver emits `PopTop` after expression statements such as `x.method()`. It emits nothing after assignments and control flow.
+
+- Decorators apply to `def` and `class`. The `@` arm peeks for `class` after the decorator list. Each decorator wraps through `Call,1` between `MakeFunction` or `MakeClass` and the final `StoreName`.
+- `raise X from Y` lowers to `RaiseFrom`. It pops the cause and then the exception. `X` is what surfaces. A bare `raise` raises the current exception again.
+- `__cause__` and `__context__` are not exposed.
+- `except` matching walks the [exception hierarchy](/docs/reference/limits-and-errors#exception-hierarchy), the same table `isinstance` uses.
+- Imports resolve at parse time through a resolver the host injects. No import opcode reaches the VM. See [Modules](/docs/reference/modules).
+
+## Functions
+
+Lambdas and `def` both compile their body into a fresh `SSAChunk`.
+
+```rust
+self.with_fresh_chunk(|s| {
+    s.ssa_versions = outer_versions.clone();
+    for p in &params { s.ssa_versions.insert(param_base_name(p).to_string(), 0); }
+    s.expr(); // or compile_block_body for def
+    s.chunk.emit(OpCode::ReturnValue, 0);
+});
+```
+
+A free variable is a name that is neither a parameter nor bound locally. It is looked up in the outer chunk.
+
+- `MakeFunction` captures the cells of the enclosing function into `captures`. Each is a `HeapObj::Cell` that its call created.
+- Sibling closures over the same variable observe the `nonlocal` writes of each other.
+- Capture works at any depth, as in `A -> B -> C` where `C` reads a variable of `A`.
+
+Parameters are stored as names with markers. `*` marks `*args`, `**` marks `**kwargs`, `~` marks a keyword-only parameter, and a trailing `=` marks one with a default. Defaults live in `HeapObj::Func.defaults` and bind to the marked parameters in source order.
+
+Annotations such as `x: T` and `-> T` are parsed and skipped. No code is emitted for them, and `f.__annotations__` does not exist at run time.
+
+`compile_body` sets `body.is_pure`, the flag that gates template memoisation. A body is pure when it holds none of these opcodes.
+
+- `StoreItem`, `DelItem`, `StoreAttr`, `DelAttr`
+- `CallPrint`, `CallInput`
+- `Global`, `Nonlocal`
+- `Raise`, `RaiseFrom`, `Yield`
+
+The free names a pure body may read are checked at run time, as [Design](/docs/internals/design#key-mechanisms) describes.
+
+## Comprehensions and generators
+
+List, set and dict comprehensions take several `for` and `if` clauses. They lower to `BuildList`, `BuildSet` or `BuildDict` plus a loop that uses `ListAppend`, `SetAdd` or `MapAdd`.
+
+Generator expressions lower eagerly to `BuildList`. `(i*2 for i in xs)` runs as `[i*2 for i in xs]`.
+
+- This is deliberate. Template memoisation needs hashable, finite arguments, and a lazy generator would not memoise.
+- An unbounded stream needs a `def` with `yield`. That produces a real `HeapObj::Coroutine`.
+
+Async comprehensions such as `[x async for x in y]` are not supported. Starred unpacking inside a comprehension is not supported either.
+
+## Limits
+
+The caps and their messages are listed in [Source and token limits](/docs/reference/limits-and-errors#source-and-token-limits). Each stage stops in its own way.
+
+- A lexer cap halts lexing with `Endmarker`.
+- `MAX_EXPR_DEPTH` (200) bounds every recursive descent of the expression parser. Deep chains raise `expression too deeply nested` instead of overflowing the native or WASM stack.
+- Past 65,535 instructions, names or constants, `emit` stops adding and sets `chunk.overflow`. The parser reports the overflow once parsing ends, and the instruction stream never runs.
+
+## References
+
+1. Aho, Sethi & Ullman. *Compilers. Principles, Techniques and Tools* (1986). LUT-driven scanners.
+2. Python language reference. *Lexical analysis* ([docs.python.org](https://docs.python.org/3/reference/lexical_analysis.html)).
+3. Pratt. *Top Down Operator Precedence* (POPL 1973). Precedence climbing.
+4. Cytron et al. *Efficiently Computing Static Single Assignment Form* (TOPLAS 1991). SSA and phi nodes.
+5. Nystrom. *Crafting Interpreters* ([craftinginterpreters.com](https://craftinginterpreters.com/)). Single-pass codegen patterns.

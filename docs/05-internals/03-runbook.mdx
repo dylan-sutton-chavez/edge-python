@@ -1,0 +1,56 @@
+---
+title: "Runbook"
+description: "How the engine is checked beyond its tests, with fuzzing, Miri and the bench."
+---
+
+# Runbook
+
+Three checks run beside the test suites. Each one has a `make` target at the root of the repo.
+
+| Check | Command | In CI |
+|---|---|---|
+| Fuzzing | `make fuzz` | Daily, 20 minutes |
+| Miri | `make miri SUITE=vm` | Daily, one runner per suite |
+| Bench | `make bench` | Every push and pull request to `main` |
+
+## Fuzzing
+
+The fuzzer feeds mutated source through the lexer, the parser and the VM. It also saves a snapshot at the first park and restores it into a fresh VM. It looks for panics and memory faults.
+
+- It runs on [AFL++](https://github.com/AFLplusplus/AFLplusplus) through cargo-afl, on stable Rust.
+- The seeds are the programs in `tests/cases/vm.json`.
+- Only programs that parse reach the VM.
+
+> [!NOTE]
+> The harness runs the VM with an op budget of 100,000, a thousandth of the sandbox default. A loop that ends but runs long would otherwise read as a hang to AFL.
+
+A campaign runs one instance per logical core until stopped. It needs Linux or macOS and `cargo install cargo-afl`.
+
+> [!COPY] make fuzz
+
+CI runs the same target every day at 03:00 UTC for 1,200 seconds. A saved crash fails the run.
+
+The crashes and hangs are uploaded as the `fuzz-findings` artifact and kept for 14 days. A local campaign writes them under `fuzz/out/`, one folder per instance.
+
+The [fuzzing manual](https://github.com/dylan-sutton-chavez/edge-python/blob/main/fuzz/README.md) covers container campaigns, resuming, reproducing a crash and triage.
+
+## Miri
+
+[Miri](https://github.com/rust-lang/miri) interprets the test suites and reports undefined behavior. It needs the nightly toolchain with the `miri` component. `make miri` builds the Miri sysroot first.
+
+> [!COPY] make miri SUITE=vm
+
+`SUITE` is one of `vm`, `snapshot`, `modules`, `parser`, `lexer` and `abi`. CI runs every suite every day at 04:00 UTC, each on a runner of its own.
+
+## Bench
+
+`make bench` runs every case of `tests/cases/vm.json` on the speed build of `compiler.wasm` and counts the WebAssembly instructions. Each instruction is priced at 0.82 ns. That way `bench/.snapshot` holds the same seconds and MB per case on every machine.
+
+> [!COPY] make bench
+
+The bench fails when the mean or a single case moves past its threshold. It also fails when the snapshot was taken with another Rust, or when a case and its entry do not pair. `make bench-update` takes the snapshot again.
+
+> [!CARDS]
+> - `bug` [Fuzzing manual](https://github.com/dylan-sutton-chavez/edge-python/blob/main/fuzz/README.md) Campaigns, resuming, reproducing and triage.
+> - `git-pull-request` [Contributing](https://github.com/dylan-sutton-chavez/edge-python/blob/main/CONTRIBUTING.md) Builds, tests and what a pull request runs.
+> - `workflow` [CI workflows](https://github.com/dylan-sutton-chavez/edge-python/tree/main/.github/workflows) The main, fuzz and Miri jobs.

@@ -1,0 +1,240 @@
+---
+title: "Actors"
+description: "Run many isolated edge-python programs as cooperative tasks over a few threads."
+---
+
+# Actors
+
+An actor pool runs many edge-python programs as cooperative tasks over a few threads. It does not spend one OS thread per program. Each actor is its own interpreter with its own heap, and actors talk only by message.
+
+A pool serves two shapes of work.
+
+- You orchestrate your own programs as a pipeline of cooperating groups.
+- You run untrusted code from clients, each run in its own sandbox.
+
+Both run from an `actor.yml`.
+
+> [!COPY] edge actor actor.yml
+
+The pool boots the groups, runs to quiescence and exits. With a `listen:` address it stays up as a [server](#the-server).
+
+## Groups
+
+A group is one program run as a pool of interchangeable actors. It gets its program one of three ways.
+
+```yaml
+groups:
+  actor:
+    code: |            # an inline program
+      msg = receive()
+      print(msg)
+  parser:
+    run: app           # a main.py or a whole project directory
+  runner:
+    eval: true         # compile each message as its own program
+```
+
+- `code:` is an inline body.
+- `run:` points at a script or a project directory. A directory runs its `main.py` and resolves the `edge.json` of that project and its nested imports. Each declared version resolves through the [`edge.lock`](/docs/reference/modules#edgelock) beside its manifest.
+- `eval: true` is untrusted mode, covered in [Untrusted code](#untrusted-code).
+
+> [!IMPORTANT]
+> A `code` or `run` group runs code you trust. It keeps state between messages and can send. It reaches `fs`, `net`, `time` and `secret` under what the pool `edge.json` grants, with the metered limits as the only cap. Keep third-party code out of it and use an `eval` group instead.
+
+## Actors and load
+
+`replicas:` is a ceiling, not a count. Actors are born on demand up to it, and an idle actor costs about 31 KB. A group declares a large ceiling and pays only for the actors actually running.
+
+```yaml
+groups:
+  actor:
+    run: app
+    replicas: 100000   # ceiling, actors spawn as work arrives
+```
+
+A message goes to the first of these that exists.
+
+1. An idle actor.
+2. A fresh actor under the ceiling.
+3. The least-loaded live actor, once the group is saturated.
+
+## Messages
+
+An actor loops over `receive()` and forwards with `send(group, body)`. Both are builtins that need no import.
+
+```python
+msg = receive()
+send("transform", msg + "-done")   # hand it to the transform group
+```
+
+- `send` takes two strings and returns `None`. An actor of that group picks the message up with its own `receive()`.
+- Sends are fire and forget. An actor never blocks waiting on another, which keeps a pool free of circular deadlock.
+- The `seed:` list of a group delivers messages before the pool starts. It is the entry point that kicks a run off.
+- Groups resolve their imports through the `edge.json` beside `actor.yml`, or the one `--manifest` names. A pool never asks the registry where a version points.
+- Outside a pool nothing drains the message. Under `edge run` or in a browser `send()` raises `RuntimeError: send() needs an actor scheduler, missing in this runtime`.
+
+## Group fields
+
+| Field | Meaning | Default |
+|-------|---------|---------|
+| `code` | Inline program body | |
+| `run` | Script path or project directory to run | |
+| `eval` | Untrusted mode, compile each message as its own program | `false` |
+| `replicas` | Actor ceiling, actors spawn on demand up to it | `1` |
+| `retry` | Times a crashing message is retried before it is dropped | `0` |
+| `seed` | Messages delivered before the pool starts | none |
+| `out` | Where `print` goes, `stdout`, `null` or `file://path` | `stdout` |
+| `limits` | Per-actor `memory` in MB, `ops` and `preempt` overrides | the sandbox limits, `preempt` 2000 |
+
+A group needs one of `code`, `run` or `eval`.
+
+## The server
+
+A `listen:` address turns the pool into a live server. It stays up instead of ending at quiescence, and its ingress accepts messages over TCP.
+
+```yaml
+runtime:
+  listen: tcp://127.0.0.1:7777
+  durable: tmp/actor/log
+  control: tcp://127.0.0.1:9090
+  schedulers: auto     # one per core, or a fixed number
+  max_actors: 1000000   # ceiling on the actors of each group
+```
+
+| Field | Meaning | Default |
+|-------|---------|---------|
+| `listen` | TCP address of the ingress. Setting it makes the pool a server. | none, the pool runs to quiescence |
+| `durable` | Path of the message log, relative to `actor.yml`. Read only by a server. | `actor.wal` beside `actor.yml` |
+| `control` | HTTP address for `/stats`, `/pub/<group>` and `/eval/<group>`. Read only by a server. | none |
+| `schedulers` | `auto` for one thread per core, or a fixed number. A server runs on one. | `auto` |
+| `max_actors` | Ceiling on the actors of each group, applied over `replicas` | none |
+
+A client sends messages one of two ways. Either way the body reaches an actor of that group through `receive()`.
+
+- Over TCP, one `<group> <body>` line per message to the `listen` address.
+- Over HTTP, a post of the body to `/pub/<group>` on the `control` address.
+
+```bash
+$ curl -X POST localhost:9090/pub/actor -d 'hello'
+{"ok":true}   # 202, fire and forget like the tcp line
+```
+
+The `durable` log records every message. On restart it replays what was unprocessed, so a crash loses nothing.
+
+The `control` address serves live counts at `/stats`. The response itself proves the pool is alive.
+
+```bash
+$ curl localhost:9090/stats
+{"actors":4,"active":1,"idle":3,"pending":0,"crashes":0,"dead":0}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `actors` | Live actors across every group |
+| `active` | Actors running a message right now |
+| `idle` | Actors parked on `receive()` with an empty mailbox |
+| `pending` | Messages queued and not yet delivered |
+| `crashes` | Actors retired after an uncaught error |
+| `dead` | Messages dropped after exhausting their retries |
+
+## Failure
+
+An actor that raises is retired with its traceback. `retry:` re-delivers the message it was processing to another actor up to that many times. Then the message drops to the dead count, so one poison message cannot take a group down.
+
+```yaml
+groups:
+  actor:
+    run: app
+    retry: 2           # three attempts, then the message is dropped dead
+```
+
+The actors of a group share a few wasm instances. A fault in the engine itself retires every actor of the instance it hit the same way. Their queued messages move on to other actors.
+
+## Untrusted code
+
+An `eval` group runs code it does not trust. Each incoming message is compiled and run in a fresh wasm instance with its own linear memory.
+
+```yaml
+groups:
+  runners:
+    eval: true         # every message is untrusted, no send, no shared state
+```
+
+| Guard | Rule |
+|---|---|
+| Memory | The `memory` limit of the group inside the interpreter. Outside it, twice that limit plus 64 MiB, room for garbage and the engine. |
+| Time | A deadline the host enforces from outside the instance ends the run after ten seconds of wall-clock time. A runaway loop or a long native operation ends even where the interpreter cannot yield. |
+| State | Nothing survives between messages. The instance is dropped when the run ends. |
+| Modules | `.wasm` plugins are refused. Remote modules load only from `https://cdn.edgepython.com/`. Nothing loads from disk. |
+| Messages | `send()` has no scheduler to reach, so an eval run cannot send to other groups. |
+| Versions | A bundle resolves a version only through its own [`edge.lock`](/docs/reference/modules#edgelock), never against the registry. |
+
+A bundle that carries its own `edge.json` resolves through it. Any other message resolves through the manifest of the pool.
+
+### Permissions
+
+What the pool grants `eval` under [permissions](/docs/reference/system#permissions) is the most a bundle may grant in its own `edge.json`. An entry past it refuses the run before it compiles.
+
+```json
+{
+  "permissions": {
+    "main": ["net:internal.example.com"],
+    "eval": ["net:api.example.com", "time:monotonic"]
+  }
+}
+```
+
+```text
+error: the pool does not grant eval what this bundle grants
+  main   time:wall
+```
+
+- A snippet, or a bundle without an `edge.json`, holds nothing.
+- What the pool grants `main`, `all` or a package never reaches an eval run.
+
+### Sending a project
+
+For a project, `edge build` packs it into a `.edge`. A client sends it base64-encoded behind an `EDGEPKG:` marker. The actor validates it and serves its files to the compiler from memory, so an untrusted bundle never touches the disk.
+
+### Reading the result
+
+A client that wants the result posts the snippet or bundle to `/eval/<group>` on the control address. The reply carries what the run printed.
+
+```bash
+$ curl -X POST localhost:9090/eval/runners -d 'print(2 + 3)'
+{"ok":true,"stdout":"5\n"}
+```
+
+- A run that raises answers `{"ok":false,"error":...}` with its traceback.
+- The caller waits thirty seconds at most before a 504.
+- The TCP ingress stays fire and forget. Only these posts get a reply.
+
+## A three-stage pipeline
+
+A seed flows through three groups, each stage sending to the next.
+
+```yaml
+groups:
+  ingest:
+    seed: ["raw"]
+    code: |
+      send("transform", receive() + "-ingested")
+  transform:
+    code: |
+      send("sink", receive() + "-transformed")
+  sink:
+    code: |
+      print("sink:", receive())
+```
+
+```text
+$ edge actor actor.yml
+sink: raw-ingested-transformed
+```
+
+## See also
+
+> [!CARDS]
+> - `terminal` [Command line interface](/docs/platforms/cli#edge-build) Pack a project for an eval group with edge build.
+> - `clock` [Async](/docs/language/async) The cooperative scheduler each actor runs on.
+> - `camera` [Snapshots](/docs/language/snapshots) Freeze and resume a single run.

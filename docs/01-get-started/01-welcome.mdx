@@ -1,0 +1,80 @@
+---
+title: "Welcome"
+description: "What Edge Python is, a live example, and where to start."
+---
+
+# Welcome
+
+Edge Python is a sandboxed subset of Python, compiled to bytecode and run by a register VM written in Rust. One WebAssembly engine of about 250 KB runs it in browsers, in JavaScript runtimes and in the `edge` CLI.
+
+The defaults deny everything. A program reaches no files, no network and no environment unless its host grants them. Imports resolve at compile time from `edge.json`, and a running program never loads code you did not declare.
+
+## Try it
+
+This program asks the GitHub API about the Edge Python repository and prints three of its fields. It runs on the real engine in your browser. Edit it and run it again.
+
+```edge-manifest
+{ "imports": { "json": "0.1.0" }, "permissions": { "main": ["net:api.github.com"] } }
+```
+
+```edge-python
+import json
+import net
+
+r = net.request("GET", "https://api.github.com/repos/dylan-sutton-chavez/edge-python", {}, None)
+status, headers = net.response(r)
+body = b""
+chunk = net.read(r)
+while chunk is not None:
+    body += chunk
+    chunk = net.read(r)
+
+repo = json.loads(body.decode())
+print(repo["full_name"])
+print(repo["language"])
+print(repo["default_branch"])
+```
+
+```output
+dylan-sutton-chavez/edge-python
+Rust
+main
+```
+
+Its `edge.json` declares the `json` package and grants the network for `api.github.com` alone. Any other host raises `PermissionError`. Every runnable example in these docs runs the same way.
+
+## Questions
+
+> [!QUESTION] Is it full Python?
+> No. It leaves out what does not fit a small sandboxed engine. The [language guide](/docs/language/syntax) covers everything it supports.
+
+> [!QUESTION] Which Python features are missing?
+> Classes have no metaclasses, no descriptor protocol and no `__slots__`. There are no `complex` numbers. The [builtins](/docs/reference/builtins) are a fixed set, and `dir` is not one of them.
+
+> [!QUESTION] Is there a standard library?
+> No bundled one. Every module is an external package that `edge.json` declares. [Modules](/docs/reference/modules) explains how imports resolve.
+
+> [!QUESTION] Can a program run code it builds at run time?
+> No. `exec`, `eval`, `compile` and `__import__` do not exist. The set of modules is fixed when the program compiles.
+
+> [!QUESTION] Can a program reach the network or the disk?
+> Only what the root `edge.json` grants. Each grant names a module and a scope, such as one host for `net` or one folder for `fs`. [System](/docs/reference/system) lists every scope.
+
+> [!QUESTION] Where does it run?
+> The [JavaScript host](/docs/platforms/javascript) runs it in browsers and in runtimes with the same Web APIs, such as Deno. The [edge CLI](/docs/platforms/cli) runs the same engine on macOS, Linux and WSL. [Rust](/docs/platforms/rust) shows how to drive `compiler.wasm` from Rust code.
+
+> [!QUESTION] Is there a summary for machine learning models?
+> Yes. A model can load [skill/SKILL.md](https://github.com/dylan-sutton-chavez/edge-python/blob/main/skill/SKILL.md) for a self-verifying summary of the language and the CLI.
+
+> [!QUESTION] Where do I ask for help?
+> Email [c.sutton.dylan@gmail.com](mailto:c.sutton.dylan@gmail.com) with questions or for help with an integration.
+
+## Start here
+
+> [!CARDS]
+> - `rocket` [Quickstart](/docs/get-started/quickstart) Install the CLI and run a first script.
+> - `hammer` [Your first app](/docs/get-started/first-app/create) Create, test and ship a small app step by step.
+> - `book-open` [Language](/docs/language/syntax) The syntax and the features, one topic a page.
+> - `terminal` [Platforms](/docs/platforms/cli) The CLI, the JavaScript host, actors and Rust.
+> - `package` [Modules](/docs/reference/modules) Imports, edge.json and edge.lock.
+> - `cpu` [Internals](/docs/internals/design) How the compiler and the VM work.

@@ -1,13 +1,13 @@
 ---
 title: "Async"
-description: "Cooperative coroutines with run, sleep, frame, gather, with_timeout, cancel and receive."
+description: "Cooperative coroutines with run, sleep, gather, with_timeout, cancel and receive."
 ---
 
 # Async
 
-Concurrency is cooperative. `async def` creates coroutines and the scheduler interleaves them on a single thread. There is no preemption between coroutines. A coroutine runs until it yields, sleeps, awaits, or returns. The host can still force a pause, see [Snapshots](/docs/language/snapshots). Concurrency comes from interleaving, not parallelism.
+Concurrency is cooperative. `async def` creates coroutines, and the scheduler interleaves them on a single thread. A coroutine runs until it yields, sleeps, awaits or returns.
 
-There is no `asyncio` module. The primitives are top-level builtins: `run`, `sleep`, `frame`, `gather`, `with_timeout`, `cancel`, `receive`.
+There is no `asyncio` module. The primitives are the builtins `run`, `sleep`, `gather`, `with_timeout`, `cancel` and `receive`.
 
 ```edge-python
 async def main():
@@ -23,7 +23,7 @@ ok
 
 ## Two kinds of callables
 
-A `def` body executes when called. An `async def` body returns a coroutine value that does nothing until driven with `run` or `gather`. Only coroutines are cancellable (`cancel`) and can suspend on real time (`sleep`).
+A `def` body executes when called. An `async def` body returns a coroutine value that does nothing until `run` or `gather` drives it. Only a coroutine can be cancelled.
 
 ```edge-python
 def routine():
@@ -43,7 +43,9 @@ print(run(coro())) # 1 (run drives it to completion)
 1
 ```
 
-A plain `def` called from a coroutine can still call yielding builtins like `sleep` and `receive`. The scheduler snapshots the helper's frame, suspends the call chain, and re-enters the helper on resume, so its return value lands at the original call site. The module body runs as an implicit coroutine, so top-level statements suspend the same way.
+A plain `def` called from a coroutine can still call yielding builtins such as `sleep` and `receive`. The scheduler keeps the frame of the helper and suspends the whole call chain. On resume it re-enters the helper, and its return value lands at the original call site.
+
+The module body runs as an implicit coroutine. Top-level statements suspend the same way.
 
 ```edge-python
 def helper():
@@ -75,7 +77,7 @@ print(run(square(5)))
 25
 ```
 
-`run(c1, c2, ...)` accepts multiple coroutines. They run concurrently and the call returns the first argument's result.
+`run(c1, c2, ...)` accepts several coroutines. They run concurrently, and the call returns the result of the first argument.
 
 ```edge-python
 async def a():
@@ -92,7 +94,7 @@ first
 
 ## await
 
-Inside an `async def`, `await coro` runs the coroutine to completion and resolves to its value, or re-raises its error. The awaiting coroutine parks while the awaited one sleeps or makes a host call, then resumes with the result.
+Inside an `async def`, `await coro` runs the coroutine to completion. It resolves to its value or re-raises its error. The awaiting coroutine parks while the awaited one sleeps or makes a host call, then resumes with the result.
 
 ```edge-python
 async def fetch(n):
@@ -112,9 +114,7 @@ print(run(main()))
 
 ## sleep
 
-`sleep(seconds)` suspends until `seconds` of wall time pass. Without a host time hook, a virtual clock advances logically and coroutines interleave deterministically with no real wait. That is useful for tests.
-
-`sleep(0)` yields to the scheduler without waiting.
+`sleep(seconds)` suspends the coroutine for `seconds`. `sleep(0)` yields to the scheduler without waiting.
 
 ```edge-python
 async def task(name):
@@ -132,9 +132,16 @@ a step 2
 b step 2
 ```
 
+The clock that `sleep` waits on depends on the grants of the run.
+
+- Without any `time` scope the run uses a virtual clock. `sleep` and `with_timeout` deadlines pass at once and in order, and a host call takes no time.
+- Any `time` scope turns the wall clock on for the whole run.
+
+[System](/docs/reference/system#time) describes the scopes.
+
 ## gather
 
-`gather(*coros)` runs each coroutine concurrently and returns a list of results in argument order. If any coroutine raises, `gather` re-raises after all peers have terminated. Survivors are not auto-cancelled.
+`gather(*coros)` runs each coroutine concurrently. It returns a list of results in argument order.
 
 ```edge-python
 async def fetch(name, delay):
@@ -148,7 +155,9 @@ print(gather(fetch("a", 0.05), fetch("b", 0.02), fetch("c", 0.03)))
 ['a!', 'b!', 'c!']
 ```
 
-The total wall time is `max(delays)`, not the sum. `b` and `c` overlap with `a`'s sleep.
+The sleeps overlap. On the wall clock the batch takes the longest delay, not the sum.
+
+If any coroutine raises, `gather` re-raises after all peers have ended. The survivors are not cancelled.
 
 ```edge-python
 async def good(): return 1
@@ -166,7 +175,12 @@ caught
 
 ### Concurrent host calls
 
-A system call that waits, such as `net.response`, runs concurrently with others under `gather`. Each parks its coroutine, the host resolves them in parallel, and every result is routed back to the exact coroutine that issued it. A failed call raises only in its own coroutine, at the line that made the call, so a `try` / `except` lets the rest of the batch finish and an uncaught failure's traceback points at that line.
+A system call that waits, such as `net.response`, runs concurrently with others under `gather`.
+
+- Each call parks its own coroutine while the host works on all of them.
+- Every result goes back to the coroutine that made the call.
+- A failed call raises only in its own coroutine, at the line that made the call. A `try` around it lets the rest of the batch finish.
+- An uncaught failure has a traceback that points at that line.
 
 ```python
 import net
@@ -182,7 +196,7 @@ async def status(url):
 print(gather(status("https://api.github.com/zen"), status("https://nope.invalid/x")))
 ```
 
-The example needs `edge.json` to grant `net:api.github.com` and `net:nope.invalid`, see [System](/docs/reference/system). In the JS host the request is a `fetch` inside a Web Worker, and a browser subjects it to CORS. The CLI runs the same calls on threads of its own, so `gather` overlaps them there too, with no CORS.
+The example needs `edge.json` to grant `net:api.github.com` and `net:nope.invalid`, see [System](/docs/reference/system). In a browser each request is a `fetch` from the Web Worker. The CLI fetches each request on a thread of its own, and on both hosts `gather` overlaps the calls.
 
 ## with_timeout
 
@@ -205,9 +219,12 @@ timed out
 
 ## cancel
 
-`cancel(coro)` flags a registered coroutine for cancellation. On its next scheduler tick it raises `CancelledError` at the suspension point, runs every enclosing `finally`, and stops. It cannot be caught or suppressed.
+`cancel(coro)` flags a registered coroutine for cancellation. On its next scheduler tick it raises `CancelledError` at the suspension point. It runs every enclosing `finally` and stops.
 
-A coroutine in a tight synchronous loop without `await` or `sleep` cannot be cancelled until it yields:
+> [!IMPORTANT]
+> The cancelled coroutine cannot catch or suppress `CancelledError`.
+
+A coroutine in a tight synchronous loop without `await` or `sleep` cannot be cancelled until it yields.
 
 ```python
 async def loop_forever():
@@ -216,11 +233,15 @@ async def loop_forever():
   sleep(0) # cancellable from this point on
 ```
 
-For deadline-driven cancellation use `with_timeout`.
+For deadline-driven cancellation use `with_timeout`. [Limits and errors](/docs/reference/limits-and-errors#exception-hierarchy) places `TimeoutError` and `CancelledError` in the exception hierarchy.
 
 ## receive
 
-`receive()` pops the oldest message from the host event queue. When the queue is empty it parks the coroutine until the host pushes one (`pushEvent` from JS, `run_push_event` in the ABI). Messages are arbitrary strings, DOM event names from `bind_event` or anything the embedder sends. A parked `receive()` is also a natural pause point for [snapshots](/docs/language/snapshots). Inside an [actor pool](/docs/reference/actors) its counterpart `send(group, body)` hands a string to another group.
+`receive()` pops the oldest message from the event queue of the host. When the queue is empty it parks the coroutine until the host pushes one. Messages are strings.
+
+- [JavaScript](/docs/platforms/javascript) shows how a page or a worker pushes them.
+- A parked `receive()` is a natural pause point for [snapshots](/docs/language/snapshots).
+- Inside an [actor pool](/docs/platforms/actors) its counterpart `send(group, body)` hands a string to another group.
 
 ```python
 async def main():
@@ -231,9 +252,15 @@ async def main():
 run(main())
 ```
 
+When every coroutine waits, the run suspends to the host. The host resumes it once a timer, a host call or a message is ready. [Rust](/docs/platforms/rust) shows that loop for a host of your own.
+
 ## async for and async with
 
-`async for` works against any `for`-iterable plus coroutines and async generators (an `async def` with `yield`). Each iteration resumes the source to its next yield. Behaviour over lists, tuples, and dicts is identical to regular `for`. There is no `__aiter__` / `__anext__` dispatch on user classes. Write an `async def` generator instead.
+`async for` works on any `for` iterable, on coroutines and on async generators. An async generator is an `async def` with `yield`.
+
+- Each iteration resumes the source to its next yield.
+- Over lists, tuples and dicts it behaves like a regular `for`.
+- There is no `__aiter__` or `__anext__` dispatch on user classes. Write an `async def` generator instead.
 
 ```edge-python
 async def gen():
@@ -257,29 +284,19 @@ run(main())
 20
 ```
 
-`async with` reuses the sync dispatch (`__enter__` / `__exit__`). `__aenter__` / `__aexit__` are not consulted. For async setup and teardown, use `try` / `finally` with explicit `await`.
-
-## Exception types
-
-| Exception | When |
-|---|---|
-| `TimeoutError` | `with_timeout` deadline expired |
-| `CancelledError` | raised by `cancel()`, runs `finally` but cannot be caught |
-
-`TimeoutError` matches `except` normally. `CancelledError` subclasses `BaseException`, so `except Exception` does not catch it.
+`async with` reuses the sync dispatch through `__enter__` and `__exit__`. `__aenter__` and `__aexit__` are not consulted. For async setup and teardown, use `try` and `finally` with an explicit `await`.
 
 ## Limitations
 
-- **No background tasks.** There is no `create_task`. All concurrency is structural: a coroutine only progresses while awaited inside `run(...)` or `gather(...)`.
-- **No preemption between coroutines.** `while True: pass` inside a coroutine blocks the scheduler. The host can still force a pause via the preempt interval, see [Snapshots](/docs/language/snapshots).
-- **No suspending in a cancelled `finally`.** A `finally` running from `cancel()` cannot `await` or `sleep`, doing so raises `RuntimeError`.
-- **Cooperative host loop.** The scheduler suspends to the host when it cannot progress synchronously (pending timer, frame, or event). The embedder resumes via `run_start` / `run_resume` / `run_push_event`, and can serialize a parked run with `save_state` / `restore_state`. See [Snapshots](/docs/language/snapshots) and the [ABI](/docs/reference/abi).
+- **No preemption between coroutines.** `while True: pass` inside a coroutine blocks the scheduler. The host can still force a pause through the preempt interval, see [Snapshots](/docs/language/snapshots).
+- **No suspending in a cancelled `finally`.** A `finally` running from `cancel()` cannot `await` or `sleep`. Doing so raises `RuntimeError`.
 - **No async comprehensions.** `[x async for x in it]` is a parse error.
-- **No `gen.send` / `throw` / `close`.** Generators and coroutines are one-way producers. For bidirectional flow, use `run` / `gather` and pass messages via arguments.
-- **`receive()` can park indefinitely.** An empty queue with no `run_push_event` leaves the coroutine waiting. Pair with `with_timeout` for a deadline.
+- **No `gen.send`, `throw` or `close`.** Generators and coroutines are one-way producers. For flow in both directions, use `run` or `gather` and pass messages through arguments.
+- **`receive()` can park indefinitely.** An empty queue with no message from the host leaves the coroutine waiting. Pair it with `with_timeout` for a deadline.
 
-## Time
+> [!QUESTION] Why is there no create_task?
+> All concurrency is structural. A coroutine only progresses while awaited inside `run(...)` or `gather(...)`.
 
-The scheduler reads wall time from a host hook. The JS host wires it to `Date.now()` via the `host_now_ns` import and the CLI to the system clock. Without a hook, `sleep` advances a virtual clock so deterministic tests interleave correctly. On that clock a host call takes no time, so it answers before any `sleep` or `with_timeout` deadline passes.
-
-To run many of these programs side by side as message-passing tasks, see [Actors](/docs/reference/actors).
+> [!CARDS]
+> - `camera` [Snapshots](/docs/language/snapshots) Freeze a paused run to a blob and resume it later.
+> - `users` [Actors](/docs/platforms/actors) Run many programs side by side as message-passing tasks.

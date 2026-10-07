@@ -14,11 +14,11 @@ description: "Lexical and grammatical rules of the language subset."
 x = 1  # A trailing comment
 ```
 
-A string literal as the first statement of a module, function, or class body parses and is discarded. There is no `__doc__` at runtime.
+A string literal as the first statement of a module, function or class body parses and is discarded. There is no `__doc__` at runtime.
 
 ## Line joining
 
-A statement continues on the next line after a trailing backslash, or freely inside `()`, `[]`, and `{}`.
+A statement continues on the next line after a trailing backslash. It also continues freely inside `()`, `[]` and `{}`.
 
 ```edge-python
 total = 1 + \
@@ -36,7 +36,7 @@ print(total, names)
 
 ## Identifiers and assignment
 
-Identifiers start with a letter or underscore and continue with letters, digits, and underscores. Non-ASCII characters are allowed.
+Identifiers start with a letter or underscore and continue with letters, digits and underscores. Non-ASCII characters are allowed.
 
 ```edge-python
 counter = 0
@@ -73,7 +73,7 @@ print(x, y)
 10 20
 ```
 
-Targets can also be attributes, subscripts, parenthesized lists, or nested patterns.
+Targets can also be attributes, subscripts, parenthesized lists or nested patterns.
 
 ```edge-python
 class Point:
@@ -99,7 +99,7 @@ print(a, b, h, i, j)
 
 ### Walrus operator
 
-`:=` assigns as an expression. Useful in conditions and comprehensions.
+`:=` assigns inside an expression. It helps in conditions and comprehensions.
 
 ```edge-python
 data = [1, 2, 3]
@@ -113,7 +113,9 @@ if (n := len(data)) > 0:
 
 ## Numbers
 
-Integer literals are decimal by default, with `0x` hex, `0o` octal, and `0b` binary forms. `_` may separate digits. The value range and overflow behavior: [Data types](/docs/language/data-types).
+Integer literals are decimal by default. The `0x` prefix writes hex, `0o` octal and `0b` binary. `_` may separate digits.
+
+[Data types](/docs/language/data-types#integer) covers the range and overflow.
 
 ```edge-python
 print(0xDEAD_BEEF)
@@ -129,7 +131,7 @@ print(1_000_000)
 1000000
 ```
 
-An underscore must sit between two digits. `1_`, `1__2`, and `0x_1` are rejected.
+An underscore must sit between two digits. `1_`, `1__2` and `0x_1` are rejected.
 
 Float literals are IEEE-754 doubles.
 
@@ -151,7 +153,13 @@ Complex literals such as `1j` do not exist.
 
 ## Strings
 
-Strings take single, double, or triple quotes. An `r` prefix makes a raw string where backslashes stay literal. Adjacent literals concatenate into one. A `b` prefix builds [bytes](/docs/language/data-types) instead of a string.
+Strings take single, double or triple quotes. Prefixes change what a literal builds.
+
+- An `r` prefix makes a raw string. Backslashes stay literal.
+- A `b` prefix builds [bytes](/docs/language/data-types#bytes) instead of a string.
+- An `f` prefix makes an [f-string](#f-strings).
+
+Adjacent literals concatenate into one.
 
 ```edge-python
 print('single')
@@ -173,7 +181,16 @@ hello world
 
 ### Escape sequences
 
-Supported escapes are `\n`, `\t`, `\r`, `\a`, `\b`, `\f`, `\v`, `\\`, `\'`, `\"`, `\0`, `\xHH`, `\uHHHH`, `\UHHHHHHHH`, and `\NNN` with 1 to 3 octal digits. An unknown escape keeps its backslash. Named escapes such as `\N{GREEK SMALL LETTER ALPHA}` are not supported and stay literal.
+| Escape | Meaning |
+|---|---|
+| `\n`, `\t`, `\r` | Line feed, tab, carriage return |
+| `\a`, `\b`, `\f`, `\v` | Bell, backspace, form feed, vertical tab |
+| `\\`, `\'`, `\"` | Backslash and quotes |
+| `\0`, `\NNN` | Octal with 1 to 3 digits, `\0` is the null character |
+| `\xHH` | A character from two hex digits |
+| `\uHHHH`, `\UHHHHHHHH` | A code point from 4 or 8 hex digits |
+
+An unknown escape keeps its backslash. Named escapes such as `\N{GREEK SMALL LETTER ALPHA}` are not supported and stay literal.
 
 ```edge-python
 print('\n line break')
@@ -217,21 +234,13 @@ answer is 43
 {literal braces}
 ```
 
-The format spec is `[[fill]align][sign][#][0][width][,|_][.precision][type]`. The conversions `!r`, `!s`, and `!a` come before the spec. Type characters are `b c d e E f F g G n o s x X %`. The `,` and `_` options group digits, every three for decimal output and every four for `_` with `b`, `o`, `x`, or `X`.
+The format spec follows these rules.
 
-## Booleans and None
-
-The literals are `True`, `False`, and `None`. `not` negates. Truthiness rules: [Data types](/docs/language/data-types).
-
-```edge-python
-print(True, False, None)
-print(not True)
-```
-
-```output
-True False None
-False
-```
+- The full form is `[[fill]align][sign][#][0][width][,|_][.precision][type]`.
+- The conversions `!r`, `!s` and `!a` come before the spec.
+- Type characters are `b c d e E f F g G n o s x X %`.
+- `,` and `_` group digits every three for decimal output.
+- `_` with `b`, `o`, `x` or `X` groups every four digits.
 
 ## Operators
 
@@ -249,19 +258,16 @@ print(-5, +5)
 -5 5
 ```
 
-`/` always yields a float. `@` has no builtin meaning and calls `__matmul__`. `//` and `%` use floored division, so the result of `%` takes the sign of the divisor. With a string on the left, `%` is printf-style formatting (see [Methods](/docs/reference/methods)).
-
-```edge-python
-print("%d of %s" % (3, "pies"))
-```
-
-```output
-3 of pies
-```
+- `/` always yields a float.
+- `//` and `%` use floored division. The result of `%` takes the sign of the divisor.
+- `@` has no meaning on builtin types. A class can give it one, see [Classes](/docs/language/classes#arithmetic).
+- With a string on the left, `%` does printf-style formatting, see [Methods](/docs/reference/methods#formatting).
 
 ### Comparison and chaining
 
-Comparisons chain, `in`, `not in`, `is` and `is not` included, so `a < b in c` means `a < b and b in c` with `b` evaluated once. Ordering works on numbers, strings, bytes, and on lists or tuples compared lexicographically. Mixing types that cannot be ordered raises `TypeError`.
+Comparisons chain, and `in`, `not in`, `is` and `is not` chain with them. `a < b in c` means `a < b and b in c`, with `b` evaluated once.
+
+Ordering works on numbers, strings and bytes. Lists and tuples compare lexicographically. Mixing types that cannot be ordered raises `TypeError`.
 
 ```edge-python
 print(1 < 2 < 3)  # chained
@@ -290,7 +296,7 @@ cannot order
 
 ### Logical
 
-`and` and `or` short-circuit and return the deciding operand, not a coerced bool.
+`and` and `or` short-circuit. They return the deciding operand, not a coerced bool. `not` negates.
 
 ```edge-python
 print(True and "second")
@@ -334,9 +340,11 @@ True
 True
 ```
 
+What `is` returns for equal values is on [Data types](/docs/language/data-types#behavioral-notes).
+
 ### Augmented assignment
 
-`+= -= *= /= //= %= **= @= &= |= ^= <<= >>=`. On a user class `a op= b` calls the in-place dunder such as `__iadd__` first.
+The forms are `+= -= *= /= //= %= **= @= &= |= ^= <<= >>=`. A class can define its own in-place behavior, see [Classes](/docs/language/classes#arithmetic).
 
 ```edge-python
 x = 10
@@ -362,7 +370,20 @@ big
 
 ## Containers
 
-Literal forms: `[1, 2, 3]` is a list, `(1, 2, 3)` a tuple, `(1,)` a one-element tuple, `()` an empty tuple, `{"a": 1}` a dict, `{1, 2, 3}` a set. `{}` is an empty dict, so the empty set is `set()`. Semantics and methods: [Data types](/docs/language/data-types) and [Methods](/docs/reference/methods).
+| Literal | Builds |
+|---|---|
+| `[1, 2, 3]` | A list |
+| `(1, 2, 3)` | A tuple |
+| `(1,)` | A one-element tuple |
+| `()` | An empty tuple |
+| `{"a": 1}` | A dict |
+| `{}` | An empty dict |
+| `{1, 2, 3}` | A set |
+
+> [!NOTE]
+> `{}` is an empty dict. The empty set is written `set()`.
+
+[Data types](/docs/language/data-types) covers the semantics and [Methods](/docs/reference/methods) the methods.
 
 ```edge-python
 print((1,), ())
@@ -374,9 +395,32 @@ print(type({}), type(set()))
 <class 'dict'> <class 'set'>
 ```
 
+### Unpacking in literals
+
+`*` spreads an iterable into a list, set or tuple literal. `x = *xs, 3` builds a tuple. `**` spreads a mapping into a dict literal.
+
+Both mix freely with regular elements. In a dict, later keys win.
+
+```edge-python
+xs = [1, 2]
+print([*xs, 3, *xs])  # list spread
+print(sorted({*xs, 2, 3}))  # set spread, deduped
+
+a = {"x": 1}
+print({**a, "y": 2, **{"x": 9}})  # dict spread, later key wins
+```
+
+```output
+[1, 2, 3, 1, 2]
+[1, 2, 3]
+{'x': 9, 'y': 2}
+```
+
 ### Indexing and slicing
 
-Indices start at 0. Negative indices count back from the end. Slices take `[start:stop:step]`, and any part may be omitted. A negative step walks backwards.
+Indices start at 0. Negative indices count back from the end.
+
+Slices take `[start:stop:step]`. Any part may be omitted. A negative step walks backwards.
 
 ```edge-python
 a = [1, 2, 3, 4, 5]
@@ -417,11 +461,13 @@ print(sorted({x % 3 for x in range(10)}))  # set order is arbitrary, sort to com
 [0, 1, 2]
 ```
 
-Generator expressions: [Functions](/docs/language/functions).
+[Functions](/docs/language/functions#generator-expressions) covers generator expressions.
 
 ## Type annotations
 
-Annotations parse on variables, parameters, and return positions. They have no runtime effect. There is no `__annotations__` and no runtime check. Treat them as documentation for humans and static analyzers. Type parameters such as `def f[T]` are discarded the same way, and `class Box[T]` keeps them in `__type_params__` so `Box[int]` is a generic alias, as is any class defining `__class_getitem__`. `type X = v` binds a lazy alias whose `__value__` evaluates `v`, `list[int]` is a generic alias that prints as `list[int]` and builds a `list` when called, and `int | None` is a union that `isinstance` accepts.
+Annotations parse on variables, parameters and return positions. They have no runtime effect. There is no `__annotations__` and no runtime check.
+
+Treat them as documentation for humans and static analyzers. Generic classes, `type` aliases and unions are on [Data types](/docs/language/data-types#generic-aliases).
 
 ```edge-python
 counter: int = 0
@@ -438,3 +484,7 @@ print(add("a", "b"))  # annotations do not enforce
 7
 ab
 ```
+
+> [!CARDS]
+> - `shapes` [Data types](/docs/language/data-types) The builtin types, their values and their behavior.
+> - `list-tree` [Methods](/docs/reference/methods) The methods of strings, bytes, lists, dicts, sets and numbers.

@@ -1,0 +1,909 @@
+---
+title: "Built-in functions"
+description: "The global functions available in every Edge Python program."
+---
+
+# Built-in functions
+
+Edge Python provides 68 built-in functions. They are first-class values. You can pass them as arguments, store them in containers, and alias them.
+
+```edge-python
+fns = [abs, hex, str]
+print([f(-3) for f in fns])
+
+p = print
+p("aliased")
+```
+
+```output
+[3, '-0x3', '-3']
+aliased
+```
+
+> [!QUESTION] Why is there no eval, exec or open?
+> Every module a program can reach is resolved and verified at compile time. The sandbox holds no file handles. `eval`, `exec`, `compile`, `open` and `__import__` would break both rules, and none of them exists.
+
+## Output
+
+### print
+
+`print(*args, sep=' ', end='\n')` writes the arguments joined by `sep`, then `end`.
+
+- `*` unpacking spreads an iterable into the arguments.
+- The `file` and `flush` keywords are accepted and ignored.
+
+```edge-python
+print(1, 2, 3)
+print("a", "b", "c", sep="-")
+print("no newline", end="")
+print("!")
+print(*[1, 2, 3], sep=", ")
+```
+
+```output
+1 2 3
+a-b-c
+no newline!
+1, 2, 3
+```
+
+### input
+
+`input()` pops one line from the input buffer of the host and returns it as a string.
+
+- There is no prompt argument.
+- The CLI fills the buffer from piped stdin, one line per call.
+- In WASM the host copies stdin bytes into the guest input buffer before the run.
+- An empty buffer raises `RuntimeError`.
+
+## Numeric
+
+### abs
+
+`abs(x)` returns the absolute value of an int or float. An instance whose class defines `__abs__` returns what that method gives. Other types raise `TypeError`.
+
+```edge-python
+print(abs(-7))
+print(abs(3.14))
+```
+
+```output
+7
+3.14
+```
+
+### round
+
+`round(x)` rounds to the nearest integer and returns an int.
+
+- Ties go to even.
+- `round(x, n)` rounds to `n` decimal digits and returns a float.
+- A negative `n` rounds to tens, hundreds, and so on.
+
+```edge-python
+print(round(2.5))
+print(round(0.5))
+print(round(-1.5))
+print(round(1.55, 1))
+print(round(1234, -2))
+```
+
+```output
+2
+0
+-2
+1.6
+1200
+```
+
+### min, max
+
+`min(a, b, ...)` takes several values or a single iterable. `max` works the same way.
+
+- An empty iterable raises `ValueError` unless `default=` is given.
+- A `key=` function selects the comparison value. The original element is returned.
+
+```edge-python
+print(min(3, 1, 4))
+print(max([3, 1, 4]))
+print(min([], default=-1))
+print(max(["a", "bb", "c"], key=len))
+```
+
+```output
+1
+4
+-1
+bb
+```
+
+### sum
+
+`sum(iterable)` or `sum(iterable, start)`. An empty iterable sums to `start`. It defaults to `0`.
+
+```edge-python
+print(sum([1, 2, 3]))
+print(sum([1, 2, 3], 100))
+print(sum(x * x for x in range(5)))
+```
+
+```output
+6
+106
+30
+```
+
+### pow
+
+`pow(base, exp)` matches the `**` operator. `pow(base, exp, mod)` does modular exponentiation on integers.
+
+- The exponent must be non-negative, else `ValueError`.
+- The modulus must stay below 2^63 in absolute value, else `ValueError`.
+- A zero modulus raises `ZeroDivisionError`.
+
+```edge-python
+print(pow(2, 10))
+print(pow(2, 10, 1000))
+print(pow(7, 13, 19))
+```
+
+```output
+1024
+24
+7
+```
+
+### divmod
+
+`divmod(a, b)` returns `(a // b, a % b)` as a tuple. Ints and floats both work. Float operands give a float quotient and remainder.
+
+```edge-python
+print(divmod(7, 3))
+print(divmod(-7, 3))
+print(divmod(7.5, 2))
+```
+
+```output
+(2, 1)
+(-3, 2)
+(3.0, 1.5)
+```
+
+### bin, oct, hex
+
+`bin(x)`, `oct(x)`, and `hex(x)` format an integer in base 2, 8, or 16 with the matching prefix.
+
+```edge-python
+print(bin(10))
+print(oct(8))
+print(hex(255))
+print(hex(-256))
+```
+
+```output
+0b1010
+0o10
+0xff
+-0x100
+```
+
+## Type conversion
+
+### int
+
+`int(x)` accepts an int, bool, float, or numeric string. An instance whose class defines `__int__` returns what that method gives.
+
+- Floats truncate toward zero.
+- Strings accept `_` as a digit separator.
+- `int(s, base)` parses a string in radix 2 to 36. Radix 0 detects a `0x`, `0o`, or `0b` prefix.
+- A bad string raises `ValueError`.
+- `int(inf)` raises `OverflowError` and `int(nan)` raises `ValueError`.
+- Results are bounded by the [integer width](/docs/reference/limits-and-errors#integer-width).
+
+```edge-python
+print(int(3.9))
+print(int("42"))
+print(int(True))
+print(int("ff", 16))
+print(int("0x1f", 0))
+print(int("1_000"))
+```
+
+```output
+3
+42
+1
+255
+31
+1000
+```
+
+### float
+
+`float(x)` accepts an int, bool, float, or string. Strings recognize `inf`, `-inf`, and `nan` in any case. An instance whose class defines `__float__` returns what that method gives.
+
+```edge-python
+print(float(2))
+print(float("3.14"))
+print(float("inf"))
+```
+
+```output
+2.0
+3.14
+inf
+```
+
+### str
+
+`str(x)` returns the display form of `x`. No argument gives an empty string. `str(bytes, encoding)` decodes bytes like [`bytes.decode`](/docs/reference/methods#bytes-methods).
+
+```edge-python
+print(str(42))
+print(str([1, 2, 3]))
+print(str(None))
+print(str(b"hi", "utf-8"))
+```
+
+```output
+42
+[1, 2, 3]
+None
+hi
+```
+
+### bool
+
+`bool(x)` returns the truth value of `x`. The rules live in [Truthy and falsy](/docs/language/data-types#truthy-and-falsy).
+
+```edge-python
+print(bool(0), bool(1))
+print(bool([]), bool([0]))
+print(bool(""), bool("x"))
+```
+
+```output
+False True
+False True
+False True
+```
+
+### bytes
+
+`bytes()` builds an immutable byte sequence. It takes one of these forms.
+
+| Call | Result |
+|---|---|
+| `bytes()` | Empty bytes |
+| `bytes(n)` | `n` zero bytes. A negative `n` raises `ValueError` |
+| `bytes(iterable)` | One byte per int. A non-int raises `TypeError` and a value outside 0 to 255 raises `ValueError` |
+| `bytes(b)` | A copy of the bytes `b` |
+| `bytes(s, encoding)` | The string `s` encoded as `"utf-8"`, `"utf8"` or `"ascii"` |
+
+The encoding also passes as `encoding=`. A string without an encoding raises `TypeError`. ASCII raises `UnicodeEncodeError` on a non-ASCII character, and any other encoding name raises `ValueError`.
+
+```edge-python
+print(bytes())
+print(bytes(3))
+print(bytes([72, 105]))
+print(bytes(range(3)))
+print(bytes("hé", "utf-8"))
+```
+
+```output
+b''
+b'\x00\x00\x00'
+b'Hi'
+b'\x00\x01\x02'
+b'h\xc3\xa9'
+```
+
+### list, tuple, set, frozenset
+
+Each accepts any iterable and builds a new container. Iterating a dict yields its keys. With no argument, each builds an empty container.
+
+```edge-python
+print(list("abc"))
+print(tuple(range(3)))
+print(set({"a": 1, "b": 2}))
+print(frozenset(b"\x01\x02\x03"))
+```
+
+```output
+['a', 'b', 'c']
+(0, 1, 2)
+{'b', 'a'}
+frozenset({3, 2, 1})
+```
+
+### dict
+
+`dict()` builds from a mapping, an iterable of key and value pairs, keyword arguments, or a mix. Each pair must have length 2.
+
+```edge-python
+print(dict(a=1, b=2))
+print(dict([("a", 1)]))
+print(dict({"a": 1}, b=2))
+```
+
+```output
+{'a': 1, 'b': 2}
+{'a': 1}
+{'a': 1, 'b': 2}
+```
+
+### chr, ord
+
+`chr(i)` returns the one-character string for code point `i`, across full Unicode. Out-of-range values raise `ValueError`. `ord(c)` is the inverse and accepts a length-1 string or length-1 bytes.
+
+```edge-python
+print(chr(65))
+print(ord("A"))
+print(ord(b"A"))
+print(chr(0x1F600))
+```
+
+```output
+A
+65
+65
+😀
+```
+
+## Sequences and iteration
+
+### len
+
+`len(x)` returns the element count of a string in code points, or of bytes, a list, tuple, dict, set, frozenset or range.
+
+An instance whose class defines `__len__` returns what that method gives. The result must be a non-negative int. Other types raise `TypeError`.
+
+```edge-python
+print(len("hello"))
+print(len([1, 2, 3, 4]))
+print(len({"a": 1, "b": 2}))
+print(len(range(100)))
+```
+
+```output
+5
+4
+2
+100
+```
+
+### range
+
+`range(stop)`, `range(start, stop)`, or `range(start, stop, step)` builds a lazy range.
+
+- Indexing and slicing compute without materialising. `range(10)[2:8:2]` is `range(2, 8, 2)`.
+- A zero step raises `ValueError`.
+- Non-integer arguments raise `TypeError`.
+- Two ranges compare equal when they produce the same sequence of values.
+
+```edge-python
+print(list(range(5)))
+print(list(range(2, 8)))
+print(list(range(10, 0, -2)))
+print(range(0, 6, 2) == range(0, 5, 2))
+```
+
+```output
+[0, 1, 2, 3, 4]
+[2, 3, 4, 5, 6, 7]
+[10, 8, 6, 4, 2]
+True
+```
+
+### sorted
+
+`sorted(iterable)` returns a new sorted list. [`list.sort`](/docs/reference/methods#mutating) follows the same rules in place.
+
+- `key=fn` compares by `fn(item)`.
+- `reverse=True` flips the order.
+- Numbers, strings, bytes, and lists or tuples order lexicographically.
+- Objects with `__lt__` sort by it.
+- Mixing unordered types raises `TypeError`.
+
+```edge-python
+print(sorted([3, 1, 4, 1, 5]))
+print(sorted("hello"))
+print(sorted([3, 1, 4, 1, 5], reverse=True))
+print(sorted(["banana", "apple", "kiwi"], key=len))
+```
+
+```output
+[1, 1, 3, 4, 5]
+['e', 'h', 'l', 'l', 'o']
+[5, 4, 3, 1, 1]
+['kiwi', 'apple', 'banana']
+```
+
+### reversed
+
+`reversed(x)` returns an iterator over a sequence or a dict, from its last item. It reads the items when the call is made. A set is not reversible and raises `TypeError`.
+
+```edge-python
+print(list(reversed([1, 2, 3])))
+print("".join(reversed("abc")))
+```
+
+```output
+[3, 2, 1]
+cba
+```
+
+### enumerate
+
+`enumerate(iterable)` returns an iterator of `(index, value)` tuples. A second argument, positional or `start=`, sets the first index.
+
+```edge-python
+for i, v in enumerate(["a", "b", "c"]):
+    print(i, v)
+
+print(list(enumerate(["a", "b"], start=7)))
+```
+
+```output
+0 a
+1 b
+2 c
+[(7, 'a'), (8, 'b')]
+```
+
+### zip
+
+`zip(a, b, ...)` returns an iterator of tuples pairing the inputs, truncated to the shortest. There is no `strict=` mode.
+
+```edge-python
+for a, b in zip([1, 2, 3], ["x", "y"]):
+    print(a, b)
+
+print(list(zip([1, 2], [3, 4], [5, 6])))
+```
+
+```output
+1 x
+2 y
+[(1, 3, 5), (2, 4, 6)]
+```
+
+### iter, next
+
+`iter(x)` returns an iterator over any iterable.
+
+- Over a list it reads the list as it goes.
+- Over a `range` it computes each step.
+- Over anything else it takes the items up front.
+- `iter(callable, sentinel)` calls `callable()` until it returns `sentinel`.
+
+`next(it)` returns the next item in constant time and raises `StopIteration` when the iterator is exhausted. `next(it, default)` returns `default` instead of raising.
+
+```edge-python
+it = iter([10, 20, 30])
+print(next(it))
+print(next(it))
+print(next(it))
+print(next(it, "done"))
+```
+
+```output
+10
+20
+30
+done
+```
+
+### map, filter
+
+`map(fn, *iterables)` returns an iterator over `fn(items...)`. `filter(pred, iterable)` returns an iterator over the items where `pred(item)` is truthy.
+
+- `map` walks several iterables in parallel and stops at the shortest.
+- A `None` predicate keeps the truthy items.
+- Both call the function on every item when created, not as the items are taken.
+
+```edge-python
+print(list(map(lambda x: x * 2, [1, 2, 3])))
+print(list(map(lambda a, b: a + b, [1, 2], [10, 20])))
+print(list(filter(lambda x: x > 2, [1, 2, 3, 4])))
+print(list(filter(None, [0, 1, "", "hi", [], [1]])))
+```
+
+```output
+[2, 4, 6]
+[11, 22]
+[3, 4]
+[1, 'hi', [1]]
+```
+
+### all, any
+
+`all(x)` and `any(x)` test truthiness across an iterable and stop at the deciding element. `all([])` is `True` and `any([])` is `False`.
+
+```edge-python
+print(all([1, 2, 3]))
+print(all([1, 0, 3]))
+print(all([]))
+print(any([0, 0, 1]))
+print(any([]))
+```
+
+```output
+True
+False
+True
+True
+False
+```
+
+### slice
+
+`slice(stop)`, `slice(start, stop)`, or `slice(start, stop, step)` builds a reusable slice object that indexes a sequence. It exposes `start`, `stop` and `step`. `s.indices(n)` returns the bounds clamped to a sequence of length `n`.
+
+```edge-python
+xs = [10, 20, 30, 40, 50]
+print(xs[slice(1, 4)])
+print(xs[slice(0, 5, 2)])
+```
+
+```output
+[20, 30, 40]
+[10, 30, 50]
+```
+
+## Bytes helpers
+
+These three functions are the function forms of [bytes and int methods](/docs/reference/methods#bytes-methods). They take every argument by position and behave like the methods.
+
+### bytes_fromhex
+
+`bytes_fromhex(s)` is [`bytes.fromhex(s)`](/docs/reference/methods#bytes-methods). It parses a hex string into bytes and ignores ASCII whitespace. A non-hex character or an odd digit count raises `ValueError`.
+
+### int_from_bytes
+
+`int_from_bytes(b, order)` is [`int.from_bytes(b, order)`](/docs/reference/methods#int-and-float-methods) with the order required. It reads `b` as an unsigned integer. `order` is `"big"` or `"little"`.
+
+### int_to_bytes
+
+`int_to_bytes(n, length, order)` is [`n.to_bytes(length, order)`](/docs/reference/methods#int-and-float-methods) with every argument required. It writes a non-negative int as `length` bytes. A negative `n` or a value that does not fit raises `OverflowError`.
+
+```edge-python
+print(bytes_fromhex("48656c6c6f"))
+print(int_from_bytes(b"\x01\x00", "big"))
+print(int_to_bytes(255, 2, "big"))
+```
+
+```output
+b'Hello'
+256
+b'\x00\xff'
+```
+
+## Type and identity
+
+### type
+
+`type(x)` returns the type object of `x`. The built-in type names are these same objects.
+
+`type(x) is int` holds, and calling one constructs a value. For a user instance the result is its class object.
+
+```edge-python
+print(type(42))
+print(type(42) is int)
+print(type([1, 2, 3])([4, 5]))
+
+class C:
+  pass
+
+print(type(C()) is C)
+```
+
+```output
+<class 'int'>
+True
+[4, 5]
+True
+```
+
+Functions, type objects, and classes expose `__name__`, the bare declared name. On an exception instance, `type(e).__name__` gives the name of the exception class.
+
+```edge-python
+def greet():
+  pass
+
+print(greet.__name__)
+print(int.__name__)
+
+try:
+  1 / 0
+except Exception as e:
+  print(type(e).__name__)
+```
+
+```output
+greet
+int
+ZeroDivisionError
+```
+
+### object
+
+`object()` returns a unique featureless instance. Use it as a sentinel. Every value is an instance of `object`.
+
+```edge-python
+SENTINEL = object()
+
+print(SENTINEL is object())
+print(type(SENTINEL) is object)
+print(isinstance(42, object))
+```
+
+```output
+False
+True
+True
+```
+
+### isinstance
+
+`isinstance(obj, t)` tests membership. `t` is a built-in type, exception class, user class, or a tuple of those.
+
+- `bool` counts as `int`.
+- Exception classes follow the [exception hierarchy](/docs/reference/limits-and-errors#exception-hierarchy).
+- User classes walk their inheritance chain.
+- `object` matches every value.
+
+```edge-python
+print(isinstance(42, int))
+print(isinstance(True, int))
+print(isinstance("x", (int, str)))
+```
+
+```output
+True
+True
+True
+```
+
+### issubclass
+
+`issubclass(C, B)` tests inheritance. `B` may be a tuple of classes. `C` must be a class or the call raises `TypeError`.
+
+`bool` is a subclass of `int`, and exception classes follow the same hierarchy.
+
+```edge-python
+print(issubclass(ZeroDivisionError, Exception))
+print(issubclass(bool, int))
+
+class A:
+  pass
+
+class B(A):
+  pass
+
+print(issubclass(B, A))
+print(issubclass(A, B))
+```
+
+```output
+True
+True
+True
+False
+```
+
+### callable
+
+`callable(x)` is `True` for functions, lambdas, bound methods, type objects, built-in functions, and instances whose class defines `__call__`. It is `False` for everything else.
+
+```edge-python
+print(callable(print))
+print(callable(lambda x: x))
+print(callable(42))
+```
+
+```output
+True
+True
+False
+```
+
+### id, hash
+
+`id(x)` returns a stable numeric identifier. Two values share it exactly when `is` holds between them.
+
+`hash(x)` returns the hash of a hashable value.
+
+- Lists, dicts, and sets are unhashable and raise `TypeError`.
+- Ints hash to themselves.
+- Integral floats hash as the equal int. `hash(1) == hash(1.0)` holds.
+
+```edge-python
+print(hash("hello") == hash("hello"))
+print(hash((1, 2, 3)) == hash((1, 2, 3)))
+print(hash(1) == hash(1.0))
+
+try:
+    hash([1, 2, 3])
+except TypeError:
+    print("unhashable")
+```
+
+```output
+True
+True
+True
+unhashable
+```
+
+## Representation
+
+### repr
+
+`repr(x)` returns the developer-readable form. Strings are quoted and containers show the `repr` of their elements.
+
+```edge-python
+print(repr("hello"))
+print(repr(42))
+print(repr([1, "two", 3]))
+```
+
+```output
+'hello'
+42
+[1, 'two', 3]
+```
+
+### format
+
+`format(value)` returns the display form. `format(value, spec)` applies the format spec mini-language from [f-strings](/docs/language/syntax#f-strings).
+
+```edge-python
+print(format(42))
+print(format(42, "05d"))
+print(format(3.14159, ".2f"))
+print(format(255, "#x"))
+```
+
+```output
+42
+00042
+3.14
+0xff
+```
+
+## Attributes
+
+### getattr, hasattr
+
+`getattr(obj, name)` reads an attribute. It looks in this order.
+
+1. The instance `__dict__`.
+2. The class chain.
+3. The built-in method table.
+4. The `__getattr__` of the class, when it defines one.
+
+A missing name raises `AttributeError` unless a third argument gives a default. `hasattr(obj, name)` runs the same lookup and returns a boolean.
+
+### setattr, delattr
+
+`setattr(obj, name, value)` writes an attribute on a user instance, class, or function. Built-in types have no writable attributes.
+
+`delattr(obj, name)` removes an attribute. A missing name raises `AttributeError`.
+
+```edge-python
+class Box:
+  pass
+
+b = Box()
+setattr(b, "x", 42)
+print(b.x)
+print(getattr(b, "missing", "default"))
+
+delattr(b, "x")
+print(hasattr(b, "x"))
+```
+
+```output
+42
+default
+False
+```
+
+### vars
+
+`vars(x)` returns a snapshot of the attribute dict of an instance or module. There is no form without an argument. Use `locals()` instead.
+
+```edge-python
+class P:
+  def __init__(self):
+    self.x = 1
+    self.y = 2
+
+print(vars(P()))
+```
+
+```output
+{'x': 1, 'y': 2}
+```
+
+### globals, locals
+
+`globals()` returns a fresh dict of the module-level bindings. It holds user names only. Built-ins live in a separate namespace.
+
+`locals()` returns a fresh dict of the locals of the current frame inside a function. At module level it matches `globals()`.
+
+Both are copies. Mutating them does not change any binding.
+
+```edge-python
+x = 100
+
+def add(a, b):
+    return a + b
+
+print(globals()["x"])
+print(globals()["add"](3, 4))
+
+def f():
+  a = 1
+  b = 2
+  return locals()
+
+print(f())
+```
+
+```output
+100
+7
+{'a': 1, 'b': 2}
+```
+
+## Modules
+
+### import_module
+
+`import_module(name)` returns a module that the program imports statically somewhere. It is a lookup, not a load.
+
+- Every reachable module is still resolved and verified at compile time.
+- An unknown name raises `NameError`.
+- A name bound to a global that is not a module, such as a function, raises `TypeError`.
+
+```edge-manifest
+{ "imports": { "math": "0.1.0" } }
+```
+
+```edge-python
+import math
+
+m = import_module("math")
+print(m is math)
+print(m.floor(3.7))
+```
+
+```output
+True
+3
+```
+
+Dynamic loading through `importlib` or `__import__` does not exist. Static imports plus `import_module` replace it.
+
+## Classes
+
+These builtins shape class members. [Classes](/docs/language/classes) owns their behavior and examples.
+
+- `super()` takes no arguments and works inside a method only. It resolves attributes against the bases of the current class. See [Inheritance and super()](/docs/language/classes#inheritance-and-super).
+- `property(fget, fset=None)` builds a property for a class member, usually through `@property` and `@<name>.setter`. See [Properties](/docs/language/classes#properties).
+- `staticmethod(func)` wraps a member so it receives no implicit `self`. See [Static methods](/docs/language/classes#static-methods).
+- `classmethod(func)` wraps a member so it receives the class as its first argument. See [Class methods](/docs/language/classes#class-methods).
+
+## Async
+
+These builtins drive coroutines and messages. [Async](/docs/language/async) owns the model and the examples.
+
+- `run(*coros)` runs every argument to completion and returns the result of the first. Errors from the other coroutines are discarded.
+- `gather(*coros)` runs every argument and returns a list of results in argument order. It waits for every coroutine, then raises the error of the first failing one in argument order.
+- `sleep(seconds)` suspends for the duration. A negative value counts as zero.
+- `with_timeout(seconds, coro)` returns the result of the coroutine or raises `TimeoutError` at the deadline.
+- `cancel(coro)` flags a coroutine for cancellation at its next step. Its `finally` blocks run, and it cannot catch the `CancelledError`.
+- `receive()` pops the oldest message the host queued. It parks the coroutine while the queue is empty.
+- `send(group, body)` hands the string `body` to an actor of `group` and returns `None`. Outside an [actor pool](/docs/platforms/actors#messages) it raises `RuntimeError`.

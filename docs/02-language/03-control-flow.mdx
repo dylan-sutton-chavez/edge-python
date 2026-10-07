@@ -26,20 +26,6 @@ zero
 positive
 ```
 
-## pass
-
-`pass` does nothing. Use it where the grammar requires a block.
-
-```edge-python
-for i in range(3):
-  pass
-print("done")
-```
-
-```output
-done
-```
-
 ## while
 
 ```edge-python
@@ -72,7 +58,7 @@ loop finished cleanly
 
 ## for
 
-`for` iterates any iterable: list, tuple, dict, set, range, string, or generator.
+`for` iterates any iterable. Lists, tuples, dicts, sets, ranges, strings and generators all work.
 
 ```edge-python
 for ch in "abc":
@@ -85,8 +71,9 @@ b
 c
 ```
 
+The loop variable takes the same targets as assignment, nested and starred ones included. [Tuple unpacking](/docs/language/syntax#tuple-unpacking) lists them.
+
 ```edge-python
-# Tuple unpacking in the loop variable
 pairs = [("a", 1), ("b", 2), ("c", 3)]
 for key, value in pairs:
   print(key, value)
@@ -96,17 +83,6 @@ for key, value in pairs:
 a 1
 b 2
 c 3
-```
-
-```edge-python
-# Star pattern works too
-for first, *rest in [[1, 2, 3], [4, 5, 6, 7]]:
-  print(first, rest)
-```
-
-```output
-1 [2, 3]
-4 [5, 6, 7]
 ```
 
 ### break and continue
@@ -129,24 +105,54 @@ for i in range(10):
 
 ### for ... else
 
-The `else` runs when the loop exhausts its iterator without `break`.
+The `else` runs when the loop exhausts its iterator without `break`. It fits a search that reports a miss.
 
 ```edge-python
-for i in range(3):
-  pass
-else:
-  print("done")
+def search(items, target):
+  for i, item in enumerate(items):
+    if item == target:
+      print("found at", i)
+      break
+  else:
+    print("not found")
+
+search([4, 5, 6], 5)
+search([4, 5, 6], 9)
 ```
 
 ```output
-done
+found at 1
+not found
 ```
 
 ## match / case
 
-Supported patterns: literals (`int`, `float`, `str` and `bytes` with adjacent ones joined, negative numbers, and `True`, `False` and `None`, which match by identity so `case True` rejects `1`), capture names, the `_` wildcard, OR patterns with `|`, guards with `if`, `as` captures, and sequence patterns with an optional `*rest`, written `[a, b]`, `(a, b)` or bare `a, b`. Parentheses without a comma only group, so `(x)` is the capture `x`.
+`match` tries each `case` in order and runs the first one whose pattern fits the subject.
 
-Items in a sequence pattern are any of these patterns, nested sequences, OR groups and `as` captures included. A mapping pattern `{"k": p, **rest}` takes literal keys and matches only dicts. A class pattern `Point(x, y=0)` checks `isinstance` and reads positional attributes through `__match_args__`, while `int(n)` matches the subject itself. A dotted name such as `Color.RED` compares by value. A sequence pattern matches only list and tuple subjects. Any other value, including `str` and `bytes`, fails the pattern and falls through to the next case.
+| Pattern | Example | Matches |
+|---|---|---|
+| Literal | `0`, `-1.5`, `"a"`, `b"x"` | An equal value |
+| Singleton | `True`, `False`, `None` | The same object. `case True` rejects `1` |
+| Capture | `x` | Anything, bound to the name |
+| Wildcard | `_` | Anything, bound to nothing |
+| OR | `1 \| 2 \| 3` | Any of the alternatives |
+| `as` capture | `[x, y] as pair` | The inner pattern, bound to the name |
+| Sequence | `[a, *rest]`, `(a, b)`, `a, b` | A list or tuple of that shape |
+| Mapping | `{"k": p, **rest}` | A dict holding those literal keys |
+| Class | `Point(x, y=0)`, `int(n)` | An instance whose attributes match |
+| Dotted name | `Color.RED` | A value equal to that attribute |
+
+A few rules shape how the patterns combine.
+
+- A guard such as `case x if x < 0` adds a condition after the pattern.
+- Adjacent string or bytes literals join into one literal.
+- Parentheses without a comma only group. `(x)` is the capture `x`.
+- Items of a sequence pattern can be any pattern, nested sequences, OR groups and `as` captures included.
+- A sequence pattern matches only list and tuple subjects. A `str`, `bytes` or any other value fails it and falls through to the next case.
+- A mapping pattern matches only dicts. `**rest` collects the other keys.
+- A class pattern checks `isinstance` and reads positional items through `__match_args__`. On a builtin type such as `int(n)` the positional item is the subject itself.
+
+Literals, OR patterns, guards and the wildcard.
 
 ```edge-python
 def sign(n):
@@ -166,6 +172,8 @@ print(sign(0), sign(2), sign(-7), sign(99))
 ```output
 zero small negative other
 ```
+
+Sequence patterns.
 
 ```edge-python
 def shape(seq):
@@ -192,6 +200,84 @@ pair-equal
 1 then 3 more
 ```
 
+Mapping patterns.
+
+```edge-python
+def describe(cfg):
+  match cfg:
+    case {"host": h, "port": p, **rest}:
+      return f"{h}:{p} {rest}"
+    case {"host": h}:
+      return f"{h}:80"
+    case _:
+      return "no host"
+
+print(describe({"host": "api", "port": 443, "tls": True}))
+print(describe({"host": "api"}))
+print(describe(["host"]))
+```
+
+```output
+api:443 {'tls': True}
+api:80
+no host
+```
+
+Class patterns.
+
+```edge-python
+class Point:
+  __match_args__ = ("x", "y")
+  def __init__(self, x, y):
+    self.x, self.y = x, y
+
+def where(p):
+  match p:
+    case Point(0, 0):
+      return "origin"
+    case Point(x, y=0):
+      return f"on the x axis at {x}"
+    case Point(x, y):
+      return f"at {x}, {y}"
+    case int(n):
+      return f"int {n}"
+
+print(where(Point(0, 0)))
+print(where(Point(3, 0)))
+print(where(Point(1, 2)))
+print(where(7))
+```
+
+```output
+origin
+on the x axis at 3
+at 1, 2
+int 7
+```
+
+Dotted names compare by value.
+
+```edge-python
+class Color:
+  RED = 1
+  GREEN = 2
+
+def name(c):
+  match c:
+    case Color.RED:
+      return "red"
+    case Color.GREEN:
+      return "green"
+    case _:
+      return "other"
+
+print(name(1), name(2), name(3))
+```
+
+```output
+red green other
+```
+
 ## try / except / else / finally
 
 ```edge-python
@@ -210,7 +296,12 @@ print(safe_div(10, 0))
 None
 ```
 
-A handler names one exception, a tuple of exceptions, or nothing. A bare `except` catches everything. `else` runs when the `try` body raised nothing. `finally` always runs.
+A `try` statement has up to four kinds of clauses.
+
+- An `except` handler names one exception, a tuple of exceptions, or nothing.
+- A bare `except` catches everything.
+- `else` runs when the `try` body raised nothing.
+- `finally` always runs.
 
 ```edge-python
 try:
@@ -231,7 +322,7 @@ cleanup
 ```edge-python
 # Bare except catches everything
 try:
-  raise "boom"
+  {}["missing"]
 except:
   print("caught")
 ```
@@ -240,7 +331,7 @@ except:
 caught
 ```
 
-Handlers match subclasses. `except Exception` catches `ValueError`, `RuntimeError`, `KeyError`, and the rest of the hierarchy listed in [Limits and errors](/docs/reference/limits-and-errors).
+Handlers match subclasses. `except Exception` catches `ValueError`, `RuntimeError`, `KeyError` and the rest of the [exception hierarchy](/docs/reference/limits-and-errors#exception-hierarchy).
 
 ```edge-python
 try:
@@ -254,6 +345,8 @@ subclass caught
 ```
 
 ### raise
+
+`raise` takes an exception class or an instance. Any other value, such as `raise "boom"`, raises `TypeError` with the message "exceptions must derive from BaseException".
 
 ```edge-python
 def positive(n):
@@ -292,7 +385,7 @@ logging
 outer bad
 ```
 
-`raise X from Y` raises `X`. The `from` clause parses and `Y` evaluates, but the cause is not preserved. There is no `__cause__` or `__context__`. Only `X` reaches the handler.
+`raise X from Y` raises `X`. The `from` clause parses and `Y` evaluates, but the cause is not kept. There is no `__cause__` or `__context__`, and only `X` reaches the handler.
 
 ```edge-python
 try:
@@ -307,53 +400,53 @@ caught the ValueError
 
 ## with
 
-`with` runs the context manager protocol:
+`with` runs the context manager protocol in three steps.
 
 1. Evaluate the expression.
 2. Call `__enter__` and bind its result to the `as` target.
 3. On exit, call `__exit__(exc_type, exc_value, traceback)`.
 
-On a clean exit the three arguments are `None`. On an exception they carry the exception info. A truthy return from `__exit__` suppresses the exception.
+The arguments of `__exit__` are `(None, None, None)` on a clean exit. On an exception they are the exception type and value, and `traceback` is always `None`.
 
-```edge-python
-class Resource:
-  def __enter__(self):
-    print("acquire")
-    return "handle"
-  def __exit__(self, *exc):
-    print("release")
-    return False
-
-with Resource() as r:
-  print(r)
-print("after")
-```
-
-```output
-acquire
-handle
-release
-after
-```
-
-Multiple targets:
+Several managers in one `with` nest. The last one enters last and exits first.
 
 ```edge-python
 class Tag:
   def __init__(self, name):
     self.name = name
   def __enter__(self):
+    print("enter", self.name)
     return self.name
-  def __exit__(self, *exc):
+  def __exit__(self, exc_type, exc_value, traceback):
+    print("exit", self.name, exc_type, exc_value, traceback)
     return False
 
-with Tag("first") as x, Tag("second") as y:
+with Tag("a") as x, Tag("b") as y:
   print(x, y)
+
+try:
+  with Tag("c"):
+    raise ValueError("bad")
+except ValueError:
+  print("propagated")
 ```
 
 ```output
-first second
+enter a
+enter b
+a b
+exit b None None None
+exit a None None None
+enter c
+exit c <class 'ValueError'> bad None
+propagated
 ```
+
+What `__exit__` returns or raises decides how the block ends.
+
+- A truthy return suppresses the exception. A falsy one lets it propagate.
+- Each manager has its own handler. When an inner one suppresses, the outer ones exit with `(None, None, None)`.
+- If `__exit__` raises, the new exception replaces the original.
 
 ```edge-python
 class Suppress:
@@ -373,7 +466,7 @@ suppressed
 
 ### Cleanup on early exit
 
-`finally` and `__exit__` run on every way out of a block. That includes normal completion, exceptions, `return`, `break`, and `continue`. A `return` or `break` inside `finally` replaces the original exit.
+`finally` and `__exit__` run on every way out of a block. That includes normal completion, exceptions, `return`, `break` and `continue`. A `return` or `break` inside `finally` replaces the original exit.
 
 ```edge-python
 class Lock:
@@ -422,7 +515,7 @@ print(reciprocal(4))
 0.25
 ```
 
-A failed assertion raises `AssertionError`. The message after the comma evaluates only on failure and becomes the exception argument (`e.args`).
+A failed assertion raises `AssertionError`. The message after the comma evaluates only on failure. It becomes the exception argument in `e.args`.
 
 ```edge-python
 try:
@@ -437,7 +530,7 @@ math broke
 
 ## del
 
-`del` removes a binding. It works on plain names, attributes (`del obj.attr`), indexed positions (`del seq[i]`), and parenthesized groups (`del (a, b)`).
+`del` removes a binding. It works on plain names, attributes (`del obj.attr`), indexed positions (`del seq[i]`) and parenthesized groups (`del (a, b)`).
 
 ```edge-python
 x = 42
@@ -456,3 +549,21 @@ print(xs)
 gone
 [1, 3]
 ```
+
+## pass
+
+`pass` does nothing. Use it where the grammar requires a block.
+
+```edge-python
+for i in range(3):
+  pass
+print("done")
+```
+
+```output
+done
+```
+
+> [!CARDS]
+> - `square-function` [Functions](/docs/language/functions) Parameters, closures, generators and decorators.
+> - `triangle-alert` [Limits and errors](/docs/reference/limits-and-errors) The exception hierarchy and what raises each error.

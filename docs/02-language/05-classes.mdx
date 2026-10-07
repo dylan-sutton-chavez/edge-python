@@ -5,19 +5,19 @@ description: "User-defined classes, inheritance, properties, and the dunder prot
 
 # Classes
 
-Classes are state containers and namespaces, not the primary abstraction. This is a design choice. Two patterns:
+Classes are state containers and namespaces, not the primary abstraction. This is a design choice. Two patterns cover most uses.
 
-- State machines: a few methods that mutate the receiver.
-- Namespaces: a bundle of related functions and constants.
+- **State machines.** A few methods mutate the receiver.
+- **Namespaces.** A class bundles related functions and constants.
 
-Supported:
+The class model supports these features.
 
 - Single and multiple inheritance (C3 MRO) with `super()`.
-- `@property` / `@x.setter`.
+- `@property` and `@x.setter`.
 - `@staticmethod` and `@classmethod`.
-- A curated dunder protocol for operators, indexing, iteration, hashing, context managers, and attribute fallback (see [Operator overloading and protocols](#operator-overloading-and-protocols)).
+- A curated dunder protocol for operators, indexing, iteration, hashing, context managers and attribute fallback. See [Operator overloading and protocols](#operator-overloading-and-protocols).
 
-Out of scope: descriptors, metaclasses, `__slots__`.
+[Not supported](#not-supported) lists what is left out.
 
 ## State-machine pattern
 
@@ -43,7 +43,7 @@ print(c.value())
 
 ## Namespace pattern
 
-A class with no `__init__` and no per-instance state is a namespace. Methods called on the class are unbound, with no `self` prepended.
+A class with no `__init__` and no per-instance state is a namespace. Its functions are called on the class itself.
 
 ```edge-python
 class Status:
@@ -73,9 +73,13 @@ print(Math.cube(3))
 
 ## Inheritance and super()
 
-Single or multiple bases (`class Sub(Base):`, `class C(A, B):`). Methods not on the subclass resolve along the C3 linearization (the MRO). An inconsistent hierarchy raises `TypeError` at class creation. `isinstance(x, Base)` walks the ancestor chain, so `Sub` instances are also instances of every ancestor.
+A class takes one base or several, as in `class Sub(Base):` and `class C(A, B):`.
 
-`super()` (zero-arg) delegates to the next class up the chain, bound to the current `self`. Most common in `__init__` to extend a base constructor.
+- Methods missing on the subclass resolve along the C3 linearization, the MRO.
+- An inconsistent hierarchy raises `TypeError` at class creation.
+- `isinstance(x, Base)` walks the ancestor chain. A `Sub` instance is an instance of every ancestor.
+
+`super()` with no arguments delegates to the next class up the chain, bound to the current `self`. It is most common in `__init__` to extend a base constructor.
 
 ```edge-python
 class Animal:
@@ -137,11 +141,11 @@ inconsistent hierarchy
 | `instance.attr` | instance `__dict__` first, then class |
 | `instance.method()` | bound method, `self` prepended |
 
-`setattr` / `delattr` work on instances and on class objects. The latter mutates the class's members.
+`setattr` and `delattr` work on instances and on class objects. On a class object they change the members of the class.
 
 ## Class decorators
 
-A class decorator is called with the class object and its return value binds to the name. It can add or replace class attributes (`cls.kind = ...`) or return a replacement.
+A class decorator is called with the class object, and its return value binds to the name. It can add or replace class attributes (`cls.kind = ...`) or return a replacement.
 
 ```edge-python
 def tag(cls):
@@ -164,7 +168,7 @@ tagged
 
 ## Properties
 
-`@property` turns a method into a read-only attribute. `@x.setter` makes it writable. Properties live on the class. Subclasses inherit and can override either side.
+`@property` turns a method into a read-only attribute. `@x.setter` makes it writable. Properties live on the class, and subclasses inherit and can override either side.
 
 ```edge-python
 class Temp:
@@ -193,11 +197,13 @@ print(t.fahrenheit)
 212.0
 ```
 
-The two-argument form `property(fget, fset)` also works without decorator syntax.
-
 ## Static methods
 
-`@staticmethod` makes a method that receives no implicit `self`. It is a plain function that lives in the class namespace, callable as `Class.method(...)` or `instance.method(...)` with identical arguments. Subclasses inherit it and can override it. Use it for helpers that belong to a class conceptually but need no receiver.
+`@staticmethod` makes a method that receives no implicit `self`. It is a plain function in the class namespace.
+
+- It is callable as `Class.method(...)` or `instance.method(...)` with the same arguments.
+- Subclasses inherit it and can override it.
+- It suits helpers that belong to a class but need no receiver.
 
 ```edge-python
 class Geometry:
@@ -217,11 +223,9 @@ print(Geometry().triangle_area(10, 4))
 20.0
 ```
 
-The functional form `staticmethod(func)` also works without decorator syntax.
-
 ## Class methods
 
-`@classmethod` binds the class, not the instance, as the first argument. Accessed through a subclass, `cls` is the subclass, so alternate constructors return the right type down the hierarchy.
+`@classmethod` binds the class, not the instance, as the first argument. Through a subclass, `cls` is the subclass. Alternate constructors then return the right type down the hierarchy.
 
 ```edge-python
 class Color:
@@ -247,11 +251,11 @@ print(Color.which(), Bright.which())
 Color Bright
 ```
 
-The functional form `classmethod(func)` also works without decorator syntax.
+The three decorators also work as plain calls without decorator syntax. The forms are `property(fget, fset)`, `staticmethod(func)` and `classmethod(func)`.
 
 ## Operator overloading and protocols
 
-Dunders (`__add__`, `__eq__`, `__getitem__`, ...) plug a class into language protocols. Define them in the class body. The VM calls them when the matching operator, builtin, or syntax form runs.
+Dunders such as `__add__`, `__eq__` and `__getitem__` plug a class into language protocols. Define them in the class body. The engine calls them when the matching operator, builtin or syntax form runs.
 
 ```edge-python
 class V:
@@ -271,7 +275,7 @@ print(V(3) == V(3))
 True
 ```
 
-Dunders are looked up on the class chain. The instance dict is skipped, so assigning `obj.__add__ = ...` has no effect. Subclasses inherit and may override.
+Dunders are looked up on the class chain, and subclasses inherit them and may override them. The instance dict is skipped. Assigning `obj.__add__ = ...` has no effect.
 
 ### Arithmetic
 
@@ -288,26 +292,12 @@ Dunders are looked up on the class chain. The instance dict is skipped, so assig
 | `-a` | `__neg__` | - |
 | `+a` | `__pos__` | - |
 
-Return `NotImplemented` from the forward op to make the VM try the reflected op on the other operand. If both return `NotImplemented` (or neither is defined), the operation raises `TypeError`. An augmented assignment such as `a += b` first calls the in-place dunder (`__iadd__`, `__imatmul__`, ...) and falls back to this pair when it is missing or returns `NotImplemented`.
+The engine picks between the forward and the reflected dunder by these rules.
 
-Subclass-first ordering applies here. When `type(b)` is a strict subclass of `type(a)`, `b.__radd__` runs before `a.__add__`. This lets a subclass override an inherited reflected op without touching the base.
-
-```edge-python
-class Base:
-  def __add__(self, o):
-    return "base.__add__"
-  def __radd__(self, o):
-    return "base.__radd__"
-class Sub(Base):
-  def __radd__(self, o):
-    return "sub.__radd__"
-
-print(Base() + Sub())
-```
-
-```output
-sub.__radd__
-```
+- A forward dunder that returns `NotImplemented` makes the engine try the reflected one on the other operand.
+- If both return `NotImplemented`, or neither is defined, the operation raises `TypeError`.
+- When `type(b)` is a strict subclass of `type(a)`, `b.__radd__` runs before `a.__add__`. A subclass can then override an inherited reflected op without touching the base.
+- An augmented assignment such as `a += b` first calls the in-place dunder (`__iadd__`, `__imatmul__` and the rest). It falls back to the pair above when that dunder is missing or returns `NotImplemented`.
 
 ```edge-python
 class Money:
@@ -328,7 +318,7 @@ print((3 + Money(7)).n)
 
 ### Bitwise and shifts
 
-The bitwise and shift operators follow the same forward/reflected protocol.
+The bitwise and shift operators follow the same forward and reflected protocol.
 
 | Operator | Forward | Reflected |
 |----------|-----------------|------------------|
@@ -350,7 +340,7 @@ The bitwise and shift operators follow the same forward/reflected protocol.
 | `a > b` | `__gt__` | `__lt__` |
 | `a >= b` | `__ge__` | `__le__` |
 
-`!=` falls back to `not __eq__` (coerced to `bool`) when `__ne__` is absent. Every other comparison returns the dunder's raw result. A `__lt__` that returns `'A.lt'` yields the string, not `True`.
+When `__ne__` is absent, `!=` falls back to `not __eq__`, coerced to `bool`. Every other comparison returns the raw result of its dunder. A `__lt__` that returns `'A.lt'` yields the string, not `True`.
 
 ```edge-python
 class N:
@@ -370,7 +360,7 @@ False
 
 ### Truth and length
 
-`bool(x)` (and any boolean context) consults, in order:
+`bool(x)` and any boolean context consult these in order.
 
 1. `__bool__` if defined. It must return `bool`, else `TypeError`.
 2. `__len__` if defined. `False` when the length is 0, else `True`.
@@ -408,9 +398,9 @@ False True
 | `del obj[i]` | `__delitem__` | `(self, i)` |
 | `v in obj` | `__contains__` | `(self, value)` |
 
-Slices pass as a `slice` object, so `obj[1:3]` calls `__getitem__(self, slice(1, 3, None))`. Indexes on built-in sequences coerce via `__index__`, including slice bounds. Dict keys never coerce.
-
-Without `__contains__`, `v in obj` falls back to iterating `obj` and comparing with `__eq__`.
+- Slices pass as a `slice` object. `obj[1:3]` calls `__getitem__(self, slice(1, 3, None))`.
+- Indexes on builtin sequences coerce through `__index__`, slice bounds included. Dict keys never coerce.
+- Without `__contains__`, `v in obj` iterates `obj` and compares with `__eq__`.
 
 ```edge-python
 class Store:
@@ -463,11 +453,11 @@ print(2 in Up(3))
 True
 ```
 
-`for` loops, `list(x)`, and `tuple(x)` all honour the protocol.
+`for` loops, `list(x)` and `tuple(x)` all honor the protocol.
 
 ### Callable
 
-`__call__` makes instances invocable. Positional and keyword arguments are forwarded like any method call.
+`__call__` makes instances callable. Positional and keyword arguments pass through like any method call.
 
 ```edge-python
 class Double:
@@ -488,9 +478,12 @@ True
 
 ### Hashing
 
-`hash(x)` calls `__hash__`. It must return an `int`, which is masked to `INT_MAX`.
+`hash(x)` calls `__hash__`. It must return an `int`. The engine masks the result to `INT_MAX`.
 
-Eq/hash invariant. A class that defines `__eq__` without `__hash__` is unhashable. `hash(x)` and `{x: 1}` raise `TypeError`. This prevents inconsistent dict keys. `object.__hash__` is the identity hash every instance inherits, so `__hash__ = object.__hash__` keeps such a class hashable.
+- A class that defines `__eq__` without `__hash__` is unhashable. `hash(x)` and `{x: 1}` raise `TypeError`. This keeps dict keys consistent.
+- `object.__hash__` is the identity hash every instance inherits. `__hash__ = object.__hash__` keeps such a class hashable.
+- Dicts and sets place a key by its `__hash__` and match it with `__eq__`. An equal instance finds the entry.
+- A key stays under the hash it had when it went in.
 
 ```edge-python
 class K:
@@ -510,8 +503,6 @@ print({k: 'found'}[K(5)]) # an equal instance finds the entry
 found
 ```
 
-Dicts and sets place a key by its `__hash__` and match it with `__eq__`, so an equal instance finds the entry, and the hash a key had when it went in is the one it stays under.
-
 ### Representation
 
 | Function / form | Dunder | Fallback |
@@ -522,7 +513,7 @@ Dicts and sets place a key by its `__hash__` and match it with `__eq__`, so an e
 | `f"{x:spec}"` | `__format__` | `TypeError` for a non-empty spec |
 | `f"{x!r}"` | `__repr__` | - |
 
-`__format__(spec)` receives the spec string and must return `str`. `int(x)` on an instance calls `__int__`, which is also used by `%d` / `%x` / `%X` / `%o` formatting. `float(x)` calls `__float__` and falls back to `__index__`. `abs(x)` calls `__abs__`.
+`__format__(spec)` receives the spec string and must return `str`.
 
 ```edge-python
 class P:
@@ -545,9 +536,39 @@ P(3)
 [P(3)]
 ```
 
+### Numeric conversion
+
+| Function / form | Dunder | Fallback |
+|---------------------|---------------|-----------------------------|
+| `int(x)` | `__int__` | - |
+| `float(x)` | `__float__` | `__index__` |
+| `abs(x)` | `__abs__` | - |
+| `%d`, `%x`, `%X`, `%o` | `__int__` | - |
+
+```edge-python
+class Money:
+  def __init__(self, cents):
+    self.cents = cents
+  def __int__(self):
+    return self.cents // 100
+  def __float__(self):
+    return self.cents / 100
+  def __abs__(self):
+    return Money(abs(self.cents))
+
+m = Money(1250)
+print(int(m), float(m), abs(Money(-5)).cents)
+print("%d dollars" % m)
+```
+
+```output
+12 12.5 5
+12 dollars
+```
+
 ### Attribute access fallback
 
-`__getattr__(self, name)` runs only when normal lookup (instance dict, then class chain) misses. It receives the name as a string. Return the value, or raise `AttributeError` to surface a real miss.
+`__getattr__(self, name)` runs only when normal lookup misses. Normal lookup checks the instance dict, then the class chain. The dunder receives the name as a string and returns the value, or raises `AttributeError` to report a real miss.
 
 ```edge-python
 class Proxy:
@@ -568,43 +589,22 @@ computed:anything
 computed:foo
 ```
 
-Existing attributes bypass `__getattr__`. Only misses trigger it.
-
 ### Context managers
 
-`with cm() as x:` invokes `__enter__`. Its return value binds to `as`. On exit, `__exit__(exc_type, exc_value, traceback)` runs. The arguments are `(None, None, None)` on normal exit. On a raise, they carry the exception type and value, with `traceback` always `None`. A truthy return suppresses the exception. A falsy one propagates it.
+`__enter__` and `__exit__` make an instance usable in `with`. [Control flow](/docs/language/control-flow#with) covers the order of calls, the arguments of `__exit__` and suppression.
 
-```edge-python
-class Suppress:
-  def __enter__(self):
-    return self
-  def __exit__(self, t, v, tb):
-    return True # swallow whatever raised
+## Not supported
 
-with Suppress():
-  raise ValueError("boom")
-print("after")
-```
+The class model leaves these out. Where the syntax parses, the engine ignores it.
 
-```output
-after
-```
+- Metaclasses, `__slots__` and ABCs. A `metaclass=` keyword and a `__slots__` attribute have no effect.
+- Descriptors. `__get__`, `__set__` and `__delete__` are never called.
+- `__init_subclass__` and `__set_name__` are never called.
+- `__new__`. The engine builds the instance and `__init__` runs user logic.
+- Async dunders. `__aenter__`, `__aexit__`, `__aiter__` and `__anext__` are never called. `async with` and `async for` use the sync paths, see [Async](/docs/language/async#async-for-and-async-with).
 
-Multiple managers (`with a(), b() as x:`) nest LIFO. `b` enters last and exits first. Each has its own implicit handler, so inner suppression still lets outer managers run their normal `__exit__(None, None, None)`.
+Reuse behavior through free functions and composition by default. Reach for inheritance and operator overloading when the abstraction calls for them.
 
-If `__exit__` itself raises, the new exception replaces the original.
-
-### What's not dispatched
-
-Parsed for compatibility but never invoked on user classes:
-
-- `__init_subclass__`, `__set_name__`, descriptors (`__get__` / `__set__` / `__delete__`)
-- `__new__`. The VM constructs the instance and `__init__` runs user logic.
-- Async dunders (`__aenter__` / `__aexit__` / `__aiter__` / `__anext__`). `async with` and `async for` use the sync paths. See [Async](/docs/language/async).
-
-## What classes do not support
-
-- Metaclasses, descriptors (`__get__` / `__set__`), `__slots__`, ABCs, `__init_subclass__`.
-- Async dunders, covered above.
-
-Reuse behaviour through free functions and composition by default. Reach for inheritance and operator overloading when the abstraction genuinely calls for them.
+> [!CARDS]
+> - `timer` [Async](/docs/language/async) Cooperative coroutines with run, sleep, gather and cancel.
+> - `book-open` [Builtins](/docs/reference/builtins#classes) The builtins that build and inspect classes.

@@ -1,0 +1,54 @@
+---
+title: "Quickstart"
+description: "Install the CLI and run a first script."
+---
+
+# Quickstart
+
+## Install the CLI
+
+Run the installer in a terminal.
+
+> [!COPY] curl -fsSL https://cdn.edgepython.com/cli/install.sh | sh
+
+> [!NOTE]
+> The installer works on macOS, Linux and WSL.
+
+Open a new shell and check the install. It prints the version of the CLI.
+
+> [!COPY] edge --version
+
+To build the CLI from source instead, follow [Install](/docs/platforms/cli#install) in the CLI reference.
+
+## Run your first script
+
+Create `hello.py` with the code below. You can also edit it and run it here in the browser.
+
+```edge-python
+def greet(name):
+  return f"Hello, {name}!"
+
+for who in ["world", "edge", "python"]:
+  print(greet(who))
+```
+
+```output
+Hello, world!
+Hello, edge!
+Hello, python!
+```
+
+Run it from your terminal.
+
+> [!COPY] edge run hello.py
+
+There is no build step. The CLI compiles the file and runs it.
+
+> [!BANNER] Build your first app
+> [Start the tutorial](/docs/get-started/first-app/create)
+
+## Next steps
+
+> [!CARDS]
+> - `book-open` [Language](/docs/language/syntax) Walk through the language feature by feature.
+> - `terminal` [Command line interface](/docs/platforms/cli) Every command of the edge CLI and its flags.

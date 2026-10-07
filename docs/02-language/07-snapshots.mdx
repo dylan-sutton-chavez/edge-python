@@ -5,33 +5,34 @@ description: "Freeze a paused program to a portable blob and resume it later, an
 
 # Snapshots
 
-A paused program can be frozen whole and brought back to life later, even on a different page load, machine, or day. `saveState` captures the entire interpreter in a portable blob that holds the heap, every global, each suspended coroutine with its call frames, and the scheduler. `restoreState` boots a fresh VM, pours that state back in, and the program continues from exactly where it stopped.
+A paused program can be frozen whole and brought back later. That can be on another page load, another machine or another day. `saveState` captures the whole interpreter in a portable blob, and `restoreState` boots a fresh VM from it.
 
-The blob embeds the source and a structural fingerprint of the compiled bytecode. `restoreState` re-parses and verifies both, and rejects any blob that belongs to a different program or a different snapshot format version. One blob restores any number of times, each an independent copy.
+A blob holds everything the program needs to go on.
+
+- The heap and every global.
+- Each suspended coroutine with its call frames.
+- The scheduler and the events queued for it.
+- The source and a structural fingerprint of the compiled bytecode.
+
+`restoreState` parses the source again and checks both. It rejects a blob that belongs to another program, another compiler build or another snapshot format. One blob restores any number of times, each restore an independent copy.
+
+> [!WARNING]
+> A blob is pinned to one program and one compiler build by its fingerprint. An engine upgrade invalidates every saved blob.
 
 ## Where a run can freeze
 
-A run freezes at a suspension point, and there are two ways to reach one.
+A run freezes at a suspension point. There are two ways to reach one.
 
-The program can reach it on its own through an empty `receive()`, a `sleep(n>0)`, or a pending host call (see [Async](/docs/language/async)). At those points the VM unwinds to a clean serializable state and stays there until the host wakes it.
+- The program reaches one on its own, at an empty `receive()`, a `sleep(n>0)` or a pending host call. See [Async](/docs/language/async).
+- The host forces one. With a preempt interval of `n` the VM yields every `n` loop back-edges. A bare `while True:` that only counts can then be paused, with no change to the program.
 
-The host can also force one. With `setPreemptInterval(n)` the VM yields every `n` loop back-edges, so `pause()` stops a program that has no suspension point at all, including a bare `while True:` that only counts. The program needs no cooperation and no rewriting. See [Pause from the host](#pause-from-the-host).
+At a suspension point the VM unwinds to a clean state it can serialize. A snapshot is only coherent there. Saving while the run executes fails.
 
-Either way, `saveState` rejects while the run is executing, because a snapshot is only coherent at a suspension point.
-
-## What cannot be preempted
-
-A preempt lands at a loop back-edge and only where the VM can unwind, so three cases keep running past their interval and yield at the next reachable back-edge instead.
-
-A class body and an imported module's init are not preemptible, so `while` loops there run to the end. The entry script's top level runs as the module-body coroutine and preempts normally. Neither is user code a builtin re-enters: a `sort(key=...)` or `sorted(key=...)` callback, a generator body being drained by `list()` or `sum()`, and the `__init__` / `__call__` that run while an object is being constructed or invoked. And a single long native operation has no back-edge inside it, so sorting a huge list or `"x" * 10**8` runs to completion before the next yield.
-
-Everything else preempts, including function and method bodies at any call depth, `for` and `while` loops, comprehensions, and loops inside `try` or `with` blocks.
-
-None of this changes results. An unpreemptible stretch delays the pause. It never corrupts one.
+Each yield costs the host a round trip. A small interval lets a pause land fast and slows the run, and `0` turns preemption off. That is the default.
 
 ## A program that pauses
 
-A shopping cart that accumulates state across events and parks on `receive()` every loop.
+A shopping cart keeps state across events and parks on `receive()` every loop.
 
 ```python
 items = []
@@ -47,11 +48,11 @@ while True:
 print(f"done: {len(items)} items, {total} total")
 ```
 
-Here `items` and `total` live in the VM heap, and the only freeze point is the `receive()` line.
+`items` and `total` live in the VM heap. The only freeze point is the `receive()` line.
 
-## Save, persist, restore
+## Save and restore
 
-The round trip runs from the host through `createWorker`.
+A page drives the round trip through `createWorker`. The first session adds two items and saves.
 
 ```js
 import { createWorker } from "https://cdn.edgepython.com/js/src/index.js";
@@ -66,7 +67,6 @@ async function untilParked(worker) {
   throw new Error("run never parked");
 }
 
-// Session 1 starts the program and adds a couple of items.
 const worker = await createWorker();
 worker.onOutput((chunk) => console.log(chunk));
 
@@ -81,8 +81,9 @@ const blob = await worker.saveState(); // Uint8Array holding the whole VM
 worker.dispose(); // user closes the tab, run() is abandoned
 ```
 
+A second session on a fresh page load resumes where the user left off.
+
 ```js
-// Session 2 is a fresh page load that resumes where the user left off.
 const worker = await createWorker();
 worker.onOutput((chunk) => console.log(chunk));
 
@@ -93,113 +94,33 @@ worker.pushEvent("checkout"); // done: 3 items, 40 total
 const { out } = await done; // resolves like run() once the program finishes
 ```
 
-The point shows in that last total of **40** rather than 0. The snapshot restored the heap and the program continued instead of restarting.
+The last total reads **40** rather than 0. The snapshot restored the heap, and the program continued instead of restarting.
 
-## Pause from the host
+> [!CARDS]
+> - `save` [Persisting a run](/docs/platforms/javascript#persisting-a-run) Keep a blob in Cache Storage, a file, IndexedDB or a server.
+> - `pause` [Pause and snapshots](/docs/platforms/javascript#pause-and-snapshots) Every pause, resume and state call of the JS host.
 
-`setPreemptInterval(n)` makes the VM yield every `n` loop back-edges. Nothing else changes. The yields are invisible, the run continues on its own, and the host only notices when it asks to stop. `pause()` then resolves `true` once the run is actually parked, or `false` when no run reached a park (already finished, or none started). `resume()` lets a parked run go again.
+## From the CLI
 
-```python
-# counter.py, no suspension point anywhere
-n = 0
-while True:
-    n += 1
-    if n % 1_000_000 == 0:
-        print(n)
-```
+The CLI saves and restores the same blob as a plain file, with no JS involved.
 
-```js
-const worker = await createWorker();
-await worker.setPreemptInterval(50_000); // ~1 yield per 50k loop iterations
+Both hosts run one engine built from one source. A blob saved in one host restores in the other. The flags are in [Run flags](/docs/platforms/cli#run-flags).
 
-worker.run(counterSrc); // never awaited, it runs forever
+## What cannot be preempted
 
-await worker.pause(); // resolves true once parked, mid-loop
-const blob = await worker.saveState();
-await worker.stateGlobals(); // { n: "3170000" }
-worker.resume(); // keeps counting from 3170000
-```
+A preempt lands at a loop back-edge, and only where the VM can unwind. Three cases run past their interval and yield at the next reachable back-edge.
 
-Pick `n` for how fast you need a pause to land. Each yield is one event-loop round trip, which browsers clamp to a few milliseconds, so the interval decides how many you pay. A tight `i = i + 1` loop runs about a million iterations per second, so `n = 1_000` yields every millisecond of work and costs several times the runtime, while `n = 1_000_000` yields about once a second and costs almost nothing. `0` turns preemption off and leaves the program cooperative-only. That is the default.
+- A class body and the init of an imported module. The top level of the entry script preempts normally.
+- User code a builtin calls back into. That covers a `key=` callback of `sort` or `sorted`, a generator drained by `list()` or `sum()`, and the `__init__` or `__call__` run while an object is built or called.
+- A single long native operation, such as sorting a huge list or `"x" * 10**8`.
 
-## Save when the tab closes
+Everything else preempts, at any call depth and inside `try` or `with` blocks.
 
-`createWorker` spins up the worker, and everything else is calls on it.
-
-```html
-<script type="module">
-  import { createWorker } from "https://cdn.edgepython.com/js/src/index.js";
-
-  const worker = await createWorker();
-  const store = await caches.open("edge-python");
-  const KEY = "/session";
-
-  await worker.setPreemptInterval(50000);
-  const hit = await store.match(KEY);
-  hit
-    ? worker.restoreState(new Uint8Array(await hit.arrayBuffer()))
-    : worker.run(await fetch("./counter.py").then((r) => r.text()));
-
-  const checkpoint = async () => {
-    if (!await worker.pause()) return; // the run already finished
-    await store.put(KEY, new Response(await worker.saveState()));
-    worker.resume();
-  };
-
-  setInterval(checkpoint, 5000);
-  addEventListener("visibilitychange", () => document.hidden && checkpoint());
-</script>
-```
-
-The interval is what actually protects the session. `visibilitychange` is the last event that reliably fires on mobile, but the handler is async and the browser can kill the page before the write lands. The rolling checkpoint is the guarantee and the handler only shortens what a close costs.
-
-## Download it to a file
-
-`saveState` returns a `Uint8Array` of opaque bytes, which the browser can offer as a download.
-
-```js
-const blob = await worker.saveState();
-const file = new Blob([blob], { type: "application/octet-stream" });
-const url = URL.createObjectURL(file);
-Object.assign(document.createElement("a"), { href: url, download: "cart.snapshot" }).click();
-URL.revokeObjectURL(url);
-```
-
-Reload it from a file the user picks.
-
-```js
-const bytes = new Uint8Array(await fileInput.files[0].arrayBuffer());
-worker.restoreState(bytes);
-```
-
-Any other store works the same way. IndexedDB keeps a `Uint8Array` directly and a server accepts the raw bytes.
-
-```js
-await store.put("cart", await worker.saveState()); // IndexedDB
-await fetch("/saves/cart", { method: "PUT", body: await worker.saveState() }); // server
-```
-
-## The same blob from the CLI
-
-The [CLI](/docs/reference/cli) works with snapshots as plain files, no JS involved. `edge run --save-state cart.bin` writes the blob when the script parks on a wait the CLI cannot serve, and `edge run --restore-state cart.bin` boots from it and keeps running. `--preempt <n>` is `setPreemptInterval(n)` as a flag, and `--events <f>` feeds `receive()` line by line. The CLI and the JS host run the same engine, built from one source, so a blob saved in one host restores in the other.
-
-## Restore if present, else start fresh
-
-The common pattern resumes a saved session when one exists and otherwise begins a new run. A backend works the same way as a local store. It only holds bytes and never runs the VM.
-
-```js
-const res = await fetch(`/saves/${userId}`); // or any local store
-if (res.ok) {
-  const blob = new Uint8Array(await res.arrayBuffer());
-  worker.restoreState(blob); // continue the user's held session
-} else {
-  worker.run(cartSrc); // no save yet, so start fresh
-}
-```
+None of this changes results. An unpreemptible stretch delays a pause and never corrupts one. Why is in [Design](/docs/internals/design#snapshots).
 
 ## Inspect without resuming
 
-`stateGlobals` and `stateStack` read a parked run without waking it, which suits a "resume?" screen or debugging a restored blob.
+`stateGlobals` and `stateStack` read a parked run without waking it. That suits a resume screen or debugging a restored blob.
 
 ```js
 await worker.stateStack();
@@ -209,14 +130,15 @@ await worker.stateGlobals();
 // { items: "[10, 25]", total: "35" }   values are reprs
 ```
 
-The `state` field reads `"waiting_event"` for a parked `receive()`, `"sleeping"` for a `sleep()`, and so on. A run held by `pause()` reads `"ready"`, because a preempted coroutine is not waiting on anything. It is simply not being stepped.
+`state` reads `"waiting_event"` for a parked `receive()` and `"sleeping"` for a `sleep()`.
+
+A run held by `pause()` reads `"ready"`. A preempted coroutine waits on nothing. It is only not being stepped.
 
 ## Limits
 
-Script-only state restores identically, including queued but unconsumed events. Live host resources (DOM handles, sockets, pending host calls) are not captured and must be recreated after restoring. The blob carries the whole heap and has no size cap. See [blob layout](/docs/reference/abi#driver-exports).
+- Script state restores identically, queued but unconsumed events included.
+- Live host resources are not captured. DOM handles, sockets and pending host calls must be recreated after a restore.
+- A blob carries the whole heap and has no size cap.
+- A restored run keeps the limits saved in its blob.
 
-## See also
-
-- [Design](/docs/implementation/design) for the serializer internals.
-- [ABI](/docs/reference/abi#driver-exports) for the `compiler.wasm` exports and blob layout.
-- [CLI](/docs/reference/cli) for the snapshot flags.
+The byte layout is in [Blob layout](/docs/platforms/rust#blob-layout).

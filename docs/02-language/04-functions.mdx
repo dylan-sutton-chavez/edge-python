@@ -5,7 +5,7 @@ description: "First-class functions, lambdas, closures, generators, decorators."
 
 # Functions
 
-Functions are values. Pass them, return them, store them, compose them.
+Functions are values. Pass them, return them, store them and compose them.
 
 ## def
 
@@ -54,7 +54,10 @@ print(f(1, z=3, y=2))
 
 ### Variadic parameters
 
-`*args` collects extra positional arguments into a tuple. `**kwargs` collects extra keyword arguments into a dict.
+A function without `*args` rejects extra positional arguments with `TypeError`. The two variadic forms collect what the declared parameters do not take.
+
+- `*args` collects extra positional arguments into a tuple.
+- `**kwargs` collects extra keyword arguments into a dict.
 
 ```edge-python
 def total(*nums):
@@ -82,7 +85,7 @@ print(opts(host="api", port=443))
 
 ### Keyword-only parameters
 
-A bare `*` marks the following parameters as keyword-only. They must be passed by name. A positional argument that would reach them raises `TypeError`, as does any positional argument beyond the declared parameters when there is no `*args`.
+A bare `*` marks the following parameters as keyword-only. They must be passed by name. A positional argument that would reach them raises `TypeError`.
 
 ```edge-python
 def connect(host, *, port=80, secure=False):
@@ -124,7 +127,7 @@ print(f(1, **{"b": 2, "c": 3}))
 
 ## lambda
 
-An anonymous function. The body is a single expression.
+A lambda is an anonymous function. Its body is a single expression.
 
 ```edge-python
 double = lambda x: x * 2
@@ -144,9 +147,9 @@ print(greet("world"))
 Hi, world
 ```
 
-## First-class functions
+## Functions as values
 
-Store functions in data structures and pass them as arguments.
+A function can sit in a list or a dict, travel as an argument and come back as a result.
 
 ```edge-python
 ops = [abs, hex, str]
@@ -157,8 +160,9 @@ print([f(-3) for f in ops])
 [3, '-0x3', '-3']
 ```
 
+A dict of functions replaces a switch statement.
+
 ```edge-python
-# Functions as dict values; replaces switch/case
 handlers = {
   "add": lambda a, b: a + b,
   "mul": lambda a, b: a * b,
@@ -176,37 +180,7 @@ print(handlers["max"](3, 4))
 4
 ```
 
-## Function attributes
-
-Functions carry writable attributes, like any object. `getattr` / `hasattr` / `setattr` / `delattr` work on them, and an assigned `__name__` wins over the declared one. Decorators use these for metadata.
-
-```edge-python
-def sma(source, length):
-  return sum(source) / length
-
-sma.window = 10
-print(sma.window)
-print(getattr(sma, "missing", "n/a"))
-
-def tag(fn):
-  fn.tagged = True
-  return fn
-
-@tag
-def step():
-  pass
-print(step.tagged)
-```
-
-```output
-10
-n/a
-True
-```
-
-## Higher-order functions
-
-Functions that take or return functions.
+A higher-order function takes or returns a function.
 
 ```edge-python
 def apply(f, x):
@@ -214,26 +188,19 @@ def apply(f, x):
 
 print(apply(lambda n: n * n, 5))
 print(apply(abs, -10))
-```
 
-```output
-25
-10
-```
-
-```edge-python
-# Returning a function
 def make_adder(n):
   return lambda x: x + n
 
 add5 = make_adder(5)
 add10 = make_adder(10)
-
 print(add5(3))
 print(add10(3))
 ```
 
 ```output
+25
+10
 8
 13
 ```
@@ -263,7 +230,7 @@ print(tick())
 3
 ```
 
-Because capture is by reference, every lambda in a loop sees the same loop variable. Bind the current value through a default argument.
+Capture is by reference. Every lambda made in a loop sees the same loop variable. Bind the current value through a default argument.
 
 ```edge-python
 def make_adders(n):
@@ -279,7 +246,10 @@ print(add0(10), add1(10), add2(10))
 
 ### global and nonlocal
 
-Assignment inside a function creates a local unless declared otherwise. `nonlocal name` rebinds the nearest enclosing function's variable. That is the shared cell the `counter` closure above relies on. `global name` rebinds the module-level variable.
+Assignment inside a function creates a local unless declared otherwise.
+
+- `nonlocal name` rebinds the variable of the nearest enclosing function. The `counter` closure above relies on it.
+- `global name` rebinds the module-level variable.
 
 ```edge-python
 total = 0
@@ -342,7 +312,7 @@ print(is_even(10), is_odd(10))
 True False
 ```
 
-> Pure functions are memoized after two calls with the same arguments. The VM detects purity statically (no I/O, no mutation, no raise, no yield) and confirms it at runtime. Any call that performs a side effect, including a builtin like `print` passed as a first-class value, marks the call impure and skips the cache, so memoization never drops an effect. Naive recursion runs at memoized cost with no source changes. See [Design](/docs/implementation/design) for the full model.
+A pure function called again with the same immutable positional arguments can return a cached result without running its body. [Design](/docs/internals/design#key-mechanisms) lists when the cache applies.
 
 ## Generators
 
@@ -397,7 +367,7 @@ print(list(naturals(5)))
 
 ### yield from
 
-Delegate to another generator or any iterable.
+`yield from` delegates to another generator or any iterable.
 
 ```edge-python
 def nums():
@@ -411,7 +381,7 @@ print(list(nums()))
 [0, 1, 2, 10, 20]
 ```
 
-`yield from` is also an expression. It evaluates to the subgenerator's return value, so a generator can pass a result back to its delegating caller.
+`yield from` is also an expression. It evaluates to the return value of the subgenerator. A generator can pass a result back to the one that delegates to it.
 
 ```edge-python
 def sub():
@@ -431,11 +401,12 @@ returned done
 [1, 2]
 ```
 
-> Generators are one-way producers. `gen.send(value)`, `gen.throw(exc)`, and `gen.close()` are not exposed. For bidirectional flow, use the [cooperative scheduler](/docs/language/async) and pass values through arguments and return values.
+> [!NOTE]
+> Generators are one-way producers. `gen.send(value)`, `gen.throw(exc)` and `gen.close()` are not exposed. For flow in both directions, use the [cooperative scheduler](/docs/language/async) and pass values through arguments and return values.
 
 ## Generator expressions
 
-A generator expression is evaluated at once into a list, so `(x * x for x in xs)` is `[x * x for x in xs]` and can be read more than once. When the values should come one at a time, as from an unbounded source, write a `def` with `yield`. [Parsing](/docs/implementation/parsing#comprehensions-and-generators) explains why.
+A generator expression is evaluated at once into a list. It can be read more than once.
 
 ```edge-python
 print(sum(x * x for x in range(5)))
@@ -447,9 +418,12 @@ print(max(i for i in [3, 1, 4, 1, 5]))
 5
 ```
 
+> [!WARNING]
+> `(x * x for x in xs)` is `[x * x for x in xs]`. An unbounded source never finishes. When the values should come one at a time, write a `def` with `yield`. [Compiler](/docs/internals/compiler#comprehensions-and-generators) explains why.
+
 ## Decorators
 
-A decorator wraps another callable. It applies to both functions and classes (see [Classes](/docs/language/classes#class-decorators)).
+A decorator wraps another callable. It applies to functions and to [classes](/docs/language/classes#class-decorators).
 
 ```edge-python
 def trace(f):
@@ -515,3 +489,38 @@ hi world
 hi world
 hi world
 ```
+
+## Function attributes
+
+Functions carry writable attributes, like any object. Decorators use them for metadata.
+
+- `getattr`, `hasattr`, `setattr` and `delattr` work on them.
+- An assigned `__name__` wins over the declared one.
+
+```edge-python
+def sma(source, length):
+  return sum(source) / length
+
+sma.window = 10
+print(sma.window)
+print(getattr(sma, "missing", "n/a"))
+
+def tag(fn):
+  fn.tagged = True
+  return fn
+
+@tag
+def step():
+  pass
+print(step.tagged)
+```
+
+```output
+10
+n/a
+True
+```
+
+> [!CARDS]
+> - `boxes` [Classes](/docs/language/classes) Inheritance, properties and the dunder protocol.
+> - `book-open` [Builtins](/docs/reference/builtins) The builtin functions and what each one returns.
