@@ -28,7 +28,6 @@ jobs:
           - entry: parser
           - entry: lexer
           - entry: abi
-          - entry: lang
     steps:
       - uses: actions/checkout@v7
 

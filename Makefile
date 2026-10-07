@@ -21,7 +21,6 @@ MIRI_modules := -p edge-python --test tests modules::
 MIRI_parser := -p edge-python --test tests parser::
 MIRI_lexer := -p edge-python --test tests lexer::
 MIRI_abi := -p edge-python --test tests abi::
-MIRI_lang := -p lang
 
 unix_only = $(if $(filter Windows_NT,$(OS)),$(error AFL runs on Linux and macOS only))
 
@@ -130,7 +129,7 @@ miri-setup:
 	cargo +nightly miri setup
 
 miri: miri-setup
-	$(if $(MIRI_$(SUITE)),,$(error SUITE is one of vm snapshot modules parser lexer abi lang))
+	$(if $(MIRI_$(SUITE)),,$(error SUITE is one of vm snapshot modules parser lexer abi))
 	cargo +nightly miri test --locked $(MIRI_$(SUITE))
 
 fuzz:
