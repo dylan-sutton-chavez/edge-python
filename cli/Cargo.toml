@@ -3,7 +3,7 @@
 
 [package]
 name = "edge"
-version = "0.9.3"
+version = "0.9.4"
 edition = "2024"
 description = "The Edge Python developer CLI. Runs, tests, and scaffolds scripts on the same compiler.wasm the browser uses, hosted under wasmtime, packs apps into standalone binaries or bundles, and runs cooperative actor pools."
 

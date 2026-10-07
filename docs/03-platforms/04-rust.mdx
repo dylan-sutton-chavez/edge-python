@@ -28,7 +28,7 @@ The crate builds no wasm of its own and fetches nothing at build time. `cargo bu
 ```toml
 # Downstream Cargo.toml
 [dependencies]
-edge-python = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.9.3" }
+edge-python = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.9.4" }
 ```
 
 The `runtime` feature is the wrapper that makes `compiler.wasm`, with its exports, host imports, allocator and panic handler. It is off by default and `make wasm` turns it on.
@@ -36,7 +36,7 @@ The `runtime` feature is the wrapper that makes `compiler.wasm`, with its export
 A wasm that links the crate as a library, such as a plugin that only parses, drops the default `std` feature. It brings its own allocator and panic handler.
 
 ```toml
-edge-python = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.9.3", default-features = false }
+edge-python = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.9.4", default-features = false }
 ```
 
 ## Imports
