@@ -59,11 +59,20 @@ fn pages(dir: &Path, prefix: &str) -> Result<Vec<String>> {
     Ok(found)
 }
 
+// The boxes a blockquote opens with a `[!KIND]` marker, the first five as GitHub draws them.
+const KINDS: [&str; 8] = ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION", "QUESTION", "CARDS", "BANNER"];
+
+// The icons of the site a card can carry.
+const ICONS: [&str; 34] = [
+    "agent", "binoculars", "book", "boxes", "chart", "cloud", "create", "download", "feather", "file", "fork", "github", "glasses", "hammer", "handshake", "house", "images",
+    "key", "layout", "locked", "mail", "mailbox", "megaphone", "messages", "output", "play", "search", "shield", "shovel", "star", "tram", "umbrella", "user", "users",
+];
+
 /* The convention the site renderer relies on, so a package cannot ship docs the site cannot lay out. */
 fn check(page: &str, text: &str) -> Result<()> {
     let segments: Vec<&str> = page.split('/').collect();
-    if segments.len() > 2 {
-        bail!("'{page}' nests deeper than one folder, a section and its pages is all the renderer orders");
+    if segments.len() > 3 {
+        bail!("'{page}' nests deeper than two folders, a section, its groups and their pages is all the renderer orders");
     }
     if !segments.iter().copied().all(ordered) {
         bail!("'{page}' needs a numeric prefix on every segment, like '01-reference/02-cli.mdx'");
@@ -71,9 +80,13 @@ fn check(page: &str, text: &str) -> Result<()> {
     let mut open: Option<&str> = None;
     let mut closed: Option<&str> = None;
     let mut headings = 0usize;
+    let mut quote = Quote::Out;
     // The lines of the edge-manifest being read, checked once its fence closes.
     let mut manifest = String::new();
     for line in front(page, text)?.lines() {
+        if open.is_none() {
+            quote.read(page, line)?;
+        }
         if let Some(rest) = line.trim().strip_prefix("```") {
             match open.take() {
                 Some(lang) => {
@@ -120,6 +133,7 @@ fn check(page: &str, text: &str) -> Result<()> {
     if open.is_some() {
         bail!("'{page}' leaves a code fence unterminated");
     }
+    quote.end(page)?;
     if closed == Some("edge-manifest") {
         return Err(lone(page));
     }
@@ -127,6 +141,111 @@ fn check(page: &str, text: &str) -> Result<()> {
         bail!("'{page}' has {headings} top-level headings, the renderer needs exactly one");
     }
     Ok(())
+}
+
+/* Where a prose line stands among blockquotes, so a box is read whole before the site draws it. */
+enum Quote<'a> {
+    Out,
+    Plain,
+    Boxed { kind: &'a str, lines: usize },
+}
+
+impl<'a> Quote<'a> {
+    fn read(&mut self, page: &str, line: &'a str) -> Result<()> {
+        let Some(rest) = line.strip_prefix('>') else {
+            if let Quote::Boxed { kind, .. } = *self
+                && !line.trim().is_empty()
+            {
+                bail!("'{page}' runs prose on from its [!{kind}] box, a blank line ends it");
+            }
+            return self.end(page);
+        };
+        let rest = rest.trim();
+        match (&mut *self, marker(rest)) {
+            (Quote::Out, Some((kind, beside))) => {
+                if !KINDS.contains(&kind) {
+                    bail!("'{page}' opens a [!{kind}] box, and a box is one of {}", KINDS.join(", "));
+                }
+                // A question and a banner write their title beside the marker, every other box below it.
+                let what = match kind {
+                    "QUESTION" => "question",
+                    "BANNER" => "title",
+                    _ => "",
+                };
+                match (what.is_empty(), beside.is_empty()) {
+                    (false, true) => bail!("'{page}' opens a [!{kind}] box with no {what} beside the marker"),
+                    (true, false) => bail!("'{page}' writes text beside [!{kind}], the box holds it on the lines below"),
+                    _ => {}
+                }
+                *self = Quote::Boxed { kind, lines: 0 };
+            }
+            (_, Some((kind, _))) => bail!("'{page}' writes [!{kind}] inside a quote, a marker only ever opens one"),
+            (Quote::Boxed { kind, lines }, None) if !rest.is_empty() => {
+                *lines += 1;
+                shaped(page, kind, *lines, rest)?;
+            }
+            (Quote::Out, None) => *self = Quote::Plain,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn end(&mut self, page: &str) -> Result<()> {
+        if let Quote::Boxed { kind, lines: 0 } = *self {
+            bail!("'{page}' leaves its [!{kind}] box empty");
+        }
+        *self = Quote::Out;
+        Ok(())
+    }
+}
+
+// A `[!KIND]` that opens a quote line, and the text beside it.
+fn marker(rest: &str) -> Option<(&str, &str)> {
+    let (kind, beside) = rest.strip_prefix("[!")?.split_once(']')?;
+    (!kind.is_empty() && kind.bytes().all(|b| b.is_ascii_alphabetic())).then(|| (kind, beside.trim()))
+}
+
+/* A line inside a box, held to the shape the site lays out for cards and banners. */
+fn shaped(page: &str, kind: &str, lines: usize, rest: &str) -> Result<()> {
+    let href = match kind {
+        "CARDS" => {
+            let Some((icon, href)) = card(rest) else {
+                bail!("'{page}' has the card '{rest}', a card is - `icon` [Title](link) and a description");
+            };
+            if !ICONS.contains(&icon) {
+                bail!("'{page}' gives a card the icon '{icon}', which the site does not draw, pick from {}", ICONS.join(", "));
+            }
+            href
+        }
+        "BANNER" => match button(rest) {
+            Some(href) if lines == 1 => href,
+            _ => bail!("'{page}' has the banner line '{rest}', a banner holds one [Action](link) below its title"),
+        },
+        _ => return Ok(()),
+    };
+    if !linked(href) {
+        bail!("'{page}' links a box to '{href}', which is neither https nor a path on the site");
+    }
+    Ok(())
+}
+
+// A `- `icon` [Title](link) description` line, its icon and its link.
+fn card(rest: &str) -> Option<(&str, &str)> {
+    let (icon, rest) = rest.strip_prefix("- `")?.split_once("` [")?;
+    let (title, rest) = rest.split_once("](")?;
+    let (href, about) = rest.split_once(") ")?;
+    (!title.is_empty() && !about.trim().is_empty()).then_some((icon, href))
+}
+
+// A `[Action](link)` line, its link.
+fn button(rest: &str) -> Option<&str> {
+    let (label, href) = rest.strip_prefix('[')?.strip_suffix(')')?.split_once("](")?;
+    (!label.is_empty()).then_some(href)
+}
+
+/* A link a box can carry, https or a path on the site, since a link with no colon names no scheme. */
+fn linked(href: &str) -> bool {
+    !href.contains(char::is_whitespace) && (href.starts_with("https://") || !(href.contains(':') || href.starts_with("//")))
 }
 
 /* An edge-manifest with no edge-python block right after it, which no example would run under. */

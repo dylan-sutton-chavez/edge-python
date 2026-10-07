@@ -236,7 +236,7 @@ Code you do not trust goes to an [eval group](/docs/reference/actors#untrusted-c
 make cli   # builds compiler.wasm and js/dist, then embeds them
 ```
 
-`cli/build.rs` reads the `make wasm-cli` build of `compiler.wasm`, or `EDGE_COMPILER_WASM`, and fetches nothing. The system calls run in SpiderMonkey, which the first build compiles from source, see `CONTRIBUTING.md` for what it needs.
+`EDGE_COMPILER_WASM` points the build at another `compiler.wasm`, and it fetches nothing. The system calls run in SpiderMonkey, which the first build compiles from source, see `CONTRIBUTING.md` for what it needs.
 
 ## See also
 

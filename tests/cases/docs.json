@@ -62,9 +62,15 @@
   {
     "name": "two folders deep",
     "files": {
-      "01-a/02-b/03-c.mdx": "---\ntitle: C\ndescription: Too deep.\n---\n\n# C\n"
+      "01-a/02-b/03-c.mdx": "---\ntitle: C\ndescription: A group of a section.\n---\n\n# C\n"
+    }
+  },
+  {
+    "name": "three folders deep",
+    "files": {
+      "01-a/02-b/03-c/04-d.mdx": "---\ntitle: D\ndescription: Too deep.\n---\n\n# D\n"
     },
-    "error": "nests deeper than one folder"
+    "error": "nests deeper than two folders"
   },
   {
     "name": "a page with no numeric prefix",
@@ -238,5 +244,152 @@
       "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n```edge-manifest\n[\"net:api.example.com\"]\n```\n\n```edge-python\nprint(1)\n```\n"
     },
     "error": "is not a JSON object"
+  },
+  {
+    "name": "every github box",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!NOTE]\n> One.\n\n> [!TIP]\n> Two.\n\n> [!IMPORTANT]\n> Three.\n\n> [!WARNING]\n> Four.\n\n> [!CAUTION]\n> Five.\n"
+    }
+  },
+  {
+    "name": "questions in a row",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!QUESTION] How do I run it?\n> With edge run.\n\n> [!QUESTION] Does it reach the network?\n> Only what edge.json grants.\n"
+    }
+  },
+  {
+    "name": "a set of cards",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!CARDS]\n> - `play` [Quick start](/docs/getting-started/quickstart) Run a first script.\n> - `book` [Modules](https://edgepython.com/docs/reference/modules) What edge.json grants.\n> - `file` [Usage](02-usage) The next page.\n"
+    }
+  },
+  {
+    "name": "a banner",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!BANNER] Try it in the browser\n> [Open the playground](/playground)\n"
+    }
+  },
+  {
+    "name": "a plain quote is no box",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> Just a quote.\n> On two lines.\n"
+    }
+  },
+  {
+    "name": "a box inside a fence is not a box",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n```markdown\n> [!SHOUT]\n```\n"
+    }
+  },
+  {
+    "name": "a box the page ends on",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!NOTE]\n> Last words."
+    }
+  },
+  {
+    "name": "a box no one knows",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!SHOUT]\n> Loud.\n"
+    },
+    "error": "opens a [!SHOUT] box, and a box is one of"
+  },
+  {
+    "name": "a box written in lowercase",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!note]\n> Quiet.\n"
+    },
+    "error": "opens a [!note] box"
+  },
+  {
+    "name": "a marker inside a quote",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> A quote.\n> [!NOTE]\n"
+    },
+    "error": "inside a quote, a marker only ever opens one"
+  },
+  {
+    "name": "text beside a note marker",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!NOTE] Read this.\n"
+    },
+    "error": "writes text beside [!NOTE]"
+  },
+  {
+    "name": "a question with no question",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!QUESTION]\n> An answer.\n"
+    },
+    "error": "with no question beside the marker"
+  },
+  {
+    "name": "a banner with no title",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!BANNER]\n> [Go](/docs)\n"
+    },
+    "error": "with no title beside the marker"
+  },
+  {
+    "name": "an empty note",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!NOTE]\n\nProse.\n"
+    },
+    "error": "leaves its [!NOTE] box empty"
+  },
+  {
+    "name": "a question with no answer",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!QUESTION] Why?\n"
+    },
+    "error": "leaves its [!QUESTION] box empty"
+  },
+  {
+    "name": "prose straight after a box",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!NOTE]\n> Inside.\nOutside.\n"
+    },
+    "error": "runs prose on from its [!NOTE] box"
+  },
+  {
+    "name": "a card with no description",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!CARDS]\n> - `book` [Modules](/docs/reference/modules)\n"
+    },
+    "error": "a card is - `icon` [Title](link) and a description"
+  },
+  {
+    "name": "a card with an icon the site does not draw",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!CARDS]\n> - `rocket` [Start](/docs) Begin here.\n"
+    },
+    "error": "gives a card the icon 'rocket'"
+  },
+  {
+    "name": "a card linking to a script",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!CARDS]\n> - `book` [Start](javascript:alert(1)) Begin here.\n"
+    },
+    "error": "links a box to 'javascript:alert(1)'"
+  },
+  {
+    "name": "a card linking to another host by path",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!CARDS]\n> - `book` [Start](//evil.example/docs) Begin here.\n"
+    },
+    "error": "links a box to '//evil.example/docs'"
+  },
+  {
+    "name": "a banner linking over http",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!BANNER] Try it\n> [Go](http://edgepython.com)\n"
+    },
+    "error": "links a box to 'http://edgepython.com'"
+  },
+  {
+    "name": "a banner with two lines",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!BANNER] Try it\n> [Go](/docs)\n> [Again](/docs)\n"
+    },
+    "error": "a banner holds one [Action](link) below its title"
   }
 ]

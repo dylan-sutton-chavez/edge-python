@@ -20,7 +20,6 @@ runs:
       shell: bash
       run: make lint-js
 
-    # Strips types to js/dist, the shape the CDN and the Playwright suite both serve, pinned tsc version.
     - name: Build
       shell: bash
       run: make js

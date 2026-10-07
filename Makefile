@@ -33,6 +33,7 @@ wasm:
 wasm-cli:
 	cargo rustc --locked --profile cli $(RUNTIME)
 
+# The small compiler.wasm that ships, and the speed copy the CLI precompiles to native code.
 wasm-ship: wasm-small wasm-cli-opt
 
 # Three passes, -Oz, reflatten for a fresh CFG, then a converge sweep. Traps stay, they guard bounds.
@@ -58,6 +59,7 @@ js:
 
 lint: lint-rust lint-js
 
+# Shear refuses dependencies declared but unused, then clippy runs for the host and for wasm.
 lint-rust:
 	cargo shear
 	cargo clippy --locked --all-targets -- -D warnings
@@ -111,7 +113,6 @@ serve: cdn/node_modules/.package-lock.json
 browsers:
 	deno run -A npm:playwright install --with-deps chromium
 
-# The Deno suite loads the pdk example to prove a plugin reaches and awaits system calls.
 test-js: plugin
 	deno test --allow-all js/tests/
 

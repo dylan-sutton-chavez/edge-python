@@ -116,7 +116,6 @@ runs:
         sudo apt-get update
         sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium
 
-    # The engine suite also builds the pdk example its plugin cases load.
     - name: Test
       if: inputs.mode == 'test'
       shell: bash

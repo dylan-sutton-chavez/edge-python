@@ -28,7 +28,8 @@ edge uninstall         # remove the binary and the PATH entry
 # Prebuilt binary (recommended)
 curl -fsSL https://cdn.edgepython.com/cli/install.sh | sh
 
-# Or from source (any platform with Rust and Cargo)
+# Or from source, at the repo root
+make wasm-cli js
 cargo install --path cli
 ```
 
@@ -36,7 +37,7 @@ cargo install --path cli
 
 Pass a release to install that one instead of the latest, `curl -fsSL https://cdn.edgepython.com/cli/install.sh | sh -s v1.0.0`. Every release from 1.0 keeps a frozen copy of itself on the CDN, which is what a version reads and what a downgrade needs.
 
-Building from source embeds `compiler.wasm` and the JS host, so run `make wasm-cli js` first, or point `EDGE_COMPILER_WASM` at a copy. The build fetches nothing.
+`cargo install` embeds what `make wasm-cli js` builds, unless `EDGE_COMPILER_WASM` points at another `compiler.wasm`, and fetches nothing.
 
 ## `edge run`: run a script
 
@@ -174,7 +175,18 @@ A `.edge` and an app binary also carry the `README.md` and any `LICENSE` at the 
 
 Documentation is packed only after every page passes the rendering convention, so a package reaches a registry with pages the site can lay out. The build fails otherwise, since shipping documentation that cannot be laid out is worse than shipping none.
 
-A page nests one folder deep at most and carries a numeric prefix on every path segment. It opens with a closed frontmatter block holding a `title` and a `description`, has exactly one top-level heading, and places an `output` block only ever directly after an `edge-python` block. An `edge-manifest` block sits only ever directly before one and holds a single JSON object, the `edge.json` that example runs under, such as `{ "permissions": { "main": ["time:wall"] } }`, and an example without one runs under `{}`. The site holds its own `docs/` to the same rules, read from the same place.
+A page nests two folders deep at most and carries a numeric prefix on every path segment. It opens with a closed frontmatter block holding a `title` and a `description`, has exactly one top-level heading, and places an `output` block only ever directly after an `edge-python` block. An `edge-manifest` block sits only ever directly before one and holds a single JSON object, the `edge.json` that example runs under, such as `{ "permissions": { "main": ["time:wall"] } }`, and an example without one runs under `{}`. The site holds its own `docs/` to the same rules, read from the same place.
+
+Prose stays markdown and raw HTML is refused, so a blockquote that opens with a marker is what draws a box. `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` and `[!CAUTION]` hold their text below, as GitHub draws them. `[!QUESTION]` carries its question beside the marker and the answer below, and questions in a row fold into one list. `[!CARDS]` holds one card a line, an icon the site draws, a link and a description, and `[!BANNER]` carries its title beside the marker and one `[Action](link)` below. A card or a banner links only to https or a path on the site.
+
+```markdown
+> [!QUESTION] Does a script reach the network?
+> Only the hosts its edge.json grants.
+
+> [!CARDS]
+> - `play` [Quick start](/docs/getting-started/quickstart) Run a first script.
+> - `book` [Modules](/docs/reference/modules) What edge.json grants.
+```
 
 ```text
 $ edge build

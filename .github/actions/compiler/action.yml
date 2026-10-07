@@ -37,7 +37,6 @@ runs:
       with:
         tool: cargo-shear@1.13.4
 
-    # Shear detects declared but unused dependencies, then clippy runs for the host and for wasm.
     - name: Lint
       shell: bash
       run: make lint-rust
@@ -57,7 +56,6 @@ runs:
           | tar -xz --strip-components=2 -C /usr/local/bin binaryen-version_121/bin/wasm-opt
         wasm-opt --version
 
-    # The small compiler.wasm that ships, and the speed copy the CLI precompiles to native code.
     - name: Build
       shell: bash
       run: make wasm-ship
