@@ -5,8 +5,8 @@ TSC := npm:typescript@5.9.3/tsc
 TREE := $(CURDIR)/_cdn
 EXE := $(if $(filter Windows_NT,$(OS)),.exe)
 
-# The CLI embeds the speed compiler and js/dist, unless the environment points it at copies.
-CLI_INPUTS := $(if $(EDGE_COMPILER_WASM),,wasm-cli) $(if $(EDGE_JS_DIST),,js)
+# The CLI embeds the speed compiler, js/dist and the Lucide names, unless the environment points it at copies.
+CLI_INPUTS := $(if $(EDGE_COMPILER_WASM),,wasm-cli) $(if $(EDGE_JS_DIST),,js) lucide
 
 CLI_TEST_engine := --bin edge --test cli --test run -- --skip builtin_corpora_mirror_the_web_api
 CLI_TEST_network := --test run builtin_corpora_mirror_the_web_api
@@ -25,7 +25,7 @@ MIRI_lang := -p lang
 
 unix_only = $(if $(filter Windows_NT,$(OS)),$(error AFL runs on Linux and macOS only))
 
-.PHONY: wasm wasm-cli wasm-ship wasm-small wasm-cli-opt size js lint lint-rust lint-js lint-cli test bench bench-update plugin cli cli-release stage serve browsers test-js test-cli test-skill miri miri-setup fuzz seeds version check
+.PHONY: wasm wasm-cli wasm-ship wasm-small wasm-cli-opt size js lint lint-rust lint-js lint-cli test bench bench-update plugin cli cli-release stage serve browsers test-js test-cli test-skill miri miri-setup fuzz seeds lucide version check
 
 wasm:
 	cargo rustc --locked --release $(RUNTIME)
@@ -140,6 +140,10 @@ fuzz:
 seeds:
 	$(unix_only)
 	cd fuzz && bash ./seeds.sh
+
+# The icon names a docs card can carry, from the Lucide release VERSION names or the latest.
+lucide:
+	deno run --allow-net --allow-write=target make/lucide.ts $(VERSION)
 
 version:
 	$(if $(TAG),,$(error pass TAG, for example make version TAG=v1.0.0))

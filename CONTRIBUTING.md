@@ -29,7 +29,7 @@ Comments are one line, at most one per block, and deleted when redundant. No fil
 make wasm       # compiler.wasm, CI ships the smaller make wasm-ship
 make wasm-cli   # the speed build the CLI embeds
 make js         # js/src stripped to js/dist
-make cli        # the edge binary, embedding both
+make cli        # the edge binary, embedding wasm-cli, js and the Lucide names
 make lint
 cargo build --release   # the .rlib Rust embedders link
 ```
@@ -63,7 +63,7 @@ make test-js test-cli test-skill
 
 ## Docs
 
-`docs/` holds MDX pages two folders deep at most, with a numeric prefix on every path segment. Each opens with a frontmatter holding a `title` and a `description` and has one top-level heading, the rules `edge build` holds package docs to. An `edge-python` block followed by an `output` block becomes a playground on the real engine, and a blockquote opening with a marker such as `[!NOTE]`, `[!QUESTION]` or `[!CARDS]` becomes a box, as the [CLI reference](https://edgepython.com/docs/reference/cli) lists.
+`docs/` holds MDX pages two folders deep at most, with a numeric prefix on every path segment. Each opens with a frontmatter holding a `title` and a `description` and has one top-level heading, the rules `edge build` holds package docs to. An `edge-python` block followed by an `output` block becomes a playground on the real engine, and a blockquote opening with a marker such as `[!NOTE]`, `[!QUESTION]`, `[!CARDS]` or `[!COPY]` becomes a box, as the [CLI reference](https://edgepython.com/docs/reference/cli) lists.
 
 ## CI
 

@@ -358,11 +358,11 @@
     "error": "a card is - `icon` [Title](link) and a description"
   },
   {
-    "name": "a card with an icon the site does not draw",
+    "name": "a card with an icon Lucide does not draw",
     "files": {
-      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!CARDS]\n> - `rocket` [Start](/docs) Begin here.\n"
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!CARDS]\n> - `not-an-icon` [Start](/docs) Begin here.\n"
     },
-    "error": "gives a card the icon 'rocket'"
+    "error": "gives a card the icon 'not-an-icon', which Lucide"
   },
   {
     "name": "a card linking to a script",
@@ -391,5 +391,32 @@
       "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!BANNER] Try it\n> [Go](/docs)\n> [Again](/docs)\n"
     },
     "error": "a banner holds one [Action](link) below its title"
+  },
+  {
+    "name": "a copy line",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!COPY] curl -fsSL https://cdn.edgepython.com/cli/install.sh | sh\n\nThen open a new shell.\n"
+    }
+  },
+  {
+    "name": "a copy box with no text",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!COPY]\n"
+    },
+    "error": "with no text beside the marker"
+  },
+  {
+    "name": "a copy box with a line below",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!COPY] edge run app.py\n> And more.\n"
+    },
+    "error": "writes 'And more.' below [!COPY]"
+  },
+  {
+    "name": "a copy box with backticks",
+    "files": {
+      "01-intro.mdx": "---\ntitle: Intro\ndescription: Where to start.\n---\n\n# Intro\n\n> [!COPY] `edge run app.py`\n"
+    },
+    "error": "writes backticks in its [!COPY] box"
   }
 ]

@@ -21,6 +21,9 @@ fn main() {
     precompile(&engine, &compiler, &out.join("compiler.cwasm"), "run make wasm-cli first");
     // A browser runs the module itself, never the precompile, so a dist and a headless run carry a raw copy.
     std::fs::copy(&compiler, out.join("compiler.wasm")).unwrap_or_else(|e| panic!("copying {}: {e}", compiler.display()));
+    let lucide = manifest.join("../target/lucide.json");
+    println!("cargo:rerun-if-changed={}", lucide.display());
+    std::fs::copy(&lucide, out.join("lucide.json")).unwrap_or_else(|e| panic!("copying {}: {e}, run make lucide first", lucide.display()));
     let js_dist = std::env::var("EDGE_JS_DIST").map(PathBuf::from).unwrap_or_else(|_| manifest.join("../js/dist"));
     js_host(&js_dist, &out.join("js_host.rs"));
 }

@@ -1,6 +1,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use std::fs;
 use std::path::{Component, Path};
+use std::sync::LazyLock;
 
 // Every page lands under this prefix inside the bundle, so no import can ever resolve to one.
 pub const PREFIX: &str = "@docs/";
@@ -60,13 +61,17 @@ fn pages(dir: &Path, prefix: &str) -> Result<Vec<String>> {
 }
 
 // The boxes a blockquote opens with a `[!KIND]` marker, the first five as GitHub draws them.
-const KINDS: [&str; 8] = ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION", "QUESTION", "CARDS", "BANNER"];
+const KINDS: [&str; 9] = ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION", "QUESTION", "CARDS", "BANNER", "COPY"];
 
-// The icons of the site a card can carry.
-const ICONS: [&str; 34] = [
-    "agent", "binoculars", "book", "boxes", "chart", "cloud", "create", "download", "feather", "file", "fork", "github", "glasses", "hammer", "handshake", "house", "images",
-    "key", "layout", "locked", "mail", "mailbox", "megaphone", "messages", "output", "play", "search", "shield", "shovel", "star", "tram", "umbrella", "user", "users",
-];
+// The Lucide release `make lucide` writes, every name a card can carry.
+#[derive(serde::Deserialize)]
+struct Lucide {
+    version: &'static str,
+    #[serde(borrow)]
+    icons: Vec<&'static str>,
+}
+
+static LUCIDE: LazyLock<Lucide> = LazyLock::new(|| serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/lucide.json"))).expect("parsing lucide.json"));
 
 /* The convention the site renderer relies on, so a package cannot ship docs the site cannot lay out. */
 fn check(page: &str, text: &str) -> Result<()> {
@@ -166,16 +171,20 @@ impl<'a> Quote<'a> {
                 if !KINDS.contains(&kind) {
                     bail!("'{page}' opens a [!{kind}] box, and a box is one of {}", KINDS.join(", "));
                 }
-                // A question and a banner write their title beside the marker, every other box below it.
+                // A question, a banner and a copy line write beside the marker, every other box below it.
                 let what = match kind {
                     "QUESTION" => "question",
                     "BANNER" => "title",
+                    "COPY" => "text",
                     _ => "",
                 };
                 match (what.is_empty(), beside.is_empty()) {
                     (false, true) => bail!("'{page}' opens a [!{kind}] box with no {what} beside the marker"),
                     (true, false) => bail!("'{page}' writes text beside [!{kind}], the box holds it on the lines below"),
                     _ => {}
+                }
+                if kind == "COPY" && beside.contains('`') {
+                    bail!("'{page}' writes backticks in its [!COPY] box, the box copies its text as written");
                 }
                 *self = Quote::Boxed { kind, lines: 0 };
             }
@@ -191,7 +200,9 @@ impl<'a> Quote<'a> {
     }
 
     fn end(&mut self, page: &str) -> Result<()> {
-        if let Quote::Boxed { kind, lines: 0 } = *self {
+        if let Quote::Boxed { kind, lines: 0 } = *self
+            && kind != "COPY"
+        {
             bail!("'{page}' leaves its [!{kind}] box empty");
         }
         *self = Quote::Out;
@@ -212,8 +223,8 @@ fn shaped(page: &str, kind: &str, lines: usize, rest: &str) -> Result<()> {
             let Some((icon, href)) = card(rest) else {
                 bail!("'{page}' has the card '{rest}', a card is - `icon` [Title](link) and a description");
             };
-            if !ICONS.contains(&icon) {
-                bail!("'{page}' gives a card the icon '{icon}', which the site does not draw, pick from {}", ICONS.join(", "));
+            if !LUCIDE.icons.contains(&icon) {
+                bail!("'{page}' gives a card the icon '{icon}', which Lucide {} does not draw, see https://lucide.dev/icons", LUCIDE.version);
             }
             href
         }
@@ -221,6 +232,7 @@ fn shaped(page: &str, kind: &str, lines: usize, rest: &str) -> Result<()> {
             Some(href) if lines == 1 => href,
             _ => bail!("'{page}' has the banner line '{rest}', a banner holds one [Action](link) below its title"),
         },
+        "COPY" => bail!("'{page}' writes '{rest}' below [!COPY], the text to copy sits beside the marker"),
         _ => return Ok(()),
     };
     if !linked(href) {
