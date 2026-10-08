@@ -151,7 +151,10 @@ NameError
 ```
 
 - No complex numbers. `1j` lexes as `1` followed by the name `j`.
-- No metaclasses, descriptors, `__slots__`, `__new__`, `__init_subclass__` or `__set_name__`. Some parse but are never dispatched.
+- No metaclasses, descriptors, `__slots__`, `__new__`, `__init_subclass__`, `__set_name__`, `__hash__` or `__del__`. A class keyword or any dunder outside the supported list fails at compile time.
+- No `id`, `hash` or `locals`, and no `is` with a literal. Each fails at compile time, so compare values with `==` and keep `is` for names and for `None`, `True` and `False`.
+- A list, dict or set as a default argument fails at compile time. Default to `None` and build the value in the body.
+- An instance hashes by identity, and a class that defines `__eq__` is unhashable.
 - No `bytearray` and no `memoryview`.
 - No exception chaining. `raise X from Y` evaluates `Y` but the cause is discarded.
 - No `gen.send`, `gen.throw` or `gen.close`. Generators are one-way producers.
@@ -362,7 +365,7 @@ print(sorted([3, 1, 2], reverse=True), any([0, "", 3]))
 
 ### Types and attributes
 
-`type`, `object`, `isinstance`, `issubclass`, `callable`, `id`, `hash`, `repr`, `format`, `getattr`, `hasattr`, `setattr`, `delattr`, `vars`, `globals`, `locals`, `import_module`, `super`, `property`, `staticmethod`, `classmethod`. `isinstance` accepts a tuple of types and `bool` is a subclass of `int`. `x.__class__` is the same object as `type(x)`. `getattr`, `hasattr` and `setattr` behave like `obj.name`, properties and `__getattr__` included, and a `getattr` default answers only an `AttributeError`. `format(x, spec)` with a spec on a value that has no format of its own, a list or an instance without `__format__`, raises `TypeError`, and `f"{x!s:>10}"` pads its `str()`. `vars(x)` returns a snapshot of instance attributes, and `globals()` and `locals()` return copies whose mutation binds nothing.
+`type`, `object`, `isinstance`, `issubclass`, `callable`, `repr`, `format`, `getattr`, `hasattr`, `setattr`, `delattr`, `vars`, `globals`, `import_module`, `super`, `property`, `staticmethod`, `classmethod`. `isinstance` accepts a tuple of types and `bool` is a subclass of `int`. `x.__class__` is the same object as `type(x)`. `getattr`, `hasattr` and `setattr` behave like `obj.name`, properties and `__getattr__` included, and a `getattr` default answers only an `AttributeError`. `format(x, spec)` with a spec on a value that has no format of its own, a list or an instance without `__format__`, raises `TypeError`, and `f"{x!s:>10}"` pads its `str()`. `vars(x)` returns a snapshot of instance attributes, and `globals()` returns a copy whose mutation binds nothing.
 
 ```python
 print(isinstance(True, int), callable(len))
@@ -532,7 +535,7 @@ hi edge?
 
 Classes support single and multiple inheritance with C3 linearization, zero-argument `super()`, `property` with setters, `staticmethod` and `classmethod`, and class decorators. There is no two-argument `super()` form. Dunders are looked up on the class, assigning one on an instance has no effect.
 
-The supported dunders are `__init__`, `__call__`, `__repr__`, `__str__`, `__format__`, `__bool__`, `__len__`, `__hash__`, `__iter__`, `__next__`, `__getitem__`, `__setitem__`, `__delitem__`, `__contains__`, `__getattr__`, `__enter__`, `__exit__`, `__index__`, `__int__`, `__float__`, `__abs__`, the arithmetic and bitwise operators with their reflected and in-place forms including `@` through `__matmul__`, and the six comparisons. Returning `NotImplemented` from an arithmetic dunder triggers the reflected fallback.
+The supported dunders are `__init__`, `__call__`, `__repr__`, `__str__`, `__format__`, `__bool__`, `__len__`, `__iter__`, `__next__`, `__getitem__`, `__setitem__`, `__delitem__`, `__contains__`, `__getattr__`, `__enter__`, `__exit__`, `__index__`, `__int__`, `__float__`, `__abs__`, `__neg__`, `__pos__`, `__invert__`, `__class_getitem__`, `__match_args__`, the arithmetic and bitwise operators with their reflected and in-place forms including `@` through `__matmul__`, and the six comparisons. A class body that binds any other dunder fails at compile time. Returning `NotImplemented` from an arithmetic dunder triggers the reflected fallback.
 
 ```python
 class Vector:
@@ -913,13 +916,7 @@ s = {"a", "b", "c"}  # skip: set iteration order is hash based
 print(s)
 ```
 
-`id()` reuses heap slots and varies between runs. Never print it in examples or tests.
-
-```python skip
-print(id(object()))  # skip: heap slots are reused, the value changes between runs
-```
-
-Truthiness follows Python, the falsy set is `None`, `False`, `0`, `0.0`, `""`, `b""`, `[]`, `()`, `{}`, `set()`, `frozenset()` and `range(0)`. `bool` subclasses `int` so `True + True == 2`. `len` on strings counts code points. Same source and input give the same output on every run, `id()` aside.
+Truthiness follows Python, the falsy set is `None`, `False`, `0`, `0.0`, `""`, `b""`, `[]`, `()`, `{}`, `set()`, `frozenset()` and `range(0)`. `bool` subclasses `int` so `True + True == 2`. `len` on strings counts code points. Same source and input give the same output on every run.
 
 ## Sandbox limits
 

@@ -92,7 +92,7 @@ impl<'a> VM<'a> {
                     let a = attrs.borrow();
                     if a.len() != len as usize || a.entry_count() != len as usize || a.position_str(self.heap_str(key), hash, &self.heap).is_some() { return false; }
                 }
-                self.heap.growing(&mut *attrs.borrow_mut(), |a| a.push_hashed(key, value, hash, false));
+                self.heap.growing(&mut *attrs.borrow_mut(), |a| a.push_hashed(key, value, hash));
                 true
             }
             _ => false,

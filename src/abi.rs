@@ -236,9 +236,7 @@ pub enum PrimitiveBytes {
 pub fn classify_decode(val_bits: u64) -> DecodeBits {
     let v = crate::value::Val(val_bits);
     // Ints widen to the 16-byte wire form.
-    // A NaN leaves without the id its payload carries inside the engine.
-    let float = |f: f64| if f.is_nan() { f64::from_bits((val_bits & crate::abi::nan_box::SIGN) | crate::value::Val::NAN_BASE) } else { f };
-    let (tag, bytes) = if v.is_float() { (Tag::Float, PrimitiveBytes::Eight(float(v.as_float()).to_le_bytes())) }
+    let (tag, bytes) = if v.is_float() { (Tag::Float, PrimitiveBytes::Eight(v.as_float().to_le_bytes())) }
         else if v.is_int() { (Tag::Int, PrimitiveBytes::Sixteen((v.as_int() as i128).to_le_bytes())) }
         else if v.is_none() { (Tag::None, PrimitiveBytes::None) }
         else if v.is_bool() { (Tag::Bool, PrimitiveBytes::Bool(v.as_bool() as u8)) }

@@ -31,12 +31,6 @@ pub(crate) enum AttrLookup {
 }
 
 impl<'a> VM<'a> {
-    // What a class or instance inherits from `object`, the name test keeps a miss off the method scan.
-    pub(crate) fn object_attr(&self, obj: Val, name: &str) -> Option<BuiltinMethodId> {
-        let inherits = obj.is_heap() && matches!(self.heap.get(obj), HeapObj::Instance(..) | HeapObj::Class(..));
-        if name == "__hash__" && inherits { lookup_method("object", name) } else { None }
-    }
-
     // The cached C3 linearization of `cls`, or `[cls]` when uncached (native classes, or an inconsistent hierarchy that `c3_merge` declined to cache).
     fn mro_of(&self, c: Val) -> alloc::vec::Vec<Val> {
         match self.mro_cache.get(&c.0) {
@@ -185,7 +179,6 @@ impl<'a> VM<'a> {
                         _ => AttrLookup::ClassMember(v),
                     });
                 }
-                if let Some(id) = self.object_attr(obj, name) { return Ok(AttrLookup::BuiltinMethod(id)); }
                 return Err(VmErr::Attribute(s!("type object '", str cls_name, "' has no attribute '", str name, "'")));
             }
             // Instance attribute lookup, check `__dict__` first, then the class chain (direct + bases).
@@ -195,7 +188,6 @@ impl<'a> VM<'a> {
                     .map(|(_, v)| v);
                 if let Some(v) = found { return Ok(AttrLookup::InstanceField(v)); }
                 if let Some((mv, defining)) = self.lookup_class_member(*cls_val, name) { return Ok(self.bind_member(mv, obj, defining)); }
-                if let Some(id) = self.object_attr(obj, name) { return Ok(AttrLookup::BuiltinMethod(id)); }
                 // An exception falls back to the `BaseException` methods.
                 if self.exc_base(*cls_val).is_some() && let Some(id) = lookup_method("BaseException", name) { return Ok(AttrLookup::BuiltinMethod(id)); }
                 if name == "__class__" { return Ok(AttrLookup::ClassMember(*cls_val)); }
@@ -220,7 +212,7 @@ impl<'a> VM<'a> {
                 // `Exception.__init__(self, msg)` reaches the shared exception methods.
                 let owner = if crate::vm::globals::matches_exc_class(n, "BaseException") { "BaseException" } else { n.as_str() };
                 if let Some(id) = lookup_method(owner, name) {
-                    let classmethod = matches!(name, "fromkeys" | "fromhex" | "from_bytes" | "__hash__");
+                    let classmethod = matches!(name, "fromkeys" | "fromhex" | "from_bytes");
                     return Ok(if classmethod { AttrLookup::BuiltinMethod(id) } else { AttrLookup::UnboundMethod(id) });
                 }
             }

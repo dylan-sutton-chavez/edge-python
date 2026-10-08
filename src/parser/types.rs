@@ -25,7 +25,7 @@ pub enum OpCode {
     Del, Assert, Global, Nonlocal, UnpackArgs, ListAppend, SetAdd, MapAdd, BuildSet, RaiseFrom,
     UnpackEx, LoadEllipsis, Await, MakeCoroutine, StoreItem, Dup2,
     JumpIfFalseOrPop, JumpIfTrueOrPop, Dup, CallMethod, CallMethodArgs, CallAll, CallAny, CallBin,
-    CallOct, CallHex, CallDivmod, CallPow, CallRepr, CallReversed, CallCallable, CallId, CallHash,
+    CallOct, CallHex, CallDivmod, CallPow, CallRepr, CallReversed, CallCallable,
     PopIter, DelItem, DelAttr, CallExtern,
     /* Constant-time lookup of chunk.imports[operand] from `vm.module_table`. */
     LoadModule,
@@ -108,10 +108,39 @@ fused! {
     CallSet => Set, "set"; CallInput => Input, "input"; CallIsInstance => IsInstance, "isinstance"; CallChr => Chr, "chr";
     CallOrd => Ord, "ord"; CallAll => All, "all"; CallAny => Any, "any"; CallBin => Bin, "bin";
     CallOct => Oct, "oct"; CallHex => Hex, "hex"; CallDivmod => Divmod, "divmod"; CallPow => Pow, "pow";
-    CallRepr => Repr, "repr"; CallReversed => Reversed, "reversed"; CallCallable => Callable, "callable"; CallId => Id, "id";
-    CallHash => Hash, "hash";
+    CallRepr => Repr, "repr"; CallReversed => Reversed, "reversed"; CallCallable => Callable, "callable";
     // dict, min, max, enumerate, print and range need the keyword-aware path in `call()`.
     CallPrint => Print; CallRange => Range; CallDict => Dict; CallMin => Min; CallMax => Max; CallEnumerate => Enumerate;
+}
+
+/* Builtins the language leaves out, each with the error its use compiles to. */
+pub(super) const REMOVED_BUILTINS: [(&str, &str); 3] = [
+    ("id", "'id' is not supported, compare values with '=='"),
+    ("hash", "'hash' is not supported, a dict or set hashes its keys by value or identity"),
+    ("locals", "'locals' is not supported, pass the values a call needs"),
+];
+
+/* The index of `name` in `REMOVED_BUILTINS`, the length test keeping every other name to one compare. */
+#[inline]
+pub(super) fn removed_builtin(name: &str) -> Option<usize> {
+    if !matches!(name.len(), 2 | 4 | 6) { return None; }
+    REMOVED_BUILTINS.iter().position(|&(n, _)| n == name)
+}
+
+/* Whether a class body may bind dunder `name`, every other one compiles to an error. */
+pub(super) fn class_dunder(name: &str) -> bool {
+    matches!(name,
+        "__init__" | "__repr__" | "__str__" | "__format__" | "__bool__" | "__len__" | "__iter__" | "__next__" |
+        "__contains__" | "__getitem__" | "__setitem__" | "__delitem__" | "__getattr__" | "__call__" | "__enter__" |
+        "__exit__" | "__eq__" | "__ne__" | "__lt__" | "__le__" | "__gt__" | "__ge__" | "__int__" | "__float__" |
+        "__index__" | "__abs__" | "__neg__" | "__pos__" | "__invert__" | "__class_getitem__" | "__match_args__" |
+        "__add__" | "__sub__" | "__mul__" | "__truediv__" | "__floordiv__" | "__matmul__" | "__mod__" | "__pow__" |
+        "__and__" | "__or__" | "__xor__" | "__lshift__" | "__rshift__" | "__radd__" | "__rsub__" | "__rmul__" |
+        "__rtruediv__" | "__rfloordiv__" | "__rmatmul__" | "__rmod__" | "__rpow__" | "__rand__" | "__ror__" |
+        "__rxor__" | "__rlshift__" | "__rrshift__" | "__iadd__" | "__isub__" | "__imul__" | "__itruediv__" |
+        "__ifloordiv__" | "__imatmul__" | "__imod__" | "__ipow__" | "__iand__" | "__ior__" | "__ixor__" |
+        "__ilshift__" | "__irshift__"
+    )
 }
 
 // Constant literals stored in the bytecode constants pool.
@@ -345,7 +374,7 @@ pub(crate) struct JoinNode {
     pub(super) then: Option<HashMap<String, u32>>,
 }
 
-/* Synthetic SSA temps for multi-step desugarings. Leading `#` hides them from `globals()`/`locals()`, centralised so a typo becomes a compile error, not a misnamed slot. */
+/* Synthetic SSA temps for multi-step desugarings. Leading `#` hides them from `globals()`, centralised so a typo becomes a compile error, not a misnamed slot. */
 pub const SSA_TMP_CMP: &str = "#cmp";
 pub const SSA_TMP_MATCH: &str = "#match";
 pub const SSA_TMP_MATCH_ITEM: &str = "#match_item";

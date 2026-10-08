@@ -55,10 +55,8 @@ impl<'a> VM<'a> {
         }
 
         let idx = self.coerce_index(obj, idx, chunk)?;
-        // A dict answers here, through the user `__hash__` and `__eq__` when its keys need them.
         if obj.is_heap() && let HeapObj::Dict(p) = self.heap.get(obj) {
-            let fast = { let m = p.borrow(); (!m.is_rich() && !is_rich_key(idx, &self.heap)).then(|| m.get(&idx, &self.heap).copied()) };
-            let found = match fast { Some(hit) => hit, None => self.dict_get(obj, idx, chunk)? };
+            let found = p.borrow().get(&idx, &self.heap).copied();
             let Some(v) = found else { self.require_hashable(idx)?; return Err(self.key_error(idx)) };
             self.push(v);
             return Ok(());
@@ -269,7 +267,7 @@ impl<'a> VM<'a> {
         self.heap.alloc(HeapObj::GenericAlias(origin, args))
     }
 
-    /* Reject mutable types (list/dict/set) used as dict/set keys, plus instances that override `__eq__` without `__hash__`. */
+    /* Reject mutable types (list/dict/set) used as dict/set keys, plus instances whose class defines `__eq__`. */
     pub(in crate::vm) fn require_hashable(&self, v: Val) -> Result<(), VmErr> { self.require_hashable_at(v, 0) }
 
     /* A set probe of a set looks up as the frozenset it equals, so only other values must hash. */
@@ -286,14 +284,8 @@ impl<'a> VM<'a> {
                 HeapObj::Set(_) => return Err(cold_type("unhashable type: 'set'")),
                 // A tuple hashes through its items as deep as the hash looks, so each must be hashable too.
                 HeapObj::Tuple(items) => for &item in items { self.require_hashable_at(item, depth + 1)?; },
-                HeapObj::Instance(cls, _) => {
-                    // Same eq-hash invariant as `call_hash` since defining one without the other voids hashability.
-                    let cls = *cls;
-                    if self.lookup_class_member(cls, "__eq__").is_some()
-                        && self.lookup_class_member(cls, "__hash__").is_none() {
-                        return Err(cold_type("unhashable type: instance defines __eq__ without __hash__"));
-                    }
-                }
+                // A user `__eq__` would let two equal keys hash apart.
+                HeapObj::Instance(cls, _) if self.lookup_class_member(*cls, "__eq__").is_some() => return Err(cold_type("unhashable type: instance defines __eq__")),
                 _ => {}
             }
         }
@@ -322,13 +314,6 @@ impl<'a> VM<'a> {
             return Ok(());
         }
         let idx_val = self.coerce_index(cont, idx_val, chunk)?;
-        // A dict stores here, through the user `__hash__` and `__eq__` when its keys need them.
-        if let HeapObj::Dict(p) = self.heap.get(cont) && !matches!(self.heap.try_get(idx_val), Some(HeapObj::Slice(..))) {
-            if p.borrow().is_rich() || is_rich_key(idx_val, &self.heap) { return self.dict_set(cont, idx_val, value, chunk); }
-            self.require_hashable(idx_val)?;
-            self.heap.growing(&mut *p.borrow_mut(), |d| d.insert(idx_val, value, &self.heap));
-            return Ok(());
-        }
         self.store_item_builtin(cont, idx_val, value)
     }
 
@@ -375,9 +360,6 @@ impl<'a> VM<'a> {
             && let &HeapObj::Slice(start, stop, step) = self.heap.get(idx_val)
         {
             return self.store_slice(cont, start, stop, step, None);
-        }
-        if self.dict_needs_vm(cont, idx_val) {
-            return match self.dict_del(cont, idx_val, chunk)? { Some(_) => Ok(()), None => Err(self.key_error(idx_val)) };
         }
         match self.heap.get(cont) {
             HeapObj::List(v) => {

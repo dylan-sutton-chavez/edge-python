@@ -317,4 +317,4 @@ The [system modules](/docs/reference/system) are the only way out, and each is h
 - Any `time` scope turns the wall clock on for the whole run. Timing then depends on when the program runs.
 - `fs`, `net` and `secret` return what the host holds at the moment of the call. Their results are as stable as those files, servers and values.
 
-Heap-slot reuse is the one other source of variation. It shows through `id(x)` only, never through `==`, `repr`, or any other operation.
+Heap-slot reuse shows through no operation, since no builtin reads an object address.

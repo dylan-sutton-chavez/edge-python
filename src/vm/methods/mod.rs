@@ -193,9 +193,6 @@ const METHODS: &[MethodDesc] = methods! {
     "slice" {
         "indices" => slice::indices, ro, 1..1;
     }
-    "object" {
-        "__hash__" => object::hash, ro, 0..1;
-    }
     "BaseException" {
         "__init__" => object::exc_init, rw, 0..255;
         "__str__" => object::exc_str, ro, 0..0;

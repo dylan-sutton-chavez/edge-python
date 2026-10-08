@@ -39,10 +39,7 @@ impl<'a> VM<'a> {
 
         // `name -= rhs` removes from a left set in place (alias-visible), every other type behaves as Sub.
         let op = if op == OpCode::InPlaceSub {
-            if self.is_set_like(a) && self.is_set_like(b) {
-                if self.sets_rich(a, b) { return self.rich_set_op(a, b, OpCode::Sub, true, chunk); }
-                return self.set_iop_and_push(a, b, OpCode::Sub);
-            }
+            if self.is_set_like(a) && self.is_set_like(b) { return self.set_iop_and_push(a, b, OpCode::Sub); }
             OpCode::Sub
         } else { op };
 
@@ -58,10 +55,6 @@ impl<'a> VM<'a> {
             return Ok(());
         }
 
-        // Sets of user-hashed items subtract through their own `__eq__`.
-        if op == OpCode::Sub && self.is_set_like(a) && self.is_set_like(b) && self.sets_rich(a, b) {
-            return self.rich_set_op(a, b, op, false, chunk);
-        }
         let result = match op {
             OpCode::Add => self.add_vals(a, b)?,
             OpCode::Sub => self.sub_vals(a, b)?,
@@ -267,16 +260,12 @@ impl<'a> VM<'a> {
 
         if self.is_set_like(a) && self.is_set_like(b)
             && matches!(op, OpCode::BitAnd | OpCode::BitOr | OpCode::BitXor) {
-            if self.sets_rich(a, b) { return self.rich_set_op(a, b, op, inplace, chunk); }
             return if inplace { self.set_iop_and_push(a, b, op) } else { self.set_binop_and_push(a, b, op) };
         }
         // `dict | dict` (and `|=`) merges, right operand winning.
         if op == OpCode::BitOr && a.is_heap() && b.is_heap()
             && matches!(self.heap.get(a), HeapObj::Dict(_))
             && matches!(self.heap.get(b), HeapObj::Dict(_)) {
-            if [a, b].iter().any(|&d| matches!(self.heap.get(d), HeapObj::Dict(rc) if rc.borrow().is_rich())) {
-                return self.rich_dict_merge(a, b, chunk);
-            }
             let mut merged = DictMap::with_capacity(0);
             if let HeapObj::Dict(d) = self.heap.get(a) { for (k, v) in d.borrow().iter() { merged.insert(k, v, &self.heap); } }
             if let HeapObj::Dict(d) = self.heap.get(b) { for (k, v) in d.borrow().iter() { merged.insert(k, v, &self.heap); } }
@@ -368,22 +357,7 @@ impl<'a> VM<'a> {
         }
 
         // Set/Set uses subset/superset, NOT total order, the numeric `LtEq = !lt_vals(b, a)` identity is wrong here ({1,2} <= {2,3} would come back True), so we bypass `lt_vals`.
-        if self.is_set_like(a) && self.is_set_like(b) {
-            if !self.sets_rich(a, b) { return self.set_compare_and_push(a, b, op); }
-            // Sets of user-hashed items probe each other through their own dunders.
-            let r = self.with_roots([a, b], |vm| -> Result<bool, VmErr> {
-                Ok(match op {
-                    OpCode::Eq => vm.values_eq(a, b, chunk)?,
-                    OpCode::NotEq => !vm.values_eq(a, b, chunk)?,
-                    OpCode::LtEq => vm.set_within(a, b, chunk)?,
-                    OpCode::GtEq => vm.set_within(b, a, chunk)?,
-                    OpCode::Lt => vm.set_within(a, b, chunk)? && !vm.values_eq(a, b, chunk)?,
-                    _ => vm.set_within(b, a, chunk)? && !vm.values_eq(a, b, chunk)?,
-                })
-            })?;
-            self.push(Val::bool(r));
-            return Ok(());
-        }
+        if self.is_set_like(a) && self.is_set_like(b) { return self.set_compare_and_push(a, b, op); }
 
         let result = match op {
             OpCode::Eq => self.values_eq(a, b, chunk)?,

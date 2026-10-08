@@ -596,12 +596,14 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
         // `x: T` annotates, a colon on the next line belongs to another statement.
         if matches!(self.peek_same_line(), Some(TokenType::Colon)) {
+            self.check_member(&name, t.end);
             self.advance();
             if !self.skip_annotation() { return false; }
         }
 
         match self.peek_same_line() {
             Some(TokenType::Equal) => {
+                self.check_member(&name, t.end);
                 self.assign(name);
                 false
             }
@@ -635,7 +637,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     /* Trailers and operators after a statement head, true when a value is left on the stack. */
     fn stmt_tails(&mut self, start: usize) -> bool {
         if self.postfix_tail(true) { return false; }
-        self.infix_bp(0);
+        self.infix_bp(0, start);
         self.ternary_tail(start);
         if matches!(self.peek_same_line(), Some(TokenType::Comma)) {
             return self.unpack_or_tuple(start, None);

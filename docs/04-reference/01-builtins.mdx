@@ -5,7 +5,7 @@ description: "The global functions available in every Edge Python program."
 
 # Built-in functions
 
-Edge Python provides 68 built-in functions. They are first-class values. You can pass them as arguments, store them in containers, and alias them.
+Edge Python provides 65 built-in functions. They are first-class values. You can pass them as arguments, store them in containers, and alias them.
 
 ```edge-python
 fns = [abs, hex, str]
@@ -708,33 +708,13 @@ True
 False
 ```
 
-### id, hash
+### id, hash, locals
 
-`id(x)` returns a stable numeric identifier. Two values share it exactly when `is` holds between them.
+`id`, `hash` and `locals` are not builtins. A use of one fails at compile time, unless the module binds the name itself.
 
-`hash(x)` returns the hash of a hashable value.
-
-- Lists, dicts, and sets are unhashable and raise `TypeError`.
-- Ints hash to themselves.
-- Integral floats hash as the equal int. `hash(1) == hash(1.0)` holds.
-
-```edge-python
-print(hash("hello") == hash("hello"))
-print(hash((1, 2, 3)) == hash((1, 2, 3)))
-print(hash(1) == hash(1.0))
-
-try:
-    hash([1, 2, 3])
-except TypeError:
-    print("unhashable")
-```
-
-```output
-True
-True
-True
-unhashable
-```
+- Compare values with `==`, and keep `is` for names and for `None`, `True` and `False`.
+- A dict or a set hashes its keys by value, and an instance by identity.
+- A function takes the values it needs as arguments.
 
 ## Representation
 
@@ -812,7 +792,7 @@ False
 
 ### vars
 
-`vars(x)` returns a snapshot of the attribute dict of an instance or module. There is no form without an argument. Use `locals()` instead.
+`vars(x)` returns a snapshot of the attribute dict of an instance or module. There is no form without an argument.
 
 ```edge-python
 class P:
@@ -827,13 +807,11 @@ print(vars(P()))
 {'x': 1, 'y': 2}
 ```
 
-### globals, locals
+### globals
 
 `globals()` returns a fresh dict of the module-level bindings. It holds user names only. Built-ins live in a separate namespace.
 
-`locals()` returns a fresh dict of the locals of the current frame inside a function. At module level it matches `globals()`.
-
-Both are copies. Mutating them does not change any binding.
+It is a copy. Mutating it does not change any binding.
 
 ```edge-python
 x = 100
@@ -843,19 +821,11 @@ def add(a, b):
 
 print(globals()["x"])
 print(globals()["add"](3, 4))
-
-def f():
-  a = 1
-  b = 2
-  return locals()
-
-print(f())
 ```
 
 ```output
 100
 7
-{'a': 1, 'b': 2}
 ```
 
 ## Modules

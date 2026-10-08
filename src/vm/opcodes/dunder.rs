@@ -170,24 +170,18 @@ impl<'a> VM<'a> {
             return Ok(self.truthy(r));
         }
 
-        // A dict or set probes by hash, a user key through its own `__hash__` and `__eq__`.
-        let plain = |rich: bool, vm: &Self| !rich && !is_rich_key(item, &vm.heap);
-        let fast = match self.heap.try_get(container) {
-            Some(HeapObj::Dict(rc)) => { let m = rc.borrow(); plain(m.is_rich(), self).then(|| (m.contains_key(&item, &self.heap), false)) }
-            Some(HeapObj::Set(rc)) => { let s = rc.borrow(); plain(s.is_rich(), self).then(|| (s.contains(item, &self.heap), true)) }
-            Some(HeapObj::FrozenSet(s)) => plain(s.is_rich(), self).then(|| (s.contains(item, &self.heap), true)),
+        // A dict or set probes by hash.
+        let probe = match self.heap.try_get(container) {
+            Some(HeapObj::Dict(rc)) => Some((rc.borrow().contains_key(&item, &self.heap), false)),
+            Some(HeapObj::Set(rc)) => Some((rc.borrow().contains(item, &self.heap), true)),
+            Some(HeapObj::FrozenSet(s)) => Some((s.contains(item, &self.heap), true)),
             Some(HeapObj::List(_) | HeapObj::Tuple(_)) => return self.seq_contains(container, item, chunk),
             _ => None,
         };
-        match fast {
-            // A miss still rejects an unhashable probe, a set probing as the frozenset it equals.
-            Some((hit, set)) => {
-                if !hit { if set { self.require_set_probe(item)?; } else { self.require_hashable(item)?; } }
-                return Ok(hit);
-            }
-            None if matches!(self.heap.try_get(container), Some(HeapObj::Dict(_))) => return Ok(self.dict_get(container, item, chunk)?.is_some()),
-            None if self.is_set_like(container) => return self.set_has(container, item, chunk),
-            None => {}
+        // A miss still rejects an unhashable probe, a set probing as the frozenset it equals.
+        if let Some((hit, set)) = probe {
+            if !hit { if set { self.require_set_probe(item)?; } else { self.require_hashable(item)?; } }
+            return Ok(hit);
         }
 
         // User instance container with `__iter__` walks via the iterator protocol, comparing items with `__eq__`.

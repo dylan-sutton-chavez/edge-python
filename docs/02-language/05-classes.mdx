@@ -478,29 +478,23 @@ True
 
 ### Hashing
 
-`hash(x)` calls `__hash__`. It must return an `int`. The engine masks the result to `INT_MAX`.
+An instance hashes by identity, so it can be a dict key or a set item.
 
-- A class that defines `__eq__` without `__hash__` is unhashable. `hash(x)` and `{x: 1}` raise `TypeError`. This keeps dict keys consistent.
-- `object.__hash__` is the identity hash every instance inherits. `__hash__ = object.__hash__` keeps such a class hashable.
-- Dicts and sets place a key by its `__hash__` and match it with `__eq__`. An equal instance finds the entry.
-- A key stays under the hash it had when it went in.
+- A class that defines `__eq__` is unhashable. `{x: 1}` raises `TypeError`, since two equal instances could hash apart.
+- A class body cannot define `__hash__`. It fails at compile time.
 
 ```edge-python
 class K:
   def __init__(self, n): self.n = n
-  def __hash__(self):
-    return self.n
-  def __eq__(self, o):
-    return self.n == o.n
 
 k = K(5)
-print(hash(k))
-print({k: 'found'}[K(5)]) # an equal instance finds the entry
+print({k: 'found'}[k])
+print(K(5) in {k}) # another instance is another key
 ```
 
 ```output
-5
 found
+False
 ```
 
 ### Representation
@@ -595,13 +589,16 @@ computed:foo
 
 ## Not supported
 
-The class model leaves these out. Where the syntax parses, the engine ignores it.
+The class model leaves these out, and each fails at compile time.
 
-- Metaclasses, `__slots__` and ABCs. A `metaclass=` keyword and a `__slots__` attribute have no effect.
-- Descriptors. `__get__`, `__set__` and `__delete__` are never called.
-- `__init_subclass__` and `__set_name__` are never called.
+- Metaclasses, `__slots__` and ABCs. A class keyword such as `metaclass=` and a `__slots__` binding are rejected.
+- Descriptors. `__get__`, `__set__` and `__delete__`.
+- `__init_subclass__` and `__set_name__`.
 - `__new__`. The engine builds the instance and `__init__` runs user logic.
-- Async dunders. `__aenter__`, `__aexit__`, `__aiter__` and `__anext__` are never called. `async with` and `async for` use the sync paths, see [Async](/docs/language/async#async-for-and-async-with).
+- `__hash__` and `__del__`.
+- Async dunders. `__aenter__`, `__aexit__`, `__aiter__` and `__anext__`. `async with` and `async for` use the sync paths, see [Async](/docs/language/async#async-for-and-async-with).
+
+Any other dunder a class body binds fails the same way. The supported ones are on this page, and `__class_getitem__` is on [Data types](/docs/language/data-types).
 
 Reuse behavior through free functions and composition by default. Reach for inheritance and operator overloading when the abstraction calls for them.
 

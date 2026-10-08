@@ -65,7 +65,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
     pub(super) fn expr_tails(&mut self, start: usize) {
         if self.postfix_tail(false) { self.chunk.emit(OpCode::LoadNone, 0); }
-        self.infix_bp(0);
+        self.infix_bp(0, start);
         self.ternary_tail(start);
     }
 
@@ -77,6 +77,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             self.error("expression too deeply nested");
             return;
         }
+        let start = self.chunk.instructions.len();
         match self.peek() {
             Some(TokenType::Not) => {
                 self.advance();
@@ -85,17 +86,22 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             }
             _ => self.parse_unary(),
         }
-        self.infix_bp(min_bp);
+        self.infix_bp(min_bp, start);
         self.expr_depth -= 1;
     }
 
-    // An operator never continues past the logical line, so `@deco` on the next line stays a decorator.
-    pub(super) fn infix_bp(&mut self, min_bp: u8) {
+    // An operator never continues past the logical line, so `@deco` on the next line stays a decorator, `left` is where the first operand starts.
+    pub(super) fn infix_bp(&mut self, min_bp: u8, left: usize) {
         while let Some(tok) = self.peek_same_line() {
             if is_comparison(tok) {
                 if 7 < min_bp { break; }
+                let op_start = self.tokens.peek().map_or(self.last_end, |t| t.start);
                 let op = self.comparison_op();
+                let right = self.chunk.instructions.len();
                 self.expr_bp(8);
+                if matches!(op, OpCode::Is | OpCode::IsNot) && (self.literal_from(left, right) || self.literal_from(right, self.chunk.instructions.len())) {
+                    self.reject(op_start, self.last_end, "'is' with a literal, compare values with '=='");
+                }
                 // `a < b in c` tests `b` again and stops at the first false, the tail holds no `and` or `or`.
                 if self.peek_same_line().is_some_and(is_comparison) {
                     let ver = self.increment_version(super::SSA_TMP_CMP);
@@ -104,8 +110,9 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     self.chunk.emit(OpCode::LoadName, tmp);
                     self.chunk.emit(op, 0);
                     let jmp = self.emit_jump(OpCode::JumpIfFalseOrPop);
+                    let again = self.chunk.instructions.len();
                     self.chunk.emit(OpCode::LoadName, tmp);
-                    self.infix_bp(7);
+                    self.infix_bp(7, again);
                     self.patch(jmp);
                 } else {
                     self.chunk.emit(op, 0);
@@ -127,6 +134,17 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
             self.expr_bp(r_bp);
             self.chunk.emit(op, 0);
+        }
+    }
+
+    /* Whether the code in `from..to` builds a literal, a constant or a fresh display, which `is` cannot compare. */
+    fn literal_from(&self, from: usize, to: usize) -> bool {
+        let ins = &self.chunk.instructions[from..to];
+        let constant = |i: &Instruction| i.opcode == OpCode::LoadConst && !matches!(self.chunk.constants.get(i.operand as usize), Some(Value::Bool(_) | Value::None));
+        match ins.last() {
+            Some(i) if matches!(i.opcode, OpCode::BuildList | OpCode::BuildTuple | OpCode::BuildDict | OpCode::BuildSet | OpCode::BuildString) => true,
+            Some(_) => ins.iter().any(constant) && ins.iter().all(|i| constant(i) || i.opcode == OpCode::Minus),
+            None => false,
         }
     }
 
@@ -474,7 +492,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.with_fresh_chunk(|s| {
             s.ssa_versions = outer_versions;
             // Base name shadows the enclosing scope, prefix/`=` marker must be stripped.
-            for p in params { s.ssa_versions.insert(super::types::param_base_name(p).to_string(), 0); }
+            for p in params { s.bind_param(p); }
             s.expr();
             s.chunk.emit(OpCode::ReturnValue, 0);
         })

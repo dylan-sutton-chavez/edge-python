@@ -35,6 +35,8 @@ Hello, world!
 Hi, world!
 ```
 
+A list, dict or set as a default fails at compile time, since every call would share it. Default to `None` and build the value in the body.
+
 ### Keyword arguments
 
 ```edge-python

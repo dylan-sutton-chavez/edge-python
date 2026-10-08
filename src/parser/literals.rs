@@ -3,7 +3,7 @@ use crate::s;
 use super::Parser;
 use super::stmt::UnpackTarget;
 use super::types::builtin;
-use super::types::{OpCode, Value, SSAChunk, Instruction};
+use super::types::{OpCode, Value, SSAChunk, Instruction, class_dunder};
 
 use crate::lexer::{Token, TokenType};
 use crate::util::hash::FxHashMap as HashMap;
@@ -388,6 +388,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             self.call_rest(call_pos);
             return true;
         }
+        self.note_removed(&name);
         if name == "print" {
             // Same packed layout as Call so the VM can split sep/end kwargs from positionals.
             let operand = self.fused_args(&name, true);
@@ -538,7 +539,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 } else {
                     let elem_start = s.chunk.instructions.len();
                     s.name_operand(t);
-                    s.infix_bp(0);
+                    s.infix_bp(0, elem_start);
                     // Name-led arg bypasses expr(), parse a trailing ternary here too.
                     s.saw_newline = false;
                     s.ternary_tail(elem_start);
@@ -587,8 +588,22 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         let mut num_bases: u16 = 0;
         if self.eat_if(TokenType::Lpar) {
             while !matches!(self.peek(), Some(TokenType::Rpar) | None) {
-                self.expr();
-                num_bases = num_bases.saturating_add(1);
+                // `metaclass=` and every other class keyword parse and then fail, the class model has none.
+                if matches!(self.peek(), Some(TokenType::Name)) {
+                    let t = self.advance();
+                    if self.eat_if(TokenType::Equal) {
+                        self.reject(t.start, t.end, "class keywords such as 'metaclass' are not supported");
+                        self.expr();
+                    } else {
+                        let start = self.chunk.instructions.len();
+                        self.name_operand(t);
+                        self.expr_tails(start);
+                        num_bases = num_bases.saturating_add(1);
+                    }
+                } else {
+                    self.expr();
+                    num_bases = num_bases.saturating_add(1);
+                }
                 if !self.eat_if(TokenType::Comma) { break; }
             }
             self.eat(TokenType::Rpar);
@@ -597,6 +612,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.eat(TokenType::Colon);
 
         let body = self.with_fresh_chunk(|s| {
+            s.in_class_body = true;
             // `class Box[T]` keeps its parameters in `__type_params__`, which makes `Box[int]` an alias.
             if !params.is_empty() {
                 for p in &params {
@@ -626,6 +642,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     pub(super) fn func_def_inner(&mut self, decorators: u16, is_async: bool) {
         // Missing name, non-syncing diagnostic + synthetic name so signature+body still parse.
         let fname = self.ident_or_missing("expected function name");
+        self.check_member(&fname, self.last_end);
         self.type_params();
         let (params, defaults) = self.parse_params();
         let body = self.compile_body(&params);
@@ -636,6 +653,22 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.emit_decorator_calls(decorators);
 
         self.emit_store_new(&fname);
+    }
+
+    /* Rejects a dunder a class body binds that the engine never calls, `end` closing its name. */
+    pub(super) fn check_member(&mut self, name: &str, end: usize) {
+        if self.in_class_body && name.len() > 4 && name.starts_with("__") && name.ends_with("__") && !class_dunder(name) {
+            self.reject(end - name.len(), end, &s!("'", str name, "' is not supported in a class body"));
+        }
+    }
+
+    /* Whether the code from `from` builds a list, dict or set, by display, comprehension or constructor. */
+    fn mutable_from(&self, from: usize) -> bool {
+        let ins = &self.chunk.instructions[from..];
+        let built = |op: OpCode| matches!(op, OpCode::BuildList | OpCode::BuildDict | OpCode::BuildSet | OpCode::CallList | OpCode::CallDict | OpCode::CallSet);
+        let display = ins.last().is_some_and(|i| built(i.opcode));
+        let comprehension = ins.first().is_some_and(|i| built(i.opcode) && i.operand == 0) && ins.iter().any(|i| matches!(i.opcode, OpCode::ListAppend | OpCode::SetAdd | OpCode::MapAdd));
+        display || comprehension
     }
 
     /* Names of a `[T, *Ts, **P]` type parameter list, bounds and defaults skipped since the engine is dynamically typed. */
@@ -695,7 +728,9 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 if annotated { self.drain_annotation(); }
                 // Trailing `=` marks a param carrying a default value.
                 if prefix.len() < 2 && self.eat_if(TokenType::Equal) {
+                    let (from, at) = (self.chunk.instructions.len(), self.tokens.peek().map_or(self.last_end, |t| t.start));
                     self.expr();
+                    if self.mutable_from(from) { self.reject(at, self.last_end, "a list, dict or set default is shared by every call, default to None and build it in the body"); }
                     defaults += 1;
                     if let Some(last) = params.last_mut() { last.push('='); }
                 }
@@ -733,7 +768,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         let mut body = self.with_fresh_chunk(|s| {
             for p in params {
                 // Base name shadows the enclosing scope, prefix/`=` marker must be stripped.
-                s.ssa_versions.insert(super::types::param_base_name(p).to_string(), 0);
+                s.bind_param(p);
                 let _ = s.push_ssa_name(super::types::param_base_name(p), 0);
             }
             s.compile_block_body();

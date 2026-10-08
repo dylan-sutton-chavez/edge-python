@@ -60,9 +60,9 @@ impl<'a> VM<'a> {
         self.alloc_set_result(items, true)
     }
 
-    pub fn build_set(&mut self, op: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
+    pub fn build_set(&mut self, op: u16) -> Result<(), VmErr> {
         let items = self.pop_n(op as usize)?;
-        let s = self.valset_of(&items, chunk)?;
+        let s = self.valset_of(&items)?;
         let val = self.heap.alloc(HeapObj::Set(Rc::new(RefCell::new(s))))?;
         self.push(val); Ok(())
     }
@@ -76,7 +76,7 @@ impl<'a> VM<'a> {
     }
 
     // Operand packs kw<<8 | pos, keep counts distinct.
-    pub fn call_dict(&mut self, op: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
+    pub fn call_dict(&mut self, op: u16) -> Result<(), VmErr> {
         let pos = (op & 0xFF) as usize;
         let kw = (op >> 8) as usize;
         if pos > 1 {
@@ -85,14 +85,14 @@ impl<'a> VM<'a> {
         // Keyword pairs sit above the positional source.
         let kw_flat = self.pop_n(kw * 2)?;
         let src = if pos == 1 { Some(self.pop()?) } else { None };
-        // A dict source copies with the hashes it stored, so a user `__hash__` never runs again.
+        // A dict source copies with the hashes it stored.
         if let Some(HeapObj::Dict(rc)) = src.and_then(|s| self.heap.try_get(s)) && kw_flat.is_empty() {
             let dm = rc.borrow().clone();
             return self.alloc_and_push_dict(dm);
         }
         let mut pairs = match src { Some(s) => self.pairs_of(s)?, None => Vec::new() };
         pairs.extend(kw_flat.chunks(2).map(|p| (p[0], p[1])));
-        let dm = self.with_roots(kw_flat.iter().copied().chain(src), |vm| vm.dictmap_of(pairs, chunk))?;
+        let dm = self.dictmap_of(pairs)?;
         self.alloc_and_push_dict(dm)
     }
 
@@ -114,16 +114,16 @@ impl<'a> VM<'a> {
         Ok(pairs)
     }
 
-    pub fn call_set(&mut self, op: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
+    pub fn call_set(&mut self, op: u16) -> Result<(), VmErr> {
         let src = if op == 0 { None } else { Some(self.pop()?) };
-        let s = self.set_source(src, chunk)?;
+        let s = self.set_source(src)?;
         let val = self.heap.alloc(HeapObj::Set(Rc::new(RefCell::new(s))))?;
         self.push(val);
         Ok(())
     }
 
     /* The items `set(src)` or `frozenset(src)` holds, a set source copies the hashes it stored. */
-    fn set_source(&mut self, src: Option<Val>, chunk: &crate::parser::SSAChunk) -> Result<ValSet, VmErr> {
+    fn set_source(&mut self, src: Option<Val>) -> Result<ValSet, VmErr> {
         let Some(src) = src else { return Ok(ValSet::new()) };
         match self.heap.try_get(src) {
             Some(HeapObj::Set(rc)) => return Ok(rc.borrow().clone()),
@@ -131,14 +131,14 @@ impl<'a> VM<'a> {
             _ => {}
         }
         let items = self.extract_iter(src)?;
-        self.with_roots([src], |vm| vm.valset_of(&items, chunk))
+        self.valset_of(&items)
     }
 
     /* `frozenset()` | `frozenset(iter)`, construct an immutable, hashable set from an iterable. Without args returns the empty frozenset. */
-    pub fn call_frozenset(&mut self, argc: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
+    pub fn call_frozenset(&mut self, argc: u16) -> Result<(), VmErr> {
         let args = self.pop_n(argc as usize)?;
         if args.len() > 1 { return Err(cold_type("frozenset() takes 0 or 1 argument")); }
-        let s = self.set_source(args.first().copied(), chunk)?;
+        let s = self.set_source(args.first().copied())?;
         let v = self.heap.alloc(HeapObj::FrozenSet(Rc::new(s)))?;
         self.push(v); Ok(())
     }

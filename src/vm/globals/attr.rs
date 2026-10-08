@@ -1,6 +1,6 @@
 use crate::s;
 
-use alloc::string::{String, ToString};
+use alloc::string::String;
 
 use super::super::VM;
 use super::super::types::*;
@@ -98,7 +98,7 @@ impl<'a> VM<'a> {
         self.str_of(v, msg)
     }
 
-    /* `vars(obj)`, an Instance yields a copy of `__dict__`, a Module yields a dict from its attrs. No-arg form is unsupported, use `locals()`. */
+    /* `vars(obj)`, an Instance yields a copy of `__dict__`, a Module yields a dict from its attrs. No-arg form is unsupported. */
     pub fn call_vars(&mut self) -> Result<(), VmErr> {
         use alloc::vec::Vec;
         let obj = self.pop()?;
@@ -138,39 +138,6 @@ impl<'a> VM<'a> {
         let mut dm = DictMap::with_capacity(bound.len());
         for (k, v) in bound {
             let key = self.heap.alloc(HeapObj::Str(k))?;
-            dm.insert(key, v, &self.heap);
-        }
-        self.alloc_and_push_dict(dm)
-    }
-
-    /* `locals()`, a copy of the frame's own and closed-over variables. */
-    pub fn call_locals(&mut self, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
-        // A module's locals are its bindings, a class body's its namespace slots.
-        let fi = self.body_to_fi.get(&(chunk as *const _)).copied();
-        if fi.is_none() && !self.class_chunks.contains(&(chunk as *const _)) { return self.call_globals(chunk); }
-        // Map bare-name -> (best version, val) so we keep only the latest.
-        let mut latest: crate::util::hash::FxHashMap<String, (i64, Val)> = crate::util::hash::FxHashMap::default();
-        for (i, name) in chunk.names.iter().enumerate() {
-            let kind = fi.and_then(|fi| self.fn_scope[fi].kinds.get(i).copied());
-            if matches!(kind, Some(crate::vm::scope::Kind::Global(_))) { continue; }
-            let v = match self.regs.get(self.base + i).map(|&v| if kind == Some(crate::vm::scope::Kind::Cell) { self.deref(v) } else { v }) {
-                Some(v) if !v.is_undef() => v,
-                _ => continue,
-            };
-            // Synthetic `#`-slots are matcher scratch, never user-visible.
-            if name.starts_with('#') { continue; }
-            // Strip SSA version suffix.
-            let (bare, ver) = crate::parser::SsaName::parse_or_bare(name);
-            let ver = ver as i64;
-            // Skip unrebound builtins, same Val as the global means the user never assigned locally.
-            if let Some(gv) = self.global(bare)
-                && gv.0 == v.0 { continue; }
-            let entry = latest.entry(bare.to_string()).or_insert((-1, Val::undef()));
-            if ver > entry.0 { *entry = (ver, v); }
-        }
-        let mut dm = DictMap::with_capacity(latest.len());
-        for (name, (_, v)) in latest {
-            let key = self.heap.intern_str(&name)?;
             dm.insert(key, v, &self.heap);
         }
         self.alloc_and_push_dict(dm)

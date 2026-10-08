@@ -25,8 +25,7 @@ fn native_is_impure(id: super::super::types::NativeFnId) -> bool {
         | GetAttr | HasAttr // attr access can run getters
         | Run | ImportModule // arbitrary execution / import
         | Cancel | WithTimeout | Gather // async effects
-        | Globals | Locals | Vars | Super // reflection of mutable state
-        | Id // heap-slot nondeterminism
+        | Globals | Vars | Super // reflection of mutable state
     )
 }
 
@@ -142,21 +141,13 @@ impl<'a> VM<'a> {
                     for a in &mut args {
                         if let Some(l) = vm.lift_iterable(*a, chunk)? { vm.temp_roots.push(l); *a = l; }
                     }
-                    vm.builtin_method(recv, id, &args, kw, chunk)
+                    crate::vm::methods::dispatch_method(vm, id, recv, &args, kw)
                 })
             }
-            _ => self.builtin_method(recv, id, pos, kw, chunk),
+            _ => crate::vm::methods::dispatch_method(self, id, recv, pos, kw),
         }
     }
 
-    /* A dict or set method meeting user keys runs in the VM, every other one through its table entry. */
-    #[inline]
-    fn builtin_method(&mut self, recv: Val, id: crate::vm::methods::BuiltinMethodId, pos: &[Val], kw: &[Val], chunk: &SSAChunk) -> Result<(), VmErr> {
-        // `dict.fromkeys` reaches here with the type as its receiver.
-        let table = recv.is_heap() && matches!(self.heap.get(recv), HeapObj::Dict(_) | HeapObj::Set(_) | HeapObj::Type(_));
-        if table && self.keyed_method(id, recv, pos, kw, chunk)? { return Ok(()); }
-        crate::vm::methods::dispatch_method(self, id, recv, pos, kw)
-    }
 
     /* `str.lower(s)`, an unbound builtin method takes a receiver of its own type as the first argument. */
     pub(crate) fn exec_unbound_method(&mut self, id: crate::vm::methods::BuiltinMethodId, args: &[Val], kw: &[Val], chunk: &SSAChunk) -> Result<(), VmErr> {
@@ -835,8 +826,8 @@ impl<'a> VM<'a> {
             Max => self.call_max(operand, chunk),
             Sum => self.call_sum(operand),
             Zip => self.call_zip(operand),
-            Dict => self.call_dict(operand, chunk),
-            Set => self.call_set(operand, chunk),
+            Dict => self.call_dict(operand),
+            Set => self.call_set(operand),
             Pow => self.call_pow(operand),
             All => self.call_all(operand),
             Any => self.call_any(operand),
@@ -863,8 +854,6 @@ impl<'a> VM<'a> {
             Repr => self.call_repr(chunk),
             Reversed => self.call_reversed(),
             Callable => self.call_callable(),
-            Id => self.call_id(),
-            Hash => self.call_hash(chunk),
             Divmod => self.call_divmod(),
             IsInstance => self.call_isinstance(),
             IsSubclass => self.call_issubclass(),
@@ -889,9 +878,8 @@ impl<'a> VM<'a> {
             BytesFromHex => self.call_bytes_fromhex(),
             IntFromBytes => self.call_int_from_bytes(),
             IntToBytes => self.call_int_to_bytes(),
-            FrozenSet => self.call_frozenset(operand, chunk),
+            FrozenSet => self.call_frozenset(operand),
             Globals => self.call_globals(chunk),
-            Locals => self.call_locals(chunk),
             Super => self.call_super(),
             Property => self.call_property(operand),
             StaticMethod => self.call_staticmethod(operand),

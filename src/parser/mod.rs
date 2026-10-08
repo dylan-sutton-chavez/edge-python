@@ -73,6 +73,12 @@ pub struct Parser<'src, I: Iterator<Item = Token>> {
     pub(super) in_target_list: bool,
     /* Unclosed brackets with error count at open, anchors "never closed" and drops cascade errors. */
     pub(super) bracket_stack: Vec<(TokenType, usize, usize, usize)>,
+    /* True while the statements of a class body compile, not those of its methods. */
+    pub(super) in_class_body: bool,
+    /* One bit per entry of `REMOVED_BUILTINS` the module binds in any scope, so that name stays its own. */
+    pub(super) bound: u8,
+    /* Spans that use a removed builtin, by its index in `REMOVED_BUILTINS`, reported at the end unless the module binds the name. */
+    pub(super) removed_uses: Vec<(usize, usize, usize)>,
     pub errors: Vec<Diagnostic>,
     /* Host resolver defaulting to NoopResolver so import-free call sites work unchanged. */
     pub(super) resolver: Box<dyn Resolver>,
@@ -106,7 +112,32 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         let cur = self.current_version(name);
         let new = cur + 1;
         self.ssa_versions.insert(name.to_string(), new);
+        self.note_bound(name);
         new
+    }
+
+    /* Binds a parameter at version zero, so the body reads it before any store. */
+    pub(super) fn bind_param(&mut self, p: &str) {
+        let name = types::param_base_name(p);
+        self.ssa_versions.insert(name.to_string(), 0);
+        self.note_bound(name);
+    }
+
+    #[inline]
+    fn note_bound(&mut self, name: &str) {
+        if let Some(i) = removed_builtin(name) { self.bound |= 1 << i; }
+    }
+
+    /* Notes a use of `name` when it is a removed builtin the scope does not bind. */
+    #[inline]
+    pub(super) fn note_removed(&mut self, name: &str) {
+        if let Some(i) = removed_builtin(name) { self.note_removed_at(name, i); }
+    }
+
+    #[cold]
+    fn note_removed_at(&mut self, name: &str, i: usize) {
+        if self.ssa_versions.contains_key(name) || self.globals_decl.contains(name) || self.chunk.extern_index.contains_key(name) { return; }
+        self.removed_uses.push((self.last_end.saturating_sub(name.len()), self.last_end, i));
     }
 
     pub(super) fn push_ssa_name(&mut self, name: &str, ver: u32) -> u16 {
@@ -115,6 +146,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     }
 
     pub(super) fn emit_load_ssa(&mut self, name: String) {
+        self.note_removed(&name);
         if self.globals_decl.contains(&name) {
             let i = self.chunk.push_name(&name);
             self.chunk.emit(OpCode::LoadGlobal, i);
@@ -137,6 +169,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
     pub(super) fn store_name(&mut self, name: String) {
         if self.globals_decl.contains(&name) {
+            self.note_bound(&name);
             let i = self.chunk.push_name(&name);
             self.chunk.emit(OpCode::StoreGlobal, i);
             return;
@@ -190,6 +223,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         let saved_globals = core::mem::take(&mut self.globals_decl);
         // Nested body owns its loops and block stack, isolate, then restore the enclosing ones.
         let saved_loops = (core::mem::take(&mut self.loops), core::mem::replace(&mut self.cleanup_count, 0));
+        let saved_class = core::mem::replace(&mut self.in_class_body, false);
         // Copy parent externs so nested def bodies can call imported natives, extras don't leak up.
         self.chunk.extern_table = saved_chunk.extern_table.clone();
         self.chunk.extern_index = saved_chunk.extern_index.clone();
@@ -202,6 +236,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.ssa_versions = saved_ver;
         self.globals_decl = saved_globals;
         (self.loops, self.cleanup_count) = saved_loops;
+        self.in_class_body = saved_class;
         body
     }
 }
@@ -318,6 +353,11 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             _ => {}
         }
         tok
+    }
+
+    /* Non-syncing diagnostic over a span that parsed fine but is not allowed. */
+    pub(super) fn reject(&mut self, start: usize, end: usize, msg: &str) {
+        self.errors.push(Diagnostic { start, end, msg: msg.to_string() });
     }
 
     /* Non-syncing diagnostic at peek, used when flow must continue (e.g. missing class name). */
@@ -530,6 +570,9 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             last_line: 0,
             last_end: 0,
             bracket_stack: Vec::new(),
+            in_class_body: false,
+            bound: 0,
+            removed_uses: Vec::new(),
             errors: Vec::new(),
             resolver,
             module_cache,
@@ -547,6 +590,10 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             self.end_statement(errors_before);
             // Pop expression-statement results, chunk's implicit ReturnValue expects empty stack.
             if produced_value { self.chunk.emit(OpCode::PopTop, 0); }
+        }
+
+        for (start, end, i) in core::mem::take(&mut self.removed_uses) {
+            if self.bound & 1 << i == 0 { self.errors.push(Diagnostic { start, end, msg: REMOVED_BUILTINS[i].1.to_string() }); }
         }
 
         if self.chunk.overflow {

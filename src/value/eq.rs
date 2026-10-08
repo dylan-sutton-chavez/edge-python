@@ -29,7 +29,7 @@ pub fn eq_member(a: Val, b: Val, heap: &HeapPool) -> bool {
     eq_vals_depth(a, b, heap, 0, &mut false)
 }
 
-/* Content equality, None when a `False` came from a pair only user code can settle, a `__eq__` or a dict keyed by one. */
+/* Content equality, None when a `False` came from a pair only a user `__eq__` can settle. */
 #[inline]
 pub fn eq_checked(a: Val, b: Val, heap: &HeapPool) -> Option<bool> {
     let mut rich = false;
@@ -37,31 +37,15 @@ pub fn eq_checked(a: Val, b: Val, heap: &HeapPool) -> Option<bool> {
     if !r && rich { None } else { Some(r) }
 }
 
-/* A key whose hash or equality runs user code, an instance whose class defines `__eq__` or `__hash__`, or a tuple or frozenset holding one. */
-#[inline]
-pub fn is_rich_key(v: Val, heap: &HeapPool) -> bool {
-    v.is_heap() && matches!(heap.get(v), HeapObj::Instance(..) | HeapObj::Tuple(_) | HeapObj::FrozenSet(_)) && rich_depth(v, heap, 0)
-}
-
-fn rich_depth(v: Val, heap: &HeapPool, depth: usize) -> bool {
-    if !v.is_heap() || depth > EQ_DEPTH_MAX { return false; }
-    match heap.get(v) {
-        HeapObj::Instance(cls, _) => class_defines_eq(*cls, heap, 0),
-        HeapObj::Tuple(t) => t.iter().any(|&e| rich_depth(e, heap, depth + 1)),
-        HeapObj::FrozenSet(s) => s.is_rich(),
-        _ => false,
-    }
-}
-
-/* The class or a base defines `__eq__` or `__hash__`. */
-pub(crate) fn class_defines_eq(cls: Val, heap: &HeapPool, depth: usize) -> bool {
+/* The class or a base defines `__eq__`. */
+fn class_defines_eq(cls: Val, heap: &HeapPool, depth: usize) -> bool {
     if depth > EQ_DEPTH_MAX { return false; }
     let Some(HeapObj::Class(_, bases, methods)) = heap.try_get(cls) else { return false };
-    methods.borrow().iter().any(|(n, _)| n == "__eq__" || n == "__hash__") || bases.iter().any(|&b| class_defines_eq(b, heap, depth + 1))
+    methods.borrow().iter().any(|(n, _)| n == "__eq__") || bases.iter().any(|&b| class_defines_eq(b, heap, depth + 1))
 }
 
-/* Tuple hash from its item hashes, the content hash and the user hash path agree through it. */
-pub fn hash_tuple_parts(parts: &[u64]) -> u64 {
+/* Tuple hash from its item hashes. */
+fn hash_tuple_parts(parts: &[u64]) -> u64 {
     use core::hash::Hasher;
     let mut h = crate::util::hash::FxHasher::default();
     h.write_u8(3);
@@ -71,7 +55,7 @@ pub fn hash_tuple_parts(parts: &[u64]) -> u64 {
 }
 
 /* Order-free set hash from its item hashes, so equal frozensets hash equal. */
-pub fn hash_set_parts(parts: impl Iterator<Item = u64>) -> u64 {
+fn hash_set_parts(parts: impl Iterator<Item = u64>) -> u64 {
     use core::hash::Hasher;
     let mut h = crate::util::hash::FxHasher::default();
     h.write_u8(4);
@@ -212,8 +196,6 @@ fn eq_vals_depth(a: Val, b: Val, heap: &HeapPool, depth: usize, rich: &mut bool)
         (HeapObj::FrozenSet(x), HeapObj::Set(y)) => eq_tables(x, &y.borrow(), heap, d, rich),
         (HeapObj::Dict(x), HeapObj::Dict(y)) => {
             let (x, y) = (x.borrow(), y.borrow());
-            // A user-hashed key is found only through its own `__hash__`, which the VM runs.
-            if x.is_rich() || y.is_rich() { *rich = true; return false; }
             x.len() == y.len() && x.iter().all(|(k, v)| y.get(&k, heap).is_some_and(|&v2| v.0 == v2.0 || eq_vals_depth(v, v2, heap, d, rich)))
         }
         // An instance with its own `__eq__` decides in user code, the VM asks it.
@@ -237,9 +219,8 @@ fn eq_vals_depth(a: Val, b: Val, heap: &HeapPool, depth: usize, rich: &mut bool)
     }
 }
 
-/* Set equality, a set holding user-hashed items leaves the answer to the VM. */
+/* Set equality, each item matched under the hash it stored. */
 fn eq_tables(x: &ValSet, y: &ValSet, heap: &HeapPool, d: usize, rich: &mut bool) -> bool {
-    if x.is_rich() || y.is_rich() { *rich = true; return false; }
     eq_set(x, y, |a, b| a.0 == b.0 || eq_vals_depth(a, b, heap, d, rich))
 }
 

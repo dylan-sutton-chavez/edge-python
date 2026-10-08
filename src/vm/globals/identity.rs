@@ -3,14 +3,6 @@ use super::super::VM;
 use super::super::types::*;
 use super::matches_exc_class;
 
-/* CPython's int hash, identity in i64 range with -1 mapped to -2, wider values reduce mod 2^61-1. */
-fn py_int_hash(i: i128) -> i128 {
-    match i64::try_from(i) {
-        Ok(n) => (if n == -1 { -2 } else { n }) as i128,
-        Err(_) => i.rem_euclid((1i128 << 61) - 1),
-    }
-}
-
 impl<'a> VM<'a> {
 
     /* `property(fget)` / `property(fget, fset)`, captures the descriptor pair the class chain hands to `LoadAttr` / `StoreAttr`. The `@x.setter` decorator builds the second form via `PropertySetter`. */
@@ -80,69 +72,6 @@ impl<'a> VM<'a> {
             }
         } else { false };
         self.push(Val::bool(result));
-        Ok(())
-    }
-
-    pub fn call_id(&mut self) -> Result<(), VmErr> {
-        let o = self.pop()?;
-        // The full NaN-boxed bits, the ones `is` compares, so `id` and `is` always agree.
-        let id = self.int_to_val(Some(o.0 as i128))?;
-        self.push(id);
-        Ok(())
-    }
-
-    pub fn call_hash(&mut self, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
-        let o = self.pop()?;
-
-        // instance dispatch, user `__hash__` wins, `__eq__` without `__hash__` makes the instance unhashable.
-        if o.is_heap() && let HeapObj::Instance(cls, _) = self.heap.get(o) {
-            let cls = *cls;
-            let hash_fn = self.lookup_class_member(cls, "__hash__").map(|(f, _)| f);
-            let has_eq = self.lookup_class_member(cls, "__eq__").is_some();
-            // `__hash__ = object.__hash__` keeps the identity hash below.
-            let inherited = hash_fn.is_some_and(|f| f.is_heap() && matches!(self.heap.get(f), HeapObj::BoundMethod(_, id) if id.name() == "__hash__"));
-            if hash_fn.is_some() && !inherited {
-                let r = self.try_call_dunder(o, "__hash__", &[], chunk)?
-                    .ok_or_else(|| cold_type("__hash__ returned NotImplemented"))?;
-                if !r.is_int() {
-                    return Err(cold_type("__hash__ must return int"));
-                }
-                self.push(Val::int(r.as_int() & Val::INT_MAX));
-                return Ok(());
-            }
-            if hash_fn.is_none() && has_eq {
-                return Err(cold_type("unhashable type: instance defines __eq__ without __hash__"));
-            }
-            // Default fallback, pointer identity, mirroring Python's `object.__hash__`.
-        }
-
-        // Python guarantees hash(n)==n for ints in range (hash(-1) is -2), bool hashes as 0/1.
-        if o.is_int() { let n = o.as_int(); self.push(Val::int(if n == -1 { -2 } else { n })); return Ok(()); }
-        if o.is_bool() { self.push(Val::int(o.as_bool() as i64)); return Ok(()); }
-
-        // Wide ints hash by value through the same rule, the i64 branch keeps hash(n)==n.
-        let wide = if o.is_heap() {
-            if let HeapObj::LongInt(i) = self.heap.get(o) { Some(i.get()) } else { None }
-        } else { None };
-        if let Some(i) = wide {
-            let v = self.int_to_val(Some(py_int_hash(i)))?;
-            self.push(v);
-            return Ok(());
-        }
-
-        // Integral floats hash as the equal int or LongInt, same unification hash_depth uses for dict keys.
-        if o.is_float() && let Some(i) = float_exact_i128(o.as_float()) {
-            let v = self.int_to_val(Some(py_int_hash(i)))?;
-            self.push(v);
-            return Ok(());
-        }
-        // The rest hashes by content, the hash a dict key probes with, so equal tuples and frozensets agree.
-        if o.is_heap() { self.require_hashable(o)?; }
-        // A tuple holding a user-hashed item hashes through that item, as its dict key would.
-        let rich_tuple = matches!(self.heap.try_get(o), Some(HeapObj::Tuple(_))) && crate::vm::eq::is_rich_key(o, &self.heap);
-        let h = if rich_tuple { self.with_roots([o], |vm| vm.key_hash(o, chunk))? }
-            else { crate::vm::eq::hash_val_with_heap(o, &self.heap) };
-        self.push(Val::int(h as i64 & Val::INT_MAX));
         Ok(())
     }
 

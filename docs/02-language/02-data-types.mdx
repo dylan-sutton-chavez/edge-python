@@ -463,8 +463,9 @@ True
 ## Behavioral notes
 
 - **Set iteration and `repr` order.** Sets store elements in a hash table. Iteration and `repr` follow hash order, not insertion order. Sort a set when the order matters.
-- **`is` on equal numbers.** Two ints or two floats of the same value are one object. `a = 1000; b = 1000; a is b` is `True`. Two NaN values made apart are not, and neither are `0.0` and `-0.0`.
+- **`is` on equal numbers.** Two ints or two floats of the same value are one object. `a = 1000; b = 1000; a is b` is `True`. Every NaN is one object too, while `0.0` and `-0.0` are two.
 - **`is` on equal strings.** String literals with the same text are one object. Every string of zero or one character is one object too. A string built at run time, such as `c + "b"`, is a new object.
+- **`is` with a literal.** It fails at compile time, since its answer would depend on how the engine stores the value.
 
 ```edge-python
 print({3, 1, 2})
@@ -472,7 +473,8 @@ a = 1000
 b = 1000
 print(a is b)
 c = "a"
-print(c + "b" is "ab", c + "b" == "ab")
+ab = "ab"
+print(c + "b" is ab, c + "b" == ab)
 ```
 
 ```output

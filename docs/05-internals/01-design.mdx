@@ -79,7 +79,7 @@ The instruction format is in [Bytecode model](/docs/internals/compiler#bytecode-
 
 | Tag | Pattern | Notes |
 |---|---|---|
-| Float | Any non-canonical IEEE-754 | Each NaN is `0x7FF8...` plus an id in its low 50 bits |
+| Float | Any non-canonical IEEE-754 | Every NaN is `0x7FF8...`, its sign kept |
 | Int | `QNAN \| SIGN \| i48` | 48-bit signed inline, promotes to `HeapObj::LongInt` (i128) on overflow |
 | Undef | `QNAN` | Unbound-local sentinel |
 | None | `QNAN \| 1` | |
@@ -90,7 +90,7 @@ The instruction format is in [Bytecode model](/docs/internals/compiler#bytecode-
 `INT_MAX = 140_737_488_355_327` and `INT_MIN = -140_737_488_355_328`. Inline ints cost one ALU op per arithmetic.
 
 - Overflow promotes to `HeapObj::LongInt(i128)`. Results demote back inline when they fit.
-- LongInts are interned by value. Equal values share a heap index and stay consistent under `hash` and `eq`.
+- LongInts are interned by value. Equal values share a heap index, so they agree as dict keys and under `==` and `is`.
 - The hard cap is ±2¹²⁷. Wider results raise `OverflowError`.
 
 Arbitrary-precision bigints would need a limb vector with a heap allocation per op, or dropping NaN-boxing. Both regress the WASM size and the inner loop.

@@ -117,7 +117,6 @@
 "__setitem__"
 "__call__"
 "__eq__"
-"__hash__"
 "__add__"
 "__len__"
 "__repr__"

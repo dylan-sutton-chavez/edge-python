@@ -736,15 +736,15 @@ impl<'a> VM<'a> {
         true
     }
 
-    /* Adds `key` and `value` to the stack-top accumulator, false if user code may decide. */
+    /* Adds `key` and `value` to the stack-top accumulator, false when the handler must check the key. */
     fn accumulate(&mut self, ins: Ins, key: Val, value: Val) -> bool {
         let Some(&acc) = self.stack.last() else { return false };
         if value.is_undef() { return false; }
         let plain = self.plain_key(key);
         match (ins.op, self.heap.try_get(acc)) {
             (OpCode::ListAppendR, Some(HeapObj::List(rc))) => self.heap.growing(&mut *rc.borrow_mut(), |l| l.push(value)),
-            (OpCode::SetAddR, Some(HeapObj::Set(rc))) if plain && !rc.borrow().is_rich() => { self.heap.growing(&mut *rc.borrow_mut(), |t| t.insert(key, &self.heap)); }
-            (OpCode::MapAddR, Some(HeapObj::Dict(rc))) if plain && !rc.borrow().is_rich() => self.heap.growing(&mut *rc.borrow_mut(), |d| d.insert(key, value, &self.heap)),
+            (OpCode::SetAddR, Some(HeapObj::Set(rc))) if plain => { self.heap.growing(&mut *rc.borrow_mut(), |t| t.insert(key, &self.heap)); }
+            (OpCode::MapAddR, Some(HeapObj::Dict(rc))) if plain => self.heap.growing(&mut *rc.borrow_mut(), |d| d.insert(key, value, &self.heap)),
             _ => return false,
         }
         true
@@ -780,7 +780,7 @@ impl<'a> VM<'a> {
         }
     }
 
-    /* A key whose hash and equality run no user code. */
+    /* A key that is hashable by its kind alone, so a fast path skips the hashability check. */
     #[inline(always)]
     fn plain_key(&self, k: Val) -> bool { !k.is_heap() && !k.is_undef() || matches!(self.heap.try_get(k), Some(HeapObj::Str(_))) }
 
@@ -806,9 +806,9 @@ impl<'a> VM<'a> {
                 // A plain key probes a plain dict or set, anything else runs the protocol.
                 if !self.plain_key(item) { return false; }
                 let hit = match self.heap.try_get(container) {
-                    Some(HeapObj::Set(rc)) => { let s = rc.borrow(); if s.is_rich() { return false; } s.contains(item, &self.heap) }
-                    Some(HeapObj::Dict(rc)) => { let d = rc.borrow(); if d.is_rich() { return false; } d.contains_key(&item, &self.heap) }
-                    Some(HeapObj::FrozenSet(s)) if !s.is_rich() => s.contains(item, &self.heap),
+                    Some(HeapObj::Set(rc)) => rc.borrow().contains(item, &self.heap),
+                    Some(HeapObj::Dict(rc)) => rc.borrow().contains_key(&item, &self.heap),
+                    Some(HeapObj::FrozenSet(s)) => s.contains(item, &self.heap),
                     _ => return false,
                 };
                 self.regs[self.base + ins.a as usize] = Val::bool(hit == (ins.op == OpCode::InR));
@@ -861,7 +861,7 @@ impl<'a> VM<'a> {
                 if ins.op == OpCode::MapAddR { let k = self.reg(chunk, ins.b)?; self.push(k); }
                 self.push(v);
                 let form = match ins.op { OpCode::ListAppendR => OpCode::ListAppend, OpCode::SetAddR => OpCode::SetAdd, _ => OpCode::MapAdd };
-                self.handle_comprehension(form, chunk)?;
+                self.handle_comprehension(form)?;
             }
             OpCode::Move => self.regs[self.base + ins.a as usize] = self.reg(chunk, ins.b)?,
             OpCode::PushRegs => self.push_regs(ins, chunk)?,
@@ -1092,7 +1092,7 @@ impl<'a> VM<'a> {
             | OpCode::CallInput | OpCode::MakeFunction | OpCode::MakeCoroutine
             | OpCode::CallAll | OpCode::CallAny | OpCode::CallBin | OpCode::CallOct
             | OpCode::CallHex | OpCode::CallDivmod | OpCode::CallPow | OpCode::CallRepr
-            | OpCode::CallReversed | OpCode::CallCallable | OpCode::CallId | OpCode::CallHash
+            | OpCode::CallReversed | OpCode::CallCallable
             | OpCode::CallExtern => {
                 // Snapshot call-site byte_pos for the new CallFrame, falls back to enclosing stmt.
                 self.pending.call_ip = Some(code.orig(rip));
@@ -1184,14 +1184,14 @@ impl<'a> VM<'a> {
             OpCode::In | OpCode::NotIn | OpCode::Is | OpCode::IsNot => self.handle_identity(opcode, chunk)?,
 
             OpCode::BuildList | OpCode::BuildTuple | OpCode::BuildDict
-            | OpCode::BuildString | OpCode::BuildSet | OpCode::BuildSlice => self.handle_build(opcode, operand, chunk)?,
+            | OpCode::BuildString | OpCode::BuildSet | OpCode::BuildSlice => self.handle_build(opcode, operand)?,
 
             OpCode::StoreItem => { self.mark_impure(); self.store_item(chunk)?; }
             OpCode::DelItem => { self.mark_impure(); self.del_item(chunk)?; }
             OpCode::DelAttr => { self.mark_impure(); self.exec_del_attr(operand, chunk)?; }
             OpCode::UnpackSequence | OpCode::UnpackEx | OpCode::FormatValue => self.handle_container(opcode, operand, chunk)?,
 
-            OpCode::ListAppend | OpCode::SetAdd | OpCode::MapAdd => self.handle_comprehension(opcode, chunk)?,
+            OpCode::ListAppend | OpCode::SetAdd | OpCode::MapAdd => self.handle_comprehension(opcode)?,
             OpCode::DictUpdate | OpCode::SetUpdate | OpCode::ListExtend => self.handle_spread_merge(opcode, chunk)?,
 
             // The yielded value stays on the stack for the resumer.

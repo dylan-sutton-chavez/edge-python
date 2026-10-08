@@ -5,13 +5,13 @@ use core::cell::RefCell;
 use core::hash::Hasher;
 
 use crate::parser::types::{ImportKind, SSAChunk};
-use crate::util::hash::{FxHashMap, FxHasher};
+use crate::util::hash::{FxHashMap, FxHashSet, FxHasher};
 use crate::util::jesc::escape as json_escape;
 use super::{Pending, VM};
 use super::types::*;
 
 const MAGIC: u32 = 0x4E53_5045;
-const FORMAT: u32 = 8;
+const FORMAT: u32 = 9;
 
 pub type SnapErr = String;
 
@@ -107,8 +107,8 @@ impl<'a> R<'a> {
         if v.is_heap() && let Some(live) = &self.live && !live.get(v.as_heap() as usize).copied().unwrap_or(false) {
             return Err("snapshot references a missing object".to_string());
         }
-        v.note_nan();
-        Ok(v)
+        // A float goes back through `Val::float`, so a NaN in the blob is the one NaN the engine makes.
+        Ok(if v.is_float() { Val::float(v.as_float()) } else { v })
     }
     fn seq<T>(&mut self, f: impl Fn(&mut Self) -> Result<T, SnapErr>) -> Result<Vec<T>, SnapErr> {
         let n = self.count()?;
@@ -297,22 +297,22 @@ codec!(struct Pending, put_pending, get_pending {
     preempt_request: default,
 });
 
-/* Each entry keeps its hash, the one a user `__hash__` gave cannot be taken again without running code. */
+/* Hashes are taken again on restore, so only the entries travel. */
 fn put_dict(w: &mut W, d: &DictMap) {
-    let live: Vec<(Val, Val, u64)> = d.iter_hashed().collect();
-    w.seq(&live, |w, &(k, v, h)| { w.val(k); w.val(v); w.u64(h); });
+    let live: Vec<(Val, Val)> = d.iter().collect();
+    w.seq(&live, |w, &(k, v)| { w.val(k); w.val(v); });
 }
 
 fn get_dict(r: &mut R) -> Result<DictMap, SnapErr> {
-    Ok(DictMap::from_entries(r.seq(|r| Ok((r.val()?, r.val()?, r.u64()?)))?))
+    Ok(DictMap::from_unhashed(r.seq(|r| Ok((r.val()?, r.val()?)))?))
 }
 
 fn put_set(w: &mut W, s: &ValSet) {
-    let items: Vec<(u64, Val)> = s.iter_hashed().collect();
-    w.seq(&items, |w, &(h, v)| { w.u64(h); w.val(v); });
+    let items: Vec<Val> = s.iter().copied().collect();
+    w.seq(&items, |w, &v| w.val(v));
 }
 
-fn get_set_items(r: &mut R) -> Result<Vec<(u64, Val)>, SnapErr> { r.seq(|r| Ok((r.u64()?, r.val()?))) }
+fn get_set_items(r: &mut R) -> Result<Vec<Val>, SnapErr> { r.seq(|r| r.val()) }
 
 /* Sorted so identical states produce identical blobs. */
 fn put_map(w: &mut W, m: &FxHashMap<String, Val>) {
@@ -344,8 +344,8 @@ fn get_map(r: &mut R) -> Result<FxHashMap<String, Val>, SnapErr> {
 
 /* Set items are inserted in the rehash pass. */
 enum SetFill {
-    Mutable(Vec<(u64, Val)>),
-    Frozen(Vec<(u64, Val)>),
+    Mutable(Vec<Val>),
+    Frozen(Vec<Val>),
 }
 
 fn put_obj(w: &mut W, obj: &HeapObj) {
@@ -693,7 +693,7 @@ fn check_objs(vm: &VM, fills: &[(u32, SetFill)]) -> Result<(), SnapErr> {
     let nfn = vm.functions.len();
     let dangling = |v: Val| v.is_heap() && vm.heap.try_get(v).is_none();
     let mut set_items = fills.iter().flat_map(|(_, SetFill::Mutable(items) | SetFill::Frozen(items))| items);
-    if set_items.any(|&(_, v)| dangling(v)) { return Err("snapshot references a missing object or function".to_string()); }
+    if set_items.any(|&v| dangling(v)) { return Err("snapshot references a missing object or function".to_string()); }
     for obj in vm.heap.snapshot_objs().flatten() {
         let mut ok = match obj {
             &HeapObj::Func(fi, ..) => fi < nfn,
@@ -725,8 +725,27 @@ fn rebuild_mro(vm: &mut VM) -> Result<(), SnapErr> {
     Ok(())
 }
 
-/* Hashing reads the heap, so index once slots are live. */
+/* Hashing reads the heap, so index once slots are live, every frozenset before what hashes it. */
 fn rehash(vm: &mut VM, fills: Vec<(u32, SetFill)>) -> Result<(), SnapErr> {
+    let mut frozen: FxHashMap<u32, Vec<Val>> = FxHashMap::default();
+    let mut mutable = Vec::new();
+    for (slot, fill) in fills {
+        match fill {
+            SetFill::Frozen(items) => { frozen.insert(slot, items); }
+            SetFill::Mutable(items) => mutable.push((slot, items)),
+        }
+    }
+    let mut order: Vec<u32> = frozen.keys().copied().collect();
+    order.sort_unstable();
+    let mut seen = FxHashSet::default();
+    for slot in order { fill_frozen(vm, slot, &mut frozen, &mut seen); }
+    for (slot, items) in mutable {
+        let rc = match vm.heap.try_get(Val::heap(slot)) {
+            Some(HeapObj::Set(rc)) => rc.clone(),
+            _ => return Err("snapshot set slot mismatch".to_string()),
+        };
+        *rc.borrow_mut() = ValSet::from_vals(&items, &vm.heap);
+    }
     let nslots = vm.heap.snapshot_objs().count();
     for idx in 0..nslots {
         let v = Val::heap(idx as u32);
@@ -737,22 +756,30 @@ fn rehash(vm: &mut VM, fills: Vec<(u32, SetFill)>) -> Result<(), SnapErr> {
         };
         for rc in dicts { rc.borrow_mut().rebuild_index(&vm.heap); }
     }
-    for (slot, fill) in fills {
-        match fill {
-            SetFill::Mutable(items) => {
-                let rc = match vm.heap.try_get(Val::heap(slot)) {
-                    Some(HeapObj::Set(rc)) => rc.clone(),
-                    _ => return Err("snapshot set slot mismatch".to_string()),
-                };
-                *rc.borrow_mut() = ValSet::from_hashed(items, &vm.heap);
+    Ok(())
+}
+
+/* Builds frozenset `root` after the frozensets its items reach through tuples, a stack in place of recursion since the blob is untrusted. */
+fn fill_frozen(vm: &mut VM, root: u32, pending: &mut FxHashMap<u32, Vec<Val>>, seen: &mut FxHashSet<u32>) {
+    let mut stack = alloc::vec![(root, false)];
+    while let Some((slot, ready)) = stack.pop() {
+        if ready {
+            if let Some(items) = pending.remove(&slot) {
+                let set = ValSet::from_vals(&items, &vm.heap);
+                vm.heap.replace_obj(slot, HeapObj::FrozenSet(Rc::new(set)));
             }
-            SetFill::Frozen(items) => {
-                let s = ValSet::from_hashed(items, &vm.heap);
-                vm.heap.replace_obj(slot, HeapObj::FrozenSet(Rc::new(s)));
-            }
+            continue;
+        }
+        if !pending.contains_key(&slot) || !seen.insert(slot) { continue; }
+        stack.push((slot, true));
+        let mut walk: Vec<Val> = pending[&slot].clone();
+        while let Some(v) = walk.pop() {
+            if !v.is_heap() { continue; }
+            let at = v.as_heap();
+            if pending.contains_key(&at) { if !seen.contains(&at) { stack.push((at, false)); } }
+            else if seen.insert(at) && let Some(HeapObj::Tuple(t)) = vm.heap.try_get(v) { walk.extend(t.iter().copied()); }
         }
     }
-    Ok(())
 }
 
 /* Appends `s` as a quoted JSON string. */

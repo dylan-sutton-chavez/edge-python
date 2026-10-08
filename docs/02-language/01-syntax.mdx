@@ -329,7 +329,8 @@ print(2 in [1, 2, 3])
 print(4 not in [1, 2, 3])
 print('a' in {'a': 1})
 print(None is None)
-print(1 is not 2)
+xs = [1, 2]
+print(xs is not None)
 ```
 
 ```output
@@ -340,7 +341,7 @@ True
 True
 ```
 
-What `is` returns for equal values is on [Data types](/docs/language/data-types#behavioral-notes).
+What `is` returns for equal values, and why it takes no literal, is on [Data types](/docs/language/data-types#behavioral-notes).
 
 ### Augmented assignment
 

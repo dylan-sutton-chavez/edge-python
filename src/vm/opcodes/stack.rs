@@ -11,7 +11,7 @@ impl<'a> VM<'a> {
     }
 
     /* Container constructors for list / tuple / dict / set / slice / string. */
-    pub(crate) fn handle_build(&mut self, op: OpCode, operand: u16, chunk: &SSAChunk) -> Result<(), VmErr> {
+    pub(crate) fn handle_build(&mut self, op: OpCode, operand: u16) -> Result<(), VmErr> {
         match op {
             OpCode::BuildList => {
                 let v = self.pop_n(operand as usize)?;
@@ -25,7 +25,7 @@ impl<'a> VM<'a> {
             }
             OpCode::BuildDict => {
                 let flat = self.pop_n(operand as usize * 2)?;
-                let dm = self.dictmap_of(flat.chunks(2).map(|c| (c[0], c[1])).collect(), chunk)?;
+                let dm = self.dictmap_of(flat.chunks(2).map(|c| (c[0], c[1])).collect())?;
                 let val = self.heap.alloc(HeapObj::Dict(Rc::new(RefCell::new(dm))))?;
                 self.push(val);
             }
@@ -35,7 +35,7 @@ impl<'a> VM<'a> {
                 let val = self.heap.alloc(HeapObj::Str(s))?;
                 self.push(val);
             }
-            OpCode::BuildSet => self.build_set(operand, chunk)?,
+            OpCode::BuildSet => self.build_set(operand)?,
             OpCode::BuildSlice => self.build_slice(operand)?,
             _ => return Err(cold_runtime("non-build opcode in handle_build")),
         }
@@ -81,14 +81,14 @@ impl<'a> VM<'a> {
     }
 
     /* Append/add to the comprehension accumulator at the top of the stack. */
-    pub(crate) fn handle_comprehension(&mut self, op: OpCode, chunk: &SSAChunk) -> Result<(), VmErr> {
+    pub(crate) fn handle_comprehension(&mut self, op: OpCode) -> Result<(), VmErr> {
         let value = self.pop()?;
         let key = if op == OpCode::MapAdd { Some(self.pop()?) } else { None };
         let acc = *self.stack.last().ok_or(VmErr::Runtime("stack underflow"))?;
         match (op, key, self.heap.try_get(acc)) {
             (OpCode::ListAppend, _, Some(HeapObj::List(rc))) => self.heap.growing(&mut *rc.borrow_mut(), |v| v.push(value)),
-            (OpCode::SetAdd, _, Some(HeapObj::Set(_))) => { self.set_add(acc, value, chunk)?; }
-            (OpCode::MapAdd, Some(k), Some(HeapObj::Dict(_))) => self.dict_set(acc, k, value, chunk)?,
+            (OpCode::SetAdd, _, Some(HeapObj::Set(rc))) => { self.require_hashable(value)?; self.heap.growing(&mut *rc.borrow_mut(), |s| s.insert(value, &self.heap)); }
+            (OpCode::MapAdd, Some(k), Some(HeapObj::Dict(rc))) => { self.require_hashable(k)?; self.heap.growing(&mut *rc.borrow_mut(), |d| d.insert(k, value, &self.heap)); }
             _ => return Err(cold_runtime("comprehension accumulator corrupted")),
         }
         Ok(())
@@ -101,7 +101,7 @@ impl<'a> VM<'a> {
         if !acc.is_heap() { return Err(cold_runtime("spread accumulator corrupted")); }
         match op {
             // `**` requires a mapping, and later keys overwrite earlier ones.
-            OpCode::DictUpdate => self.dict_spread_into(acc, src, chunk)?,
+            OpCode::DictUpdate => self.dict_spread_into(acc, src)?,
             OpCode::SetUpdate => {
                 if !matches!(self.heap.get(acc), HeapObj::Set(_)) { return Err(cold_runtime("spread accumulator corrupted")); }
                 self.spread_into(acc, src, chunk)?;
