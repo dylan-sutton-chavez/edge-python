@@ -14,14 +14,13 @@ impl<'a> VM<'a> {
     pub fn resume_coroutine(&mut self, callee: Val) -> Result<Val, VmErr> {
         // Scheduler-driven resumes have nothing native above.
         let resume_safe = core::mem::take(&mut self.pending_exec_safe);
-        let (outer_ip, outer_body, held) = match self.heap.get(callee) {
-            HeapObj::Coroutine(c) => (c.ip, c.body, c.syncs.len() + c.stack.len() + c.slots.len() + c.iters.len()),
+        let (outer_ip, outer_body, syncs, held) = match self.heap.get(callee) {
+            HeapObj::Coroutine(c) => (c.ip, c.body, c.syncs.len(), c.syncs.len() + c.stack.len() + c.slots.len() + c.iters.len()),
             _ => return Err(cold_type("not a coroutine")),
         };
         if outer_ip == FINISHED { self.yielded = false; return Ok(Val::none()); }
 
         // Bound depth, sync frames within a coroutine, plus nested resumes from mutual awaits (native-stack recursion).
-        let syncs = match self.heap.get(callee) { HeapObj::Coroutine(c) => c.syncs.len(), _ => 0 };
         if syncs >= self.max_calls || self.depth >= self.max_calls {
             return Err(cold_depth());
         }
@@ -52,8 +51,8 @@ impl<'a> VM<'a> {
         let mut pending_ret: Option<Val> = None;
         let result: Result<Val, VmErr> = 'drive: loop {
             if let Some(frame) = sync_frames.pop() {
-                let SyncFrame { ip, fi, func, mut slots, stack_delta, iter_delta, exception_delta } = frame;
-                let (frame_stack_base, frame_iter_base, frame_exc_base) = self.restore_frames(stack_delta, iter_delta, exception_delta);
+                let SyncFrame { ip, fi, func, mut slots, mut stack_delta, mut iter_delta, mut exception_delta } = frame;
+                let (frame_stack_base, frame_iter_base, frame_exc_base) = self.restore_into(&mut stack_delta, &mut iter_delta, &mut exception_delta);
                 // Inner result lands on this frame's stack.
                 if let Some(v) = pending_ret.take() { self.push(v); }
                 self.pending_exec_exc_base = Some(frame_exc_base);
@@ -80,14 +79,12 @@ impl<'a> VM<'a> {
                             call_byte_pos: caller.resolve_call(call_ip).or_else(|| caller.resolve(call_ip)).unwrap_or(0),
                             caller_source: Some(caller.source.clone()),
                             caller_path: Some(caller.path.clone()),
-                            current_class: None,
-                            current_self: None,
                         };
                         self.call_stack.push(frame);
                         self.resume_raise = Some(e);
                     }
                     Ok(val) if self.yielded => {
-                        let (stack_delta, iter_delta, exception_delta) = self.split_frames(frame_stack_base, frame_iter_base, frame_exc_base);
+                        self.save_frames(frame_stack_base, frame_iter_base, frame_exc_base, &mut stack_delta, &mut iter_delta, &mut exception_delta);
                         sync_frames.push(SyncFrame { ip: self.resume_ip, fi, func, slots, stack_delta, iter_delta, exception_delta });
                         // Reverse so pop re-enters innermost first.
                         let newer = core::mem::take(&mut self.pending_sync_frames);

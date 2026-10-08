@@ -23,7 +23,7 @@ fn index_of(i: i64, len: usize) -> Option<usize> {
 /* Opcodes the register loop hands to `regs_aside`, done there when common. */
 #[inline(always)]
 fn aside_op(op: OpCode) -> bool {
-    matches!(op, OpCode::PowR | OpCode::BitAndR | OpCode::BitOrR | OpCode::BitXorR | OpCode::ShlR | OpCode::ShrR
+    matches!(op, OpCode::PowR
         | OpCode::ListAppendR | OpCode::SetAddR | OpCode::MapAddR | OpCode::UnpackR
         | OpCode::JumpIfFalse | OpCode::JumpIfFalseOrPop | OpCode::JumpIfTrueOrPop
         | OpCode::BuildList | OpCode::BuildTuple | OpCode::BuildString | OpCode::UnpackSequence | OpCode::FormatValue
@@ -320,7 +320,7 @@ impl<'a> VM<'a> {
             Err(VmErr::Attribute(msg)) => {
                 //  if `__getattr__` resolves the name to a callable, invoke it with the positional args.
                 if let Some(v) = self.try_getattr_fallback(obj, name, chunk)? {
-                            return self.call_with(v, None, &positional, &kw_flat, chunk);
+                    return self.call_with(v, None, &positional, &kw_flat, chunk);
                 }
                 return Err(VmErr::Attribute(msg));
             }
@@ -339,7 +339,7 @@ impl<'a> VM<'a> {
                 // Prepend `self`, `super()` reads the binding off `pending`, and method bodies stage like plain calls.
                 self.pending.method_binding = Some((class, recv));
                 self.pending_exec_safe = self.frame_safe;
-                    let called = self.call_with(func, Some(recv), &positional, &kw_flat, chunk);
+                let called = self.call_with(func, Some(recv), &positional, &kw_flat, chunk);
                 self.pending_exec_safe = false;
                 called
             }
@@ -453,18 +453,18 @@ impl<'a> VM<'a> {
                 OpCode::JumpUnlessGtEq => test!(ins, >=),
                 // `x` set jumps on a true value instead.
                 OpCode::JumpIfFalseR => {
-                        let v = r[ins.b as usize];
+                    let v = r[ins.b as usize];
                     let holds = if v.is_bool() { v.as_bool() } else if v.is_int() { v.as_int() != 0 } else { break };
                     branch!(ins, holds != (ins.x != 0))
                 }
                 OpCode::Move => {
-                        let v = r[ins.b as usize];
+                    let v = r[ins.b as usize];
                     if v.is_undef() { break; }
                     r[ins.a as usize] = v;
                     i += 1;
                 }
                 OpCode::PushRegs => {
-                        let (a, b, c) = (r[ins.a as usize], r[ins.b as usize], r[ins.c as usize]);
+                    let (a, b, c) = (r[ins.a as usize], r[ins.b as usize], r[ins.c as usize]);
                     match ins.x {
                         1 if !a.is_undef() => self.stack.push(a),
                         2 if !a.is_undef() && !b.is_undef() => self.stack.extend_from_slice(&[a, b]),
@@ -474,7 +474,7 @@ impl<'a> VM<'a> {
                     i += 1;
                 }
                 OpCode::StoreTopR => {
-                        let Some(v) = self.stack.pop() else { break };
+                    let Some(v) = self.stack.pop() else { break };
                     if ins.x == 0 { r[ins.a as usize] = v; } else { self.scopes[code.module].set_at(ins.a as u32, v); }
                     i += 1;
                 }
@@ -483,25 +483,25 @@ impl<'a> VM<'a> {
                     i += 1;
                 }
                 OpCode::IsR | OpCode::IsNotR => {
-                        let (x, y) = (r[ins.b as usize], r[ins.c as usize]);
+                    let (x, y) = (r[ins.b as usize], r[ins.c as usize]);
                     if x.is_undef() || y.is_undef() { break; }
                     r[ins.a as usize] = Val::bool((x.0 == y.0) == (ins.op == OpCode::IsR));
                     i += 1;
                 }
                 OpCode::LoadGlobalR => {
-                        let v = self.scopes[code.module].at(ins.b as u32);
+                    let v = self.scopes[code.module].at(ins.b as u32);
                     if v.is_undef() { break; }
                     r[ins.a as usize] = v;
                     i += 1;
                 }
                 OpCode::StoreGlobalR if ins.x == 0 => {
-                        let v = r[ins.b as usize];
+                    let v = r[ins.b as usize];
                     if v.is_undef() { break; }
                     self.scopes[code.module].set_at(ins.a as u32, v);
                     i += 1;
                 }
                 OpCode::GetItemR => {
-                        let (o, k) = (r[ins.b as usize], r[ins.c as usize]);
+                    let (o, k) = (r[ins.b as usize], r[ins.c as usize]);
                     if !o.is_heap() || !k.is_int() { break; }
                     let hit = match self.heap.get(o) {
                         HeapObj::List(v) => { let b = v.borrow(); index_of(k.as_int(), b.len()).map(|j| b[j]) }
@@ -513,7 +513,7 @@ impl<'a> VM<'a> {
                     i += 1;
                 }
                 OpCode::StoreItemR => {
-                        let (o, k) = (r[ins.a as usize], r[ins.b as usize]);
+                    let (o, k) = (r[ins.a as usize], r[ins.b as usize]);
                     if !o.is_heap() || !k.is_int() { break; }
                     let HeapObj::List(v) = self.heap.get(o) else { break };
                     let mut b = v.borrow_mut();
@@ -526,7 +526,7 @@ impl<'a> VM<'a> {
                 }
                 // Ranges and lists step here, the rest and an ended loop in the handler.
                 OpCode::ForIterR if self.budget > 0 && !self.heap.needs_gc() => {
-                        let item = match self.iter_stack.last_mut() {
+                    let item = match self.iter_stack.last_mut() {
                         Some(IterFrame::Range { cur, end, step }) if *step > 0 && *cur < *end && (Val::INT_MIN..=Val::INT_MAX).contains(cur) => {
                             let v = *cur;
                             *cur = cur.checked_add(*step).unwrap_or(i64::MAX);
@@ -547,7 +547,7 @@ impl<'a> VM<'a> {
                     i += 1;
                 }
                 OpCode::GetAttrR => {
-                        let (site, o) = (cache.site(i), r[ins.b as usize]);
+                    let (site, o) = (cache.site(i), r[ins.b as usize]);
                     let v = match self.site_get(site, o) {
                         Some(v) => v,
                         // A builtin type's method binds its receiver, the same bound object each time.
@@ -561,7 +561,7 @@ impl<'a> VM<'a> {
                     i += 1;
                 }
                 OpCode::SetAttrR => {
-                        let (o, v) = (r[ins.a as usize], r[ins.b as usize]);
+                    let (o, v) = (r[ins.a as usize], r[ins.b as usize]);
                     if v.is_undef() || !self.site_store(cache.site(i), o, v) { break; }
                     r = &mut self.regs[base..];
                     i += 1;
@@ -574,7 +574,7 @@ impl<'a> VM<'a> {
                     i = ins.a as usize;
                 }
                 OpCode::MinusR | OpCode::NotR => {
-                        let x = r[ins.b as usize];
+                    let x = r[ins.b as usize];
                     let v = match ins.op {
                         OpCode::MinusR if x.is_int() => Val::int_checked(-x.as_int()),
                         OpCode::MinusR if x.is_float() => Some(Val::float(-x.as_float())),
@@ -630,11 +630,6 @@ impl<'a> VM<'a> {
     fn regs_aside(&mut self, ins: Ins, n: usize, i: usize) -> Option<usize> {
         match ins.op {
             OpCode::PowR => self.regs[self.base + ins.a as usize] = numeric_binop(OpCode::Pow, self.regs[self.base + ins.b as usize], self.regs[self.base + ins.c as usize])?,
-            OpCode::BitAndR | OpCode::BitOrR | OpCode::BitXorR | OpCode::ShlR | OpCode::ShrR => {
-                let (x, y) = (self.regs[self.base + ins.b as usize], self.regs[self.base + ins.c as usize]);
-                let v = if x.is_int() && y.is_int() { int_bits(ins.op, x.as_int(), y.as_int()) } else { None };
-                self.regs[self.base + ins.a as usize] = v?;
-            }
             // A stack value tested by plain truth, a short-circuit keeping it to jump.
             OpCode::JumpIfFalse | OpCode::JumpIfFalseOrPop | OpCode::JumpIfTrueOrPop => if self.stack_jump(ins, n)? { return Some(ins.a as usize) },
             OpCode::ListAppendR | OpCode::SetAddR | OpCode::MapAddR => if !self.accumulate(ins, self.regs[self.base + ins.b as usize], self.regs[self.base + ins.c as usize]) { return None },

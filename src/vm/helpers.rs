@@ -88,19 +88,7 @@ impl<'a> VM<'a> {
         Ok(self.stack.split_off(at))
     }
 
-    /* The stack, iterator and handler tails above a suspended frame, handler depths made relative to it. */
-    pub(crate) fn split_frames(&mut self, sb: usize, ib: usize, eb: usize) -> (Vec<Val>, Vec<IterFrame>, Vec<ExceptionFrame>) {
-        let stack = self.stack.split_off(sb.min(self.stack.len()));
-        let iters = self.iter_stack.split_off(ib.min(self.iter_stack.len()));
-        let mut excs = self.exception_stack.split_off(eb.min(self.exception_stack.len()));
-        for f in &mut excs {
-            f.stack_depth = f.stack_depth.saturating_sub(sb);
-            f.iter_depth = f.iter_depth.saturating_sub(ib);
-        }
-        (stack, iters, excs)
-    }
-
-    /* Moves the live stacks above the bases into the buffers of a coroutine, reusing what they hold. */
+    /* Moves the live stacks above the bases into a suspended frame, handler depths made relative to it. */
     pub(crate) fn save_frames(&mut self, sb: usize, ib: usize, eb: usize, stack: &mut Vec<Val>, iters: &mut Vec<IterFrame>, excs: &mut Vec<ExceptionFrame>) {
         stack.extend(self.stack.drain(sb.min(self.stack.len())..));
         iters.extend(self.iter_stack.drain(ib.min(self.iter_stack.len())..));
@@ -122,19 +110,6 @@ impl<'a> VM<'a> {
             f.iter_depth += bases.1;
         }
         self.exception_stack.append(excs);
-        bases
-    }
-
-    /* Puts a suspended frame back on the live stacks and returns their bases. */
-    pub(crate) fn restore_frames(&mut self, stack: Vec<Val>, iters: Vec<IterFrame>, mut excs: Vec<ExceptionFrame>) -> (usize, usize, usize) {
-        let bases = (self.stack.len(), self.iter_stack.len(), self.exception_stack.len());
-        self.stack.extend(stack);
-        self.iter_stack.extend(iters);
-        for f in &mut excs {
-            f.stack_depth += bases.0;
-            f.iter_depth += bases.1;
-        }
-        self.exception_stack.extend(excs);
         bases
     }
 
@@ -287,7 +262,7 @@ impl<'a> VM<'a> {
 
     /* Pick the first defined Phi source, if both are undef fall back to None. */
     pub(crate) fn exec_phi(&mut self, op: u16, rip: usize, phi_map: &[usize], phi_sources: &[(u16, u16)]) {
-        // Parse recovery can leave a Phi indexing past `slots` (sized to names.len()), index defensively.
+        // Parse recovery can leave a Phi indexing past the frame (sized to names.len()), index defensively.
         let Some(&(ia, ib)) = phi_map.get(rip).and_then(|&pi| phi_sources.get(pi)) else { return };
         let a = self.regs.get(self.base + ia as usize).copied().unwrap_or_else(Val::undef);
         let val = if !a.is_undef() { a }

@@ -96,7 +96,7 @@ pub enum BodyRef {
     Module,
 }
 
-/* Call-site snapshot for traceback rendering, pushed by `exec_call`, popped on return/error. */
+/* Call-site snapshot for traceback rendering, built only as an error unwinds through the call. */
 #[derive(Clone, Debug)]
 pub struct CallFrame {
     pub fi: usize,
@@ -104,9 +104,6 @@ pub struct CallFrame {
     // The caller's source and path, taken only once the frame stays for a traceback.
     pub caller_source: Option<alloc::sync::Arc<alloc::string::String>>,
     pub caller_path: Option<alloc::sync::Arc<alloc::string::String>>,
-    // Class where the running method was found and its implicit `self`, consumed by `super()` to walk one level up. `None` for plain function calls.
-    pub current_class: Option<Val>,
-    pub current_self: Option<Val>,
 }
 
 /* ForIter state, consumed one item per `next_item`. */

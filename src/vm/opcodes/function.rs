@@ -299,7 +299,7 @@ impl<'a> VM<'a> {
         self.exec_call_n((operand & 0xFF) as usize, ((operand >> 8) & 0xFF) as usize, chunk)
     }
 
-    /* `Call` orchestrator. Only user `Func` callees build a fresh `fn_slots` and run the body inline, every other callee kind short-circuits in `try_dispatch_non_func_callable`. */
+    /* `Call` orchestrator. Only user `Func` callees open a frame on the register stack and run the body inline, every other callee kind short-circuits in `try_dispatch_non_func_callable`. */
     pub(crate) fn exec_call_n(&mut self, num_pos: usize, num_kw: usize, chunk: &SSAChunk) -> Result<(), VmErr> {
         // Taken so nested native calls see false.
         let call_safe = core::mem::take(&mut self.pending_exec_safe);
@@ -414,7 +414,8 @@ impl<'a> VM<'a> {
             // Sync helper suspended mid-execution (e.g. `sleep(0)` from inside a sync fn called by an async coro). Stage its frame on the VM-level buffer. `resume_coroutine` drains it onto the enclosing coro so the helper is re-entered from the right ip. Without this, the outer's resume_ip would skip past the unfinished helper and the next StoreName would underflow. A nested sync call inside this helper would already have pushed its own frame first, so the buffer ends up innermost-last.
             let helper_resume_ip = self.resume_ip;
             self.resume_ip = 0;
-            let (stack_delta, iter_delta, exception_delta) = self.split_frames(stack_base, iter_base, exc_base);
+            let (mut stack_delta, mut iter_delta, mut exception_delta) = (Vec::new(), Vec::new(), Vec::new());
+            self.save_frames(stack_base, iter_base, exc_base, &mut stack_delta, &mut iter_delta, &mut exception_delta);
             let slots = self.regs.split_off(base);
             self.pending_sync_frames.push(SyncFrame { ip: helper_resume_ip, fi, func: callee, slots, stack_delta, iter_delta, exception_delta });
             return Ok(());
@@ -458,7 +459,7 @@ impl<'a> VM<'a> {
         Ok(Some(heap.alloc(super::super::types::HeapObj::Dict(Rc::new(RefCell::new(dm))))?))
     }
 
-    /* list.sort() parses key/reverse kwargs and sorts in place. Intercepted from both call paths since it needs chunk/slots for __lt__. */
+    /* list.sort() parses key/reverse kwargs and sorts in place. Intercepted from both call paths since it needs the chunk for __lt__. */
     pub(crate) fn exec_sort(&mut self, recv: Val, positional: &[Val], kw_flat: &[Val], chunk: &SSAChunk) -> Result<(), VmErr> {
         if !positional.is_empty() {
             return Err(cold_type("list.sort() takes no positional arguments"));
@@ -700,7 +701,7 @@ impl<'a> VM<'a> {
     /* Undoes what `enter_body` noted, a body that raised leaving its traceback frame, whether it showed an effect. */
     pub(crate) fn leave_body(&mut self, fi: usize, entry: Entry, ok: bool, chunk: &SSAChunk) -> bool {
         let impure = entry.tracked && self.observed_impure.pop().unwrap_or(true);
-        let binding = if entry.bound { self.bindings.pop() } else { None };
+        if entry.bound { self.bindings.pop(); }
         if !ok {
             // Frames go in as the error unwinds, the innermost first.
             let frame = super::super::types::CallFrame {
@@ -709,8 +710,6 @@ impl<'a> VM<'a> {
                 call_byte_pos: entry.call_ip.and_then(|ip| chunk.resolve_call(ip).or_else(|| chunk.resolve(ip))).unwrap_or(0),
                 caller_source: Some(chunk.source.clone()),
                 caller_path: Some(chunk.path.clone()),
-                current_class: binding.map(|b| b.1),
-                current_self: binding.map(|b| b.2),
             };
             self.call_stack.push(frame);
         }

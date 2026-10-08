@@ -11,7 +11,7 @@ use super::{Pending, VM};
 use super::types::*;
 
 const MAGIC: u32 = 0x4E53_5045;
-const FORMAT: u32 = 7;
+const FORMAT: u32 = 8;
 
 pub type SnapErr = String;
 
@@ -535,8 +535,6 @@ fn put_call_frame(w: &mut W, f: &CallFrame) {
     w.usz(f.fi);
     w.u32(f.call_byte_pos);
     w.str(f.caller_path.as_deref().map_or("", |p| p.as_str()));
-    w.opt_val(f.current_class);
-    w.opt_val(f.current_self);
 }
 
 pub fn save(vm: &VM, source: &str) -> Vec<u8> {
@@ -674,16 +672,12 @@ pub fn restore(vm: &mut VM, blob: &[u8]) -> Result<(), SnapErr> {
         if fi >= nfn { return Err("snapshot names a missing function".to_string()); }
         let call_byte_pos = r.u32()?;
         let path = r.str()?;
-        let current_class = r.opt_val()?;
-        let current_self = r.opt_val()?;
         let owner = sources.iter().find(|c| c.path.as_str() == path).copied().unwrap_or(chunk);
         Ok(CallFrame {
             fi,
             call_byte_pos,
             caller_source: Some(owner.source.clone()),
             caller_path: Some(owner.path.clone()),
-            current_class,
-            current_self,
         })
     })?;
 
