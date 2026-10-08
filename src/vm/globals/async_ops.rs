@@ -14,30 +14,34 @@ impl<'a> VM<'a> {
     pub fn resume_coroutine(&mut self, callee: Val) -> Result<Val, VmErr> {
         // Scheduler-driven resumes have nothing native above.
         let resume_safe = core::mem::take(&mut self.pending_exec_safe);
-        let (outer_ip, mut outer_slots, outer_stack, outer_body, outer_iters, mut sync_frames, outer_exc) =
-            if let HeapObj::Coroutine(c) = self.heap.get(callee) {
-                (c.ip, c.slots.clone(), c.stack.clone(), c.body, c.iters.clone(), c.syncs.clone(), c.excs.clone())
-            } else {
-                return Err(cold_type("not a coroutine"));
-            };
+        let (outer_ip, outer_body, held) = match self.heap.get(callee) {
+            HeapObj::Coroutine(c) => (c.ip, c.body, c.syncs.len() + c.stack.len() + c.slots.len() + c.iters.len()),
+            _ => return Err(cold_type("not a coroutine")),
+        };
         if outer_ip == FINISHED { self.yielded = false; return Ok(Val::none()); }
 
         // Bound depth, sync frames within a coroutine, plus nested resumes from mutual awaits (native-stack recursion).
-        if sync_frames.len() >= self.max_calls || self.depth >= self.max_calls {
+        let syncs = match self.heap.get(callee) { HeapObj::Coroutine(c) => c.syncs.len(), _ => 0 };
+        if syncs >= self.max_calls || self.depth >= self.max_calls {
             return Err(cold_depth());
         }
         // Re-entrant resume (`yield from g` inside g, `next(g)` from g's own body).
         if self.executing_coros.contains(&callee.0) {
             return Err(VmErr::Value("generator already executing"));
         }
-        // Charge the whole cloned state (stack/slots/iters/frames), not just frame count.
-        self.charge_steps(sync_frames.len() + outer_stack.len() + outer_slots.len() + outer_iters.len())?;
+        // Charge the whole saved state (stack/slots/iters/frames), not just frame count.
+        self.charge_steps(held)?;
+        // With no suspended helper the state moves out, a yield puts it back and any error finishes the coroutine. Helper frames wait outside every root, so the coroutine keeps them until it saves.
+        let (mut outer_slots, mut outer_stack, mut outer_iters, mut sync_frames, mut outer_exc) = match self.heap.get_mut(callee) {
+            HeapObj::Coroutine(c) if syncs == 0 => (core::mem::take(&mut c.slots), core::mem::take(&mut c.stack), core::mem::take(&mut c.iters), Vec::new(), core::mem::take(&mut c.excs)),
+            HeapObj::Coroutine(c) => (c.slots.clone(), c.stack.clone(), c.iters.clone(), c.syncs.clone(), c.excs.clone()),
+            _ => return Err(cold_type("not a coroutine")),
+        };
 
         self.executing_coros.push(callee.0);
 
-        let saved_call_len = self.call_stack.len();
         // Stored depths are relative to the saved stacks of the coroutine, restoring lifts them to absolute positions.
-        let (saved_stack_len, saved_iter_len, saved_exc_len) = self.restore_frames(outer_stack, outer_iters, outer_exc);
+        let (saved_stack_len, saved_iter_len, saved_exc_len) = self.restore_into(&mut outer_stack, &mut outer_iters, &mut outer_exc);
         let saved_yielded = self.yielded;
         let saved_resume_ip = self.resume_ip; // don't leak into next exec()
         self.yielded = false;
@@ -79,7 +83,7 @@ impl<'a> VM<'a> {
                             current_class: None,
                             current_self: None,
                         };
-                        self.call_stack.insert(saved_call_len.min(self.call_stack.len()), frame);
+                        self.call_stack.push(frame);
                         self.resume_raise = Some(e);
                     }
                     Ok(val) if self.yielded => {
@@ -134,15 +138,15 @@ impl<'a> VM<'a> {
         if self.yielded {
             let resume_ip = if outer_ran { self.resume_ip } else { outer_ip };
             // Handler depths become relative, clamped when the coroutine left a shorter stack.
-            let (remaining, coro_iters, coro_exc) = self.split_frames(saved_stack_len, saved_iter_len, saved_exc_len);
+            self.save_frames(saved_stack_len, saved_iter_len, saved_exc_len, &mut outer_stack, &mut outer_iters, &mut outer_exc);
             // An inline-awaited coro isn't a scheduler root, so its body's GC may have freed it, if so skip the save (a freed coro is unreachable and won't resume).
             if let Some(HeapObj::Coroutine(c)) = self.heap.try_get_mut(callee) {
                 c.ip = resume_ip;
                 c.slots = outer_slots;
-                c.stack = remaining;
-                c.iters = coro_iters;
+                c.stack = outer_stack;
+                c.iters = outer_iters;
                 c.syncs = sync_frames;
-                c.excs = coro_exc;
+                c.excs = outer_exc;
             }
             self.resume_ip = saved_resume_ip; // restore the caller's scratch
             Ok(result)

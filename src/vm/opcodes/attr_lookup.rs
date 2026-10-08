@@ -240,7 +240,7 @@ impl<'a> VM<'a> {
     }
 
     /* `case C(p, k=q)` checks `isinstance(subj, C)`, then pushes a tuple of the values its sub-patterns match, or None on a miss. */
-    pub(crate) fn match_class(&mut self, npos: usize, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn match_class(&mut self, npos: usize, chunk: &SSAChunk) -> Result<(), VmErr> {
         let names = self.pop()?;
         let cls = self.pop()?;
         let subj = self.pop()?;
@@ -266,7 +266,7 @@ impl<'a> VM<'a> {
         }
         if let HeapObj::Tuple(kw) = self.heap.get(names) { for &n in kw { attrs.push(self.display(n)); } }
         for a in &attrs {
-            match self.load_attr(subj, a, chunk, slots) {
+            match self.load_attr(subj, a, chunk) {
                 Ok(()) => {}
                 // A missing attribute fails the pattern instead of raising.
                 Err(e) if self.absorb_attr_err(&e) => { self.stack.truncate(base); self.push(Val::none()); return Ok(()); }
@@ -288,25 +288,25 @@ impl<'a> VM<'a> {
     }
 
     /* instance fallback via `__getattr__(name)`. Called by `LoadAttr` / `CallMethod` after the normal lookup raises `AttributeError`. */
-    pub(crate) fn try_getattr_fallback(&mut self, obj: Val, name: &str, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Option<Val>, VmErr> {
+    pub(crate) fn try_getattr_fallback(&mut self, obj: Val, name: &str, chunk: &SSAChunk) -> Result<Option<Val>, VmErr> {
         if !obj.is_heap() || !matches!(self.heap.get(obj), HeapObj::Instance(..)) { return Ok(None); }
         let name_val = self.heap.intern_str(name)?;
-        self.try_call_dunder(obj, "__getattr__", &[name_val], chunk, slots)
+        self.try_call_dunder(obj, "__getattr__", &[name_val], chunk)
     }
 
-    pub(crate) fn handle_load_attr(&mut self, name_idx: u16, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn handle_load_attr(&mut self, name_idx: u16, chunk: &SSAChunk) -> Result<(), VmErr> {
         // Borrow, don't clone, `chunk` outlives every `&mut self` call below.
         let name = chunk.names.get(name_idx as usize).ok_or(VmErr::Runtime("LoadAttr: bad name index"))?;
         let obj = self.pop()?;
-        self.load_attr(obj, name, chunk, slots)
+        self.load_attr(obj, name, chunk)
     }
 
     /* Pushes `obj.name`, shared by LoadAttr and class patterns. */
-    pub(crate) fn load_attr(&mut self, obj: Val, name: &str, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn load_attr(&mut self, obj: Val, name: &str, chunk: &SSAChunk) -> Result<(), VmErr> {
         let lookup = match self.resolve_attr(obj, name) {
             Ok(l) => l,
             Err(VmErr::Attribute(msg)) => {
-                if let Some(v) = self.try_getattr_fallback(obj, name, chunk, slots)? {
+                if let Some(v) = self.try_getattr_fallback(obj, name, chunk)? {
                     self.push(v);
                     return Ok(());
                 }
@@ -330,11 +330,11 @@ impl<'a> VM<'a> {
                 if self.depth >= self.max_calls { return Err(cold_depth()); }
                 self.push(getter);
                 self.push(recv);
-                return self.exec_call(1, chunk, slots);
+                return self.exec_call(1, chunk);
             }
             AttrLookup::Thunk(f) => {
                 self.push(f);
-                return self.exec_call(0, chunk, slots);
+                return self.exec_call(0, chunk);
             }
         };
         let v = self.heap.alloc(made)?;

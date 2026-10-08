@@ -53,7 +53,7 @@ impl<'a> VM<'a> {
 
     /* Runs a learned operator dunder, false with operands restored on a miss or `NotImplemented`. */
     #[inline]
-    fn exec_dunder(&mut self, site: Site, chunk: &SSAChunk, slots: &mut [Val]) -> Result<bool, VmErr> {
+    fn exec_dunder(&mut self, site: Site, chunk: &SSAChunk) -> Result<bool, VmErr> {
         let Site::Dunder { class, func, owner, arity, epoch } = site else { return Ok(false) };
         let arity = arity as usize;
         let len = self.stack.len();
@@ -66,7 +66,7 @@ impl<'a> VM<'a> {
         self.pending.method_binding = Some((owner, recv));
         self.push(func);
         self.stack.extend_from_slice(&operands);
-        self.exec_call(arity as u16, chunk, slots)?;
+        self.exec_call(arity as u16, chunk)?;
         let result = self.pop()?;
         if self.heap.is_not_implemented(result) {
             // The slow handler sees its operands unchanged and tries the reflected dunder.
@@ -84,10 +84,14 @@ impl<'a> VM<'a> {
         cache.set_site(ip, Site::Dunder { class, func, owner, arity, epoch: self.class_epoch });
     }
 
-    /* Runs `chunk` in `frame`, its pool found by the chunk. */
+    /* Runs `chunk` on `frame` moved onto the register stack, and moves it back after. */
     pub(crate) fn exec(&mut self, chunk: &SSAChunk, frame: &mut Vec<Val>) -> Result<Val, VmErr> {
         let pool = self.pool_of(chunk);
-        self.exec_in(chunk, frame, pool)
+        let base = self.regs.len();
+        self.regs.append(frame);
+        let result = self.exec_in(chunk, base, pool);
+        frame.extend(self.regs.drain(base..));
+        result
     }
 
     /* The index of `chunk`'s pool, made empty on its first run. */
@@ -99,8 +103,16 @@ impl<'a> VM<'a> {
         self.pools.len() - 1
     }
 
+    /* Runs the frame at `base` of the register stack, its registers the top of it. */
+    pub(crate) fn exec_in(&mut self, chunk: &SSAChunk, base: usize, pool: usize) -> Result<Val, VmErr> {
+        let outer_base = core::mem::replace(&mut self.base, base);
+        let result = self.exec_frame(chunk, pool);
+        self.base = outer_base;
+        result
+    }
+
     /* Runs the chunk's lowered code, register forms and stack opcodes alike. */
-    pub(crate) fn exec_in(&mut self, chunk: &SSAChunk, frame: &mut Vec<Val>, pool: usize) -> Result<Val, VmErr> {
+    fn exec_frame(&mut self, chunk: &SSAChunk, pool: usize) -> Result<Val, VmErr> {
         // `resume_coroutine` pre-pushes restored exception frames before calling us. Honor its override so dispatch's handler search includes them.
         let exc_base = self.pending_exec_exc_base.take().unwrap_or(self.exception_stack.len());
         let outer_safe = core::mem::replace(&mut self.frame_safe, core::mem::take(&mut self.pending_exec_safe));
@@ -117,19 +129,11 @@ impl<'a> VM<'a> {
                 Err(e) => { self.frame_safe = outer_safe; return Err(e); }
             }
         }
-        // The pool keeps its constants for good, so the slice stays put.
-        let consts_ptr: *const [Val] = self.pools[pool].consts.as_deref().unwrap_or(&[]);
         loop {
             let code: &Code = &code_rc;
             let mut cache = if once { alloc::boxed::Box::new(OpcodeCache::new(code.ins.len())) } else { self.pools[pool].take(code.ins.len()) };
-            // SAFETY see comment above.
-            if frame.len() < code.frame { self.grow_frame(chunk, code, unsafe { &*consts_ptr }, frame); }
-            let slots: &mut [Val] = frame;
-            // Root this frame's slots because a nested resume's GC marks only its own current_slots, so without this an outer frame's mutating locals get swept.
-            self.active_slots.push(slots as *const [Val]);
+            if self.regs.len() - self.base < code.frame { self.grow_frame(chunk, code, pool); }
             let result: Result<Val, VmErr> = (|| {
-                // SAFETY see comment above.
-                let consts: &[Val] = unsafe { &*consts_ptr };
                 let n = code.ins.len();
                 let mut ip = code.lowered(self.resume_ip);
                 self.resume_ip = 0;
@@ -140,7 +144,7 @@ impl<'a> VM<'a> {
                     let mut rip = ip;
                     let step = if let Some(e) = raised.take() { Err(e) } else {
                         // Only what the register loop runs enters it, a stack opcode leaves at once.
-                        if code.ins.get(ip).is_some_and(|i| in_regs(i.op)) { self.run_regs(slots, code, &mut cache, chunk, &mut ip); }
+                        if code.ins.get(ip).is_some_and(|i| in_regs(i.op)) { self.run_regs(code, &mut cache, chunk, &mut ip); }
                         rip = ip;
                         // A call the loop made can fail or leave its callee parked.
                         if let Some(e) = self.reg_error.take() { Err(e) } else if self.yielded { Ok(None) } else if ip >= n { Ok(Some(Val::none())) } else {
@@ -150,17 +154,17 @@ impl<'a> VM<'a> {
                             { let at = code.orig(rip) as usize; self.executed.entry(chunk as *const _).or_insert_with(|| alloc::vec![0; chunk.instructions.len().div_ceil(64)])[at / 64] |= 1 << (at % 64); }
                             match ins.op {
                                 // A return with no cleanup to run leaves at once.
-                                OpCode::ReturnR if self.exception_stack.len() <= exc_base && !slots[ins.b as usize].is_undef() => Ok(Some(slots[ins.b as usize])),
+                                OpCode::ReturnR if self.exception_stack.len() <= exc_base && !self.regs[self.base + ins.b as usize].is_undef() => Ok(Some(self.regs[self.base + ins.b as usize])),
                                 // A plain call skips the fused-builtin checks, its operand is only counts.
                                 OpCode::Call => {
                                     self.pending.call_ip = Some(code.orig(rip));
                                     self.pending_exec_safe = self.frame_safe;
-                                    let called = self.exec_call(ins.a, chunk, slots);
+                                    let called = self.exec_call(ins.a, chunk);
                                     self.pending_exec_safe = false;
                                     called.map(|()| None)
                                 }
-                                op if op.is_register() => self.exec_reg(ins, rip, chunk, slots, &mut cache, code, &mut ip, exc_base),
-                                _ => self.dispatch(ins, rip, chunk, slots, &mut cache, code, consts, &mut ip, exc_base),
+                                op if op.is_register() => self.exec_reg(ins, rip, chunk, &mut cache, code, &mut ip, exc_base),
+                                _ => self.dispatch(ins, rip, chunk, &mut cache, code, pool, &mut ip, exc_base),
                             }
                         }
                     };
@@ -199,7 +203,6 @@ impl<'a> VM<'a> {
                 }
             })();
 
-            self.active_slots.pop();
             if once { self.pools[pool].heat += code.hot.get(); } else { self.pools[pool].put(cache); }
             // A hot loop left unlowered carries on in the lowered code from its head.
             if core::mem::take(&mut self.tier_up) && result.is_ok() {
@@ -284,7 +287,7 @@ impl<'a> VM<'a> {
 
     /* Resolve the receiver's method and call directly, args come from CallMethodArgs. */
     #[allow(clippy::too_many_arguments)]
-    fn exec_call_method(&mut self, attr_idx: u16, call_op: u16, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    fn exec_call_method(&mut self, attr_idx: u16, call_op: u16, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk) -> Result<(), VmErr> {
         let raw = call_op as usize;
         let num_kw = (raw >> 8) & 0xFF;
         let num_pos = raw & 0xFF;
@@ -300,24 +303,24 @@ impl<'a> VM<'a> {
             self.stack.insert(at - 1, func);
             self.pending.method_binding = Some((owner, obj));
             self.pending_exec_safe = self.frame_safe;
-            let called = self.exec_call_n(num_pos + 1, num_kw, chunk, slots);
+            let called = self.exec_call_n(num_pos + 1, num_kw, chunk);
             self.pending_exec_safe = false;
             return called;
         }
         if let Some(value) = self.site_get(site, obj) {
             self.stack[at - 1] = value;
-            return self.exec_call_n(num_pos, num_kw, chunk, slots);
+            return self.exec_call_n(num_pos, num_kw, chunk);
         }
         let (positional, kw_flat) = (Args::of(&self.stack[at..at + num_pos]), Args::of(&self.stack[at + num_pos..]));
         self.stack.truncate(at - 1);
-        if let Some(id) = self.site_builtin(site, obj) { return self.exec_bound_method(obj, id, &positional, &kw_flat, chunk, slots); }
+        if let Some(id) = self.site_builtin(site, obj) { return self.exec_bound_method(obj, id, &positional, &kw_flat, chunk); }
 
         let lookup = match self.resolve_attr(obj, name) {
             Ok(l) => l,
             Err(VmErr::Attribute(msg)) => {
                 //  if `__getattr__` resolves the name to a callable, invoke it with the positional args.
-                if let Some(v) = self.try_getattr_fallback(obj, name, chunk, slots)? {
-                    return self.call_with(v, None, &positional, &kw_flat, chunk, slots);
+                if let Some(v) = self.try_getattr_fallback(obj, name, chunk)? {
+                            return self.call_with(v, None, &positional, &kw_flat, chunk);
                 }
                 return Err(VmErr::Attribute(msg));
             }
@@ -326,26 +329,26 @@ impl<'a> VM<'a> {
         match lookup {
             AttrLookup::ModuleAttr(callee) => {
                 cache.set_site(rip, self.learn_get(obj, name));
-                self.call_with(callee, None, &positional, &kw_flat, chunk, slots)
+                self.call_with(callee, None, &positional, &kw_flat, chunk)
             }
             AttrLookup::ClassMember(callee)
             // An instance-attribute callable gets no `self`, only class-level functions bind.
-            | AttrLookup::InstanceField(callee) => self.call_with(callee, None, &positional, &kw_flat, chunk, slots),
+            | AttrLookup::InstanceField(callee) => self.call_with(callee, None, &positional, &kw_flat, chunk),
             AttrLookup::InstanceMethod { recv, func, class } => {
                 if recv.0 == obj.0 { cache.set_site(rip, self.learn_method(obj, name, func, class)); }
                 // Prepend `self`, `super()` reads the binding off `pending`, and method bodies stage like plain calls.
                 self.pending.method_binding = Some((class, recv));
                 self.pending_exec_safe = self.frame_safe;
-                let called = self.call_with(func, Some(recv), &positional, &kw_flat, chunk, slots);
+                    let called = self.call_with(func, Some(recv), &positional, &kw_flat, chunk);
                 self.pending_exec_safe = false;
                 called
             }
             AttrLookup::BuiltinMethod(id) => {
                 cache.set_site(rip, self.learn_builtin(obj, id));
-                self.exec_bound_method(obj, id, &positional, &kw_flat, chunk, slots)
+                self.exec_bound_method(obj, id, &positional, &kw_flat, chunk)
             }
-            AttrLookup::BoundBuiltin(recv, id) => self.exec_bound_method(recv, id, &positional, &kw_flat, chunk, slots),
-            AttrLookup::UnboundMethod(id) => self.exec_unbound_method(id, &positional, &kw_flat, chunk, slots),
+            AttrLookup::BoundBuiltin(recv, id) => self.exec_bound_method(recv, id, &positional, &kw_flat, chunk),
+            AttrLookup::UnboundMethod(id) => self.exec_unbound_method(id, &positional, &kw_flat, chunk),
             AttrLookup::ExcArgs(_) | AttrLookup::Name(_) | AttrLookup::TypeOf(_) => {
                 // `e.args()` / `f.__name__()`, the value isn't callable, reports as missing attribute.
                 let ty = self.type_name(obj);
@@ -356,47 +359,50 @@ impl<'a> VM<'a> {
                 if self.depth >= self.max_calls { return Err(cold_depth()); }
                 self.push(getter);
                 self.push(recv);
-                self.exec_call(1, chunk, slots)?;
+                self.exec_call(1, chunk)?;
                 let value = self.pop()?;
-                self.call_with(value, None, &positional, &kw_flat, chunk, slots)
+                self.call_with(value, None, &positional, &kw_flat, chunk)
             }
             AttrLookup::Thunk(f) => {
                 // `X.__value__(...)` evaluates the value, then calls it.
                 self.push(f);
-                self.exec_call(0, chunk, slots)?;
+                self.exec_call(0, chunk)?;
                 let value = self.pop()?;
-                self.call_with(value, None, &positional, &kw_flat, chunk, slots)
+                self.call_with(value, None, &positional, &kw_flat, chunk)
             }
             AttrLookup::PropertySetterRef(prop) => {
                 let v = self.heap.alloc(HeapObj::PropertySetter(prop))?;
-                self.call_with(v, None, &positional, &kw_flat, chunk, slots)
+                self.call_with(v, None, &positional, &kw_flat, chunk)
             }
         }
     }
 
     /* Runs register forms from `ip` until one needs its handler. */
     #[inline(never)]
-    fn run_regs(&mut self, slots: &mut [Val], code: &Code, cache: &mut OpcodeCache, chunk: &SSAChunk, ip: &mut usize) {
+    fn run_regs(&mut self, code: &Code, cache: &mut OpcodeCache, chunk: &SSAChunk, ip: &mut usize) {
         let n = code.ins.len();
         let mut i = *ip;
+        let base = self.base;
+        // The frame as a local slice, taken again only after a call that may grow the stack.
+        let mut r = &mut self.regs[base..];
         macro_rules! arith {
             ($ins:ident, $int:expr, $float:expr) => {{
-                let (x, y) = (slots[$ins.b as usize], slots[$ins.c as usize]);
+                let (x, y) = (r[$ins.b as usize], r[$ins.c as usize]);
                 let v = if x.is_int() && y.is_int() { $int(x.as_int(), y.as_int()) }
                     else if x.is_float() && y.is_float() { $float(x.as_float(), y.as_float()) }
                     else { None };
                 let Some(v) = v else { break };
-                slots[$ins.a as usize] = v;
+                r[$ins.a as usize] = v;
                 i += 1;
             }};
         }
         macro_rules! compare {
             ($ins:ident, $cmp:tt) => {{
-                let (x, y) = (slots[$ins.b as usize], slots[$ins.c as usize]);
+                let (x, y) = (r[$ins.b as usize], r[$ins.c as usize]);
                 let v = if x.is_int() && y.is_int() { x.as_int() $cmp y.as_int() }
                     else if x.is_float() && y.is_float() { x.as_float() $cmp y.as_float() }
                     else { break };
-                slots[$ins.a as usize] = Val::bool(v);
+                r[$ins.a as usize] = Val::bool(v);
                 i += 1;
             }};
         }
@@ -410,7 +416,7 @@ impl<'a> VM<'a> {
         }
         macro_rules! test {
             ($ins:ident, $cmp:tt) => {{
-                let (x, y) = (slots[$ins.b as usize], slots[$ins.c as usize]);
+                let (x, y) = (r[$ins.b as usize], r[$ins.c as usize]);
                 let holds = if x.is_int() && y.is_int() { x.as_int() $cmp y.as_int() }
                     else if x.is_float() && y.is_float() { x.as_float() $cmp y.as_float() }
                     else { break };
@@ -425,6 +431,14 @@ impl<'a> VM<'a> {
                 OpCode::DivR => arith!(ins, int_div, float_div),
                 OpCode::ModR => arith!(ins, int_mod, |_, _| None),
                 OpCode::FloorDivR => arith!(ins, int_floordiv, |_, _| None),
+                // Integer bit operations stay in the loop, anything else leaves for the handler.
+                OpCode::BitAndR | OpCode::BitOrR | OpCode::BitXorR | OpCode::ShlR | OpCode::ShrR => {
+                    let (x, y) = (r[ins.b as usize], r[ins.c as usize]);
+                    let v = if x.is_int() && y.is_int() { int_bits(ins.op, x.as_int(), y.as_int()) } else { None };
+                    let Some(v) = v else { break };
+                    r[ins.a as usize] = v;
+                    i += 1;
+                }
                 OpCode::EqR => compare!(ins, ==),
                 OpCode::NotEqR => compare!(ins, !=),
                 OpCode::LtR => compare!(ins, <),
@@ -439,18 +453,18 @@ impl<'a> VM<'a> {
                 OpCode::JumpUnlessGtEq => test!(ins, >=),
                 // `x` set jumps on a true value instead.
                 OpCode::JumpIfFalseR => {
-                    let v = slots[ins.b as usize];
+                        let v = r[ins.b as usize];
                     let holds = if v.is_bool() { v.as_bool() } else if v.is_int() { v.as_int() != 0 } else { break };
                     branch!(ins, holds != (ins.x != 0))
                 }
                 OpCode::Move => {
-                    let v = slots[ins.b as usize];
+                        let v = r[ins.b as usize];
                     if v.is_undef() { break; }
-                    slots[ins.a as usize] = v;
+                    r[ins.a as usize] = v;
                     i += 1;
                 }
                 OpCode::PushRegs => {
-                    let (a, b, c) = (slots[ins.a as usize], slots[ins.b as usize], slots[ins.c as usize]);
+                        let (a, b, c) = (r[ins.a as usize], r[ins.b as usize], r[ins.c as usize]);
                     match ins.x {
                         1 if !a.is_undef() => self.stack.push(a),
                         2 if !a.is_undef() && !b.is_undef() => self.stack.extend_from_slice(&[a, b]),
@@ -460,8 +474,8 @@ impl<'a> VM<'a> {
                     i += 1;
                 }
                 OpCode::StoreTopR => {
-                    let Some(v) = self.stack.pop() else { break };
-                    if ins.x == 0 { slots[ins.a as usize] = v; } else { self.scopes[code.module].set_at(ins.a as u32, v); }
+                        let Some(v) = self.stack.pop() else { break };
+                    if ins.x == 0 { r[ins.a as usize] = v; } else { self.scopes[code.module].set_at(ins.a as u32, v); }
                     i += 1;
                 }
                 OpCode::PopTop => {
@@ -469,25 +483,25 @@ impl<'a> VM<'a> {
                     i += 1;
                 }
                 OpCode::IsR | OpCode::IsNotR => {
-                    let (x, y) = (slots[ins.b as usize], slots[ins.c as usize]);
+                        let (x, y) = (r[ins.b as usize], r[ins.c as usize]);
                     if x.is_undef() || y.is_undef() { break; }
-                    slots[ins.a as usize] = Val::bool((x.0 == y.0) == (ins.op == OpCode::IsR));
+                    r[ins.a as usize] = Val::bool((x.0 == y.0) == (ins.op == OpCode::IsR));
                     i += 1;
                 }
                 OpCode::LoadGlobalR => {
-                    let v = self.scopes[code.module].at(ins.b as u32);
+                        let v = self.scopes[code.module].at(ins.b as u32);
                     if v.is_undef() { break; }
-                    slots[ins.a as usize] = v;
+                    r[ins.a as usize] = v;
                     i += 1;
                 }
                 OpCode::StoreGlobalR if ins.x == 0 => {
-                    let v = slots[ins.b as usize];
+                        let v = r[ins.b as usize];
                     if v.is_undef() { break; }
                     self.scopes[code.module].set_at(ins.a as u32, v);
                     i += 1;
                 }
                 OpCode::GetItemR => {
-                    let (o, k) = (slots[ins.b as usize], slots[ins.c as usize]);
+                        let (o, k) = (r[ins.b as usize], r[ins.c as usize]);
                     if !o.is_heap() || !k.is_int() { break; }
                     let hit = match self.heap.get(o) {
                         HeapObj::List(v) => { let b = v.borrow(); index_of(k.as_int(), b.len()).map(|j| b[j]) }
@@ -495,23 +509,24 @@ impl<'a> VM<'a> {
                         _ => None,
                     };
                     let Some(v) = hit else { break };
-                    slots[ins.a as usize] = v;
+                    r[ins.a as usize] = v;
                     i += 1;
                 }
                 OpCode::StoreItemR => {
-                    let (o, k) = (slots[ins.a as usize], slots[ins.b as usize]);
+                        let (o, k) = (r[ins.a as usize], r[ins.b as usize]);
                     if !o.is_heap() || !k.is_int() { break; }
                     let HeapObj::List(v) = self.heap.get(o) else { break };
                     let mut b = v.borrow_mut();
                     let Some(j) = index_of(k.as_int(), b.len()) else { break };
-                    b[j] = slots[ins.c as usize];
+                    b[j] = r[ins.c as usize];
                     drop(b);
                     self.mark_impure();
+                    r = &mut self.regs[base..];
                     i += 1;
                 }
                 // Ranges and lists step here, the rest and an ended loop in the handler.
                 OpCode::ForIterR if self.budget > 0 && !self.heap.needs_gc() => {
-                    let item = match self.iter_stack.last_mut() {
+                        let item = match self.iter_stack.last_mut() {
                         Some(IterFrame::Range { cur, end, step }) if *step > 0 && *cur < *end && (Val::INT_MIN..=Val::INT_MAX).contains(cur) => {
                             let v = *cur;
                             *cur = cur.checked_add(*step).unwrap_or(i64::MAX);
@@ -528,11 +543,11 @@ impl<'a> VM<'a> {
                         _ => break,
                     };
                     self.budget -= 1;
-                    if ins.x == 0 { slots[ins.b as usize] = item; } else { self.scopes[code.module].set_at(ins.b as u32, item); }
+                    if ins.x == 0 { r[ins.b as usize] = item; } else { self.scopes[code.module].set_at(ins.b as u32, item); }
                     i += 1;
                 }
                 OpCode::GetAttrR => {
-                    let (site, o) = (cache.site(i), slots[ins.b as usize]);
+                        let (site, o) = (cache.site(i), r[ins.b as usize]);
                     let v = match self.site_get(site, o) {
                         Some(v) => v,
                         // A builtin type's method binds its receiver, the same bound object each time.
@@ -541,12 +556,14 @@ impl<'a> VM<'a> {
                             None => break,
                         },
                     };
-                    slots[ins.a as usize] = v;
+                    r = &mut self.regs[base..];
+                    r[ins.a as usize] = v;
                     i += 1;
                 }
                 OpCode::SetAttrR => {
-                    let (o, v) = (slots[ins.a as usize], slots[ins.b as usize]);
+                        let (o, v) = (r[ins.a as usize], r[ins.b as usize]);
                     if v.is_undef() || !self.site_store(cache.site(i), o, v) { break; }
+                    r = &mut self.regs[base..];
                     i += 1;
                 }
                 // A back-edge costs two steps, and only its handler collects or preempts.
@@ -557,7 +574,7 @@ impl<'a> VM<'a> {
                     i = ins.a as usize;
                 }
                 OpCode::MinusR | OpCode::NotR => {
-                    let x = slots[ins.b as usize];
+                        let x = r[ins.b as usize];
                     let v = match ins.op {
                         OpCode::MinusR if x.is_int() => Val::int_checked(-x.as_int()),
                         OpCode::MinusR if x.is_float() => Some(Val::float(-x.as_float())),
@@ -567,21 +584,22 @@ impl<'a> VM<'a> {
                         _ => None,
                     };
                     let Some(v) = v else { break };
-                    slots[ins.a as usize] = v;
+                    r[ins.a as usize] = v;
                     i += 1;
                 }
                 // Probing a key, a length or a cell runs apart, keeping this loop small.
                 OpCode::InR | OpCode::NotInR | OpCode::LenR | OpCode::LoadCellR | OpCode::StoreCellR => {
-                    if !self.heap_fast(ins, slots) { break; }
+                    if !self.heap_fast(ins) { break; }
+                    r = &mut self.regs[base..];
                     i += 1;
                 }
                 // Calls stay in this loop, leaving when one fails or parks its callee.
-                OpCode::Call | OpCode::CallMethod => match self.call_aside(ins, i, code, cache, chunk, slots) {
-                    Some(next) => { i = next; if self.yielded { break; } }
+                OpCode::Call | OpCode::CallMethod => match self.call_aside(ins, i, code, cache, chunk) {
+                    Some(next) => { i = next; if self.yielded { break; } r = &mut self.regs[base..]; }
                     None => break,
                 },
-                op if aside_op(op) => match self.regs_aside(ins, slots, n, i) {
-                    Some(next) => i = next,
+                op if aside_op(op) => match self.regs_aside(ins, n, i) {
+                    Some(next) => { i = next; r = &mut self.regs[base..]; }
                     None => break,
                 },
                 _ => break,
@@ -592,38 +610,38 @@ impl<'a> VM<'a> {
 
     /* A call from the register loop, its next index or None, the error kept. */
     #[inline(never)]
-    fn call_aside(&mut self, ins: Ins, i: usize, code: &Code, cache: &mut OpcodeCache, chunk: &SSAChunk, slots: &mut [Val]) -> Option<usize> {
+    fn call_aside(&mut self, ins: Ins, i: usize, code: &Code, cache: &mut OpcodeCache, chunk: &SSAChunk) -> Option<usize> {
         let called = if ins.op == OpCode::Call {
             self.pending.call_ip = Some(code.orig(i));
             self.pending_exec_safe = self.frame_safe;
-            let called = self.exec_call(ins.a, chunk, slots);
+            let called = self.exec_call(ins.a, chunk);
             self.pending_exec_safe = false;
             called.map(|()| i + 1)
         } else {
             // An unlowered pair steps over its second half.
             let next = i + 1 + (ins.x == 1) as usize;
-            self.exec_call_method(ins.a, ins.b, i, cache, chunk, slots).map(|()| next)
+            self.exec_call_method(ins.a, ins.b, i, cache, chunk).map(|()| next)
         };
         called.map_err(|e| self.reg_error = Some(e)).ok()
     }
 
     /* Register-loop opcodes kept apart from the hot ones, the next index or None. */
     #[inline(never)]
-    fn regs_aside(&mut self, ins: Ins, slots: &mut [Val], n: usize, i: usize) -> Option<usize> {
+    fn regs_aside(&mut self, ins: Ins, n: usize, i: usize) -> Option<usize> {
         match ins.op {
-            OpCode::PowR => slots[ins.a as usize] = numeric_binop(OpCode::Pow, slots[ins.b as usize], slots[ins.c as usize])?,
+            OpCode::PowR => self.regs[self.base + ins.a as usize] = numeric_binop(OpCode::Pow, self.regs[self.base + ins.b as usize], self.regs[self.base + ins.c as usize])?,
             OpCode::BitAndR | OpCode::BitOrR | OpCode::BitXorR | OpCode::ShlR | OpCode::ShrR => {
-                let (x, y) = (slots[ins.b as usize], slots[ins.c as usize]);
+                let (x, y) = (self.regs[self.base + ins.b as usize], self.regs[self.base + ins.c as usize]);
                 let v = if x.is_int() && y.is_int() { int_bits(ins.op, x.as_int(), y.as_int()) } else { None };
-                slots[ins.a as usize] = v?;
+                self.regs[self.base + ins.a as usize] = v?;
             }
             // A stack value tested by plain truth, a short-circuit keeping it to jump.
             OpCode::JumpIfFalse | OpCode::JumpIfFalseOrPop | OpCode::JumpIfTrueOrPop => if self.stack_jump(ins, n)? { return Some(ins.a as usize) },
-            OpCode::ListAppendR | OpCode::SetAddR | OpCode::MapAddR => if !self.accumulate(ins, slots[ins.b as usize], slots[ins.c as usize]) { return None },
+            OpCode::ListAppendR | OpCode::SetAddR | OpCode::MapAddR => if !self.accumulate(ins, self.regs[self.base + ins.b as usize], self.regs[self.base + ins.c as usize]) { return None },
             OpCode::UnpackR => {
                 let fits = seq_items(&self.heap, *self.stack.last()?, |items| {
                     if items.len() != ins.x as usize { return false; }
-                    for (&k, &v) in [ins.a, ins.b, ins.c].iter().zip(items) { slots[k as usize] = v; }
+                    for (&k, &v) in [ins.a, ins.b, ins.c].iter().zip(items) { self.regs[self.base + k as usize] = v; }
                     true
                 });
                 if fits != Some(true) { return None; }
@@ -786,10 +804,10 @@ impl<'a> VM<'a> {
 
     /* The fast path for a key, length or cell probe, false when it misses. */
     #[inline(never)]
-    fn heap_fast(&mut self, ins: Ins, slots: &mut [Val]) -> bool {
+    fn heap_fast(&mut self, ins: Ins) -> bool {
         match ins.op {
             OpCode::InR | OpCode::NotInR => {
-                let (item, container) = (slots[ins.b as usize], slots[ins.c as usize]);
+                let (item, container) = (self.regs[self.base + ins.b as usize], self.regs[self.base + ins.c as usize]);
                 // A plain key probes a plain dict or set, anything else runs the protocol.
                 if !self.plain_key(item) { return false; }
                 let hit = match self.heap.try_get(container) {
@@ -798,22 +816,22 @@ impl<'a> VM<'a> {
                     Some(HeapObj::FrozenSet(s)) if !s.is_rich() => s.contains(item, &self.heap),
                     _ => return false,
                 };
-                slots[ins.a as usize] = Val::bool(hit == (ins.op == OpCode::InR));
+                self.regs[self.base + ins.a as usize] = Val::bool(hit == (ins.op == OpCode::InR));
             }
             OpCode::LenR => {
                 if self.builtins_rebound { return false; }
-                let Some(n) = self.plain_len(slots[ins.b as usize]) else { return false };
-                slots[ins.a as usize] = Val::int(n as i64);
+                let Some(n) = self.plain_len(self.regs[self.base + ins.b as usize]) else { return false };
+                self.regs[self.base + ins.a as usize] = Val::int(n as i64);
             }
             OpCode::LoadCellR => {
-                let Some(&HeapObj::Cell(v)) = self.heap.try_get(slots[ins.b as usize]) else { return false };
+                let Some(&HeapObj::Cell(v)) = self.heap.try_get(self.regs[self.base + ins.b as usize]) else { return false };
                 if v.is_undef() { return false; }
-                slots[ins.a as usize] = v;
+                self.regs[self.base + ins.a as usize] = v;
             }
             OpCode::StoreCellR => {
-                let v = slots[ins.b as usize];
+                let v = self.regs[self.base + ins.b as usize];
                 if v.is_undef() { return false; }
-                let Some(HeapObj::Cell(inner)) = self.heap.try_get_mut(slots[ins.a as usize]) else { return false };
+                let Some(HeapObj::Cell(inner)) = self.heap.try_get_mut(self.regs[self.base + ins.a as usize]) else { return false };
                 *inner = v;
             }
             _ => return false,
@@ -824,46 +842,46 @@ impl<'a> VM<'a> {
     /* Register forms whose fast path missed, run as their stack opcode. */
     #[inline(never)]
     #[allow(clippy::too_many_arguments)]
-    fn exec_reg(&mut self, ins: Ins, rip: usize, chunk: &SSAChunk, slots: &mut [Val], cache: &mut OpcodeCache, code: &Code, ip: &mut usize, exc_base: usize) -> Result<Option<Val>, VmErr> {
+    fn exec_reg(&mut self, ins: Ins, rip: usize, chunk: &SSAChunk, cache: &mut OpcodeCache, code: &Code, ip: &mut usize, exc_base: usize) -> Result<Option<Val>, VmErr> {
         let n = code.ins.len();
         let op = ins.a;
         match ins.op {
             // A comparison keeps what a user dunder returned, which need not be a bool.
             OpCode::AddR | OpCode::InPlaceAddR | OpCode::SubR | OpCode::InPlaceSubR | OpCode::MulR | OpCode::DivR | OpCode::ModR | OpCode::FloorDivR | OpCode::PowR
-            | OpCode::EqR | OpCode::NotEqR | OpCode::LtR | OpCode::LtEqR | OpCode::GtR | OpCode::GtEqR => self.reg_binop(ins, rip, cache, chunk, slots)?,
+            | OpCode::EqR | OpCode::NotEqR | OpCode::LtR | OpCode::LtEqR | OpCode::GtR | OpCode::GtEqR => self.reg_binop(ins, rip, cache, chunk)?,
             OpCode::JumpUnlessEq | OpCode::JumpUnlessNotEq | OpCode::JumpUnlessLt | OpCode::JumpUnlessLtEq | OpCode::JumpUnlessGt | OpCode::JumpUnlessGtEq
-                => if !self.reg_test(ins, rip, cache, chunk, slots)? { *ip = self.checked_jump(op as usize, n)?; },
-            OpCode::JumpIfFalseR => if self.reg_truthy(chunk, slots, ins.b)? == (ins.x != 0) { *ip = self.checked_jump(op as usize, n)?; },
+                => if !self.reg_test(ins, rip, cache, chunk)? { *ip = self.checked_jump(op as usize, n)?; },
+            OpCode::JumpIfFalseR => if self.reg_truthy(chunk, ins.b)? == (ins.x != 0) { *ip = self.checked_jump(op as usize, n)?; },
             OpCode::LenR | OpCode::MinusR | OpCode::NotR | OpCode::GetItemR | OpCode::InR | OpCode::NotInR | OpCode::IsR | OpCode::IsNotR
             | OpCode::BitAndR | OpCode::BitOrR | OpCode::BitXorR | OpCode::ShlR | OpCode::ShrR => {
                 if ins.op == OpCode::LenR { self.pending.call_ip = Some(code.orig(rip)); }
-                slots[ins.a as usize] = self.reg_stack(ins, rip, cache, chunk, slots)?;
+                self.regs[self.base + ins.a as usize] = self.reg_stack(ins, rip, cache, chunk)?;
             }
             OpCode::UnpackR => {
-                self.unpack_iterable(ins.x as usize, None, chunk, slots)?;
-                for &t in [ins.a, ins.b, ins.c].iter().take(ins.x as usize) { slots[t as usize] = self.pop()?; }
+                self.unpack_iterable(ins.x as usize, None, chunk)?;
+                for &t in [ins.a, ins.b, ins.c].iter().take(ins.x as usize) { self.regs[self.base + t as usize] = self.pop()?; }
             }
             OpCode::ListAppendR | OpCode::SetAddR | OpCode::MapAddR => {
-                let v = self.reg(chunk, slots, ins.c)?;
-                if ins.op == OpCode::MapAddR { let k = self.reg(chunk, slots, ins.b)?; self.push(k); }
+                let v = self.reg(chunk, ins.c)?;
+                if ins.op == OpCode::MapAddR { let k = self.reg(chunk, ins.b)?; self.push(k); }
                 self.push(v);
                 let form = match ins.op { OpCode::ListAppendR => OpCode::ListAppend, OpCode::SetAddR => OpCode::SetAdd, _ => OpCode::MapAdd };
-                self.handle_comprehension(form, chunk, slots)?;
+                self.handle_comprehension(form, chunk)?;
             }
-            OpCode::Move => slots[ins.a as usize] = self.reg(chunk, slots, ins.b)?,
-            OpCode::PushRegs => self.push_regs(ins, chunk, slots)?,
+            OpCode::Move => self.regs[self.base + ins.a as usize] = self.reg(chunk, ins.b)?,
+            OpCode::PushRegs => self.push_regs(ins, chunk)?,
             OpCode::StoreItemR => {
-                let (o, k, v) = (self.reg(chunk, slots, ins.a)?, self.reg(chunk, slots, ins.b)?, self.reg(chunk, slots, ins.c)?);
+                let (o, k, v) = (self.reg(chunk, ins.a)?, self.reg(chunk, ins.b)?, self.reg(chunk, ins.c)?);
                 self.stack.extend_from_slice(&[o, k, v]);
                 self.mark_impure();
-                self.store_item(chunk, slots)?;
+                self.store_item(chunk)?;
             }
             OpCode::GetAttrR => {
-                let o = self.reg(chunk, slots, ins.b)?;
+                let o = self.reg(chunk, ins.b)?;
                 let name = chunk.names.get(ins.c as usize).ok_or(VmErr::Runtime("LoadAttr: bad name index"))?;
-                self.load_attr(o, name, chunk, slots)?;
+                self.load_attr(o, name, chunk)?;
                 let v = self.pop()?;
-                slots[ins.a as usize] = v;
+                self.regs[self.base + ins.a as usize] = v;
                 let site = match self.heap.try_get(v) {
                     Some(&HeapObj::BoundMethod(recv, id)) if recv.0 == o.0 => self.learn_builtin(o, id),
                     _ => self.learn_get(o, name),
@@ -871,31 +889,31 @@ impl<'a> VM<'a> {
                 cache.set_site(rip, site);
             }
             OpCode::SetAttrR => {
-                let (o, v) = (self.reg(chunk, slots, ins.a)?, self.reg(chunk, slots, ins.b)?);
-                self.store_attr_at(o, ins.c, v, rip, cache, chunk, slots)?;
+                let (o, v) = (self.reg(chunk, ins.a)?, self.reg(chunk, ins.b)?);
+                self.store_attr_at(o, ins.c, v, rip, cache, chunk)?;
             }
-            OpCode::LoadGlobalR => slots[ins.a as usize] = self.global_at(code.module, ins.b as u32)?,
+            OpCode::LoadGlobalR => self.regs[self.base + ins.a as usize] = self.global_at(code.module, ins.b as u32)?,
             OpCode::StoreTopR => {
                 let v = self.pop()?;
-                if ins.x == 0 { slots[ins.a as usize] = v; } else { self.scopes[code.module].set_at(ins.a as u32, v); }
+                if ins.x == 0 { self.regs[self.base + ins.a as usize] = v; } else { self.scopes[code.module].set_at(ins.a as u32, v); }
             }
             OpCode::StoreGlobalR => {
-                let v = self.reg(chunk, slots, ins.b)?;
+                let v = self.reg(chunk, ins.b)?;
                 self.scopes[code.module].set_at(ins.a as u32, v);
                 if ins.x & STORE_VOIDS_CACHE != 0 { self.templates.clear(); }
                 if ins.x & STORE_NOTES_BUILTIN != 0 { self.rebind_builtin(); }
             }
             OpCode::LoadCellR => {
-                let v = self.deref(slots[ins.b as usize]);
+                let v = self.deref(self.regs[self.base + ins.b as usize]);
                 if v.is_undef() { return Err(VmErr::Name(ssa_strip(&chunk.names[ins.b as usize]).into())); }
-                slots[ins.a as usize] = v;
+                self.regs[self.base + ins.a as usize] = v;
             }
             OpCode::StoreCellR => {
-                let v = self.reg(chunk, slots, ins.b)?;
-                if !self.set_cell(slots[ins.a as usize], v) { slots[ins.a as usize] = v; }
+                let v = self.reg(chunk, ins.b)?;
+                if !self.set_cell(self.regs[self.base + ins.a as usize], v) { self.regs[self.base + ins.a as usize] = v; }
             }
-            OpCode::ForIterR => match self.for_step(chunk, slots)? {
-                Some(item) if ins.x == 0 => slots[ins.b as usize] = item,
+            OpCode::ForIterR => match self.for_step(chunk)? {
+                Some(item) if ins.x == 0 => self.regs[self.base + ins.b as usize] = item,
                 Some(item) => self.scopes[code.module].set_at(ins.b as u32, item),
                 None => {
                     if op as usize > n { return Err(cold_runtime("jump target out of bounds")); }
@@ -903,7 +921,7 @@ impl<'a> VM<'a> {
                 }
             },
             OpCode::ReturnR => {
-                let result = self.reg(chunk, slots, ins.b)?;
+                let result = self.reg(chunk, ins.b)?;
                 if self.exception_stack.len() > exc_base
                     && let Some(h) = self.next_cleanup_handler(exc_base)
                 {
@@ -921,19 +939,19 @@ impl<'a> VM<'a> {
     /* Stack opcodes, apart from the loop so a frame's entry stays cheap. */
     #[inline(never)]
     #[allow(clippy::too_many_arguments)]
-    fn dispatch(&mut self, ins: Ins, rip: usize, chunk: &SSAChunk, slots: &mut [Val], cache: &mut OpcodeCache, code: &Code, consts: &[Val], ip: &mut usize, exc_base: usize) -> Result<Option<Val>, VmErr> {
+    fn dispatch(&mut self, ins: Ins, rip: usize, chunk: &SSAChunk, cache: &mut OpcodeCache, code: &Code, pool: usize, ip: &mut usize, exc_base: usize) -> Result<Option<Val>, VmErr> {
         let n = code.ins.len();
         let op = ins.a;
         match ins.op {
             // Short-circuit jumps, instance `__bool__` / `__len__` may run via `truthy_op`.
             OpCode::JumpIfFalseOrPop => {
                 let v = *self.stack.last().ok_or_else(|| cold_runtime("stack underflow"))?;
-                if !self.truthy_op(v, chunk, slots)? { *ip = op as usize; }
+                if !self.truthy_op(v, chunk)? { *ip = op as usize; }
                 else { self.pop()?; }
             }
             OpCode::JumpIfTrueOrPop => {
                 let v = *self.stack.last().ok_or_else(|| cold_runtime("stack underflow"))?;
-                if self.truthy_op(v, chunk, slots)? { *ip = op as usize; }
+                if self.truthy_op(v, chunk)? { *ip = op as usize; }
                 else { self.pop()?; }
             }
 
@@ -942,12 +960,12 @@ impl<'a> VM<'a> {
                 let v = match code.kinds.get(op as usize) {
                     Some(&Kind::Global(g)) => self.global_at(code.module, g)?,
                     Some(Kind::Cell) => {
-                        let v = self.deref(slots.get(op as usize).copied().unwrap_or(Val::undef()));
+                        let v = self.deref(self.regs.get(self.base + op as usize).copied().unwrap_or(Val::undef()));
                         if v.is_undef() { return Err(VmErr::Name(ssa_strip(&chunk.names[op as usize]).into())); }
                         v
                     }
                     // Malformed bytecode can carry an out-of-range slot, treat it as unbound.
-                    _ => match slots.get(op as usize).copied().filter(|v| !v.is_undef()) {
+                    _ => match self.regs.get(self.base + op as usize).copied().filter(|v| !v.is_undef()) {
                         Some(v) => v,
                         None => {
                             let name = chunk.names.get(op as usize).map(|n| ssa_strip(n)).unwrap_or_default();
@@ -966,9 +984,9 @@ impl<'a> VM<'a> {
                 }
                 Some(Kind::Cell) => {
                     let v = self.pop()?;
-                    if !self.set_cell(slots[op as usize], v) { slots[op as usize] = v; }
+                    if !self.set_cell(self.regs[self.base + op as usize], v) { self.regs[self.base + op as usize] = v; }
                 }
-                _ => self.handle_store(op, slots)?,
+                _ => self.handle_store(op)?,
             },
             OpCode::LoadGlobal => {
                 let v = match code.kinds.get(op as usize) {
@@ -998,15 +1016,15 @@ impl<'a> VM<'a> {
                     self.note_builtin_binding(name);
                 }
                 Some(Kind::Cell) => {
-                    let cell = slots[op as usize];
+                    let cell = self.regs[self.base + op as usize];
                     if self.deref(cell).is_undef() { return Err(VmErr::Name(ssa_strip(&chunk.names[op as usize]).into())); }
                     self.set_cell(cell, Val::undef());
                 }
-                _ => self.handle_side(OpCode::Del, op, chunk, slots)?,
+                _ => self.handle_side(OpCode::Del, op, chunk)?,
             },
             OpCode::LoadConst => {
                 // Constants are pre-materialised at exec entry, so this is a single bounds-checked index instead of a Value->Val conversion.
-                let v = *consts.get(op as usize)
+                let v = *self.pools[pool].consts.as_deref().and_then(|c| c.get(op as usize))
                     .ok_or_else(|| cold_runtime("constant index out of bounds"))?;
                 self.push(v);
             }
@@ -1017,7 +1035,7 @@ impl<'a> VM<'a> {
             | OpCode::Eq | OpCode::Lt | OpCode::NotEq
             | OpCode::Gt | OpCode::LtEq | OpCode::GtEq
             | OpCode::Div | OpCode::Pow | OpCode::Minus | OpCode::Pos | OpCode::InPlaceAdd | OpCode::InPlaceSub => {
-                self.exec_arith_or_compare(ins.op, op, rip, cache, chunk, slots)?;
+                self.exec_arith_or_compare(ins.op, op, rip, cache, chunk)?;
             }
 
             OpCode::Jump => {
@@ -1025,7 +1043,7 @@ impl<'a> VM<'a> {
                 // Backward jumps are loop back-edges, charge them so `while` is bounded like `for`.
                 if target <= rip {
                     self.charge_step()?;
-                    if self.heap.needs_gc() { self.collect_point(slots)?; }
+                    if self.heap.needs_gc() { self.collect_point()?; }
                     // Back-edges are the only preempt sampling point.
                     if self.preempt_left != 0 {
                         self.preempt_left -= 1;
@@ -1050,9 +1068,9 @@ impl<'a> VM<'a> {
             }
             OpCode::JumpIfFalse => {
                 let v = self.pop()?;
-                if !self.truthy_op(v, chunk, slots)? { *ip = self.checked_jump(op as usize, n)?; }
+                if !self.truthy_op(v, chunk)? { *ip = self.checked_jump(op as usize, n)?; }
             }
-            OpCode::ForIter => self.exec_for_iter(op, ip, n, chunk, slots)?,
+            OpCode::ForIter => self.exec_for_iter(op, ip, n, chunk)?,
             OpCode::PopTop => { self.pop()?; }
             OpCode::ReturnValue => {
                 let result = if self.stack.is_empty() { Val::none() } else { self.pop()? };
@@ -1068,7 +1086,7 @@ impl<'a> VM<'a> {
             }
 
             // Warm opcodes.
-            OpCode::GetItem => self.get_item_op(rip, chunk, slots, cache)?,
+            OpCode::GetItem => self.get_item_op(rip, chunk, cache)?,
 
             OpCode::CallSpread | OpCode::CallPrint | OpCode::CallLen | OpCode::CallAbs
             | OpCode::CallStr | OpCode::CallInt | OpCode::CallFloat | OpCode::CallBool
@@ -1085,7 +1103,7 @@ impl<'a> VM<'a> {
                 self.pending.call_ip = Some(code.orig(rip));
                 // Only plain user calls stage frames.
                 self.pending_exec_safe = self.frame_safe && matches!(ins.op, OpCode::Call | OpCode::CallSpread);
-                let dispatched = self.handle_function(ins.op, op, chunk, slots);
+                let dispatched = self.handle_function(ins.op, op, chunk);
                 // Cleared so `true` cannot leak onward.
                 self.pending_exec_safe = false;
                 dispatched?;
@@ -1093,16 +1111,16 @@ impl<'a> VM<'a> {
 
             OpCode::GetIter => {
                 let obj = self.pop()?;
-                let frame = self.make_iter_frame(obj, chunk, slots)?;
+                let frame = self.make_iter_frame(obj, chunk)?;
                 self.iter_stack.push(frame);
             }
             OpCode::LoadTrue => self.push(Val::bool(true)),
             OpCode::LoadFalse => self.push(Val::bool(false)),
             OpCode::LoadNone => self.push(Val::none()),
-            OpCode::Not => self.handle_logic(OpCode::Not, chunk, slots)?,
+            OpCode::Not => self.handle_logic(OpCode::Not, chunk)?,
 
             OpCode::Phi => {
-                Self::exec_phi(op, rip, &chunk.phi_map, slots, &chunk.phi_sources);
+                self.exec_phi(op, rip, &chunk.phi_map, &chunk.phi_sources);
             }
 
             OpCode::LoadAttr => {
@@ -1110,7 +1128,7 @@ impl<'a> VM<'a> {
                 match self.site_get(cache.site(rip), obj) {
                     Some(v) => { self.pop()?; self.push(v); }
                     None => {
-                        self.handle_load_attr(op, chunk, slots)?;
+                        self.handle_load_attr(op, chunk)?;
                         if let Some(name) = chunk.names.get(op as usize) { cache.set_site(rip, self.learn_get(obj, name)); }
                     }
                 }
@@ -1119,7 +1137,7 @@ impl<'a> VM<'a> {
             // Fused method call, the call's counts in the second operand.
             OpCode::CallMethod => {
                 if ins.x == 1 { *ip += 1; }
-                self.exec_call_method(op, ins.b, rip, cache, chunk, slots)?
+                self.exec_call_method(op, ins.b, rip, cache, chunk)?
             }
             OpCode::CallMethodArgs => {
                 // Always folded into CallMethod, reaching here is a bytecode bug.
@@ -1132,11 +1150,11 @@ impl<'a> VM<'a> {
                 return Err(cold_runtime("And/Or reached VM dispatch (should be short-circuited)"));
             }
 
-            OpCode::MakeClass => self.exec_make_class(op, code.orig(rip) as usize + 1, chunk, slots)?,
+            OpCode::MakeClass => self.exec_make_class(op, code.orig(rip) as usize + 1, chunk)?,
             OpCode::StoreAttr => {
                 let value = self.pop()?;
                 let obj = self.pop()?;
-                self.store_attr_at(obj, op, value, rip, cache, chunk, slots)?;
+                self.store_attr_at(obj, op, value, rip, cache, chunk)?;
             }
 
             OpCode::LoadModule => {
@@ -1145,18 +1163,18 @@ impl<'a> VM<'a> {
                 self.push(v);
             }
 
-            other => return self.dispatch_generic(other, op, chunk, slots, code, ip, exc_base),
+            other => return self.dispatch_generic(other, op, chunk, code, ip, exc_base),
         }
         Ok(None)
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn dispatch_generic(&mut self, opcode: OpCode, operand: u16, chunk: &SSAChunk, slots: &mut [Val], code: &Code, ip: &mut usize, exc_base: usize) -> Result<Option<Val>, VmErr> {
+    fn dispatch_generic(&mut self, opcode: OpCode, operand: u16, chunk: &SSAChunk, code: &Code, ip: &mut usize, exc_base: usize) -> Result<Option<Val>, VmErr> {
         match opcode {
             OpCode::BitAnd | OpCode::BitOr | OpCode::BitXor
             | OpCode::BitNot | OpCode::Shl | OpCode::Shr
-            | OpCode::InPlaceBitOr | OpCode::InPlaceBitAnd | OpCode::InPlaceBitXor => self.handle_bitwise(opcode, operand, chunk, slots)?,
-            OpCode::MatMul => self.handle_matmul(operand, chunk, slots)?,
+            | OpCode::InPlaceBitOr | OpCode::InPlaceBitAnd | OpCode::InPlaceBitXor => self.handle_bitwise(opcode, operand, chunk)?,
+            OpCode::MatMul => self.handle_matmul(operand, chunk)?,
             OpCode::MakeTypeAlias => {
                 let value = self.pop()?;
                 let name = chunk.names.get(operand as usize).ok_or_else(|| cold_runtime("MakeTypeAlias: bad name index"))?.clone();
@@ -1168,18 +1186,18 @@ impl<'a> VM<'a> {
                 let v = self.heap.alloc(HeapObj::TypeVar(name))?;
                 self.push(v);
             }
-            OpCode::In | OpCode::NotIn | OpCode::Is | OpCode::IsNot => self.handle_identity(opcode, chunk, slots)?,
+            OpCode::In | OpCode::NotIn | OpCode::Is | OpCode::IsNot => self.handle_identity(opcode, chunk)?,
 
             OpCode::BuildList | OpCode::BuildTuple | OpCode::BuildDict
-            | OpCode::BuildString | OpCode::BuildSet | OpCode::BuildSlice => self.handle_build(opcode, operand, chunk, slots)?,
+            | OpCode::BuildString | OpCode::BuildSet | OpCode::BuildSlice => self.handle_build(opcode, operand, chunk)?,
 
-            OpCode::StoreItem => { self.mark_impure(); self.store_item(chunk, slots)?; }
-            OpCode::DelItem => { self.mark_impure(); self.del_item(chunk, slots)?; }
+            OpCode::StoreItem => { self.mark_impure(); self.store_item(chunk)?; }
+            OpCode::DelItem => { self.mark_impure(); self.del_item(chunk)?; }
             OpCode::DelAttr => { self.mark_impure(); self.exec_del_attr(operand, chunk)?; }
-            OpCode::UnpackSequence | OpCode::UnpackEx | OpCode::FormatValue => self.handle_container(opcode, operand, chunk, slots)?,
+            OpCode::UnpackSequence | OpCode::UnpackEx | OpCode::FormatValue => self.handle_container(opcode, operand, chunk)?,
 
-            OpCode::ListAppend | OpCode::SetAdd | OpCode::MapAdd => self.handle_comprehension(opcode, chunk, slots)?,
-            OpCode::DictUpdate | OpCode::SetUpdate | OpCode::ListExtend => self.handle_spread_merge(opcode, chunk, slots)?,
+            OpCode::ListAppend | OpCode::SetAdd | OpCode::MapAdd => self.handle_comprehension(opcode, chunk)?,
+            OpCode::DictUpdate | OpCode::SetUpdate | OpCode::ListExtend => self.handle_spread_merge(opcode, chunk)?,
 
             // The yielded value stays on the stack for the resumer.
             OpCode::Yield => self.yielded = true,
@@ -1198,7 +1216,7 @@ impl<'a> VM<'a> {
                 let is_seq = v.is_heap() && matches!(self.heap.get(v), HeapObj::List(_) | HeapObj::Tuple(_));
                 self.push(Val::bool(is_seq));
             }
-            OpCode::MatchClass => self.match_class(operand as usize, chunk, slots)?,
+            OpCode::MatchClass => self.match_class(operand as usize, chunk)?,
             OpCode::MatchMap => {
                 let v = self.pop()?;
                 let is_map = v.is_heap() && matches!(self.heap.get(v), HeapObj::Dict(_));
@@ -1218,7 +1236,7 @@ impl<'a> VM<'a> {
             }
             OpCode::Assert | OpCode::Del | OpCode::Global | OpCode::Nonlocal
             | OpCode::Raise | OpCode::RaiseFrom | OpCode::Await => {
-                self.handle_side(opcode, operand, chunk, slots)?;
+                self.handle_side(opcode, operand, chunk)?;
             }
             // A finally frame runs on every exit path, its handler the finally body or WithExit.
             OpCode::SetupExcept | OpCode::SetupFinally => {
@@ -1315,7 +1333,7 @@ impl<'a> VM<'a> {
                 let kw_before = (operand >> 2) as usize;
                 match operand & 0x3 {
                     1 => {
-                        let items = self.iterable_items(val, chunk, slots)?;
+                        let items = self.iterable_items(val, chunk)?;
                         let n = items.len() as i32;
                         // Insert below preceding kw pairs so positionals stay contiguous.
                         let at = self.stack.len() - 2 * kw_before;
@@ -1386,28 +1404,28 @@ impl<'a> VM<'a> {
     /* Heavy arms extracted out of `dispatch` so wasm-opt can dedup prologues and the dispatcher itself stays compact. */
 
     #[inline(never)]
-    pub(crate) fn exec_arith_or_compare(&mut self, opcode: OpCode, operand: u16, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn exec_arith_or_compare(&mut self, opcode: OpCode, operand: u16, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk) -> Result<(), VmErr> {
         // The register loop already tried two plain numbers.
         let site = cache.site(rip);
         if matches!(site, Site::Dunder { .. }) {
-            if self.exec_dunder(site, chunk, slots)? { return Ok(()); }
+            if self.exec_dunder(site, chunk)? { return Ok(()); }
             cache.set_site(rip, Site::Empty);
         }
         if matches!(opcode, OpCode::Eq | OpCode::Lt | OpCode::NotEq | OpCode::Gt | OpCode::LtEq | OpCode::GtEq) {
-            self.handle_compare(opcode, rip, cache, chunk, slots)
+            self.handle_compare(opcode, rip, cache, chunk)
         } else {
-            self.handle_arith(opcode, operand, rip, cache, chunk, slots)
+            self.handle_arith(opcode, operand, rip, cache, chunk)
         }
     }
 
     /* `obj[idx]` on the stack, a monomorphic `__getitem__` site skipping the class lookup. */
-    pub(crate) fn get_item_op(&mut self, rip: usize, chunk: &SSAChunk, slots: &mut [Val], cache: &mut OpcodeCache) -> Result<(), VmErr> {
+    pub(crate) fn get_item_op(&mut self, rip: usize, chunk: &SSAChunk, cache: &mut OpcodeCache) -> Result<(), VmErr> {
         let site = cache.site(rip);
         if matches!(site, Site::Dunder { .. }) {
-            if self.exec_dunder(site, chunk, slots)? { return Ok(()); }
+            if self.exec_dunder(site, chunk)? { return Ok(()); }
             cache.set_site(rip, Site::Empty);
         }
-        self.get_item(rip, chunk, slots, cache)
+        self.get_item(rip, chunk, cache)
     }
 
     /* Charge one unit against the op budget for native loops (custom-iterator drain, generator collect) that bypass the dispatch back-edge counter. */
@@ -1427,8 +1445,8 @@ impl<'a> VM<'a> {
     }
 
     #[inline(never)]
-    fn exec_for_iter(&mut self, op: u16, ip: &mut usize, n: usize, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
-        match self.for_step(chunk, slots)? {
+    fn exec_for_iter(&mut self, op: u16, ip: &mut usize, n: usize, chunk: &SSAChunk) -> Result<(), VmErr> {
+        match self.for_step(chunk)? {
             Some(item) => self.push(item),
             None => {
                 if op as usize > n { return Err(cold_runtime("jump target out of bounds")); }
@@ -1440,9 +1458,9 @@ impl<'a> VM<'a> {
 
     /* The innermost iterator's next item, None once it ended and left the iterator stack. */
     #[inline(never)]
-    fn for_step(&mut self, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Option<Val>, VmErr> {
+    fn for_step(&mut self, chunk: &SSAChunk) -> Result<Option<Val>, VmErr> {
         self.charge_step()?;
-        if self.heap.needs_gc() { self.collect_point(slots)?; }
+        if self.heap.needs_gc() { self.collect_point()?; }
         // The next item, or the value a `yield from` over this frame evaluates to once it ends.
         let step = match self.iter_stack.last() {
             // Resume directly so `yielded` distinguishes a yielded value (even None) from exhaustion.
@@ -1451,7 +1469,7 @@ impl<'a> VM<'a> {
                 if core::mem::take(&mut self.yielded) { Ok(result) } else { Err(result) }
             }
             // A user iterator steps `__next__`, `StopIteration` ends the loop and `raise StopIteration(v)` carries `v`.
-            Some(&IterFrame::UserDefined(iter)) => match self.iter_next_proto(iter, chunk, slots) {
+            Some(&IterFrame::UserDefined(iter)) => match self.iter_next_proto(iter, chunk) {
                 Ok(Some(item)) => Ok(item),
                 Ok(None) => Err(Val::none()),
                 Err(VmErr::Raised(m)) if m == "StopIteration" || m.starts_with("StopIteration:") => Err(match self.pending.exc_val.and_then(|e| self.heap.try_get(e)) {
@@ -1485,7 +1503,7 @@ impl<'a> VM<'a> {
     }
 
     #[inline(never)]
-    fn exec_make_class(&mut self, op: u16, ip: usize, chunk: &SSAChunk, caller_slots: &[Val]) -> Result<(), VmErr> {
+    fn exec_make_class(&mut self, op: u16, ip: usize, chunk: &SSAChunk) -> Result<(), VmErr> {
         // Operand layout mirrors `class_def_with`, low byte = class chunk index, high byte = base count.
         let class_idx = (op & 0xFF) as usize;
         let num_bases = (op >> 8) as usize;
@@ -1509,7 +1527,7 @@ impl<'a> VM<'a> {
         let around: Vec<(String, Val)> = match self.body_to_fi.get(&(chunk as *const SSAChunk)) {
             Some(&fi) => chunk.names.iter().enumerate()
                 .filter(|&(i, _)| self.fn_scope[fi].kinds.get(i) == Some(&Kind::Cell))
-                .filter_map(|(i, n)| caller_slots.get(i).filter(|&&c| matches!(self.heap.try_get(c), Some(HeapObj::Cell(_)))).map(|&c| (String::from(ssa_strip(n)), c)))
+                .filter_map(|(i, n)| self.regs.get(self.base + i).filter(|&&c| matches!(self.heap.try_get(c), Some(HeapObj::Cell(_)))).map(|&c| (String::from(ssa_strip(n)), c)))
                 .collect(),
             None if self.class_chunks.contains(&(chunk as *const SSAChunk)) => self.class_cells.last().cloned().unwrap_or_default(),
             None => Vec::new(),
@@ -1574,17 +1592,17 @@ impl<'a> VM<'a> {
 
     /* `obj.name = value` at a site, which keeps where an instance's attribute went. */
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn store_attr_at(&mut self, obj: Val, name_idx: u16, value: Val, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn store_attr_at(&mut self, obj: Val, name_idx: u16, value: Val, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk) -> Result<(), VmErr> {
         if self.site_store(cache.site(rip), obj, value) { return Ok(()); }
         let name = chunk.names.get(name_idx as usize).ok_or_else(|| cold_runtime("StoreAttr: bad name index"))?;
         let before = match self.heap.try_get(obj) { Some(HeapObj::Instance(_, a)) => { let a = a.borrow(); (a.len(), a.entry_count()) } _ => (0, 0) };
-        self.store_attr(obj, name, value, chunk, slots)?;
+        self.store_attr(obj, name, value, chunk)?;
         cache.set_site(rip, self.learn_store(obj, name, before));
         Ok(())
     }
 
     /* `obj.name = value`, shared by StoreAttr and `setattr()`. */
-    pub(crate) fn store_attr(&mut self, obj: Val, name: &str, value: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn store_attr(&mut self, obj: Val, name: &str, value: Val, chunk: &SSAChunk) -> Result<(), VmErr> {
         if !obj.is_heap() { return Err(cold_type("cannot set attribute")); }
         if let HeapObj::Instance(cls_val, _) = self.heap.get(obj) {
             let cls_val = *cls_val;
@@ -1599,7 +1617,7 @@ impl<'a> VM<'a> {
                 self.push(setter);
                 self.push(obj);
                 self.push(value);
-                self.exec_call(2, chunk, slots)?;
+                self.exec_call(2, chunk)?;
                 self.pop()?;
                 return Ok(());
             }

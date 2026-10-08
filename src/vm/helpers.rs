@@ -60,8 +60,7 @@ impl<'a> VM<'a> {
         let before = self.stack.len();
         self.stack.push(callee);
         for &a in args { self.stack.push(a); }
-        let mut empty_slots: [Val; 0] = [];
-        self.exec_call(args.len() as u16, chunk, &mut empty_slots)?;
+        self.exec_call(args.len() as u16, chunk)?;
         if self.stack.len() != before + 1 {
             return Err(VmErr::Runtime("call_export: callable left no result"));
         }
@@ -101,6 +100,31 @@ impl<'a> VM<'a> {
         (stack, iters, excs)
     }
 
+    /* Moves the live stacks above the bases into the buffers of a coroutine, reusing what they hold. */
+    pub(crate) fn save_frames(&mut self, sb: usize, ib: usize, eb: usize, stack: &mut Vec<Val>, iters: &mut Vec<IterFrame>, excs: &mut Vec<ExceptionFrame>) {
+        stack.extend(self.stack.drain(sb.min(self.stack.len())..));
+        iters.extend(self.iter_stack.drain(ib.min(self.iter_stack.len())..));
+        let at = excs.len();
+        excs.extend(self.exception_stack.drain(eb.min(self.exception_stack.len())..));
+        for f in &mut excs[at..] {
+            f.stack_depth = f.stack_depth.saturating_sub(sb);
+            f.iter_depth = f.iter_depth.saturating_sub(ib);
+        }
+    }
+
+    /* Puts a suspended frame back on the live stacks and returns their bases, its buffers left empty to reuse. */
+    pub(crate) fn restore_into(&mut self, stack: &mut Vec<Val>, iters: &mut Vec<IterFrame>, excs: &mut Vec<ExceptionFrame>) -> (usize, usize, usize) {
+        let bases = (self.stack.len(), self.iter_stack.len(), self.exception_stack.len());
+        self.stack.append(stack);
+        self.iter_stack.append(iters);
+        for f in excs.iter_mut() {
+            f.stack_depth += bases.0;
+            f.iter_depth += bases.1;
+        }
+        self.exception_stack.append(excs);
+        bases
+    }
+
     /* Puts a suspended frame back on the live stacks and returns their bases. */
     pub(crate) fn restore_frames(&mut self, stack: Vec<Val>, iters: Vec<IterFrame>, mut excs: Vec<ExceptionFrame>) -> (usize, usize, usize) {
         let bases = (self.stack.len(), self.iter_stack.len(), self.exception_stack.len());
@@ -124,13 +148,13 @@ impl<'a> VM<'a> {
     }
 
     /* `f(*row)` for each of the first `n` rows of `cols`, args and results rooted while `f` runs. */
-    pub(crate) fn call_rows(&mut self, f: Val, cols: &[Vec<Val>], n: usize, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<Vec<Val>, VmErr> {
+    pub(crate) fn call_rows(&mut self, f: Val, cols: &[Vec<Val>], n: usize, chunk: &crate::parser::SSAChunk) -> Result<Vec<Val>, VmErr> {
         self.with_roots(core::iter::once(f).chain(cols.iter().flatten().copied()), |vm| {
             let mut out = Vec::with_capacity(n);
             for i in 0..n {
                 vm.push(f);
                 for c in cols { vm.push(c[i]); }
-                vm.exec_call(cols.len() as u16, chunk, slots)?;
+                vm.exec_call(cols.len() as u16, chunk)?;
                 let r = vm.pop()?;
                 vm.temp_roots.push(r);
                 out.push(r);
@@ -140,8 +164,8 @@ impl<'a> VM<'a> {
     }
 
     /* Items of any iterable, a user `__iter__` included, for `*` spreads and unpacking. */
-    pub(crate) fn iterable_items(&mut self, v: Val, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<Vec<Val>, VmErr> {
-        match self.iter_to_vec_op(v, chunk, slots)? {
+    pub(crate) fn iterable_items(&mut self, v: Val, chunk: &crate::parser::SSAChunk) -> Result<Vec<Val>, VmErr> {
+        match self.iter_to_vec_op(v, chunk)? {
             Some(items) => Ok(items),
             None => self.extract_iter(v),
         }
@@ -200,15 +224,15 @@ impl<'a> VM<'a> {
         s.chars().map(|c| self.heap.alloc(HeapObj::Str(c.to_string()))).collect()
     }
 
-    pub(crate) fn make_iter_frame(&mut self, obj: Val, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<IterFrame, VmErr> {
+    pub(crate) fn make_iter_frame(&mut self, obj: Val, chunk: &crate::parser::SSAChunk) -> Result<IterFrame, VmErr> {
         if !obj.is_heap() {
             return Err(VmErr::TypeMsg(s!("'", str self.type_name(obj), "' object is not iterable")));
         }
         // Instance `__iter__` gives a user iterator stepped by `__next__`, or a generator or builtin iterator looped as itself.
         if matches!(self.heap.get(obj), HeapObj::Instance(..))
-            && let Some(iter) = self.try_call_dunder(obj, "__iter__", &[], chunk, slots)? {
+            && let Some(iter) = self.try_call_dunder(obj, "__iter__", &[], chunk)? {
             if matches!(self.heap.try_get(iter), Some(HeapObj::Instance(..))) { return Ok(IterFrame::UserDefined(iter)); }
-            return self.make_iter_frame(iter, chunk, slots);
+            return self.make_iter_frame(iter, chunk);
         }
         Ok(match self.heap.get(obj) {
             HeapObj::Range(s, e, st) => IterFrame::Range { cur: *s, end: *e, step: *st },
@@ -241,12 +265,12 @@ impl<'a> VM<'a> {
     }
 
     /* `a, b = it`, or `a, *b, c = it` with `after` targets past the star. */
-    pub(crate) fn unpack_iterable(&mut self, n: usize, after: Option<usize>, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn unpack_iterable(&mut self, n: usize, after: Option<usize>, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         let obj = self.pop()?;
         let items = match self.heap.try_get(obj) {
             Some(HeapObj::Tuple(t)) => t.clone(),
             Some(HeapObj::List(l)) => l.borrow().clone(),
-            _ => self.iterable_items(obj, chunk, slots)?,
+            _ => self.iterable_items(obj, chunk)?,
         };
         let tail = after.unwrap_or(0);
         if items.len() < n + tail { return Err(cold_value("not enough values to unpack")); }
@@ -262,12 +286,12 @@ impl<'a> VM<'a> {
     }
 
     /* Pick the first defined Phi source, if both are undef fall back to None. */
-    pub(crate) fn exec_phi(op: u16, rip: usize, phi_map: &[usize], slots: &mut [Val], phi_sources: &[(u16, u16)]) {
+    pub(crate) fn exec_phi(&mut self, op: u16, rip: usize, phi_map: &[usize], phi_sources: &[(u16, u16)]) {
         // Parse recovery can leave a Phi indexing past `slots` (sized to names.len()), index defensively.
         let Some(&(ia, ib)) = phi_map.get(rip).and_then(|&pi| phi_sources.get(pi)) else { return };
-        let a = slots.get(ia as usize).copied().unwrap_or_else(Val::undef);
+        let a = self.regs.get(self.base + ia as usize).copied().unwrap_or_else(Val::undef);
         let val = if !a.is_undef() { a }
-        else { let b = slots.get(ib as usize).copied().unwrap_or_else(Val::undef); if !b.is_undef() { b } else { Val::none() } };
-        if let Some(dst) = slots.get_mut(op as usize) { *dst = val; }
+        else { let b = self.regs.get(self.base + ib as usize).copied().unwrap_or_else(Val::undef); if !b.is_undef() { b } else { Val::none() } };
+        if let Some(dst) = self.regs.get_mut(self.base + op as usize) { *dst = val; }
     }
 }

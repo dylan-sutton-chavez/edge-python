@@ -205,13 +205,13 @@ fn dispatch_call(recv_h: u32, name: &str, args: &[Val]) -> Result<Val, VmErr> {
         // `__call__` invokes `recv` itself, so any callable a plugin holds takes the normal dispatch path.
         if name == "__call__" {
             let chunk = vm.chunk;
-            return take_result(vm, "edge_op call(__call__): callable left no result", |vm| vm.call_with(recv, None, args, &[], chunk, &mut []));
+            return take_result(vm, "edge_op call(__call__): callable left no result", |vm| vm.call_with(recv, None, args, &[], chunk));
         }
         let ty = vm.type_name(recv);
         let mid = lookup_method(ty, name).ok_or_else(|| VmErr::Attribute(s!("'", str ty, "' object has no method '", str name, "'")))?;
         // The path a script call takes, so `str.format` or `list.sort` gets the frame its user code runs in.
         let chunk = vm.chunk;
-        take_result(vm, "edge_op call: method left no result", |vm| vm.exec_bound_method(recv, mid, args, &[], chunk, &mut []))
+        take_result(vm, "edge_op call: method left no result", |vm| vm.exec_bound_method(recv, mid, args, &[], chunk))
     })
 }
 
@@ -227,7 +227,7 @@ fn take_result(vm: &mut VM<'static>, what: &'static str, f: impl FnOnce(&mut VM<
 fn dispatch_get_attr(recv_h: u32, name: &str) -> Result<Val, VmErr> {
     with_recv("edge_op get_attr: invalid receiver handle", recv_h, |vm, recv| {
         let chunk = vm.chunk;
-        take_result(vm, "edge_op get_attr: lookup left no result", |vm| vm.load_attr(recv, name, chunk, &mut []))
+        take_result(vm, "edge_op get_attr: lookup left no result", |vm| vm.load_attr(recv, name, chunk))
     })
 }
 
@@ -238,7 +238,7 @@ fn dispatch_set_attr(recv_h: u32, name: &str, args: &[Val]) -> Result<Val, VmErr
     };
     with_recv("edge_op set_attr: invalid receiver handle", recv_h, |vm, recv| {
         let chunk = vm.chunk;
-        vm.store_attr(recv, name, value, chunk, &mut [])?;
+        vm.store_attr(recv, name, value, chunk)?;
         Ok(Val::none())
     })
 }

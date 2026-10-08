@@ -88,6 +88,10 @@ pub(crate) type NameVersionIndex = crate::util::hash::FxHashMap<String, Vec<(i64
 
 pub struct VM<'a> {
     pub(crate) stack: Vec<Val>,
+    /* The registers of every running frame, each frame a window from its base to the next. */
+    pub(crate) regs: Vec<Val>,
+    /* Where the running frame starts in `regs`. */
+    pub(crate) base: usize,
     pub(crate) heap: HeapPool,
     pub(crate) iter_stack: Vec<IterFrame>,
     pub(crate) yields: Vec<Val>,
@@ -134,8 +138,6 @@ pub struct VM<'a> {
     pub(crate) slot_templates: Vec<Vec<Val>>,
     /* Deduped template values, templates are static after init, so the GC marks this flat list instead of every per-function template. */
     pub(crate) template_roots: Vec<Val>,
-    /* Recycled fn_slots buffers, popped in exec_call, pushed back on normal return. Never a GC root (entries are cleared before reuse). */
-    pub(crate) slot_pool: Vec<Vec<Val>>,
     /* Whether `fi` may memoize, a call that shows its result can change turns it off. */
     pub(crate) memo_ok: Vec<bool>,
     /* Coroutines currently inside `resume_coroutine`, re-entry raises like Python's already-executing guard. Transient, never snapshotted. */
@@ -158,8 +160,6 @@ pub struct VM<'a> {
     pub(crate) fn_pool: Vec<usize>,
     /* Per-chunk `bare -> [(version, slot)]` index, telling a name bound once from rebound. */
     pub(crate) chunk_name_versions: HashMap<*const SSAChunk, NameVersionIndex>,
-    /* Slot-slice ptrs for every live exec() frame, GC roots so a frame's mutating locals survive a nested resume. */
-    pub(crate) active_slots: Vec<*const [Val]>,
     pub(crate) with_stack: Vec<Val>,
     /* GC roots for operands popped off the stack but still read after a dunder call that can collect. */
     pub(crate) temp_roots: Vec<Val>,
@@ -201,8 +201,10 @@ pub struct VM<'a> {
     pub(crate) fn_module: Vec<Option<String>>,
     /* Function names parallel to `functions`, consumed by traceback render. Empty = lambda. */
     pub(crate) function_names: Vec<String>,
-    /* Active call frames (innermost at end), drained by the traceback renderer on error. */
+    /* The frames an error unwound through, innermost first, built only as it unwinds and read by the traceback renderer. */
     pub(crate) call_stack: Vec<CallFrame>,
+    /* `(depth, class, self)` of each running method, which zero-argument `super()` reads. */
+    pub(crate) bindings: Vec<(usize, Val, Val)>,
     /* Cooperative scheduler for `run` / `gather` / `with_timeout`, one handle per coroutine. Single-driver model where only `top_loop` drives this, async builtins yield instead of recursing. */
     pub(crate) scheduler: Vec<CoroutineHandle>,
     /* Count of scheduler entries in `WaitingForChildren`, gates the sweep so the common (no-nested-run) tick is one comparison. */
@@ -237,6 +239,8 @@ impl<'a> VM<'a> {
     pub fn with_limits(chunk: &'a SSAChunk, limits: Limits) -> Self {
         let mut vm = Self {
             stack: Vec::with_capacity(256),
+            regs: Vec::with_capacity(256),
+            base: 0,
             iter_stack: Vec::with_capacity(16),
             yields: Vec::new(),
             chunk,
@@ -286,6 +290,7 @@ impl<'a> VM<'a> {
             fn_module: Vec::new(),
             function_names: Vec::new(),
             call_stack: Vec::new(),
+            bindings: Vec::new(),
             scheduler: Vec::new(),
             waiting_for_children_count: 0,
             time_hook: None,
@@ -300,7 +305,6 @@ impl<'a> VM<'a> {
             simple_arity: Vec::new(),
             slot_templates: Vec::new(),
             template_roots: Vec::new(),
-            slot_pool: Vec::new(),
             memo_ok: Vec::new(),
             executing_coros: Vec::new(),
             class_epoch: 0,
@@ -314,7 +318,6 @@ impl<'a> VM<'a> {
             pool_ids: HashMap::default(),
             fn_pool: Vec::new(),
             chunk_name_versions: HashMap::default(),
-            active_slots: Vec::new(),
         };
         vm.build_function_table(chunk, None, None);
         vm.index_functions(0);
@@ -474,12 +477,15 @@ impl<'a> VM<'a> {
     /* Discard transient execution state so a parked REPL interpreter can run its next input. The heap, globals, and module bindings persist. */
     pub fn clear_error_state(&mut self) {
         self.stack.clear();
+        self.regs.clear();
+        self.base = 0;
         self.iter_stack.clear();
         self.exception_stack.clear();
         self.with_stack.clear();
         self.unwind_stack.clear();
         self.temp_roots.clear();
         self.call_stack.clear();
+        self.bindings.clear();
         self.scheduler.clear();
         self.pending_sync_frames.clear();
         self.executing_coros.clear();

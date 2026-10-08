@@ -31,7 +31,7 @@ pub(crate) fn slice_bounds(start: Val, stop: Val, step: Val, len: i64) -> Result
 
 impl<'a> VM<'a> {
 
-    pub fn get_item(&mut self, ip: usize, chunk: &crate::parser::SSAChunk, slots: &mut [Val], cache: &mut crate::vm::cache::OpcodeCache) -> Result<(), VmErr> {
+    pub fn get_item(&mut self, ip: usize, chunk: &crate::parser::SSAChunk, cache: &mut crate::vm::cache::OpcodeCache) -> Result<(), VmErr> {
         // An in-range int index on a list or tuple needs no dunder or coercion.
         let n = self.stack.len();
         if n >= 2 && self.stack[n - 1].is_int() && self.stack[n - 2].is_heap() {
@@ -47,37 +47,37 @@ impl<'a> VM<'a> {
         let obj = self.pop()?;
 
         // instance `__getitem__` runs before built-in indexing, and slices pass through as a single Slice arg.
-        if let Some(r) = self.try_call_dunder(obj, "__getitem__", &[idx], chunk, slots)? {
+        if let Some(r) = self.try_call_dunder(obj, "__getitem__", &[idx], chunk)? {
             // Record monomorphic hit so the next iteration skips the class lookup.
             self.record_dunder_hit(ip, cache, obj, "__getitem__", 2);
             self.push(r);
             return Ok(());
         }
 
-        let idx = self.coerce_index(obj, idx, chunk, slots)?;
+        let idx = self.coerce_index(obj, idx, chunk)?;
         // A dict answers here, through the user `__hash__` and `__eq__` when its keys need them.
         if obj.is_heap() && let HeapObj::Dict(p) = self.heap.get(obj) {
             let fast = { let m = p.borrow(); (!m.is_rich() && !is_rich_key(idx, &self.heap)).then(|| m.get(&idx, &self.heap).copied()) };
-            let found = match fast { Some(hit) => hit, None => self.dict_get(obj, idx, chunk, slots)? };
+            let found = match fast { Some(hit) => hit, None => self.dict_get(obj, idx, chunk)? };
             let Some(v) = found else { self.require_hashable(idx)?; return Err(self.key_error(idx)) };
             self.push(v);
             return Ok(());
         }
         match self.get_item_builtin(obj, idx) {
-            Err(e) if obj.is_heap() && matches!(self.heap.get(obj), HeapObj::Class(..)) => self.class_getitem(obj, idx, e, chunk, slots),
+            Err(e) if obj.is_heap() && matches!(self.heap.get(obj), HeapObj::Class(..)) => self.class_getitem(obj, idx, e, chunk),
             r => r,
         }
     }
 
     /* `A[int]` on a class calls its `__class_getitem__`, a class with type parameters builds a generic alias. */
-    fn class_getitem(&mut self, cls: Val, idx: Val, err: VmErr, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    fn class_getitem(&mut self, cls: Val, idx: Val, err: VmErr, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         if let Some((f, _)) = self.lookup_class_member(cls, "__class_getitem__") {
             // An implicit classmethod, decorated or not.
             let f = match self.heap.try_get(f) { Some(&HeapObj::ClassMethod(inner)) => inner, _ => f };
             self.push(f);
             self.push(cls);
             self.push(idx);
-            return self.exec_call(2, chunk, slots);
+            return self.exec_call(2, chunk);
         }
         if self.lookup_class_member(cls, "__type_params__").is_none() { return Err(err); }
         let alias = self.generic_alias(cls, idx)?;
@@ -95,13 +95,13 @@ impl<'a> VM<'a> {
     }
 
     /* Instance indexes coerce via `__index__`, including slice bounds. Dict keys never coerce, they look up by hash and eq. */
-    fn coerce_index(&mut self, cont: Val, idx: Val, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<Val, VmErr> {
+    fn coerce_index(&mut self, cont: Val, idx: Val, chunk: &crate::parser::SSAChunk) -> Result<Val, VmErr> {
         // `xs[True]` indexes like `xs[1]`, a dict keeps the bool key.
         if idx.is_bool() && !(cont.is_heap() && matches!(self.heap.get(cont), HeapObj::Dict(_))) { return Ok(Val::int(idx.as_bool() as i64)); }
         if !idx.is_heap() { return Ok(idx); }
         if cont.is_heap() && matches!(self.heap.get(cont), HeapObj::Dict(_)) { return Ok(idx); }
         match *self.heap.get(idx) {
-            HeapObj::Instance(..) => match self.try_call_dunder(idx, "__index__", &[], chunk, slots)? {
+            HeapObj::Instance(..) => match self.try_call_dunder(idx, "__index__", &[], chunk)? {
                 Some(r) if r.is_int() || r.is_bool() => {
                     // Normalize bool to int, the builtin paths below accept only `is_int`.
                     let i = self.as_i128(r).unwrap_or(r.as_bool() as i128);
@@ -113,9 +113,9 @@ impl<'a> VM<'a> {
             HeapObj::Slice(start, stop, step) => {
                 let is_inst = |v: &Val| v.is_heap() && matches!(self.heap.get(*v), HeapObj::Instance(..));
                 if !is_inst(&start) && !is_inst(&stop) && !is_inst(&step) { return Ok(idx); }
-                let start = self.coerce_index(cont, start, chunk, slots)?;
-                let stop = self.coerce_index(cont, stop, chunk, slots)?;
-                let step = self.coerce_index(cont, step, chunk, slots)?;
+                let start = self.coerce_index(cont, start, chunk)?;
+                let stop = self.coerce_index(cont, stop, chunk)?;
+                let step = self.coerce_index(cont, step, chunk)?;
                 self.heap.alloc(HeapObj::Slice(start, stop, step))
             }
             _ => Ok(idx),
@@ -300,7 +300,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    pub fn store_item(&mut self, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn store_item(&mut self, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         let n = self.stack.len();
         if n >= 3 && self.stack[n - 2].is_int() && self.stack[n - 3].is_heap()
             && let HeapObj::List(v) = self.heap.get(self.stack[n - 3]) {
@@ -318,13 +318,13 @@ impl<'a> VM<'a> {
         let cont = self.pop()?;
         if !cont.is_heap() { return Err(cold_type("object does not support item assignment")); }
         // instance `__setitem__(idx, value)` short-circuits the built-in dispatch.
-        if self.try_call_dunder(cont, "__setitem__", &[idx_val, value], chunk, slots)?.is_some() {
+        if self.try_call_dunder(cont, "__setitem__", &[idx_val, value], chunk)?.is_some() {
             return Ok(());
         }
-        let idx_val = self.coerce_index(cont, idx_val, chunk, slots)?;
+        let idx_val = self.coerce_index(cont, idx_val, chunk)?;
         // A dict stores here, through the user `__hash__` and `__eq__` when its keys need them.
         if let HeapObj::Dict(p) = self.heap.get(cont) && !matches!(self.heap.try_get(idx_val), Some(HeapObj::Slice(..))) {
-            if p.borrow().is_rich() || is_rich_key(idx_val, &self.heap) { return self.dict_set(cont, idx_val, value, chunk, slots); }
+            if p.borrow().is_rich() || is_rich_key(idx_val, &self.heap) { return self.dict_set(cont, idx_val, value, chunk); }
             self.require_hashable(idx_val)?;
             self.heap.growing(&mut *p.borrow_mut(), |d| d.insert(idx_val, value, &self.heap));
             return Ok(());
@@ -362,22 +362,22 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    pub fn del_item(&mut self, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn del_item(&mut self, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         let idx_val = self.pop()?;
         let cont = self.pop()?;
         if !cont.is_heap() { return Err(cold_type("object does not support item deletion")); }
         // instance `__delitem__(idx)` short-circuits the built-in dispatch.
-        if self.try_call_dunder(cont, "__delitem__", &[idx_val], chunk, slots)?.is_some() {
+        if self.try_call_dunder(cont, "__delitem__", &[idx_val], chunk)?.is_some() {
             return Ok(());
         }
-        let idx_val = self.coerce_index(cont, idx_val, chunk, slots)?;
+        let idx_val = self.coerce_index(cont, idx_val, chunk)?;
         if idx_val.is_heap()
             && let &HeapObj::Slice(start, stop, step) = self.heap.get(idx_val)
         {
             return self.store_slice(cont, start, stop, step, None);
         }
         if self.dict_needs_vm(cont, idx_val) {
-            return match self.dict_del(cont, idx_val, chunk, slots)? { Some(_) => Ok(()), None => Err(self.key_error(idx_val)) };
+            return match self.dict_del(cont, idx_val, chunk)? { Some(_) => Ok(()), None => Err(self.key_error(idx_val)) };
         }
         match self.heap.get(cont) {
             HeapObj::List(v) => {

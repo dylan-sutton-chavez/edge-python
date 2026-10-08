@@ -25,6 +25,7 @@ This page covers the parts that span the pipeline. Tokens, parsing and bytecode 
 ## Key mechanisms
 
 - **Register dispatch.** Each chunk lowers to instructions that name frame slots directly. The hot loop is a flat `match` that Rust lowers to a jump table. Opcodes without a register form run as stack opcodes.
+- **One register stack.** Every running frame is a window of one stack, from its base to the next frame. A call opens its callee on top, and an error builds the traceback frames only as it unwinds.
 - **Inline tag checks and caches.** Register arithmetic and comparisons test the NaN-box tags of both operands inline and take the generic handler for any other type. Attribute loads, stores, method calls and operator dunders cache the field index, method or builtin they last resolved. A class change invalidates them. Caching is per instruction. Each monomorphic site stabilises on its own.
 - **Template memoisation.** A pure user function caches `args -> result`. The rules are in [Template memoisation](#template-memoisation).
 - **Static scopes.** The names of each function resolve once before anything runs. A name an enclosing function binds becomes a shared `HeapObj::Cell`. The cell is wrapped when that function is called and captured by the definition. Closures observe the `nonlocal` writes of each other. Every other free name reads the binding table of its module by a fixed index. The builtins answer while that binding is unbound.
@@ -123,7 +124,7 @@ The roots are these.
 
 - The value stack, the with-stack, yields, and the event queue.
 - The pending `yield from` value.
-- The slots of every running frame, and slot templates.
+- The register stack, which holds every running frame, and slot templates.
 - Module binding tables, and cells around class bodies.
 - Parked scheduler coroutines and iterator frames.
 - Chunk constant pools, inline-cache values, and memoisation entries.
@@ -151,7 +152,7 @@ When the children finish, the result replaces the saved stack placeholder of the
 
 A child error, a timeout or a failed host call marks it `CoroState::Raising` instead. The next resume raises the error at the park point. Handlers and the traceback position follow the normal path.
 
-Coroutines carry their own `try` and `except` frames across yields. On entry the stored frames are denormalised onto the live exception stack.
+Coroutines carry their own `try` and `except` frames across yields. On entry the stored frames are denormalised onto the live exception stack. A resume moves the saved state onto the live stacks and a yield moves it back, reusing the same buffers.
 
 On a yield they are renormalised and saved. That is how `try: run(coro) except E:` catches the raise of a child across several resume cycles.
 

@@ -540,6 +540,8 @@ fn put_call_frame(w: &mut W, f: &CallFrame) {
 }
 
 pub fn save(vm: &VM, source: &str) -> Vec<u8> {
+    // A pause leaves every frame saved in its coroutine, so the register stack holds nothing to keep.
+    debug_assert!(vm.regs.is_empty() && vm.bindings.is_empty(), "a snapshot is taken only at a pause");
     let mut w = W::new();
     w.u32(MAGIC);
     w.u32(FORMAT);

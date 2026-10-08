@@ -66,7 +66,8 @@ repository = "https://github.com/dylan-sutton-chavez/edge-python/"
 wasm-abi = { path = "abi" }
 hashbrown = { version = "0.17", default-features = false }
 itoa = "1"
-libm = "0.2"
+# Without `arch` every target takes the same software paths, the ones wasm32 takes, which Miri can interpret.
+libm = { version = "0.2", default-features = false }
 lol_alloc = "0.4"
 proc-macro2 = "1"
 quote = "1"

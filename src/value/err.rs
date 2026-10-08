@@ -85,7 +85,8 @@ impl VmErr {
     /* Multi-frame traceback, `error:` at the site, then `note: called from ...` outward. */
     pub fn render_traceback(&self, error_src: &str, error_byte_pos: Option<usize>, error_path: Option<&str>, frames: &[CallFrame], function_names: &[alloc::string::String]) -> alloc::string::String {
         let mut out = self.render_at(error_src, error_byte_pos, error_path);
-        for f in frames.iter().rev() {
+        // Frames come innermost first, the order an error unwinds them.
+        for f in frames {
             let fname = function_names.get(f.fi).map(|s| s.as_str()).unwrap_or("<anonymous>");
             let pos = f.call_byte_pos as usize;
             let path: Option<&str> = f.caller_path.as_deref().map(|p| p.as_str()).filter(|p| !p.is_empty());

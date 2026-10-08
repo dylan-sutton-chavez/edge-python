@@ -8,24 +8,24 @@ use super::super::types::*;
 impl<'a> VM<'a> {
 
     // `getattr(obj, name [, default])` reads like `obj.name`, a default answers only an AttributeError.
-    pub fn call_getattr(&mut self, op: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_getattr(&mut self, op: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         if op != 2 && op != 3 {
             return Err(cold_type("getattr() takes 2 or 3 arguments"));
         }
         let default = if op == 3 { Some(self.pop()?) } else { None };
         let name = self.expect_str_arg("getattr() name must be a string")?;
         let obj = self.pop()?;
-        match (self.with_roots(default, |vm| vm.load_attr(obj, &name, chunk, slots)), default) {
+        match (self.with_roots(default, |vm| vm.load_attr(obj, &name, chunk)), default) {
             (Err(e), Some(d)) if self.absorb_attr_err(&e) => { self.push(d); Ok(()) }
             (r, _) => r,
         }
     }
 
     // `hasattr(obj, name)` is True when `getattr` would not raise AttributeError.
-    pub fn call_hasattr(&mut self, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_hasattr(&mut self, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         let name = self.expect_str_arg("hasattr() name must be a string")?;
         let obj = self.pop()?;
-        let found = match self.load_attr(obj, &name, chunk, slots) {
+        let found = match self.load_attr(obj, &name, chunk) {
             Ok(()) => { self.pop()?; true }
             Err(e) if self.absorb_attr_err(&e) => false,
             Err(e) => return Err(e),
@@ -35,11 +35,11 @@ impl<'a> VM<'a> {
     }
 
     // `setattr(obj, name, value)` writes like `obj.name = value`, property setters included.
-    pub fn call_setattr(&mut self, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_setattr(&mut self, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         let value = self.pop()?;
         let name = self.expect_str_arg("setattr() name must be a string")?;
         let obj = self.pop()?;
-        self.store_attr(obj, &name, value, chunk, slots)?;
+        self.store_attr(obj, &name, value, chunk)?;
         self.push(Val::none());
         Ok(())
     }
@@ -129,7 +129,7 @@ impl<'a> VM<'a> {
     }
 
     /* `globals()`, a copy of the module's bindings, builtins kept apart. */
-    pub fn call_globals(&mut self, chunk: &crate::parser::SSAChunk, _slots: &[Val]) -> Result<(), VmErr> {
+    pub fn call_globals(&mut self, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         let module = self.chunk_module_id(chunk);
         let bound: alloc::vec::Vec<(String, Val)> = self.scopes[module].iter()
             .filter(|(n, _)| !n.starts_with('#'))
@@ -144,16 +144,16 @@ impl<'a> VM<'a> {
     }
 
     /* `locals()`, a copy of the frame's own and closed-over variables. */
-    pub fn call_locals(&mut self, chunk: &crate::parser::SSAChunk, slots: &[Val]) -> Result<(), VmErr> {
+    pub fn call_locals(&mut self, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         // A module's locals are its bindings, a class body's its namespace slots.
         let fi = self.body_to_fi.get(&(chunk as *const _)).copied();
-        if fi.is_none() && !self.class_chunks.contains(&(chunk as *const _)) { return self.call_globals(chunk, slots); }
+        if fi.is_none() && !self.class_chunks.contains(&(chunk as *const _)) { return self.call_globals(chunk); }
         // Map bare-name -> (best version, val) so we keep only the latest.
         let mut latest: crate::util::hash::FxHashMap<String, (i64, Val)> = crate::util::hash::FxHashMap::default();
         for (i, name) in chunk.names.iter().enumerate() {
             let kind = fi.and_then(|fi| self.fn_scope[fi].kinds.get(i).copied());
             if matches!(kind, Some(crate::vm::scope::Kind::Global(_))) { continue; }
-            let v = match slots.get(i).map(|&v| if kind == Some(crate::vm::scope::Kind::Cell) { self.deref(v) } else { v }) {
+            let v = match self.regs.get(self.base + i).map(|&v| if kind == Some(crate::vm::scope::Kind::Cell) { self.deref(v) } else { v }) {
                 Some(v) if !v.is_undef() => v,
                 _ => continue,
             };

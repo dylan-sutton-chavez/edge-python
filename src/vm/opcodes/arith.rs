@@ -10,14 +10,14 @@ fn compare_dunder_name(op: OpCode) -> Option<&'static str> {
 impl<'a> VM<'a> {
 
     /* Add/Sub/Mul/Div with IC, Mod/Pow/FloorDiv on i128 with overflow trap, Minus is unary. */
-    pub(crate) fn handle_arith(&mut self, op: OpCode, operand: u16, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn handle_arith(&mut self, op: OpCode, operand: u16, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk) -> Result<(), VmErr> {
         if op == OpCode::Minus {
             // -i128::MIN overflows, everything else fits.
-            return self.exec_unary(rip, cache, chunk, slots, "__neg__", |v| Val::float(-v.as_float()), i128::checked_neg, "unary - requires a number");
+            return self.exec_unary(rip, cache, chunk, "__neg__", |v| Val::float(-v.as_float()), i128::checked_neg, "unary - requires a number");
         }
         if op == OpCode::Pos {
             // +float returns the value unchanged, bool drops its tag to int.
-            return self.exec_unary(rip, cache, chunk, slots, "__pos__", |v| v, Some, "unary + requires a number");
+            return self.exec_unary(rip, cache, chunk, "__pos__", |v| v, Some, "unary + requires a number");
         }
 
         let (a, b) = self.pop2()?;
@@ -40,13 +40,13 @@ impl<'a> VM<'a> {
         // `name -= rhs` removes from a left set in place (alias-visible), every other type behaves as Sub.
         let op = if op == OpCode::InPlaceSub {
             if self.is_set_like(a) && self.is_set_like(b) {
-                if self.sets_rich(a, b) { return self.rich_set_op(a, b, OpCode::Sub, true, chunk, slots); }
+                if self.sets_rich(a, b) { return self.rich_set_op(a, b, OpCode::Sub, true, chunk); }
                 return self.set_iop_and_push(a, b, OpCode::Sub);
             }
             OpCode::Sub
         } else { op };
 
-        let dunder = self.try_binary_dunder(op, a, b, inplace, chunk, slots);
+        let dunder = self.try_binary_dunder(op, a, b, inplace, chunk);
 
         // instance dunder protocol, try user-defined operator before any builtin coercion.
         if let Some(r) = dunder? {
@@ -60,14 +60,14 @@ impl<'a> VM<'a> {
 
         // Sets of user-hashed items subtract through their own `__eq__`.
         if op == OpCode::Sub && self.is_set_like(a) && self.is_set_like(b) && self.sets_rich(a, b) {
-            return self.rich_set_op(a, b, op, false, chunk, slots);
+            return self.rich_set_op(a, b, op, false, chunk);
         }
         let result = match op {
             OpCode::Add => self.add_vals(a, b)?,
             OpCode::Sub => self.sub_vals(a, b)?,
             OpCode::Mul => self.mul_vals(a, b)?,
             OpCode::Div => self.div_vals(a, b)?,
-            OpCode::Mod => self.exec_mod(a, b, chunk, slots)?,
+            OpCode::Mod => self.exec_mod(a, b, chunk)?,
             OpCode::Pow => self.exec_pow(a, b)?,
             OpCode::FloorDiv => self.exec_floordiv(a, b)?,
             _ => return Err(cold_runtime("non-arith opcode in handle_arith")),
@@ -78,10 +78,10 @@ impl<'a> VM<'a> {
 
     /* Unary `-`/`+`, instance dunder takes precedence over numeric coercion. `ffl` maps the float case, `fint` the i128 case. */
     #[allow(clippy::too_many_arguments)]
-    fn exec_unary(&mut self, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk, slots: &mut [Val],
+    fn exec_unary(&mut self, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk,
                   name: &'static str, ffl: fn(Val) -> Val, fint: fn(i128) -> Option<i128>, err: &'static str) -> Result<(), VmErr> {
         let v = self.pop()?;
-        if let Some(r) = self.try_call_dunder(v, name, &[], chunk, slots)? {
+        if let Some(r) = self.try_call_dunder(v, name, &[], chunk)? {
             // monomorphic unary-instance sites promote like binary ops.
             self.record_dunder_hit(rip, cache, v, name, 1);
             self.push(r);
@@ -98,10 +98,10 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    fn exec_mod(&mut self, a: Val, b: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Val, VmErr> {
+    fn exec_mod(&mut self, a: Val, b: Val, chunk: &SSAChunk) -> Result<Val, VmErr> {
         // `str % args` is printf-style formatting, not modulo.
         if a.is_heap() && matches!(self.heap.get(a), HeapObj::Str(_)) {
-            return self.str_percent_format(a, b, chunk, slots);
+            return self.str_percent_format(a, b, chunk);
         }
         Ok(self.divmod_vals(a, b, "% requires numeric operands")?.1)
     }
@@ -121,7 +121,7 @@ impl<'a> VM<'a> {
     }
 
     /* printf-style `str % args` translates each `%[flags][width][.prec]conv` into the `{:spec}` mini-language and reuses `format_value`. A tuple spreads, else one value. */
-    fn str_percent_format(&mut self, fmt_val: Val, arg: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Val, VmErr> {
+    fn str_percent_format(&mut self, fmt_val: Val, arg: Val, chunk: &SSAChunk) -> Result<Val, VmErr> {
         let fmt = match self.heap.get(fmt_val) { HeapObj::Str(s) => s.clone(), _ => return Err(cold_type("% requires a string")) };
         let args: alloc::vec::Vec<Val> = match self.heap.try_get(arg) {
             Some(HeapObj::Tuple(t)) => t.clone(),
@@ -175,13 +175,13 @@ impl<'a> VM<'a> {
             ai += 1;
             // Map printf conversion -> (format value, spec type char, is-numeric).
             let (fval, ty, numeric): (Val, Option<char>, bool) = match conv {
-                's' => { let s = self.display_op(val, chunk, slots)?; (self.heap.alloc(HeapObj::Str(s))?, None, false) }
-                'r' => { let s = self.repr_op(val, chunk, slots)?; (self.heap.alloc(HeapObj::Str(s))?, None, false) }
-                'a' => { let s = crate::vm::format_spec::ascii_escape(&self.repr_op(val, chunk, slots)?); (self.heap.alloc(HeapObj::Str(s))?, None, false) }
-                'd' | 'i' | 'u' => (self.coerce_format_int(val, chunk, slots)?, Some('d'), true),
-                'x' => (self.coerce_format_int(val, chunk, slots)?, Some('x'), true),
-                'X' => (self.coerce_format_int(val, chunk, slots)?, Some('X'), true),
-                'o' => (self.coerce_format_int(val, chunk, slots)?, Some('o'), true),
+                's' => { let s = self.display_op(val, chunk)?; (self.heap.alloc(HeapObj::Str(s))?, None, false) }
+                'r' => { let s = self.repr_op(val, chunk)?; (self.heap.alloc(HeapObj::Str(s))?, None, false) }
+                'a' => { let s = crate::vm::format_spec::ascii_escape(&self.repr_op(val, chunk)?); (self.heap.alloc(HeapObj::Str(s))?, None, false) }
+                'd' | 'i' | 'u' => (self.coerce_format_int(val, chunk)?, Some('d'), true),
+                'x' => (self.coerce_format_int(val, chunk)?, Some('x'), true),
+                'X' => (self.coerce_format_int(val, chunk)?, Some('X'), true),
+                'o' => (self.coerce_format_int(val, chunk)?, Some('o'), true),
                 'c' => (val, Some('c'), false),
                 'f' | 'F' => (val, Some('f'), true),
                 'e' => (val, Some('e'), true),
@@ -220,9 +220,9 @@ impl<'a> VM<'a> {
     }
 
     /* `%d`/`%x` on a user instance defers to its `__int__`, matching Python. */
-    fn coerce_format_int(&mut self, v: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Val, VmErr> {
+    fn coerce_format_int(&mut self, v: Val, chunk: &SSAChunk) -> Result<Val, VmErr> {
         if v.is_heap() && matches!(self.heap.get(v), HeapObj::Instance(..))
-            && let Some(r) = self.try_call_dunder(v, "__int__", &[], chunk, slots)? {
+            && let Some(r) = self.try_call_dunder(v, "__int__", &[], chunk)? {
             if r.is_int() || (r.is_heap() && matches!(self.heap.get(r), HeapObj::LongInt(_))) { return Ok(r); }
             return Err(cold_type("__int__ returned non-int"));
         }
@@ -238,7 +238,7 @@ impl<'a> VM<'a> {
     }
 
     /* i128 bitwise + Shl/Shr (overflow trap), BitNot unary. Set/Set on |/&/^ means union/intersection/symmetric-diff, other types use the bitwise path. */
-    pub(crate) fn handle_bitwise(&mut self, op: OpCode, operand: u16, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn handle_bitwise(&mut self, op: OpCode, operand: u16, chunk: &SSAChunk) -> Result<(), VmErr> {
         // Augmented set bitwise reuses the plain path but mutates the left set in place.
         let inplace = matches!(op, OpCode::InPlaceBitOr | OpCode::InPlaceBitAnd | OpCode::InPlaceBitXor);
         let op = match op {
@@ -249,7 +249,7 @@ impl<'a> VM<'a> {
         };
         if op == OpCode::BitNot {
             let v = self.pop()?;
-            if let Some(r) = self.try_call_dunder(v, "__invert__", &[], chunk, slots)? {
+            if let Some(r) = self.try_call_dunder(v, "__invert__", &[], chunk)? {
                 self.push(r);
                 return Ok(());
             }
@@ -262,12 +262,12 @@ impl<'a> VM<'a> {
         let (a, b) = self.pop2()?;
 
         // User instance operands dispatch __or__/__and__/__xor__ (and reflected) first.
-        let dunder = self.try_binary_dunder(op, a, b, inplace || operand == crate::parser::INPLACE, chunk, slots);
+        let dunder = self.try_binary_dunder(op, a, b, inplace || operand == crate::parser::INPLACE, chunk);
         if let Some(r) = dunder? { self.push(r); return Ok(()); }
 
         if self.is_set_like(a) && self.is_set_like(b)
             && matches!(op, OpCode::BitAnd | OpCode::BitOr | OpCode::BitXor) {
-            if self.sets_rich(a, b) { return self.rich_set_op(a, b, op, inplace, chunk, slots); }
+            if self.sets_rich(a, b) { return self.rich_set_op(a, b, op, inplace, chunk); }
             return if inplace { self.set_iop_and_push(a, b, op) } else { self.set_binop_and_push(a, b, op) };
         }
         // `dict | dict` (and `|=`) merges, right operand winning.
@@ -275,7 +275,7 @@ impl<'a> VM<'a> {
             && matches!(self.heap.get(a), HeapObj::Dict(_))
             && matches!(self.heap.get(b), HeapObj::Dict(_)) {
             if [a, b].iter().any(|&d| matches!(self.heap.get(d), HeapObj::Dict(rc) if rc.borrow().is_rich())) {
-                return self.rich_dict_merge(a, b, chunk, slots);
+                return self.rich_dict_merge(a, b, chunk);
             }
             let mut merged = DictMap::with_capacity(0);
             if let HeapObj::Dict(d) = self.heap.get(a) { for (k, v) in d.borrow().iter() { merged.insert(k, v, &self.heap); } }
@@ -325,9 +325,9 @@ impl<'a> VM<'a> {
     }
 
     /* `a @ b` has no builtin meaning, only `__matmul__` or `__rmatmul__` answer it. */
-    pub(crate) fn handle_matmul(&mut self, operand: u16, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn handle_matmul(&mut self, operand: u16, chunk: &SSAChunk) -> Result<(), VmErr> {
         let (a, b) = self.pop2()?;
-        let dunder = self.try_binary_dunder(OpCode::MatMul, a, b, operand == crate::parser::INPLACE, chunk, slots);
+        let dunder = self.try_binary_dunder(OpCode::MatMul, a, b, operand == crate::parser::INPLACE, chunk);
         let r = dunder?.ok_or_else(|| self.unsupported("@", a, b))?;
         self.push(r);
         Ok(())
@@ -352,10 +352,10 @@ impl<'a> VM<'a> {
         self.int_to_val(Some(ai >> shift.min(127)))
     }
 
-    pub(crate) fn handle_compare(&mut self, op: OpCode, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn handle_compare(&mut self, op: OpCode, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk) -> Result<(), VmErr> {
         let (a, b) = self.pop2()?;
 
-        let dunder = self.try_compare_dunder(op, a, b, chunk, slots);
+        let dunder = self.try_compare_dunder(op, a, b, chunk);
 
         // try the user-defined comparison dunder before falling back to numeric/string compare.
         if let Some(r) = dunder? {
@@ -373,12 +373,12 @@ impl<'a> VM<'a> {
             // Sets of user-hashed items probe each other through their own dunders.
             let r = self.with_roots([a, b], |vm| -> Result<bool, VmErr> {
                 Ok(match op {
-                    OpCode::Eq => vm.values_eq(a, b, chunk, slots)?,
-                    OpCode::NotEq => !vm.values_eq(a, b, chunk, slots)?,
-                    OpCode::LtEq => vm.set_within(a, b, chunk, slots)?,
-                    OpCode::GtEq => vm.set_within(b, a, chunk, slots)?,
-                    OpCode::Lt => vm.set_within(a, b, chunk, slots)? && !vm.values_eq(a, b, chunk, slots)?,
-                    _ => vm.set_within(b, a, chunk, slots)? && !vm.values_eq(a, b, chunk, slots)?,
+                    OpCode::Eq => vm.values_eq(a, b, chunk)?,
+                    OpCode::NotEq => !vm.values_eq(a, b, chunk)?,
+                    OpCode::LtEq => vm.set_within(a, b, chunk)?,
+                    OpCode::GtEq => vm.set_within(b, a, chunk)?,
+                    OpCode::Lt => vm.set_within(a, b, chunk)? && !vm.values_eq(a, b, chunk)?,
+                    _ => vm.set_within(b, a, chunk)? && !vm.values_eq(a, b, chunk)?,
                 })
             })?;
             self.push(Val::bool(r));
@@ -386,12 +386,12 @@ impl<'a> VM<'a> {
         }
 
         let result = match op {
-            OpCode::Eq => self.values_eq(a, b, chunk, slots)?,
-            OpCode::NotEq => !self.values_eq(a, b, chunk, slots)?,
-            OpCode::Lt => self.values_lt(a, b, chunk, slots)?,
-            OpCode::Gt => self.values_lt(b, a, chunk, slots)?,
-            OpCode::LtEq => !self.values_lt(b, a, chunk, slots)?,
-            OpCode::GtEq => !self.values_lt(a, b, chunk, slots)?,
+            OpCode::Eq => self.values_eq(a, b, chunk)?,
+            OpCode::NotEq => !self.values_eq(a, b, chunk)?,
+            OpCode::Lt => self.values_lt(a, b, chunk)?,
+            OpCode::Gt => self.values_lt(b, a, chunk)?,
+            OpCode::LtEq => !self.values_lt(b, a, chunk)?,
+            OpCode::GtEq => !self.values_lt(a, b, chunk)?,
             _ => return Err(cold_runtime("non-compare opcode in handle_compare")),
         };
         self.push(Val::bool(result));
@@ -399,11 +399,11 @@ impl<'a> VM<'a> {
     }
 
     // Only plain `not`, And/Or are short-circuited by the parser via Jump-If-Or-Pop.
-    pub(crate) fn handle_logic(&mut self, op: OpCode, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn handle_logic(&mut self, op: OpCode, chunk: &SSAChunk) -> Result<(), VmErr> {
         match op {
             OpCode::Not => {
                 let v = self.pop()?;
-                let t = self.truthy_op(v, chunk, slots)?;
+                let t = self.truthy_op(v, chunk)?;
                 self.push(Val::bool(!t));
             }
             _ => return Err(cold_runtime("non-logic opcode in handle_logic")),
@@ -412,11 +412,11 @@ impl<'a> VM<'a> {
     }
 
     /* `is` / `is not` compare tag bits inline, `in` / `not in` delegate to contains(). */
-    pub(crate) fn handle_identity(&mut self, op: OpCode, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn handle_identity(&mut self, op: OpCode, chunk: &SSAChunk) -> Result<(), VmErr> {
         let (a, b) = self.pop2()?;
         let result = match op {
-            OpCode::In => self.contains_op(b, a, chunk, slots)?,
-            OpCode::NotIn => !self.contains_op(b, a, chunk, slots)?,
+            OpCode::In => self.contains_op(b, a, chunk)?,
+            OpCode::NotIn => !self.contains_op(b, a, chunk)?,
             OpCode::Is => a.0 == b.0,
             OpCode::IsNot => a.0 != b.0,
             _ => return Err(cold_runtime("non-identity opcode in handle_identity")),

@@ -3,15 +3,15 @@ use super::*;
 impl<'a> VM<'a> {
 
     /* StoreName does a single SSA slot write after register coalescing. */
-    pub(crate) fn handle_store(&mut self, operand: u16, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn handle_store(&mut self, operand: u16) -> Result<(), VmErr> {
         let v = self.pop()?;
         // Malformed bytecode can carry an out-of-range slot, so drop the write rather than panic.
-        if let Some(s) = slots.get_mut(operand as usize) { *s = v; }
+        if let Some(s) = self.regs.get_mut(self.base + operand as usize) { *s = v; }
         Ok(())
     }
 
     /* Container constructors for list / tuple / dict / set / slice / string. */
-    pub(crate) fn handle_build(&mut self, op: OpCode, operand: u16, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn handle_build(&mut self, op: OpCode, operand: u16, chunk: &SSAChunk) -> Result<(), VmErr> {
         match op {
             OpCode::BuildList => {
                 let v = self.pop_n(operand as usize)?;
@@ -25,7 +25,7 @@ impl<'a> VM<'a> {
             }
             OpCode::BuildDict => {
                 let flat = self.pop_n(operand as usize * 2)?;
-                let dm = self.dictmap_of(flat.chunks(2).map(|c| (c[0], c[1])).collect(), chunk, slots)?;
+                let dm = self.dictmap_of(flat.chunks(2).map(|c| (c[0], c[1])).collect(), chunk)?;
                 let val = self.heap.alloc(HeapObj::Dict(Rc::new(RefCell::new(dm))))?;
                 self.push(val);
             }
@@ -35,7 +35,7 @@ impl<'a> VM<'a> {
                 let val = self.heap.alloc(HeapObj::Str(s))?;
                 self.push(val);
             }
-            OpCode::BuildSet => self.build_set(operand, chunk, slots)?,
+            OpCode::BuildSet => self.build_set(operand, chunk)?,
             OpCode::BuildSlice => self.build_slice(operand)?,
             _ => return Err(cold_runtime("non-build opcode in handle_build")),
         }
@@ -43,10 +43,10 @@ impl<'a> VM<'a> {
     }
 
     /* Unpacking and `{value!s:spec}` formatting. Indexed get/store/del are dispatched directly from the hot loop, never here. */
-    pub(crate) fn handle_container(&mut self, op: OpCode, operand: u16, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn handle_container(&mut self, op: OpCode, operand: u16, chunk: &SSAChunk) -> Result<(), VmErr> {
         match op {
-            OpCode::UnpackSequence => self.unpack_iterable(operand as usize, None, chunk, slots)?,
-            OpCode::UnpackEx => self.unpack_iterable((operand >> 8) as usize, Some((operand & 0xFF) as usize), chunk, slots)?,
+            OpCode::UnpackSequence => self.unpack_iterable(operand as usize, None, chunk)?,
+            OpCode::UnpackEx => self.unpack_iterable((operand >> 8) as usize, Some((operand & 0xFF) as usize), chunk)?,
             OpCode::FormatValue => {
                 /* Operand layout is bit 0 has_spec, bits 1..=2 conversion (0 none, 1 !r, 2 !s, 3 !a). See parser/literals.rs. */
                 let has_spec = (operand & 1) != 0;
@@ -57,9 +57,9 @@ impl<'a> VM<'a> {
                 // Conversions run user dunders with the spec rooted and charge the length of the text.
                 let converted = self.with_roots(spec_val, |vm| {
                     let s = match conv {
-                        1 => vm.repr_op(v, chunk, slots)?,
-                        2 => vm.display_op(v, chunk, slots)?,
-                        3 => crate::vm::format_spec::ascii_escape(&vm.repr_op(v, chunk, slots)?),
+                        1 => vm.repr_op(v, chunk)?,
+                        2 => vm.display_op(v, chunk)?,
+                        3 => crate::vm::format_spec::ascii_escape(&vm.repr_op(v, chunk)?),
                         _ => return Ok(v),
                     };
                     vm.charge_steps(s.len())?;
@@ -71,7 +71,7 @@ impl<'a> VM<'a> {
                     Some(Some(HeapObj::Str(s))) => s.clone(),
                     Some(_) => return Err(cold_type("format spec must be a string")),
                 };
-                let result = self.format_op(converted, &spec, chunk, slots)?;
+                let result = self.format_op(converted, &spec, chunk)?;
                 let val = self.heap.alloc(HeapObj::Str(result))?;
                 self.push(val);
             }
@@ -81,33 +81,33 @@ impl<'a> VM<'a> {
     }
 
     /* Append/add to the comprehension accumulator at the top of the stack. */
-    pub(crate) fn handle_comprehension(&mut self, op: OpCode, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn handle_comprehension(&mut self, op: OpCode, chunk: &SSAChunk) -> Result<(), VmErr> {
         let value = self.pop()?;
         let key = if op == OpCode::MapAdd { Some(self.pop()?) } else { None };
         let acc = *self.stack.last().ok_or(VmErr::Runtime("stack underflow"))?;
         match (op, key, self.heap.try_get(acc)) {
             (OpCode::ListAppend, _, Some(HeapObj::List(rc))) => self.heap.growing(&mut *rc.borrow_mut(), |v| v.push(value)),
-            (OpCode::SetAdd, _, Some(HeapObj::Set(_))) => { self.set_add(acc, value, chunk, slots)?; }
-            (OpCode::MapAdd, Some(k), Some(HeapObj::Dict(_))) => self.dict_set(acc, k, value, chunk, slots)?,
+            (OpCode::SetAdd, _, Some(HeapObj::Set(_))) => { self.set_add(acc, value, chunk)?; }
+            (OpCode::MapAdd, Some(k), Some(HeapObj::Dict(_))) => self.dict_set(acc, k, value, chunk)?,
             _ => return Err(cold_runtime("comprehension accumulator corrupted")),
         }
         Ok(())
     }
 
     /* Merge the source on top of the stack into the container below it for `{**m}`, `{*s}`, `[*it]`. */
-    pub(crate) fn handle_spread_merge(&mut self, op: OpCode, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn handle_spread_merge(&mut self, op: OpCode, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         let src = self.pop()?;
         let acc = *self.stack.last().ok_or(VmErr::Runtime("stack underflow"))?;
         if !acc.is_heap() { return Err(cold_runtime("spread accumulator corrupted")); }
         match op {
             // `**` requires a mapping, and later keys overwrite earlier ones.
-            OpCode::DictUpdate => self.dict_spread_into(acc, src, chunk, slots)?,
+            OpCode::DictUpdate => self.dict_spread_into(acc, src, chunk)?,
             OpCode::SetUpdate => {
                 if !matches!(self.heap.get(acc), HeapObj::Set(_)) { return Err(cold_runtime("spread accumulator corrupted")); }
-                self.spread_into(acc, src, chunk, slots)?;
+                self.spread_into(acc, src, chunk)?;
             }
             OpCode::ListExtend => {
-                let items = self.iterable_items(src, chunk, slots)?;
+                let items = self.iterable_items(src, chunk)?;
                 match self.heap.get(acc) {
                     HeapObj::List(rc) => self.heap.growing(&mut *rc.borrow_mut(), |v| v.extend(items)),
                     _ => return Err(cold_runtime("spread accumulator corrupted")),
@@ -119,11 +119,11 @@ impl<'a> VM<'a> {
     }
 
     /* Side-effecting / impure ops, assert, del, global/nonlocal, import, type alias, raise, await. */
-    pub(crate) fn handle_side(&mut self, op: OpCode, operand: u16, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn handle_side(&mut self, op: OpCode, operand: u16, chunk: &SSAChunk) -> Result<(), VmErr> {
         match op {
             OpCode::Assert => {
                 let v = self.pop()?;
-                if !self.truthy_op(v, chunk, slots)? {
+                if !self.truthy_op(v, chunk)? {
                     // Bare `assert` raises a catchable AssertionError with empty args.
                     let inst = self.heap.alloc(HeapObj::ExcInstance("AssertionError".into(), Vec::new()))?;
                     self.pending.exc_val = Some(inst);
@@ -133,7 +133,7 @@ impl<'a> VM<'a> {
             OpCode::Del => {
                 let slot = operand as usize;
                 // Deleting an already-unbound name raises NameError, matching Python.
-                match slots.get_mut(slot) {
+                match self.regs.get_mut(self.base + slot) {
                     Some(s) if !s.is_undef() => *s = Val::undef(),
                     _ => {
                         let name = chunk.names.get(slot).map(|n| ssa_strip(n)).unwrap_or_default();
@@ -164,13 +164,13 @@ impl<'a> VM<'a> {
                 // A class deriving from an exception raises an instance of itself made with no arguments.
                 if matches!(self.heap.try_get(exc), Some(HeapObj::Class(..))) && self.exc_base(exc).is_some() {
                     self.push(exc);
-                    self.exec_call(0, chunk, slots)?;
+                    self.exec_call(0, chunk)?;
                     exc = self.pop()?;
                 }
                 // A user exception reports its class name and `str(e)`, its own `__str__` included.
                 if let Some(&HeapObj::Instance(cls, _)) = self.heap.try_get(exc) && self.exc_base(cls).is_some() {
                     let name = self.exc_type_name(exc);
-                    let text = self.with_roots([exc], |vm| vm.display_op(exc, chunk, slots))?;
+                    let text = self.with_roots([exc], |vm| vm.display_op(exc, chunk))?;
                     self.pending.exc_val = Some(exc);
                     return Err(VmErr::Raised(if text.is_empty() { name } else { crate::s!(str &name, ": ", str &text) }));
                 }

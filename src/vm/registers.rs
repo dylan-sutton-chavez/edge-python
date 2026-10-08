@@ -84,20 +84,22 @@ impl<'a> VM<'a> {
     /* Grows a frame to its code's length, and a body's template with it. */
     #[cold]
     #[inline(never)]
-    pub(crate) fn grow_frame(&mut self, chunk: &SSAChunk, code: &Code, consts: &[Val], slots: &mut Vec<Val>) {
+    pub(crate) fn grow_frame(&mut self, chunk: &SSAChunk, code: &Code, pool: usize) {
         let names = chunk.names.len();
-        let grow = |slots: &mut Vec<Val>| {
-            slots.resize(names, Val::undef());
-            slots.extend_from_slice(consts);
-            slots.extend_from_slice(&[Val::none(), Val::bool(true), Val::bool(false)]);
-            slots.resize(code.frame.max(slots.len()), Val::undef());
+        let consts = self.pools[pool].consts.as_deref().unwrap_or(&[]);
+        // The running frame is the top of the register stack, so it grows in place.
+        let grow = |regs: &mut Vec<Val>, at: usize| {
+            regs.resize(at + names, Val::undef());
+            regs.extend_from_slice(consts);
+            regs.extend_from_slice(&[Val::none(), Val::bool(true), Val::bool(false)]);
+            regs.resize(at + code.frame.max(regs.len() - at), Val::undef());
         };
-        grow(slots);
+        grow(&mut self.regs, self.base);
         if let Some(&fi) = self.body_to_fi.get(&(chunk as *const SSAChunk))
             && let Some(template) = self.slot_templates.get_mut(fi)
             && template.len() < code.frame
         {
-            grow(template);
+            grow(template, 0);
             // The template now holds constants a collection must keep.
             self.template_roots.extend(consts.iter().filter(|v| v.is_heap()));
         }
@@ -105,8 +107,8 @@ impl<'a> VM<'a> {
 
     /* The value register `r` holds, a name read the way LoadName reads it. */
     #[inline(always)]
-    pub(crate) fn reg(&self, chunk: &SSAChunk, slots: &[Val], r: u16) -> Result<Val, VmErr> {
-        let v = slots[r as usize];
+    pub(crate) fn reg(&self, chunk: &SSAChunk, r: u16) -> Result<Val, VmErr> {
+        let v = self.regs[self.base + r as usize];
         if v.is_undef() { self.unbound(chunk, r) } else { Ok(v) }
     }
 
@@ -119,29 +121,29 @@ impl<'a> VM<'a> {
 
     /* `a = b op c` on numbers inline, anything else through the stack opcode. */
     #[inline(always)]
-    pub(crate) fn reg_binop(&mut self, ins: Ins, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
-        slots[ins.a as usize] = match numeric_binop(lower::stack_form(ins.op), slots[ins.b as usize], slots[ins.c as usize]) {
+    pub(crate) fn reg_binop(&mut self, ins: Ins, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk) -> Result<(), VmErr> {
+        self.regs[self.base + ins.a as usize] = match numeric_binop(lower::stack_form(ins.op), self.regs[self.base + ins.b as usize], self.regs[self.base + ins.c as usize]) {
             Some(v) => v,
-            None => self.reg_stack(ins, rip, cache, chunk, slots)?,
+            None => self.reg_stack(ins, rip, cache, chunk)?,
         };
         Ok(())
     }
 
     /* Whether `b op c` holds, numbers compared inline. */
     #[inline(always)]
-    pub(crate) fn reg_test(&mut self, ins: Ins, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk, slots: &mut [Val]) -> Result<bool, VmErr> {
-        if let Some(v) = numeric_binop(lower::stack_form(ins.op), slots[ins.b as usize], slots[ins.c as usize]) { return Ok(v.as_bool()); }
-        let r = self.reg_stack(ins, rip, cache, chunk, slots)?;
-        self.truthy_op(r, chunk, slots)
+    pub(crate) fn reg_test(&mut self, ins: Ins, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk) -> Result<bool, VmErr> {
+        if let Some(v) = numeric_binop(lower::stack_form(ins.op), self.regs[self.base + ins.b as usize], self.regs[self.base + ins.c as usize]) { return Ok(v.as_bool()); }
+        let r = self.reg_stack(ins, rip, cache, chunk)?;
+        self.truthy_op(r, chunk)
     }
 
     /* A register form run as its stack opcode, its result taken back. */
     #[inline(never)]
-    pub(crate) fn reg_stack(&mut self, ins: Ins, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Val, VmErr> {
+    pub(crate) fn reg_stack(&mut self, ins: Ins, rip: usize, cache: &mut OpcodeCache, chunk: &SSAChunk) -> Result<Val, VmErr> {
         let op = lower::stack_form(ins.op);
-        let x = self.reg(chunk, slots, ins.b)?;
+        let x = self.reg(chunk, ins.b)?;
         self.push(x);
-        if !matches!(op, OpCode::Minus | OpCode::Not | OpCode::CallLen) { let y = self.reg(chunk, slots, ins.c)?; self.push(y); }
+        if !matches!(op, OpCode::Minus | OpCode::Not | OpCode::CallLen) { let y = self.reg(chunk, ins.c)?; self.push(y); }
         let augmented = ins.x & lower::AUGMENTED != 0;
         match op {
             OpCode::BitAnd | OpCode::BitOr | OpCode::BitXor | OpCode::Shl | OpCode::Shr => {
@@ -151,32 +153,32 @@ impl<'a> VM<'a> {
                     (OpCode::BitXor, true) => OpCode::InPlaceBitXor,
                     (op, _) => op,
                 };
-                self.handle_bitwise(op, (ins.x & !lower::AUGMENTED) as u16, chunk, slots)?;
+                self.handle_bitwise(op, (ins.x & !lower::AUGMENTED) as u16, chunk)?;
             }
-            OpCode::In | OpCode::NotIn | OpCode::Is | OpCode::IsNot => self.handle_identity(op, chunk, slots)?,
-            OpCode::Not => self.handle_logic(op, chunk, slots)?,
-            OpCode::GetItem => self.get_item_op(rip, chunk, slots, cache)?,
-            OpCode::CallLen => self.handle_function(op, 1, chunk, slots)?,
-            _ => self.exec_arith_or_compare(op, ins.x as u16, rip, cache, chunk, slots)?,
+            OpCode::In | OpCode::NotIn | OpCode::Is | OpCode::IsNot => self.handle_identity(op, chunk)?,
+            OpCode::Not => self.handle_logic(op, chunk)?,
+            OpCode::GetItem => self.get_item_op(rip, chunk, cache)?,
+            OpCode::CallLen => self.handle_function(op, 1, chunk)?,
+            _ => self.exec_arith_or_compare(op, ins.x as u16, rip, cache, chunk)?,
         }
         self.pop()
     }
 
     /* Whether register `r` is true, a user `__bool__` or `__len__` included. */
     #[inline(always)]
-    pub(crate) fn reg_truthy(&mut self, chunk: &SSAChunk, slots: &mut [Val], r: u16) -> Result<bool, VmErr> {
-        let v = slots[r as usize];
+    pub(crate) fn reg_truthy(&mut self, chunk: &SSAChunk, r: u16) -> Result<bool, VmErr> {
+        let v = self.regs[self.base + r as usize];
         if v.is_bool() { return Ok(v.as_bool()); }
         if v.is_int() { return Ok(v.as_int() != 0); }
-        let v = self.reg(chunk, slots, r)?;
-        self.truthy_op(v, chunk, slots)
+        let v = self.reg(chunk, r)?;
+        self.truthy_op(v, chunk)
     }
 
     /* Pushes the `ins.x` registers an instruction names, deepest first. */
     #[inline(always)]
-    pub(crate) fn push_regs(&mut self, ins: Ins, chunk: &SSAChunk, slots: &[Val]) -> Result<(), VmErr> {
+    pub(crate) fn push_regs(&mut self, ins: Ins, chunk: &SSAChunk) -> Result<(), VmErr> {
         for &r in [ins.a, ins.b, ins.c].iter().take(ins.x as usize) {
-            let v = self.reg(chunk, slots, r)?;
+            let v = self.reg(chunk, r)?;
             self.push(v);
         }
         Ok(())

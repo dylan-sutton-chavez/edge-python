@@ -50,8 +50,8 @@ impl<'a> VM<'a> {
 
     // `super()` zero-arg reads the running method's `(class, self)` off the top frame and returns a Super proxy.
     pub fn call_super(&mut self) -> Result<(), VmErr> {
-        let binding = self.call_stack.last()
-            .and_then(|f| f.current_class.zip(f.current_self));
+        // Only the binding of the running frame counts, a plain function a method called has none.
+        let binding = self.bindings.last().filter(|b| b.0 == self.depth).map(|b| (b.1, b.2));
         let Some((class, recv)) = binding else {
             return Err(VmErr::Runtime("super() must be called inside a method"));
         };
@@ -60,9 +60,9 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    pub fn call_repr(&mut self, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_repr(&mut self, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         let o = self.pop()?;
-        let s = self.repr_op(o, chunk, slots)?;
+        let s = self.repr_op(o, chunk)?;
         self.alloc_and_push_str(s)
     }
 
@@ -91,7 +91,7 @@ impl<'a> VM<'a> {
         Ok(())
     }
 
-    pub fn call_hash(&mut self, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_hash(&mut self, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         let o = self.pop()?;
 
         // instance dispatch, user `__hash__` wins, `__eq__` without `__hash__` makes the instance unhashable.
@@ -102,7 +102,7 @@ impl<'a> VM<'a> {
             // `__hash__ = object.__hash__` keeps the identity hash below.
             let inherited = hash_fn.is_some_and(|f| f.is_heap() && matches!(self.heap.get(f), HeapObj::BoundMethod(_, id) if id.name() == "__hash__"));
             if hash_fn.is_some() && !inherited {
-                let r = self.try_call_dunder(o, "__hash__", &[], chunk, slots)?
+                let r = self.try_call_dunder(o, "__hash__", &[], chunk)?
                     .ok_or_else(|| cold_type("__hash__ returned NotImplemented"))?;
                 if !r.is_int() {
                     return Err(cold_type("__hash__ must return int"));
@@ -140,7 +140,7 @@ impl<'a> VM<'a> {
         if o.is_heap() { self.require_hashable(o)?; }
         // A tuple holding a user-hashed item hashes through that item, as its dict key would.
         let rich_tuple = matches!(self.heap.try_get(o), Some(HeapObj::Tuple(_))) && crate::vm::eq::is_rich_key(o, &self.heap);
-        let h = if rich_tuple { self.with_roots([o], |vm| vm.key_hash(o, chunk, slots))? }
+        let h = if rich_tuple { self.with_roots([o], |vm| vm.key_hash(o, chunk))? }
             else { crate::vm::eq::hash_val_with_heap(o, &self.heap) };
         self.push(Val::int(h as i64 & Val::INT_MAX));
         Ok(())

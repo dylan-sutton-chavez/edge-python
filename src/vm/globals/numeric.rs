@@ -113,10 +113,10 @@ fn parse_int_radix(s: &str, base: i64) -> Result<i128, VmErr> {
 
 impl<'a> VM<'a> {
 
-    pub fn call_abs(&mut self, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_abs(&mut self, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         let o = self.pop()?;
         // Honor a user `__abs__` and pass any return type through.
-        if let Some(r) = self.try_call_dunder(o, "__abs__", &[], chunk, slots)? {
+        if let Some(r) = self.try_call_dunder(o, "__abs__", &[], chunk)? {
             self.push(r);
             return Ok(());
         }
@@ -131,7 +131,7 @@ impl<'a> VM<'a> {
         self.push(v); Ok(())
     }
 
-    pub fn call_int(&mut self, argc: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_int(&mut self, argc: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         // Two-arg form `int(string, base)` parses the string in the given radix.
         if argc == 2 {
             let base_v = self.pop()?;
@@ -168,7 +168,7 @@ impl<'a> VM<'a> {
             }
             else if o.is_heap() && matches!(self.heap.get(o), HeapObj::Instance(..)) {
                 // Honor a user `__int__` method.
-                match self.try_call_dunder(o, "__int__", &[], chunk, slots)? {
+                match self.try_call_dunder(o, "__int__", &[], chunk)? {
                     Some(r) if r.is_int() || r.is_bool() => self.as_i128(r).unwrap_or(r.as_bool() as i128),
                     Some(_) => return Err(cold_type("__int__ returned non-int")),
                     None => return Err(cold_type("int() requires a number or string")),
@@ -180,7 +180,7 @@ impl<'a> VM<'a> {
     }
 
     /* Converts int or parseable string to floating point. */
-    pub fn call_float(&mut self, argc: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_float(&mut self, argc: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         if argc == 0 { self.push(Val::float(0.0)); return Ok(()); } // `float()` is 0.0.
         let o = self.pop()?;
         // A float comes back as the same object.
@@ -198,10 +198,10 @@ impl<'a> VM<'a> {
             }
             else if o.is_heap() && matches!(self.heap.get(o), HeapObj::Instance(..)) {
                 // Honor a user `__float__` and fall back to `__index__` like CPython.
-                match self.try_call_dunder(o, "__float__", &[], chunk, slots)? {
+                match self.try_call_dunder(o, "__float__", &[], chunk)? {
                     Some(r) if r.is_float() => { self.push(r); return Ok(()); }
                     Some(_) => return Err(cold_type("__float__ returned non-float")),
-                    None => match self.try_call_dunder(o, "__index__", &[], chunk, slots)? {
+                    None => match self.try_call_dunder(o, "__index__", &[], chunk)? {
                         Some(r) if r.is_int() || r.is_bool() => self.as_i128(r).unwrap_or(r.as_bool() as i128) as f64,
                         Some(_) => return Err(cold_type("__index__ returned non-int")),
                         None => return Err(cold_type("float() requires a number or string")),
@@ -272,10 +272,10 @@ impl<'a> VM<'a> {
         self.push(v); Ok(())
     }
 
-    pub fn call_min(&mut self, op: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> { self.call_minmax(op, true, chunk, slots) }
-    pub fn call_max(&mut self, op: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> { self.call_minmax(op, false, chunk, slots) }
+    pub fn call_min(&mut self, op: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> { self.call_minmax(op, true, chunk) }
+    pub fn call_max(&mut self, op: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> { self.call_minmax(op, false, chunk) }
 
-    fn call_minmax(&mut self, op: u16, is_min: bool, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    fn call_minmax(&mut self, op: u16, is_min: bool, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         let (positional, kw_flat) = self.parse_call_args(op)?;
         // Optional `default=` (returned when a single iterable is empty) and `key=` (compare by key(x)).
         let mut default: Option<Val> = None;
@@ -295,22 +295,22 @@ impl<'a> VM<'a> {
         }
         // Without a key, compare elements directly, with one, compare key(x) but return the winning element.
         let keys = match key {
-            Some(k) => Some(self.call_rows(k, core::slice::from_ref(&items), items.len(), chunk, slots)?),
+            Some(k) => Some(self.call_rows(k, core::slice::from_ref(&items), items.len(), chunk)?),
             None => None,
         };
         let keys = keys.as_deref().unwrap_or(&items);
         // An instance key runs `__lt__` like `sorted`, so then the operands stay rooted.
         let roots = if self.any_instance(keys) { items.len() + keys.len() } else { 0 };
-        let best = self.with_roots(items.iter().chain(keys).copied().take(roots), |vm| vm.extreme_index(keys, is_min, chunk, slots))?;
+        let best = self.with_roots(items.iter().chain(keys).copied().take(roots), |vm| vm.extreme_index(keys, is_min, chunk))?;
         self.push(items[best]); Ok(())
     }
 
     /* Index of the least key, or with `!is_min` the greatest, the first one on a tie. */
-    fn extreme_index(&mut self, keys: &[Val], is_min: bool, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<usize, VmErr> {
+    fn extreme_index(&mut self, keys: &[Val], is_min: bool, chunk: &crate::parser::SSAChunk) -> Result<usize, VmErr> {
         let mut best = 0;
         for i in 1..keys.len() {
             let (l, r) = if is_min { (keys[i], keys[best]) } else { (keys[best], keys[i]) };
-            if self.sort_lt(l, r, chunk, slots)? { best = i; }
+            if self.sort_lt(l, r, chunk)? { best = i; }
         }
         Ok(best)
     }

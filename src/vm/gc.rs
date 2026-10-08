@@ -6,13 +6,13 @@ impl<'a> VM<'a> {
     /* Collects, and past the memory limit after it, what the program still holds raises MemoryError. */
     #[cold]
     #[inline(never)]
-    pub(crate) fn collect_point(&mut self, slots: &[Val]) -> Result<(), VmErr> {
-        self.collect(slots);
+    pub(crate) fn collect_point(&mut self) -> Result<(), VmErr> {
+        self.collect();
         if self.heap.over() { Err(cold_heap()) } else { Ok(()) }
     }
 
     /* Mark all reachable roots then sweep, non-heap Vals are no-op to mark. */
-    pub(crate) fn collect(&mut self, current_slots: &[Val]) {
+    pub(crate) fn collect(&mut self) {
         #[cfg(feature = "memcheck")]
         self.heap.check_count();
         for &v in &self.stack { self.heap.mark(v); }
@@ -38,7 +38,8 @@ impl<'a> VM<'a> {
                 }
             }
         }
-        for &v in current_slots { self.heap.mark(v); }
+        // Every running frame lives in the register stack, the innermost on top.
+        for &v in &self.regs { self.heap.mark(v); }
         #[cfg(all(target_arch = "wasm32", feature = "runtime"))]
         crate::bridge::mark_handles(self as *const Self as *const u8, &mut self.heap);
         for &v in &self.template_roots { self.heap.mark(v); }
@@ -54,11 +55,6 @@ impl<'a> VM<'a> {
         for pool in &self.pools { for &v in pool.consts.iter().flatten() { self.heap.mark(v); } }
         for cache in self.pools.iter().flat_map(|p| p.caches()) {
             for v in cache.site_roots() { self.heap.mark(v); }
-        }
-        // SAFETY each pointer lives while its frame runs, so every running frame stays rooted.
-        for i in 0..self.active_slots.len() {
-            let frame_slots: &[Val] = unsafe { &*self.active_slots[i] };
-            for &v in frame_slots { self.heap.mark(v); }
         }
         self.templates.mark_all(&mut self.heap);
         self.heap.sweep();

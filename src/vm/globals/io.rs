@@ -6,7 +6,7 @@ use super::super::types::*;
 impl<'a> VM<'a> {
 
     /* `print(*args, sep=' ', end='\n')` joins args with `sep`, appends `end`, streams exact bytes via `print_hook` or buffers. Leaves no value (statement-shaped), value uses get a None pushed by the parser / the generic Call path. */
-    pub fn call_print(&mut self, op: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_print(&mut self, op: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         let (positional, kw_flat) = self.parse_call_args(op)?;
         let mut sep = String::from(" ");
         let mut end = String::from("\n");
@@ -25,7 +25,7 @@ impl<'a> VM<'a> {
         for (i, v) in positional.iter().enumerate() {
             if i > 0 { body.push_str(&sep); }
             // each arg goes through `display_op` so user `__str__` / `__repr__` are honoured.
-            let s = self.display_op(*v, chunk, slots)?;
+            let s = self.display_op(*v, chunk)?;
             body.push_str(&s);
         }
         body.push_str(&end);
@@ -98,7 +98,7 @@ impl<'a> VM<'a> {
     }
 
     // `format(value [, spec])`.
-    pub fn call_format(&mut self, op: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_format(&mut self, op: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         if op != 1 && op != 2 {
             return Err(cold_type("format() takes 1 or 2 arguments"));
         }
@@ -109,7 +109,7 @@ impl<'a> VM<'a> {
             Some(Some(HeapObj::Str(s))) => s.clone(),
             Some(_) => return Err(cold_type("format() spec must be a string")),
         };
-        let result = self.format_op(val, &spec, chunk, slots)?;
+        let result = self.format_op(val, &spec, chunk)?;
         self.alloc_and_push_str(result)
     }
 }

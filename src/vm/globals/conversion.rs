@@ -4,7 +4,7 @@ use crate::alloc::string::ToString;
 
 impl<'a> VM<'a> {
 
-    pub fn call_str(&mut self, argc: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_str(&mut self, argc: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         if argc == 0 { return self.alloc_and_push_str(alloc::string::String::new()); }
         if argc >= 2 {
             // `str(bytes, encoding[, errors])` decodes, mirroring `bytes.decode`.
@@ -15,14 +15,14 @@ impl<'a> VM<'a> {
             return Err(cold_type("decoding to str: need a bytes-like object"));
         }
         let o = self.pop()?;
-        let s = self.display_op(o, chunk, slots)?;
+        let s = self.display_op(o, chunk)?;
         self.alloc_and_push_str(s)
     }
 
-    pub fn call_bool(&mut self, argc: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_bool(&mut self, argc: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         if argc == 0 { self.push(Val::bool(false)); return Ok(()); }
         let o = self.pop()?;
-        let t = self.truthy_op(o, chunk, slots)?;
+        let t = self.truthy_op(o, chunk)?;
         self.push(Val::bool(t));
         Ok(())
     }

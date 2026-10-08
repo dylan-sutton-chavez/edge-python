@@ -28,10 +28,10 @@ impl<'a> VM<'a> {
         frame.borrow_mut().next_item(&mut self.heap)
     }
 
-    pub fn call_len(&mut self, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_len(&mut self, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         let o = self.pop()?;
         // instance `__len__` takes precedence over built-in length rules.
-        if let Some(r) = self.try_call_dunder(o, "__len__", &[], chunk, slots)? {
+        if let Some(r) = self.try_call_dunder(o, "__len__", &[], chunk)? {
             let n = if r.is_int() { r.as_int() as i128 }
             else if let Some(i) = crate::vm::types::as_i128(r, &self.heap) { i }
             else { return Err(cold_type("__len__ must return int")); };
@@ -62,36 +62,36 @@ impl<'a> VM<'a> {
         })
     }
 
-    pub fn call_sorted(&mut self, reverse: bool, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_sorted(&mut self, reverse: bool, chunk: &SSAChunk) -> Result<(), VmErr> {
         let o = self.pop()?;
         let mut items = self.extract_iter(o)?;
-        self.sort_by_lt(&mut items, reverse, chunk, slots)?;
+        self.sort_by_lt(&mut items, reverse, chunk)?;
         self.alloc_and_push_list(items)
     }
 
     /* sorted(iterable, key=fn, reverse=False), delegates to call_sorted when key is absent. */
-    pub fn call_sorted_with_key(&mut self, key: Option<Val>, reverse: bool, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_sorted_with_key(&mut self, key: Option<Val>, reverse: bool, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         let key = match key {
             Some(k) if !k.is_none() => k,
-            _ => return self.call_sorted(reverse, chunk, slots),
+            _ => return self.call_sorted(reverse, chunk),
         };
         let o = self.pop()?;
         let items = self.extract_iter(o)?;
-        let sorted = self.sort_by_key(items, key, reverse, chunk, slots)?;
+        let sorted = self.sort_by_key(items, key, reverse, chunk)?;
         self.alloc_and_push_list(sorted)
     }
 
     /* list.sort(key=fn, reverse=False) in-place. Snapshots list before key calls so heap borrow ends before exec_call. */
-    pub fn call_list_sort_keyed(&mut self, recv: Val, key: Option<Val>, reverse: bool, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_list_sort_keyed(&mut self, recv: Val, key: Option<Val>, reverse: bool, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         let items = match self.heap.get(recv) {
             HeapObj::List(rc) => rc.borrow().clone(),
             _ => return Err(cold_type("sort: receiver is not a list")),
         };
         let result = if let Some(k) = key.filter(|k| !k.is_none()) {
-            self.sort_by_key(items, k, reverse, chunk, slots)?
+            self.sort_by_key(items, k, reverse, chunk)?
         } else {
             let mut s = items;
-            self.sort_by_lt(&mut s, reverse, chunk, slots)?;
+            self.sort_by_lt(&mut s, reverse, chunk)?;
             s
         };
         let rc = match self.heap.get(recv) {
@@ -105,15 +105,15 @@ impl<'a> VM<'a> {
     }
 
     /* Decorate-sort-undecorate, applies key fn to each item, sorts by resulting keys, returns reordered items. */
-    fn sort_by_key(&mut self, items: Vec<Val>, key: Val, reverse: bool, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<Vec<Val>, VmErr> {
-        let keys = self.call_rows(key, core::slice::from_ref(&items), items.len(), chunk, slots)?;
+    fn sort_by_key(&mut self, items: Vec<Val>, key: Val, reverse: bool, chunk: &crate::parser::SSAChunk) -> Result<Vec<Val>, VmErr> {
+        let keys = self.call_rows(key, core::slice::from_ref(&items), items.len(), chunk)?;
         // Root both keys and items because a `__lt__` comparison can run user code that GCs.
-        let order = self.sorted_order(&keys, &items, reverse, chunk, slots)?;
+        let order = self.sorted_order(&keys, &items, reverse, chunk)?;
         Ok(order.into_iter().map(|i| items[i]).collect())
     }
 
     /* Root the operands (comparators can run GC-triggering user code), stable-sort `keys` via `sort_lt`, and return the index permutation. `extra_roots` keeps caller-only values (e.g. the items in a keyed sort) alive across comparisons. First comparison error wins, later comparisons degrade to Equal. */
-    fn sorted_order(&mut self, keys: &[Val], extra_roots: &[Val], reverse: bool, chunk: &SSAChunk, slots: &mut [Val]) -> Result<Vec<usize>, VmErr> {
+    fn sorted_order(&mut self, keys: &[Val], extra_roots: &[Val], reverse: bool, chunk: &SSAChunk) -> Result<Vec<usize>, VmErr> {
         if let Some(order) = plain_order(keys, reverse, &self.heap) { return Ok(order); }
         let roots_base = self.temp_roots.len();
         // Only an instance key runs user code that could collect.
@@ -123,9 +123,9 @@ impl<'a> VM<'a> {
             if sort_err.is_some() { return core::cmp::Ordering::Equal; }
             // Descending compares flipped, so equal keys keep their order like an ascending sort.
             let (a, b) = if reverse { (b, a) } else { (a, b) };
-            match self.sort_lt(keys[a], keys[b], chunk, slots) {
+            match self.sort_lt(keys[a], keys[b], chunk) {
                 Ok(true) => core::cmp::Ordering::Less,
-                Ok(false) => match self.sort_lt(keys[b], keys[a], chunk, slots) {
+                Ok(false) => match self.sort_lt(keys[b], keys[a], chunk) {
                     Ok(true) => core::cmp::Ordering::Greater,
                     Ok(false) => core::cmp::Ordering::Equal,
                     Err(e) => { sort_err = Some(e); core::cmp::Ordering::Equal }
@@ -145,17 +145,17 @@ impl<'a> VM<'a> {
 
     // a < b via __lt__ when either side defines it, else the built-in comparison.
     #[inline]
-    pub(crate) fn sort_lt(&mut self, a: Val, b: Val, chunk: &SSAChunk, slots: &mut [Val]) -> Result<bool, VmErr> {
-        if let Some(r) = self.try_compare_dunder(OpCode::Lt, a, b, chunk, slots)? {
+    pub(crate) fn sort_lt(&mut self, a: Val, b: Val, chunk: &SSAChunk) -> Result<bool, VmErr> {
+        if let Some(r) = self.try_compare_dunder(OpCode::Lt, a, b, chunk)? {
             return Ok(self.truthy(r));
         }
-        self.values_lt(a, b, chunk, slots)
+        self.values_lt(a, b, chunk)
     }
 
     /* In-place sort dispatching `__lt__`, roots items since a comparison can run user code that GCs. */
-    pub(crate) fn sort_by_lt(&mut self, items: &mut [Val], reverse: bool, chunk: &SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub(crate) fn sort_by_lt(&mut self, items: &mut [Val], reverse: bool, chunk: &SSAChunk) -> Result<(), VmErr> {
         let snapshot = items.to_vec();
-        let order = self.sorted_order(&snapshot, &[], reverse, chunk, slots)?;
+        let order = self.sorted_order(&snapshot, &[], reverse, chunk)?;
         for (dst, &src) in order.iter().enumerate() { items[dst] = snapshot[src]; }
         Ok(())
     }
@@ -336,7 +336,7 @@ impl<'a> VM<'a> {
     }
 
     /* `iter(x)` and `iter(f, sentinel)`, a list or range steps live and the rest up front. */
-    pub fn call_iter(&mut self, argc: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_iter(&mut self, argc: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         if argc == 2 {
             let sentinel = self.pop()?;
             let callable = self.pop()?;
@@ -346,7 +346,7 @@ impl<'a> VM<'a> {
                 loop {
                     vm.charge_step()?; // bound the call loop against the op budget
                     vm.push(callable);
-                    vm.exec_call(0, chunk, slots)?;
+                    vm.exec_call(0, chunk)?;
                     let v = vm.pop()?;
                     if eq_member(v, sentinel, &vm.heap) { break; }
                     vm.heap.reserve((items.len() + 1) * VAL_BYTES)?;
@@ -363,7 +363,7 @@ impl<'a> VM<'a> {
         let name = match self.heap.try_get(o) {
             Some(HeapObj::Iter(..) | HeapObj::Coroutine(..)) => { self.push(o); return Ok(()); }
             Some(HeapObj::Instance(..)) => {
-                let it = self.try_call_dunder(o, "__iter__", &[], chunk, slots)?.ok_or_else(|| self.not_iterable(o))?;
+                let it = self.try_call_dunder(o, "__iter__", &[], chunk)?.ok_or_else(|| self.not_iterable(o))?;
                 self.push(it);
                 return Ok(());
             }
@@ -380,7 +380,7 @@ impl<'a> VM<'a> {
         self.push_items(items, name)
     }
 
-    pub fn call_next(&mut self, argc: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_next(&mut self, argc: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         if argc == 0 || argc > 2 { return Err(cold_type("next() takes 1 or 2 arguments")); }
         // `next(it, default)` returns the 2nd arg instead of raising StopIteration on exhaustion.
         let default = if argc == 2 { Some(self.pop()?) } else { None };
@@ -388,7 +388,7 @@ impl<'a> VM<'a> {
         if !o.is_heap() { return Err(cold_type("next() requires an iterator")); }
         // For a user iterator, dispatch __next__, mapping StopIteration to the optional default.
         if matches!(self.heap.get(o), HeapObj::Instance(..)) {
-            return match self.try_call_dunder(o, "__next__", &[], chunk, slots) {
+            return match self.try_call_dunder(o, "__next__", &[], chunk) {
                 Ok(Some(v)) => { self.push(v); Ok(()) }
                 Ok(None) => Err(cold_type("next() requires an iterator")),
                 Err(VmErr::Raised(m)) if default.is_some() && (m == "StopIteration" || m.starts_with("StopIteration")) => {
@@ -419,7 +419,7 @@ impl<'a> VM<'a> {
     }
 
     /* `map(fn, iter)`, its results computed up front. Re-enters `exec_call` per item so closures with captures see the caller frame. */
-    pub fn call_map(&mut self, argc: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_map(&mut self, argc: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         if argc < 2 { return Err(cold_type("map() must have at least two arguments")); }
         let mut args = self.pop_n(argc as usize)?;
         let fn_val = args.remove(0);
@@ -427,19 +427,19 @@ impl<'a> VM<'a> {
         let mut lists: Vec<Vec<Val>> = Vec::with_capacity(args.len());
         for it in args { lists.push(self.extract_iter(it)?); }
         let n = lists.iter().map(|l| l.len()).min().unwrap_or(0);
-        let out = self.call_rows(fn_val, &lists, n, chunk, slots)?;
+        let out = self.call_rows(fn_val, &lists, n, chunk)?;
         self.push_items(out, "map")
     }
 
     /* `filter(pred, iter)`, computed up front, keeps truthy `pred(item)`, a None predicate keeps truthy items. */
-    pub fn call_filter(&mut self, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_filter(&mut self, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         let iterable = self.pop()?;
         let fn_val = self.pop()?;
         let items = self.extract_iter(iterable)?;
         let out: Vec<Val> = if fn_val.is_none() {
             items.into_iter().filter(|&v| self.truthy(v)).collect()
         } else {
-            let verdicts = self.call_rows(fn_val, core::slice::from_ref(&items), items.len(), chunk, slots)?;
+            let verdicts = self.call_rows(fn_val, core::slice::from_ref(&items), items.len(), chunk)?;
             items.into_iter().zip(verdicts).filter(|&(_, r)| self.truthy(r)).map(|(v, _)| v).collect()
         };
         self.push_items(out, "filter")
@@ -481,21 +481,21 @@ impl<'a> VM<'a> {
     pub fn call_any(&mut self, op: u16) -> Result<(), VmErr> { self.scan_truthy(op, true, "any() takes exactly 1 argument") }
 
     // Materialise an iterable to a list, strings -> chars, ranges eager, coroutines drained.
-    pub fn call_list(&mut self, argc: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_list(&mut self, argc: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         if argc == 0 { return self.alloc_and_push_list(Vec::new()); } // `list()` is the empty list.
         let o = self.pop()?;
         // user-defined iterable wins over the built-in dispatch.
-        if let Some(items) = self.iter_to_vec_op(o, chunk, slots)? {
+        if let Some(items) = self.iter_to_vec_op(o, chunk)? {
             return self.alloc_and_push_list(items);
         }
         let items = self.extract_iter(o)?;
         self.alloc_and_push_list(items)
     }
 
-    pub fn call_tuple(&mut self, argc: u16, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+    pub fn call_tuple(&mut self, argc: u16, chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
         if argc == 0 { return self.alloc_and_push_tuple(Vec::new()); } // `tuple()` is the empty tuple.
         let o = self.pop()?;
-        if let Some(items) = self.iter_to_vec_op(o, chunk, slots)? {
+        if let Some(items) = self.iter_to_vec_op(o, chunk)? {
             return self.alloc_and_push_tuple(items);
         }
         let items = self.extract_iter(o)?;

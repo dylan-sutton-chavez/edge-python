@@ -219,20 +219,20 @@ pub fn replace(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
 pub fn rsplit(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> { split_impl(vm, recv, pos, true) }
 
 // `str.format(*args)` fills `{[idx][!r|!s|!a][:spec]}` fields, a spec may hold fields one level deep, keyword fields are not supported.
-pub(crate) fn format(vm: &mut VM, recv: Val, pos: &[Val], chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<(), VmErr> {
+pub(crate) fn format(vm: &mut VM, recv: Val, pos: &[Val], chunk: &crate::parser::SSAChunk) -> Result<(), VmErr> {
     let tmpl = recv_str(vm, recv)?;
     // Fields run user dunders, so the arguments stay rooted until the text is built.
-    let out = vm.with_roots(pos.iter().copied(), |vm| format_fields(vm, &tmpl, pos, chunk, slots))?;
+    let out = vm.with_roots(pos.iter().copied(), |vm| format_fields(vm, &tmpl, pos, chunk))?;
     vm.alloc_and_push_str(out)
 }
 
-fn format_fields(vm: &mut VM, tmpl: &str, pos: &[Val], chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<String, VmErr> {
+fn format_fields(vm: &mut VM, tmpl: &str, pos: &[Val], chunk: &crate::parser::SSAChunk) -> Result<String, VmErr> {
     // The next auto index and the numbering mode, Some(true)=manual, shared with the fields nested in a spec.
-    expand_fields(vm, tmpl, pos, &mut (0, None), 0, chunk, slots)
+    expand_fields(vm, tmpl, pos, &mut (0, None), 0, chunk)
 }
 
 /* Fills the fields of `tmpl`, where `depth` 1 is a spec and a field nested past it is refused as Python refuses it. */
-fn expand_fields(vm: &mut VM, tmpl: &str, pos: &[Val], numbering: &mut (usize, Option<bool>), depth: u8, chunk: &crate::parser::SSAChunk, slots: &mut [Val]) -> Result<String, VmErr> {
+fn expand_fields(vm: &mut VM, tmpl: &str, pos: &[Val], numbering: &mut (usize, Option<bool>), depth: u8, chunk: &crate::parser::SSAChunk) -> Result<String, VmErr> {
     if depth > 1 { return Err(cold_value("Max string recursion exceeded")); }
     let chars: Vec<char> = tmpl.chars().collect();
     let mut out = String::with_capacity(tmpl.len());
@@ -267,17 +267,17 @@ fn expand_fields(vm: &mut VM, tmpl: &str, pos: &[Val], numbering: &mut (usize, O
                 return Err(cold_type("str.format() does not support keyword fields"));
             };
             // The fields of a spec fill after the field that holds it, numbered on from it.
-            let spec = if spec.contains('{') { expand_fields(vm, &spec, pos, numbering, depth + 1, chunk, slots)? } else { spec };
+            let spec = if spec.contains('{') { expand_fields(vm, &spec, pos, numbering, depth + 1, chunk)? } else { spec };
             // A conversion renders to a string first, then the spec applies to that.
             let text = match conv {
                 None => None,
-                Some("r") => Some(vm.repr_op(val, chunk, slots)?),
-                Some("s") => Some(vm.display_op(val, chunk, slots)?),
-                Some("a") => Some(crate::vm::format_spec::ascii_escape(&vm.repr_op(val, chunk, slots)?)),
+                Some("r") => Some(vm.repr_op(val, chunk)?),
+                Some("s") => Some(vm.display_op(val, chunk)?),
+                Some("a") => Some(crate::vm::format_spec::ascii_escape(&vm.repr_op(val, chunk)?)),
                 Some(_) => return Err(cold_value("unknown conversion specifier")),
             };
             let target = match text { Some(t) => vm.heap.alloc(HeapObj::Str(t))?, None => val };
-            let rendered = vm.format_op(target, &spec, chunk, slots)?;
+            let rendered = vm.format_op(target, &spec, chunk)?;
             out.push_str(&rendered);
         } else if c == '}' {
             if chars.get(ci + 1) == Some(&'}') { out.push('}'); ci += 2; continue; }
