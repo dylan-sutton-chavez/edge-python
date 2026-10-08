@@ -62,8 +62,8 @@ Modules are singletons. The same canonical spec is fetched, parsed and initializ
 ```edge-python
 import math
 import math as m
-print(math is m)
-print(import_module("math") is m)
+print(math == m)
+print(import_module("math") == m)
 print(__name__)
 ```
 

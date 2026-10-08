@@ -124,6 +124,13 @@ The CLI renders them with line, column, and a caret preview. They are caught bef
 | `integer literal too large to represent (max ±2^127)` | Literal past the 128-bit cap |
 | `'break' outside loop` and `'continue' outside loop` | Misplaced control keyword |
 | `default 'except:' must be last` | Bare `except` not at the end |
+| `'is' compares only with None, True, False, ... or NotImplemented` | `is` against any other operand, compare it with `==` |
+| `'id' is not supported`, `'hash' is not supported`, `'locals' is not supported` | A use of a builtin the engine leaves out, unless the module binds the name |
+| `'__del__' is not supported in a class body` | A dunder the engine never calls, such as `__hash__`, `__new__`, `__slots__`, `__init_subclass__` or a descriptor method |
+| `class keywords such as 'metaclass' are not supported` | A keyword in a class header |
+| `a list, dict or set default is shared by every call` | A mutable default, write `None` and build the value in the body |
+| `named escapes are not supported` | `\N{...}` in a string, write the character or `\u03b1` |
+| `complex numbers are not supported` | A `j` suffix on a number |
 
 The diagnostics of the [source and token limits](#source-and-token-limits) belong here too. Import failures are compile-time diagnostics as well, including modules Edge Python does not ship (`os`, `sys`, `asyncio`). See [Modules](/docs/reference/modules#resolution-errors) for those message formats.
 
@@ -316,5 +323,3 @@ The [system modules](/docs/reference/system) are the only way out, and each is h
 - Without any `time` scope a run uses a virtual clock. `sleep` and `with_timeout` pass at once and in order, and a host call takes no time.
 - Any `time` scope turns the wall clock on for the whole run. Timing then depends on when the program runs.
 - `fs`, `net` and `secret` return what the host holds at the moment of the call. Their results are as stable as those files, servers and values.
-
-Heap-slot reuse shows through no operation, since no builtin reads an object address.

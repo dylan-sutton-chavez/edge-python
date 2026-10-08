@@ -17,7 +17,7 @@ The class model supports these features.
 - `@staticmethod` and `@classmethod`.
 - A curated dunder protocol for operators, indexing, iteration, hashing, context managers and attribute fallback. See [Operator overloading and protocols](#operator-overloading-and-protocols).
 
-[Not supported](#not-supported) lists what is left out.
+Any other dunder a class body binds, and a class keyword such as `metaclass=`, fails at compile time. [Limits and errors](/docs/reference/limits-and-errors#compile-time-errors) lists each one.
 
 ## State-machine pattern
 
@@ -478,10 +478,7 @@ True
 
 ### Hashing
 
-An instance hashes by identity, so it can be a dict key or a set item.
-
-- A class that defines `__eq__` is unhashable. `{x: 1}` raises `TypeError`, since two equal instances could hash apart.
-- A class body cannot define `__hash__`. It fails at compile time.
+An instance hashes by identity, so it can be a dict key or a set item. A class that defines `__eq__` is unhashable, and `{x: 1}` raises `TypeError`, since two equal instances could hash apart.
 
 ```edge-python
 class K:
@@ -586,19 +583,6 @@ computed:foo
 ### Context managers
 
 `__enter__` and `__exit__` make an instance usable in `with`. [Control flow](/docs/language/control-flow#with) covers the order of calls, the arguments of `__exit__` and suppression.
-
-## Not supported
-
-The class model leaves these out, and each fails at compile time.
-
-- Metaclasses, `__slots__` and ABCs. A class keyword such as `metaclass=` and a `__slots__` binding are rejected.
-- Descriptors. `__get__`, `__set__` and `__delete__`.
-- `__init_subclass__` and `__set_name__`.
-- `__new__`. The engine builds the instance and `__init__` runs user logic.
-- `__hash__` and `__del__`.
-- Async dunders. `__aenter__`, `__aexit__`, `__aiter__` and `__anext__`. `async with` and `async for` use the sync paths, see [Async](/docs/language/async#async-for-and-async-with).
-
-Any other dunder a class body binds fails the same way. The supported ones are on this page, and `__class_getitem__` is on [Data types](/docs/language/data-types).
 
 Reuse behavior through free functions and composition by default. Reach for inheritance and operator overloading when the abstraction calls for them.
 

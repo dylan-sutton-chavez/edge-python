@@ -4,6 +4,9 @@ use super::tables::*;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
 
+/* What a named escape such as `\N{BULLET}` reports, the Unicode name table being left out. */
+const NAMED_ESCAPE: &str = "named escapes are not supported, write the character or use \\u03b1";
+
 const MAX_INDENT_DEPTH: usize = 100;
 const MAX_FSTRING_DEPTH: usize = 200;
 
@@ -15,7 +18,8 @@ pub(super) struct Scanner<'a> {
     pub indent_stack: Vec<usize>,
     pub nesting: u32,
     pub line: usize,
-    pub fstring_stack: Vec<(u8, bool, usize, u32)>,
+    /* Each open f-string, its quote, whether it is triple, whether it decodes escapes, and the bracket depth it opened at. */
+    pub fstring_stack: Vec<(u8, bool, bool, u32)>,
     /* Lex-time diagnostics surfaced alongside tokens so the parser folds them into a single coherent error report. */
     pub errors: Vec<LexError>,
 }
@@ -135,6 +139,7 @@ impl<'a> Scanner<'a> {
             self.check_digits(frac_start, self.pos, true);
         }
         is_float |= self.scan_exponent();
+        self.check_imaginary(start);
         if is_float { TokenType::Float } else { TokenType::Int }
     }
 
@@ -143,25 +148,41 @@ impl<'a> Scanner<'a> {
         self.scan_digits();
         self.check_digits(body_start, self.pos, false);
         self.scan_exponent();
+        self.check_imaginary(body_start - 1);
         TokenType::Float
+    }
+
+    /* A `j` suffix makes an imaginary literal, and the engine has no complex numbers. */
+    fn check_imaginary(&mut self, start: usize) {
+        if matches!(self.at(0), Some(b'j' | b'J')) {
+            self.pos += 1;
+            self.report(start, self.pos, "complex numbers are not supported");
+        }
     }
 
     // Strings, single, double, triple-quoted (escape-aware).
 
-    fn scan_string(&mut self, quote: u8, start: usize) {
+    /* `decodes` is false for a raw or bytes literal, where `\N{...}` stays plain text. */
+    fn scan_string(&mut self, quote: u8, start: usize, decodes: bool) {
         if self.at(0) == Some(quote) && self.at(1) == Some(quote) {
             self.pos += 2;
-            self.scan_triple_string(quote, start);
+            self.scan_triple_string(quote, start, decodes);
         } else {
-            self.scan_single_string(quote, start);
+            self.scan_single_string(quote, start, decodes);
         }
     }
 
-    fn scan_single_string(&mut self, quote: u8, start: usize) {
+    fn check_escape(&mut self, decodes: bool) {
+        if decodes && self.at(1) == Some(b'N') && self.at(2) == Some(b'{') {
+            self.report(self.pos, self.pos + 3, NAMED_ESCAPE);
+        }
+    }
+
+    fn scan_single_string(&mut self, quote: u8, start: usize, decodes: bool) {
         while self.pos < self.src.len() {
             let b = self.src[self.pos];
             if b == quote { self.pos += 1; return; }
-            if b == b'\\' && self.at(1).is_some() { self.pos += 1; }
+            if b == b'\\' && self.at(1).is_some() { self.check_escape(decodes); self.pos += 1; }
             if b == b'\n' {
                 /* Anchor unterminated-string error at the opener so `^` lands on the quote, not end-of-line. */
                 self.report(start, start + 1, "unterminated string literal");
@@ -173,13 +194,13 @@ impl<'a> Scanner<'a> {
         self.report(start, start + 1, "unterminated string literal");
     }
 
-    fn scan_triple_string(&mut self, quote: u8, start: usize) {
+    fn scan_triple_string(&mut self, quote: u8, start: usize, decodes: bool) {
         while self.pos < self.src.len() {
             let b = self.src[self.pos];
             if b == quote && self.at(1) == Some(quote) && self.at(2) == Some(quote) {
                 self.pos += 3; return;
             }
-            if b == b'\\' && self.at(1).is_some() { self.pos += 1; }
+            if b == b'\\' && self.at(1).is_some() { self.check_escape(decodes); self.pos += 1; }
             if b == b'\n' { self.line += 1; }
             self.pos += 1;
         }
@@ -195,11 +216,12 @@ impl<'a> Scanner<'a> {
         let quote_len = if triple { 3 } else { 1 };
         self.pos = prefix_end + quote_len;
         let body_start = self.pos;
-        self.scan_fstring_body(quote, triple, body_start);
+        let decodes = !self.src[start..prefix_end].iter().any(|c| c.eq_ignore_ascii_case(&b'r'));
+        self.scan_fstring_body(quote, triple, decodes, body_start);
         self.pending.push((TokenType::FstringStart, self.line, start, body_start));
     }
 
-    fn scan_fstring_body(&mut self, quote: u8, triple: bool, body_start: usize) {
+    fn scan_fstring_body(&mut self, quote: u8, triple: bool, decodes: bool, body_start: usize) {
         let ql: usize = if triple { 3 } else { 1 };
         let mut pos = self.pos;
         while pos < self.src.len() {
@@ -221,6 +243,11 @@ impl<'a> Scanner<'a> {
                 return;
             }
             match self.src[pos] {
+                // A named escape fails, and its braces stay text rather than open a field.
+                b'\\' if decodes && self.src.get(pos + 1) == Some(&b'N') && self.src.get(pos + 2) == Some(&b'{') => {
+                    self.report(pos, pos + 3, NAMED_ESCAPE);
+                    pos = self.src[pos..].iter().position(|&c| c == b'}').map_or(self.src.len(), |n| pos + n + 1);
+                }
                 b'\\' => pos = (pos + 2).min(self.src.len()),
                 b'{' if self.src.get(pos + 1) == Some(&b'{') => {
                     pos += 2;
@@ -238,7 +265,7 @@ impl<'a> Scanner<'a> {
                     if pos > self.pos {
                         self.pending.push((TokenType::FstringMiddle, self.line, body_start, pos));
                     }
-                    self.fstring_stack.push((quote, triple, pos + 1, self.nesting));
+                    self.fstring_stack.push((quote, triple, decodes, self.nesting));
                     self.pos = pos + 1;
                     return;
                 }
@@ -327,9 +354,9 @@ impl<'a> Scanner<'a> {
             if self.nesting > saved_nesting {
                 self.nesting -= 1;
             } else {
-                let (quote, triple, _, _) = self.fstring_stack.pop().unwrap();
+                let (quote, triple, decodes, _) = self.fstring_stack.pop().unwrap();
                 self.pos = end;
-                self.scan_fstring_body(quote, triple, end);
+                self.scan_fstring_body(quote, triple, decodes, end);
                 self.pending.push((TokenType::Rbrace, self.line, start, end));
                 // `pos` already advanced by scan_fstring_body.
                 return;
@@ -390,7 +417,8 @@ impl<'a> Scanner<'a> {
                 }
                 let q_start = self.pos;
                 self.pos += 1;
-                self.scan_string(q, q_start);
+                let decodes = kind == TokenType::String && !slice.iter().any(|c| c.eq_ignore_ascii_case(&b'r'));
+                self.scan_string(q, q_start, decodes);
                 return Some((kind, line_at_start, start, self.pos));
             }
 
@@ -421,7 +449,7 @@ impl<'a> Scanner<'a> {
         // Bare string
         if b == b'"' || b == b'\'' {
             self.pos += 1;
-            self.scan_string(b, start);
+            self.scan_string(b, start, true);
             return Some((TokenType::String, line_at_start, start, self.pos));
         }
 

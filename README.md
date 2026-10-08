@@ -8,7 +8,7 @@
 
 <br/>
 
-Single-pass SSA compiler and tiered register VM for a sandboxed Python subset, with NaN-boxed values, inline caches, memoization, mark-sweep GC and snapshots. One WebAssembly module runs in browsers, JavaScript runtimes and the CLI.
+Single-pass SSA compiler and tiered register VM for sandboxed Python, with NaN-boxed values, inline caches, memoization, mark-sweep GC and snapshots. One WebAssembly module runs in browsers, JavaScript runtimes and the CLI.
 
 - [Documentation](https://edgepython.com/docs)
 - [Quick start](https://edgepython.com/docs/get-started/quickstart)
@@ -21,7 +21,7 @@ Single-pass SSA compiler and tiered register VM for a sandboxed Python subset, w
 
 ## Edge Python
 
-A dynamic Python subset with classes, async/await, pattern matching and imports resolved at compile time. A program touches no file, network or environment unless `edge.json` declares a module that grants it.
+Python with classes, async/await, pattern matching and imports resolved at compile time. What it leaves out, for the sandbox or for the design of the engine, fails with an error instead of behaving differently. A program touches no file, network or environment unless `edge.json` declares a module that grants it.
 
 ```python
 import json

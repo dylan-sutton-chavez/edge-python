@@ -1,6 +1,6 @@
 ---
 title: "Syntax"
-description: "Lexical and grammatical rules of the language subset."
+description: "Lexical and grammatical rules of the language."
 ---
 
 # Syntax
@@ -190,7 +190,7 @@ hello world
 | `\xHH` | A character from two hex digits |
 | `\uHHHH`, `\UHHHHHHHH` | A code point from 4 or 8 hex digits |
 
-An unknown escape keeps its backslash. Named escapes such as `\N{GREEK SMALL LETTER ALPHA}` are not supported and stay literal.
+An unknown escape keeps its backslash. A named escape such as `\N{GREEK SMALL LETTER ALPHA}` fails at compile time, so write the character or `\u03b1`.
 
 ```edge-python
 print('\n line break')
@@ -341,7 +341,7 @@ True
 True
 ```
 
-What `is` returns for equal values, and why it takes no literal, is on [Data types](/docs/language/data-types#behavioral-notes).
+`is` compares only with `None`, `True`, `False`, `...` or `NotImplemented`. Any other operand fails at compile time, so compare values with `==`.
 
 ### Augmented assignment
 

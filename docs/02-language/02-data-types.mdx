@@ -463,28 +463,18 @@ True
 ## Behavioral notes
 
 - **Set iteration and `repr` order.** Sets store elements in a hash table. Iteration and `repr` follow hash order, not insertion order. Sort a set when the order matters.
-- **`is` on equal numbers.** Two ints or two floats of the same value are one object. `a = 1000; b = 1000; a is b` is `True`. Every NaN is one object too, while `0.0` and `-0.0` are two.
-- **`is` on equal strings.** String literals with the same text are one object. Every string of zero or one character is one object too. A string built at run time, such as `c + "b"`, is a new object.
-- **`is` with a literal.** It fails at compile time, since its answer would depend on how the engine stores the value.
+- **Every NaN is one value.** A NaN is found in a list holding another NaN, and a set keeps a single one, where CPython keeps one per object.
 
 ```edge-python
 print({3, 1, 2})
-a = 1000
-b = 1000
-print(a is b)
-c = "a"
-ab = "ab"
-print(c + "b" is ab, c + "b" == ab)
+n = float('nan')
+print(n in [float('nan')], len({n, float('nan')}), n == n)
 ```
 
 ```output
 {3, 2, 1}
-True
-False True
+True 1 False
 ```
-
-> [!WARNING]
-> Use `==` to compare values. Keep `is` for `None` and other singletons.
 
 > [!CARDS]
 > - `git-branch` [Control flow](/docs/language/control-flow) Conditionals, loops, pattern matching and exceptions.

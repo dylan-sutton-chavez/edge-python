@@ -579,23 +579,23 @@ b'Hello'
 b'\x00\xff'
 ```
 
-## Type and identity
+## Types
 
 ### type
 
 `type(x)` returns the type object of `x`. The built-in type names are these same objects.
 
-`type(x) is int` holds, and calling one constructs a value. For a user instance the result is its class object.
+`type(x) == int` holds, and calling one constructs a value. For a user instance the result is its class object.
 
 ```edge-python
 print(type(42))
-print(type(42) is int)
+print(type(42) == int)
 print(type([1, 2, 3])([4, 5]))
 
 class C:
   pass
 
-print(type(C()) is C)
+print(type(C()) == C)
 ```
 
 ```output
@@ -633,8 +633,8 @@ ZeroDivisionError
 ```edge-python
 SENTINEL = object()
 
-print(SENTINEL is object())
-print(type(SENTINEL) is object)
+print(SENTINEL == object())
+print(type(SENTINEL) == object)
 print(isinstance(42, object))
 ```
 
@@ -707,14 +707,6 @@ True
 True
 False
 ```
-
-### id, hash, locals
-
-`id`, `hash` and `locals` are not builtins. A use of one fails at compile time, unless the module binds the name itself.
-
-- Compare values with `==`, and keep `is` for names and for `None`, `True` and `False`.
-- A dict or a set hashes its keys by value, and an instance by identity.
-- A function takes the values it needs as arguments.
 
 ## Representation
 
@@ -846,7 +838,7 @@ print(globals()["add"](3, 4))
 import math
 
 m = import_module("math")
-print(m is math)
+print(m == math)
 print(m.floor(3.7))
 ```
 

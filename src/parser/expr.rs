@@ -99,8 +99,8 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 let op = self.comparison_op();
                 let right = self.chunk.instructions.len();
                 self.expr_bp(8);
-                if matches!(op, OpCode::Is | OpCode::IsNot) && (self.literal_from(left, right) || self.literal_from(right, self.chunk.instructions.len())) {
-                    self.reject(op_start, self.last_end, "'is' with a literal, compare values with '=='");
+                if matches!(op, OpCode::Is | OpCode::IsNot) && !self.singleton(left, right) && !self.singleton(right, self.chunk.instructions.len()) {
+                    self.reject(op_start, self.last_end, "'is' compares only with None, True, False, ... or NotImplemented, compare other values with '=='");
                 }
                 // `a < b in c` tests `b` again and stops at the first false, the tail holds no `and` or `or`.
                 if self.peek_same_line().is_some_and(is_comparison) {
@@ -137,14 +137,14 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* Whether the code in `from..to` builds a literal, a constant or a fresh display, which `is` cannot compare. */
-    fn literal_from(&self, from: usize, to: usize) -> bool {
-        let ins = &self.chunk.instructions[from..to];
-        let constant = |i: &Instruction| i.opcode == OpCode::LoadConst && !matches!(self.chunk.constants.get(i.operand as usize), Some(Value::Bool(_) | Value::None));
-        match ins.last() {
-            Some(i) if matches!(i.opcode, OpCode::BuildList | OpCode::BuildTuple | OpCode::BuildDict | OpCode::BuildSet | OpCode::BuildString) => true,
-            Some(_) => ins.iter().any(constant) && ins.iter().all(|i| constant(i) || i.opcode == OpCode::Minus),
-            None => false,
+    /* Whether the code in `from..to` loads one singleton, the only operand `is` answers the same as CPython for. */
+    fn singleton(&self, from: usize, to: usize) -> bool {
+        let [i] = self.chunk.instructions[from..to] else { return false };
+        match i.opcode {
+            OpCode::LoadNone | OpCode::LoadTrue | OpCode::LoadFalse | OpCode::LoadEllipsis => true,
+            OpCode::LoadConst => matches!(self.chunk.constants.get(i.operand as usize), Some(Value::Bool(_) | Value::None)),
+            OpCode::LoadName => self.chunk.names.get(i.operand as usize).is_some_and(|n| super::types::ssa_strip(n) == "NotImplemented"),
+            _ => false,
         }
     }
 

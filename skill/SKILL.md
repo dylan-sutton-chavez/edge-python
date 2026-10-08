@@ -19,9 +19,9 @@ This document is self-verifying and its examples follow the cells v1 grammar. A 
 }
 ```
 
-Edge Python is a sandboxed Python subset compiled in a single pass to bytecode and executed by a register VM. It is one WebAssembly binary, hosted by the JS host, a JavaScript package built on the browser's sandbox model that runs in browsers and in JavaScript runtimes such as Deno, and by the `edge` CLI. There is no bundled stdlib, every module is an external package declared in `edge.json` and resolved at compile time, the official packages included. Programs are deterministic, there is no file, network or environment access unless a declared module grants it.
+Edge Python is sandboxed Python compiled in a single pass to bytecode and executed by a register VM. It is one WebAssembly binary, hosted by the JS host, a JavaScript package built on the browser's sandbox model that runs in browsers and in JavaScript runtimes such as Deno, and by the `edge` CLI. There is no bundled stdlib, every module is an external package declared in `edge.json` and resolved at compile time, the official packages included. Programs are deterministic, there is no file, network or environment access unless a declared module grants it.
 
-Use this skill to write correct Edge Python on the first try. The language looks like the latest CPython version but is a strict subset, and the differences matter more than the similarities. Read the delta section before writing non-trivial code.
+Use this skill to write correct Edge Python on the first try. The language is the latest CPython version, minus what the sandbox and the engine leave out, and what is left out fails with an error. Read the delta section before writing non-trivial code.
 
 ## The working loop
 
@@ -134,13 +134,14 @@ Interactive removal of the binary and PATH entries.
 
 ## The Python delta
 
-Edge Python parses like the latest CPython version but deliberately drops parts of the language. This section is the one to internalize, because everything here is valid CPython that fails or behaves differently in Edge Python.
+A program that compiles behaves as it does in CPython, apart from the six design choices this section lists. What Edge Python leaves out is missing for the sandbox or for the design of the engine, and it fails with an error instead of behaving differently, at compile time whenever the compiler can see it. This is the section to internalize.
 
-### Not supported at all
+### Left out for the sandbox
 
 - No stdlib. Every module is an external package, so `import os`, `import sys` and `import asyncio` fail at compile time.
 - No dynamic code. `exec`, `eval`, `compile` and `__import__` do not exist.
 - No `open`. `input()` reads from a host fed buffer with no prompt argument.
+- No clock, randomness or OS access without a grant, so the same source and input give the same output on every run.
 
 ```python
 open("data.txt")
@@ -150,14 +151,29 @@ open("data.txt")
 NameError
 ```
 
-- No complex numbers. `1j` lexes as `1` followed by the name `j`.
-- No metaclasses, descriptors, `__slots__`, `__new__`, `__init_subclass__`, `__set_name__`, `__hash__` or `__del__`. A class keyword or any dunder outside the supported list fails at compile time.
-- No `id`, `hash` or `locals`, and no `is` with a literal. Each fails at compile time, so compare values with `==` and keep `is` for names and for `None`, `True` and `False`.
-- A list, dict or set as a default argument fails at compile time. Default to `None` and build the value in the body.
-- An instance hashes by identity, and a class that defines `__eq__` is unhashable.
-- No `bytearray` and no `memoryview`.
-- No exception chaining. `raise X from Y` evaluates `Y` but the cause is discarded.
-- No `gen.send`, `gen.throw` or `gen.close`. Generators are one-way producers.
+### Left out by design
+
+Values are NaN-boxed and frames keep their locals in registers, so what CPython builds on object addresses does not exist. Each of these fails at compile time with a message naming what to use instead.
+
+- `id`, `hash` and `locals`.
+- `is` against anything but `None`, `True`, `False`, `...` or `NotImplemented`. Compare with `==`, which on an instance without `__eq__` already compares identity.
+- Metaclasses and other class keywords, `__slots__`, `__new__`, `__del__`, `__hash__`, descriptors, `__init_subclass__`, `__set_name__` and any dunder outside the supported list.
+- A list, dict or set as a default argument. Default to `None` and build the value in the body.
+- Complex numbers and named escapes such as `\N{BULLET}`.
+
+```python
+a = [1]
+b = a
+print(a is b)
+```
+
+```text Error
+'is' compares only with None, True, False, ... or NotImplemented
+```
+
+An instance hashes by identity, and a class that defines `__eq__` is unhashable. `bytearray`, `memoryview`, `gen.send`, `gen.throw` and `gen.close` do not exist either, and using one fails at run time.
+
+The six behaviors that differ by design follow, the eager iterators and dict views first.
 
 ### Eager where Python is lazy
 
@@ -220,6 +236,12 @@ OverflowError
 ```
 
 `pow(a, b, m)` requires a modulus below 2^63, and the `int_to_bytes` and `int_from_bytes` builtins cap at 8 bytes while the `int.to_bytes` and `int.from_bytes` methods do not.
+
+### Order, causes and NaN
+
+- Sets iterate and print in hash order. Present them through `sorted`.
+- `raise X from Y` evaluates `Y` and keeps no cause, there is no `__cause__`.
+- Every NaN is one value. A NaN is found in a list holding another NaN, and a set keeps a single one.
 
 ### Reduced pattern matching
 
@@ -870,53 +892,6 @@ groups:
 ```
 
 With `listen:` the actor accepts one `<group> <body>` line per TCP message and exposes an HTTP control endpoint, `GET /stats`, `POST /pub/<group>` and `POST /eval/<group>` for eval groups. Untrusted bundles arrive as base64 `.edge` payloads behind an `EDGEPKG:` marker and run from memory in a fresh instance.
-
-## Semantics that surprise Python programmers
-
-Closures capture loop variables by reference. Bind the value with a default argument when building functions in a loop.
-
-```python
-fns = [(lambda i=i: i) for i in range(3)]
-print([f() for f in fns])
-```
-
-```text Output
-[0, 1, 2]
-```
-
-Equal numbers and short strings are one object under `is`, a NaN aside. Reserve `is` for `None` and sentinels.
-
-```python
-a = 1000
-b = 1000
-print(a is b)
-```
-
-```text Output
-True
-```
-
-List `+=` and set `|=`, `&=`, `^=`, `-=` mutate in place and aliases see the change. A user class gets `__iadd__` and the other in-place dunders first, then the binary operator. Every other augmented assignment rebinds.
-
-```python
-a = [1]
-b = a
-a += [2]
-print(b)
-```
-
-```text Output
-[1, 2]
-```
-
-Set iteration and repr order is hash based. Always present sets through `sorted`.
-
-```python skip
-s = {"a", "b", "c"}  # skip: set iteration order is hash based
-print(s)
-```
-
-Truthiness follows Python, the falsy set is `None`, `False`, `0`, `0.0`, `""`, `b""`, `[]`, `()`, `{}`, `set()`, `frozenset()` and `range(0)`. `bool` subclasses `int` so `True + True == 2`. `len` on strings counts code points. Same source and input give the same output on every run.
 
 ## Sandbox limits
 

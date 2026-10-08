@@ -555,16 +555,16 @@
     "instructions": [["LoadName",0], ["LoadName",1], ["NotIn",0], ["StoreName",2], ["ReturnValue",0]]
   },
   {
-    "src": "x = a is b", 
+    "src": "x = a is None", 
     "constants": [], 
-    "names": ["a_0", "b_0", "x_1"], 
-    "instructions": [["LoadName",0], ["LoadName",1], ["Is",0], ["StoreName",2], ["ReturnValue",0]]
+    "names": ["a_0", "x_1"], 
+    "instructions": [["LoadName",0], ["LoadNone",0], ["Is",0], ["StoreName",1], ["ReturnValue",0]]
   },
   {
-    "src": "x = a is not b", 
+    "src": "x = a is not None", 
     "constants": [], 
-    "names": ["a_0", "b_0", "x_1"], 
-    "instructions": [["LoadName",0], ["LoadName",1], ["IsNot",0], ["StoreName",2], ["ReturnValue",0]]
+    "names": ["a_0", "x_1"], 
+    "instructions": [["LoadName",0], ["LoadNone",0], ["IsNot",0], ["StoreName",1], ["ReturnValue",0]]
   },
   {
     "src": "x = 1 if True else 2", 

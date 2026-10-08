@@ -90,7 +90,7 @@ The instruction format is in [Bytecode model](/docs/internals/compiler#bytecode-
 `INT_MAX = 140_737_488_355_327` and `INT_MIN = -140_737_488_355_328`. Inline ints cost one ALU op per arithmetic.
 
 - Overflow promotes to `HeapObj::LongInt(i128)`. Results demote back inline when they fit.
-- LongInts are interned by value. Equal values share a heap index, so they agree as dict keys and under `==` and `is`.
+- LongInts are interned by value. Equal values share a heap index, so they agree as dict keys and under `==`.
 - The hard cap is ±2¹²⁷. Wider results raise `OverflowError`.
 
 Arbitrary-precision bigints would need a limb vector with a heap allocation per op, or dropping NaN-boxing. Both regress the WASM size and the inner loop.
@@ -104,8 +104,10 @@ Dicts and sets key by content through `hash_val_with_heap`. Value-equal numbers 
 The heap is a `Vec<HeapSlot>` arena. Its free list is capped at 524,288 entries and sorted to prefer low indices.
 
 - Side hashes intern names and string constants up to 128 bytes, one-character strings, bytes up to 128 bytes, all LongInts, and bound methods.
-- Equal interned values share one slot. `is` holds between them, as it does for equal inline numbers.
+- Equal interned values share one slot.
 - Strings built at run time are not interned.
+
+An inline value has no address, so two equal numbers are one value. That is why the language has no `id`, no user `__hash__`, and no `is` beyond `None`, `True`, `False`, `...` and `NotImplemented`, since each would answer differently from CPython. Frames keep their locals in registers rather than in a dict, so there is no `locals()` either.
 
 The heap counts what it holds against the memory limit of the run, see [Sandboxed execution](/docs/reference/limits-and-errors#sandboxed-execution).
 
