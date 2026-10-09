@@ -14,7 +14,7 @@ use crate::util::hash::FxHashMap as HashMap;
 use crate::modules::{Resolver, NoopResolver};
 
 use alloc::{boxed::Box, string::{String, ToString}, vec::Vec};
-use core::iter::Peekable;
+use core::marker::PhantomData;
 
 // Bracket table for either side, (opener, open str, close str).
 #[inline]
@@ -40,6 +40,12 @@ pub(super) const fn pack_call(pos: u16, kw: u16) -> u16 {
 // Operand of a binary op written as `op=`, so the VM asks `__iop__` first.
 pub const INPLACE: u16 = 1;
 
+// GetIter operand that leaves `iter(x)` on the stack, the iterator a comprehension receives.
+pub const ITER_VALUE: u16 = 2;
+
+// GetIter operand that loops over an iterator without asking it for one again.
+pub const ITER_AS_IS: u16 = 3;
+
 // Marks a fused builtin call given `*` or `**`, whose packed operand the VM runs as a plain call.
 pub const SPREAD_ARGS: u16 = 0x8000;
 
@@ -49,9 +55,28 @@ pub const KEYWORDS: u16 = 0x4000;
 // Shared spec -> compiled-chunk cache, a Vec (linear scan) avoids a hashbrown monomorphization.
 pub(crate) type ModuleCache = alloc::rc::Rc<core::cell::RefCell<Vec<(String, alloc::rc::Rc<SSAChunk>)>>>;
 
+/* Every token behind a cursor, so a comprehension can compile its element after its clauses. */
+pub(super) struct Tokens<I: Iterator<Item = Token>> {
+    toks: Vec<Token>,
+    pub(super) pos: usize,
+    from: PhantomData<I>,
+}
+
+impl<I: Iterator<Item = Token>> Tokens<I> {
+    #[inline]
+    pub(super) fn peek(&self) -> Option<&Token> { self.toks.get(self.pos) }
+
+    #[inline]
+    pub(super) fn next(&mut self) -> Option<Token> {
+        let t = self.toks.get(self.pos).copied();
+        self.pos += t.is_some() as usize;
+        t
+    }
+}
+
 pub struct Parser<'src, I: Iterator<Item = Token>> {
     pub(super) source: &'src str,
-    pub(super) tokens: Peekable<I>,
+    pub(super) tokens: Tokens<I>,
     pub(super) chunk: SSAChunk,
     pub(super) ssa_versions: HashMap<String, u32>,
     /* Names declared `global` in the current function body, redirects load/store to `self.globals`. */
@@ -75,6 +100,13 @@ pub struct Parser<'src, I: Iterator<Item = Token>> {
     pub(super) bracket_stack: Vec<(TokenType, usize, usize, usize)>,
     /* True while the statements of a class body compile, not those of its methods. */
     pub(super) in_class_body: bool,
+    /* True while a comprehension body compiles, where a walrus binds in the enclosing scope. */
+    pub(super) in_comp: bool,
+    /* Fused builtin calls of the body, one bit per opcode, and the native imports it called by index. */
+    pub(super) fused: u128,
+    pub(super) fused_externs: Vec<u16>,
+    /* Names the body binds after calling them, compiled as its locals when the body compiles again. */
+    pub(super) unfused: Vec<String>,
     /* One bit per entry of `REMOVED_BUILTINS` the module binds in any scope, so that name stays its own. */
     pub(super) bound: u8,
     /* Spans that use a removed builtin, by its index in `REMOVED_BUILTINS`, reported at the end unless the module binds the name. */
@@ -224,6 +256,8 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         // Nested body owns its loops and block stack, isolate, then restore the enclosing ones.
         let saved_loops = (core::mem::take(&mut self.loops), core::mem::replace(&mut self.cleanup_count, 0));
         let saved_class = core::mem::replace(&mut self.in_class_body, false);
+        let saved_comp = core::mem::replace(&mut self.in_comp, false);
+        let saved_fused = (core::mem::take(&mut self.fused), core::mem::take(&mut self.fused_externs), core::mem::take(&mut self.unfused));
         // Copy parent externs so nested def bodies can call imported natives, extras don't leak up.
         self.chunk.extern_table = saved_chunk.extern_table.clone();
         self.chunk.extern_index = saved_chunk.extern_index.clone();
@@ -237,6 +271,8 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.globals_decl = saved_globals;
         (self.loops, self.cleanup_count) = saved_loops;
         self.in_class_body = saved_class;
+        self.in_comp = saved_comp;
+        (self.fused, self.fused_externs, self.unfused) = saved_fused;
         body
     }
 }
@@ -306,7 +342,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     pub(super) fn advance_raw(&mut self) -> Token {
         let tok = self.tokens.next().unwrap_or(Token {
             kind: TokenType::Endmarker,
-            line: 0, start: 0, end: 0,
+            line: 0, start: 0, end: 0, comp: false,
         });
         self.last_line = tok.line;
         if tok.end > 0 { self.last_end = tok.end; }
@@ -316,7 +352,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     pub(super) fn advance(&mut self) -> Token {
         let tok = self.tokens.next().unwrap_or(Token {
             kind: TokenType::Endmarker,
-            line: 0, start: 0, end: 0,
+            line: 0, start: 0, end: 0, comp: false,
         });
         self.last_line = tok.line;
         if tok.end > 0 { self.last_end = tok.end; }
@@ -555,7 +591,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         };
         Self {
             source,
-            tokens: iter.peekable(),
+            tokens: Tokens { toks: iter.collect(), pos: 0, from: PhantomData },
             chunk,
             ssa_versions: HashMap::default(),
             globals_decl: crate::util::hash::FxHashSet::default(),
@@ -571,6 +607,10 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             last_end: 0,
             bracket_stack: Vec::new(),
             in_class_body: false,
+            in_comp: false,
+            fused: 0,
+            fused_externs: Vec::new(),
+            unfused: Vec::new(),
             bound: 0,
             removed_uses: Vec::new(),
             errors: Vec::new(),

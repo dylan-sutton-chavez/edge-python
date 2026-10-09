@@ -33,7 +33,7 @@ fn native_is_impure(id: super::super::types::NativeFnId) -> bool {
 #[inline]
 fn iterates(id: super::super::types::NativeFnId) -> bool {
     use super::super::types::NativeFnId::*;
-    matches!(id, Sum | Sorted | Set | FrozenSet | Enumerate | Any | All | Bytes | Dict | Min | Max | Iter | Map | Filter | Zip)
+    matches!(id, Sum | Sorted | Set | FrozenSet | Bytes | Dict | Min | Max)
 }
 
 /* A count outside a builtin arity, ranged ones name the bound they miss. */
@@ -167,11 +167,8 @@ impl<'a> VM<'a> {
     fn lift_builtin_args(&mut self, id: super::super::types::NativeFnId, pos: usize, kw: usize, chunk: &SSAChunk) -> Result<(), VmErr> {
         use super::super::types::NativeFnId::*;
         let (from, to) = match id {
-            Sum | Sorted | Set | FrozenSet | Enumerate | Any | All | Bytes | Dict => (0, 1),
-            Min | Max | Iter if pos == 1 => (0, 1),
-            Map => (1, pos),
-            Filter => (1, 2),
-            Zip => (0, pos),
+            Sum | Sorted | Set | FrozenSet | Bytes | Dict => (0, 1),
+            Min | Max if pos == 1 => (0, 1),
             _ => return Ok(()),
         };
         let base = self.stack.len().saturating_sub(pos + 2 * kw);
@@ -496,7 +493,7 @@ impl<'a> VM<'a> {
                 } else {
                     // Other Type objects are exception classes, build an ExcInstance for `raise X("msg")`.
                     if !kw_flat.is_empty() { return Err(cold_type("exception class takes no keyword arguments")); }
-                    let exc = self.heap.alloc(HeapObj::ExcInstance(name, positional.to_vec()))?;
+                    let exc = self.heap.alloc(HeapObj::ExcInstance(name, positional.to_vec(), Val::undef()))?;
                     self.push(exc);
                 }
             }
@@ -825,12 +822,12 @@ impl<'a> VM<'a> {
             Min => self.call_min(operand, chunk),
             Max => self.call_max(operand, chunk),
             Sum => self.call_sum(operand),
-            Zip => self.call_zip(operand),
+            Zip => self.call_zip(operand, chunk),
             Dict => self.call_dict(operand),
             Set => self.call_set(operand),
             Pow => self.call_pow(operand),
-            All => self.call_all(operand),
-            Any => self.call_any(operand),
+            All => self.call_all(operand, chunk),
+            Any => self.call_any(operand, chunk),
             GetAttr => self.call_getattr(operand, chunk),
             Format => self.call_format(operand, chunk),
             // 0/1/2-arg
@@ -845,7 +842,7 @@ impl<'a> VM<'a> {
             Chr => self.call_chr(),
             Ord => self.call_ord(),
             Sorted => self.call_sorted(false, chunk),
-            Enumerate => self.call_enumerate(operand),
+            Enumerate => self.call_enumerate(operand, chunk),
             List => self.call_list(operand, chunk),
             Tuple => self.call_tuple(operand, chunk),
             Bin => self.call_bin(),

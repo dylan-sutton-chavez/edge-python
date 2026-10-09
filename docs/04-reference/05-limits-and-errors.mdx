@@ -124,6 +124,7 @@ The CLI renders them with line, column, and a caret preview. They are caught bef
 | `integer literal too large to represent (max ±2^127)` | Literal past the 128-bit cap |
 | `'break' outside loop` and `'continue' outside loop` | Misplaced control keyword |
 | `default 'except:' must be last` | Bare `except` not at the end |
+| `Generator expression must be parenthesized` | A bare generator expression beside another argument or before a trailing comma |
 | `'is' compares only with None, True, False, ... or NotImplemented` | `is` against any other operand, compare it with `==` |
 | `'id' is not supported`, `'hash' is not supported`, `'locals' is not supported` | A use of a builtin the engine leaves out, unless the module binds the name |
 | `'__del__' is not supported in a class body` | A dunder the engine never calls, such as `__hash__`, `__new__`, `__slots__`, `__init_subclass__` or a descriptor method |
@@ -144,6 +145,7 @@ Runtime errors raise as typed exceptions, catchable with `try` and `except`.
 | `ValueError` | Right type, invalid value |
 | `AttributeError` | Attribute not found on the object |
 | `NameError` | Undefined name |
+| `UnboundLocalError` | A local read or deleted before its first assignment |
 | `ZeroDivisionError` | Division or modulo by zero |
 | `OverflowError` | Integer arithmetic past ±2^127 |
 | `KeyError` | Dict or set lookup miss |
@@ -224,6 +226,7 @@ A user `raise X` raises whatever class or instance `X` is. Raising a value that 
 | `IndexError`, `KeyError` | `LookupError` |
 | `OverflowError`, `ZeroDivisionError` | `ArithmeticError` |
 | `RecursionError`, `NotImplementedError` | `RuntimeError` |
+| `UnboundLocalError` | `NameError` |
 | `PermissionError` | `OSError` |
 | `UnicodeError` | `ValueError` |
 | `UnicodeEncodeError`, `UnicodeDecodeError` | `UnicodeError` |
@@ -255,7 +258,7 @@ A class that derives from a built-in exception joins the tree. `except ValueErro
 
 - Its constructor arguments become `e.args`. A call to `super().__init__(...)` sets them again.
 - `str(e)` follows `e.args` unless the class defines `__str__`.
-- For `raise X from Y` and chaining, see [Control flow](/docs/language/control-flow).
+- For `raise X from Y` and chaining, see [Control flow](/docs/language/control-flow#raise).
 
 ```edge-python
 class Bad(ValueError):

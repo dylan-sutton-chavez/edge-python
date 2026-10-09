@@ -400,8 +400,7 @@ Name     -> name_stmt (assignment, augmented, indexed, attribute, call)
 Each statement returns whether it left a value on the stack. The driver emits `PopTop` after expression statements such as `x.method()`. It emits nothing after assignments and control flow.
 
 - Decorators apply to `def` and `class`. The `@` arm peeks for `class` after the decorator list. Each decorator wraps through `Call,1` between `MakeFunction` or `MakeClass` and the final `StoreName`.
-- `raise X from Y` lowers to `RaiseFrom`. It pops the cause and then the exception. `X` is what surfaces. A bare `raise` raises the current exception again.
-- `__cause__` and `__context__` are not exposed.
+- `raise X from Y` lowers to `RaiseFrom`. It pops the cause and then the exception, and `Y` becomes the `__cause__` of `X`. A bare `raise` raises the current exception again.
 - `except` matching walks the [exception hierarchy](/docs/reference/limits-and-errors#exception-hierarchy), the same table `isinstance` uses.
 - Imports resolve at parse time through a resolver the host injects. No import opcode reaches the VM. See [Modules](/docs/reference/modules).
 
@@ -439,12 +438,12 @@ The free names a pure body may read are checked at run time, as [Design](/docs/i
 
 ## Comprehensions and generators
 
-List, set and dict comprehensions take several `for` and `if` clauses. They lower to `BuildList`, `BuildSet` or `BuildDict` plus a loop that uses `ListAppend`, `SetAdd` or `MapAdd`.
+Every comprehension takes several `for` and `if` clauses and compiles to a function called at once, so its loop variables stay its own. Its first iterable goes through `iter()` where the comprehension stands, so `[x for x in 5]` fails there.
 
-Generator expressions lower eagerly to `BuildList`. `(i*2 for i in xs)` runs as `[i*2 for i in xs]`.
-
-- This is deliberate. Template memoisation needs hashable, finite arguments, and a lazy generator would not memoise.
-- An unbounded stream needs a `def` with `yield`. That produces a real `HeapObj::Coroutine`.
+- A list, set or dict comprehension builds with `BuildList`, `BuildSet` or `BuildDict` and fills with `ListAppend`, `SetAdd` or `MapAdd`, then returns the result.
+- A generator expression is a generator function, its clauses and element running as items are asked for.
+- The lexer marks the first token of an element followed by `for` inside brackets. The parser sets those tokens aside, compiles the clauses, then replays the element innermost.
+- A walrus in the element binds in the enclosing scope, as a `nonlocal` of the body.
 
 Async comprehensions such as `[x async for x in y]` are not supported. Starred unpacking inside a comprehension is not supported either.
 

@@ -1,5 +1,6 @@
 use super::*;
 use crate::alloc::string::ToString;
+use crate::value::View;
 
 /* Single source of truth for opcode -> (forward, reflected) arithmetic dunder names. */
 pub(crate) fn binary_dunder_names(op: OpCode) -> Option<(&'static str, &'static str)> {
@@ -170,9 +171,27 @@ impl<'a> VM<'a> {
             return Ok(self.truthy(r));
         }
 
+        // A values view compares each value, an items view finds the key and compares its value.
+        match self.heap.try_get(container) {
+            Some(&HeapObj::DictView(d, View::Values)) => {
+                let values = self.view_items(d, View::Values)?;
+                let t = self.heap.alloc(HeapObj::Tuple(values))?;
+                return self.with_roots([t], |vm| vm.seq_contains(t, item, chunk));
+            }
+            Some(&HeapObj::DictView(d, View::Items)) => {
+                let Some(HeapObj::Tuple(kv)) = self.heap.try_get(item) else { return Ok(false) };
+                let &[k, v] = kv.as_slice() else { return Ok(false) };
+                let found = match self.heap.get(d) { HeapObj::Dict(m) => m.borrow().get(&k, &self.heap).copied(), _ => None };
+                let Some(x) = found else { self.require_hashable(k)?; return Ok(false) };
+                return self.with_roots([x, v], |vm| vm.member_eq(x, v, chunk));
+            }
+            _ => {}
+        }
+
         // A dict or set probes by hash.
         let probe = match self.heap.try_get(container) {
             Some(HeapObj::Dict(rc)) => Some((rc.borrow().contains_key(&item, &self.heap), false)),
+            Some(&HeapObj::DictView(d, _)) => match self.heap.get(d) { HeapObj::Dict(rc) => Some((rc.borrow().contains_key(&item, &self.heap), false)), _ => None },
             Some(HeapObj::Set(rc)) => Some((rc.borrow().contains(item, &self.heap), true)),
             Some(HeapObj::FrozenSet(s)) => Some((s.contains(item, &self.heap), true)),
             Some(HeapObj::List(_) | HeapObj::Tuple(_)) => return self.seq_contains(container, item, chunk),

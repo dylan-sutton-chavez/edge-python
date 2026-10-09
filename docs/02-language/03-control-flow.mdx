@@ -385,17 +385,20 @@ logging
 outer bad
 ```
 
-`raise X from Y` raises `X`. The `from` clause parses and `Y` evaluates, but the cause is not kept. There is no `__cause__` or `__context__`, and only `X` reaches the handler.
+`raise X from Y` raises `X` with `Y` as its `__cause__`. An exception raised while another is handled keeps that one as its `__context__`, and `from None` hides it. An uncaught chain prints each exception in turn.
 
 ```edge-python
 try:
-  raise ValueError from KeyError
-except ValueError:
-  print("caught the ValueError")
+  try:
+    {}["port"]
+  except KeyError as e:
+    raise ValueError("bad config") from e
+except ValueError as e:
+  print(type(e.__cause__).__name__, e.__suppress_context__)
 ```
 
 ```output
-caught the ValueError
+KeyError True
 ```
 
 ## with

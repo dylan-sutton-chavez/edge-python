@@ -125,7 +125,7 @@ impl<'a> VM<'a> {
                 let v = self.pop()?;
                 if !self.truthy_op(v, chunk)? {
                     // Bare `assert` raises a catchable AssertionError with empty args.
-                    let inst = self.heap.alloc(HeapObj::ExcInstance("AssertionError".into(), Vec::new()))?;
+                    let inst = self.heap.alloc(HeapObj::ExcInstance("AssertionError".into(), Vec::new(), Val::undef()))?;
                     self.pending.exc_val = Some(inst);
                     return Err(VmErr::Raised("AssertionError".into()));
                 }
@@ -135,10 +135,7 @@ impl<'a> VM<'a> {
                 // Deleting an already-unbound name raises NameError, matching Python.
                 match self.regs.get_mut(self.base + slot) {
                     Some(s) if !s.is_undef() => *s = Val::undef(),
-                    _ => {
-                        let name = chunk.names.get(slot).map(|n| ssa_strip(n)).unwrap_or_default();
-                        return Err(VmErr::Name(name.into()));
-                    }
+                    _ => return Err(self.unbound_err(chunk, slot)),
                 }
             }
             OpCode::Global | OpCode::Nonlocal => self.mark_impure(),
@@ -146,64 +143,24 @@ impl<'a> VM<'a> {
                 self.mark_impure();
                 // Bare `raise` (operand 1) re-raises the exception currently being handled.
                 if op == OpCode::Raise && operand == 1 {
-                    let Some(exc) = self.handling_exc else {
-                        return Err(VmErr::Runtime("No active exception to re-raise"));
+                    let Some(&(exc, at)) = self.handling.last() else {
+                        return Err(VmErr::Runtime("No active exception to reraise"));
                     };
                     let name = self.exc_type_name(exc);
                     self.pending.exc_val = Some(exc);
-                    self.error_byte_pos = self.handling_pos;
+                    self.error_byte_pos = at;
                     return Err(VmErr::Raised(name));
                 }
                 // RaiseFrom emits both `expr` then `from expr`, the topmost value is the cause, but the exception to raise is the LHS.
-                if op == OpCode::RaiseFrom { let _cause = self.pop()?; }
-                let mut exc = self.pop()?;
-                // The exception being handled raised again keeps the line it was first raised at.
-                if Some(exc) == self.handling_exc {
-                    self.error_byte_pos = self.handling_pos;
+                let cause = if op == OpCode::RaiseFrom { self.pop()? } else { Val::undef() };
+                let exc = self.pop()?;
+                let err = self.with_roots([cause], |vm| vm.raise_value(exc, chunk));
+                // A bad cause raises its own TypeError in place of the exception.
+                if op == OpCode::RaiseFrom && let Some(e) = self.pending.exc_val && let Err(bad) = self.with_roots([e], |vm| vm.link_cause(e, cause, chunk)) {
+                    self.pending.exc_val = None;
+                    return Err(bad);
                 }
-                // A class deriving from an exception raises an instance of itself made with no arguments.
-                if matches!(self.heap.try_get(exc), Some(HeapObj::Class(..))) && self.exc_base(exc).is_some() {
-                    self.push(exc);
-                    self.exec_call(0, chunk)?;
-                    exc = self.pop()?;
-                }
-                // A user exception reports its class name and `str(e)`, its own `__str__` included.
-                if let Some(&HeapObj::Instance(cls, _)) = self.heap.try_get(exc) && self.exc_base(cls).is_some() {
-                    let name = self.exc_type_name(exc);
-                    let text = self.with_roots([exc], |vm| vm.display_op(exc, chunk))?;
-                    self.pending.exc_val = Some(exc);
-                    return Err(VmErr::Raised(if text.is_empty() { name } else { crate::s!(str &name, ": ", str &text) }));
-                }
-                // Stash the Val for `except as e` binding, with non-Exc values using `display()`.
-                self.pending.exc_val = None;
-                // Extract owned (class name, instance with args) so display() can run after the heap borrow ends.
-                let info: Option<(alloc::string::String, Option<Val>)> = if exc.is_heap() {
-                    match self.heap.get(exc) {
-                        HeapObj::ExcInstance(n, args) => {
-                            self.pending.exc_val = Some(exc);
-                            Some((n.clone(), (!args.is_empty()).then_some(exc)))
-                        }
-                        HeapObj::Type(n) => {
-                            // Bare `raise X` builds an empty ExcInstance so `e.args` is `()`.
-                            let n = n.clone();
-                            let inst = self.heap.alloc(
-                                HeapObj::ExcInstance(n.clone(), Vec::new()))?;
-                            self.pending.exc_val = Some(inst);
-                            Some((n, None))
-                        }
-                        _ => None,
-                    }
-                } else {
-                    None
-                };
-                // Append the str of the instance so an uncaught traceback reads "Class: message".
-                let msg = match info {
-                    Some((n, Some(arg))) => { let detail = self.display(arg); crate::s!(str &n, ": ", str &detail) }
-                    Some((n, None)) => n,
-                    // Non-exception value (str, int, ...) raises TypeError, catchable by `except Exception`.
-                    None => crate::s!("TypeError: exceptions must derive from BaseException"),
-                };
-                return Err(VmErr::Raised(msg));
+                return Err(err);
             }
             OpCode::Await => {
                 // Coroutine parks on it (single-driver) so the top loop runs it to completion, even across suspension. Sync values pass through.
@@ -217,5 +174,55 @@ impl<'a> VM<'a> {
             _ => return Err(cold_runtime("non-side opcode in handle_side")),
         }
         Ok(())
+    }
+
+    /* The error `raise exc` raises, a class made into its instance, the instance kept for `except as`. */
+    fn raise_value(&mut self, mut exc: Val, chunk: &SSAChunk) -> VmErr {
+        // The exception being handled raised again keeps the line it was first raised at.
+        if let Some(&(handled, at)) = self.handling.last() && handled.0 == exc.0 {
+            self.error_byte_pos = at;
+        }
+        // A class deriving from an exception raises an instance of itself made with no arguments.
+        if matches!(self.heap.try_get(exc), Some(HeapObj::Class(..))) && self.exc_base(exc).is_some() {
+            self.push(exc);
+            if let Err(e) = self.exec_call(0, chunk) { return e; }
+            exc = match self.pop() { Ok(v) => v, Err(e) => return e };
+        }
+        // A user exception reports its class name and `str(e)`, its own `__str__` included.
+        if let Some(&HeapObj::Instance(cls, _)) = self.heap.try_get(exc) && self.exc_base(cls).is_some() {
+            let name = self.exc_type_name(exc);
+            let text = match self.with_roots([exc], |vm| vm.display_op(exc, chunk)) { Ok(t) => t, Err(e) => return e };
+            self.pending.exc_val = Some(exc);
+            return VmErr::Raised(if text.is_empty() { name } else { crate::s!(str &name, ": ", str &text) });
+        }
+        // Stash the Val for `except as e` binding, with non-Exc values using `display()`.
+        self.pending.exc_val = None;
+        // Extract owned (class name, instance with args) so display() can run after the heap borrow ends.
+        let info: Option<(alloc::string::String, Option<Val>)> = if exc.is_heap() {
+            match self.heap.get(exc) {
+                HeapObj::ExcInstance(n, args, _) => {
+                    self.pending.exc_val = Some(exc);
+                    Some((n.clone(), (!args.is_empty()).then_some(exc)))
+                }
+                HeapObj::Type(n) => {
+                    // Bare `raise X` builds an empty ExcInstance so `e.args` is `()`.
+                    let n = n.clone();
+                    let inst = match self.heap.alloc(HeapObj::ExcInstance(n.clone(), Vec::new(), Val::undef())) { Ok(v) => v, Err(e) => return e };
+                    self.pending.exc_val = Some(inst);
+                    Some((n, None))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        // Append the str of the instance so an uncaught traceback reads "Class: message".
+        let msg = match info {
+            Some((n, Some(arg))) => { let detail = self.display(arg); crate::s!(str &n, ": ", str &detail) }
+            Some((n, None)) => n,
+            // Non-exception value (str, int, ...) raises TypeError, catchable by `except Exception`.
+            None => crate::s!("TypeError: exceptions must derive from BaseException"),
+        };
+        VmErr::Raised(msg)
     }
 }

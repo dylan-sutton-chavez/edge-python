@@ -98,6 +98,9 @@ macro_rules! fused {
         pub(crate) fn fused_native(op: OpCode) -> Option<F> {
             match op { $( OpCode::$op => Some(F::$id), )* _ => None }
         }
+
+        // Every fused opcode, so a set of them as bits maps back to its builtins.
+        pub(super) const FUSED: &[OpCode] = &[ $( OpCode::$op, )* ];
     };
 }
 
@@ -379,6 +382,9 @@ pub const SSA_TMP_CMP: &str = "#cmp";
 pub const SSA_TMP_MATCH: &str = "#match";
 pub const SSA_TMP_MATCH_ITEM: &str = "#match_item";
 
+// The parameter a comprehension receives its iterator through.
+pub const COMP_ARG: &str = "#arg";
+
 // Param name without `*`/`**`/`~` marker prefixes.
 pub fn param_base_name(p: &str) -> &str {
     p.trim_start_matches(['*', '~']).trim_end_matches('=')
@@ -637,7 +643,7 @@ builtin_types! {
     "int", "float", "str", "bytes", "bool", "list",
     "tuple", "dict", "set", "frozenset", "range", "slice", "type", "NoneType", "object",
     "Exception", "BaseException",
-    "ValueError", "TypeError", "NameError", "KeyError",
+    "ValueError", "TypeError", "NameError", "UnboundLocalError", "KeyError",
     "UnicodeError", "UnicodeEncodeError", "UnicodeDecodeError",
     "IndexError", "AttributeError", "RuntimeError",
     "ZeroDivisionError", "OverflowError", "MemoryError",

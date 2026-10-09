@@ -75,7 +75,7 @@ pub fn footprint(obj: &HeapObj) -> usize {
         HeapObj::Dict(rc) | HeapObj::Instance(_, rc) => BOX_BYTES + rc.borrow().bytes(),
         HeapObj::Set(rc) => BOX_BYTES + rc.borrow().bytes(),
         HeapObj::FrozenSet(s) => BOX_BYTES + s.bytes(),
-        HeapObj::ExcInstance(name, args) => name.capacity() + args.bytes(),
+        HeapObj::ExcInstance(name, args, _) => name.capacity() + args.bytes(),
         HeapObj::Func(_, defaults, cells, attrs) => defaults.bytes() + cells.bytes() + attrs.borrow().bytes(),
         HeapObj::Class(name, bases, members) => name.capacity() + bases.bytes() + members.borrow().bytes(),
         HeapObj::Module(name, entries) => name.capacity() + entries.bytes(),
@@ -205,8 +205,8 @@ pub enum HeapObj {
     NotImplemented,
     /* Wide-int slow path (i128), `int_to_val` canonicalises so 48-bit values stay inline. */
     LongInt(Wide),
-    /* Exception instance, type name + ctor args (exposed via `.args`). */
-    ExcInstance(String, Vec<Val>),
+    /* Exception instance, type name + ctor args (exposed via `.args`) + its chain, undef until it has one. */
+    ExcInstance(String, Vec<Val>, Val),
     BoundMethod(Val, BuiltinMethodId),
     NativeFn(NativeFnId),
     // `bases` lists direct parents in declared order, the VM walks a cached C3 linearization on miss. Members are mutable so a decorator or `cls.attr = ...` can add or replace class attributes.
@@ -242,7 +242,13 @@ pub enum HeapObj {
     Iter(Rc<RefCell<IterFrame>>, &'static str),
     // A variable a closure shares with the frame binding it, undef while unbound.
     Cell(Val),
+    // `d.keys()`, `d.values()` or `d.items()`, reading the dict live.
+    DictView(Val, View),
 }
+
+/* The part of a dict a view shows. */
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum View { Keys, Values, Items }
 
 /* A generator or coroutine body, where it resumes and the state it resumes with. */
 #[derive(Clone, Debug)]
@@ -279,9 +285,10 @@ impl From<i128> for Wide {
 }
 
 /* Type names a builtin iterator can carry, the index is how a snapshot stores one. */
-pub const ITER_KINDS: [&str; 15] = [
+pub const ITER_KINDS: [&str; 20] = [
     "list_iterator", "range_iterator", "tuple_iterator", "str_ascii_iterator", "str_iterator", "dict_keyiterator", "set_iterator",
     "bytes_iterator", "callable_iterator", "map", "filter", "zip", "enumerate", "list_reverseiterator", "reversed",
+    "dict_valueiterator", "dict_itemiterator", "dict_reversekeyiterator", "dict_reversevalueiterator", "dict_reverseitemiterator",
 ];
 
 pub use crate::vm::methods::BuiltinMethodId;
@@ -572,7 +579,7 @@ pub(crate) fn for_each_val(obj: &HeapObj, mut f: impl FnMut(Val)) {
             for &(_, v) in captures { f(v); }
         }
         HeapObj::Module(_, attrs) => for (_, v) in attrs { f(*v); },
-        HeapObj::ExcInstance(_, args) => for &v in args { f(v); },
+        HeapObj::ExcInstance(_, args, chain) => { for &v in args { f(v); } f(*chain); }
         HeapObj::GenericAlias(origin, args) => { f(*origin); f(*args); }
         HeapObj::TypeAlias(_, value) => f(*value),
         HeapObj::Union(args) => f(*args),
@@ -581,7 +588,7 @@ pub(crate) fn for_each_val(obj: &HeapObj, mut f: impl FnMut(Val)) {
         | HeapObj::Type(_) | HeapObj::NativeFn(_) | HeapObj::Range(..)
         | HeapObj::Extern(_) | HeapObj::Ellipsis | HeapObj::NotImplemented | HeapObj::TypeVar(_) => {}
         HeapObj::Iter(frame, _) => frame.borrow().for_each_val(&mut f),
-        HeapObj::Cell(v) => f(*v),
+        HeapObj::Cell(v) | HeapObj::DictView(v, _) => f(*v),
     }
 }
 

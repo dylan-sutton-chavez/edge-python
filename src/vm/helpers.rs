@@ -20,7 +20,7 @@ impl<'a> VM<'a> {
     /* Intended process exit code when the last uncaught error is `SystemExit` with an integer (or absent/None) argument. `None` means "not a plain SystemExit", so the host renders a normal traceback. A non-int argument also yields `None` so its message surfaces as an error. */
     pub fn system_exit_code(&self) -> Option<i64> {
         let exc = self.pending.exc_val?;
-        let HeapObj::ExcInstance(name, args) = self.heap.get(exc) else { return None; };
+        let HeapObj::ExcInstance(name, args, _) = self.heap.get(exc) else { return None; };
         if name != "SystemExit" { return None; }
         match args.first() {
             None => Some(0),
@@ -199,6 +199,22 @@ impl<'a> VM<'a> {
         s.chars().map(|c| self.heap.alloc(HeapObj::Str(c.to_string()))).collect()
     }
 
+    /* A live walk over dict `d` showing the part `kind` names. */
+    pub(crate) fn dict_walk(&self, d: Val, kind: View) -> IterFrame {
+        let len = match self.heap.try_get(d) { Some(HeapObj::Dict(m)) => m.borrow().len(), _ => 0 };
+        IterFrame::DictWalk { of: d, idx: 0, left: len, len, kind }
+    }
+
+    /* A frame over `items` read from `o`, watching a dict, dict view or set for a change of size. */
+    pub(crate) fn watched(&self, o: Val, items: Vec<Val>) -> IterFrame {
+        let of = match self.heap.try_get(o) {
+            Some(HeapObj::Dict(_) | HeapObj::Set(_)) => o,
+            Some(&HeapObj::DictView(d, _)) => d,
+            _ => return IterFrame::Seq { items: items.into(), idx: 0 },
+        };
+        IterFrame::Watched { items: items.into(), idx: 0, of, len: crate::value::watched_len(&self.heap, of) }
+    }
+
     pub(crate) fn make_iter_frame(&mut self, obj: Val, chunk: &crate::parser::SSAChunk) -> Result<IterFrame, VmErr> {
         if !obj.is_heap() {
             return Err(VmErr::TypeMsg(s!("'", str self.type_name(obj), "' object is not iterable")));
@@ -213,11 +229,9 @@ impl<'a> VM<'a> {
             HeapObj::Range(s, e, st) => IterFrame::Range { cur: *s, end: *e, step: *st },
             HeapObj::List(v) => IterFrame::List { rc: v.clone(), idx: 0 },
             HeapObj::Tuple(v) => IterFrame::Seq { items: v.as_slice().into(), idx: 0 },
-            HeapObj::Dict(p) => IterFrame::Seq { items: p.borrow().keys().collect(), idx: 0 },
-            HeapObj::Set(s) => {
-                let items: Vec<Val> = s.borrow().iter().cloned().collect();
-                IterFrame::Seq { items: items.into(), idx: 0 }
-            },
+            HeapObj::Dict(_) => self.dict_walk(obj, View::Keys),
+            &HeapObj::DictView(d, kind) => self.dict_walk(d, kind),
+            HeapObj::Set(s) => { let items = s.borrow().iter().cloned().collect(); self.watched(obj, items) }
             HeapObj::FrozenSet(s) => {
                 let items: Vec<Val> = s.iter().cloned().collect();
                 IterFrame::Seq { items: items.into(), idx: 0 }

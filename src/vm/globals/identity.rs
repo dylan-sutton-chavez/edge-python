@@ -92,7 +92,7 @@ impl<'a> VM<'a> {
             _ => (self.type_name(obj), None),
         };
         // An exception instance or a type object also matches through the exception tree by its own name.
-        let exc_name = match self.heap.try_get(obj) { Some(HeapObj::Type(n) | HeapObj::ExcInstance(n, _)) => Some(n.as_str()), _ => None };
+        let exc_name = match self.heap.try_get(obj) { Some(HeapObj::Type(n) | HeapObj::ExcInstance(n, ..)) => Some(n.as_str()), _ => None };
         match self.heap.try_get(t).ok_or_else(bad)? {
             HeapObj::Type(name) => Ok(name == "object" || matches_exc_class(obj_ty, name) || (obj_ty == "bool" && name == "int")
                 || exc_name.is_some_and(|n| matches_exc_class(n, name))

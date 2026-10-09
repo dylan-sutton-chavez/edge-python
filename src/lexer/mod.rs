@@ -8,12 +8,14 @@ use alloc::vec::Vec;
 
 const MAX_SOURCE_SIZE: usize = 10 * 1024 * 1024;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Token {
     pub kind: TokenType,
     pub line: usize,
     pub start: usize,
     pub end: usize,
+    /* Starts the element of a comprehension, so the parser compiles its clauses first. */
+    pub comp: bool,
 }
 
 /* Lex-time diagnostic. Static message since errors are a fixed set, parser boundary upgrades it to a richer Diagnostic. */
@@ -65,7 +67,7 @@ pub fn lex(source: &str) -> (Vec<Token>, Vec<LexError>) {
             msg: "source file exceeds maximum size (10 MiB)",
         });
         return (
-            alloc::vec![Token { kind: TokenType::Endmarker, line: 0, start: len, end: len }],
+            alloc::vec![Token { kind: TokenType::Endmarker, line: 0, start: len, end: len, comp: false }],
             scanner.errors,
         );
     }
@@ -80,7 +82,7 @@ pub fn lex(source: &str) -> (Vec<Token>, Vec<LexError>) {
     }
     raw.push((TokenType::Endmarker, scanner.line, len, len));
 
-    let mut tokens = Vec::with_capacity(raw.len());
+    let mut tokens: Vec<Token> = Vec::with_capacity(raw.len());
     let mut ended = false;
     for i in 0..raw.len() {
         let (tok, line, start, end) = raw[i];
@@ -93,9 +95,30 @@ pub fn lex(source: &str) -> (Vec<Token>, Vec<LexError>) {
             TokenType::Type if !(starts_stmt(&raw, i) && matches!(raw.get(i + 1), Some(&(TokenType::Name, ..)))) => TokenType::Name,
             _ => tok,
         };
-        tokens.push(Token { kind, line, start, end });
+        if kind == TokenType::For && let Some(first) = comp_start(&tokens) { tokens[first].comp = true; }
+        tokens.push(Token { kind, line, start, end, comp: false });
     }
     (tokens, scanner.errors)
+}
+
+/* The first token of the item a `for` ends inside brackets, else None. */
+fn comp_start(tokens: &[Token]) -> Option<usize> {
+    // Commas between a lambda and its colon separate its parameters, not items.
+    let (mut depth, mut item, mut params) = (0usize, None, false);
+    for (i, t) in tokens.iter().enumerate().rev() {
+        match t.kind {
+            TokenType::Rpar | TokenType::Rsqb | TokenType::Rbrace => depth += 1,
+            TokenType::Lpar | TokenType::Lsqb | TokenType::Lbrace if depth > 0 => depth -= 1,
+            TokenType::Lpar | TokenType::Lsqb | TokenType::Lbrace => { item = item.or(Some(i + 1)); break; }
+            TokenType::Colon if depth == 0 => params = true,
+            TokenType::Lambda if depth == 0 => params = false,
+            TokenType::Comma if depth == 0 && !params => item = item.or(Some(i + 1)),
+            TokenType::Newline | TokenType::Indent | TokenType::Dedent | TokenType::Semi => return None,
+            _ => {}
+        }
+        if i == 0 { return None; }
+    }
+    (item?..tokens.len()).find(|&j| !matches!(tokens[j].kind, TokenType::Nl | TokenType::Comment))
 }
 
 fn starts_stmt(raw: &[(TokenType, usize, usize, usize)], i: usize) -> bool {

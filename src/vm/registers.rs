@@ -112,11 +112,25 @@ impl<'a> VM<'a> {
         if v.is_undef() { self.unbound(chunk, r) } else { Ok(v) }
     }
 
+    /* What reading unbound slot `r` gives, a function local failing and any other name falling back to the builtins. */
     #[cold]
     #[inline(never)]
-    fn unbound(&self, chunk: &SSAChunk, r: u16) -> Result<Val, VmErr> {
+    pub(crate) fn unbound(&self, chunk: &SSAChunk, r: u16) -> Result<Val, VmErr> {
+        if self.body_to_fi.contains_key(&(chunk as *const SSAChunk)) { return Err(self.unbound_err(chunk, r as usize)); }
         let name = chunk.names.get(r as usize).map(|n| ssa_strip(n)).unwrap_or_default();
         self.builtin_binding(name).ok_or_else(|| VmErr::Name(name.into()))
+    }
+
+    /* The error unbound slot `s` raises, a function telling its own variables from captured ones. */
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn unbound_err(&self, chunk: &SSAChunk, s: usize) -> VmErr {
+        let name = chunk.names.get(s).map(|n| ssa_strip(n)).unwrap_or_default();
+        let Some(&fi) = self.body_to_fi.get(&(chunk as *const SSAChunk)) else { return VmErr::Name(name.into()) };
+        if self.fn_scope[fi].freevars.iter().any(|f| f.2 == name) {
+            return VmErr::Raised(crate::s!("NameError: cannot access free variable '", str name, "' where it is not associated with a value in enclosing scope"));
+        }
+        VmErr::Raised(crate::s!("UnboundLocalError: cannot access local variable '", str name, "' where it is not associated with a value"))
     }
 
     /* `a = b op c` on numbers inline, anything else through the stack opcode. */

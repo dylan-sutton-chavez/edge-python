@@ -134,7 +134,7 @@ Interactive removal of the binary and PATH entries.
 
 ## The Python delta
 
-A program that compiles behaves as it does in CPython, apart from the six design choices this section lists. What Edge Python leaves out is missing for the sandbox or for the design of the engine, and it fails with an error instead of behaving differently, at compile time whenever the compiler can see it. This is the section to internalize.
+A program that compiles behaves as it does in CPython, apart from the three design choices this section lists. What Edge Python leaves out is missing for the sandbox or for the design of the engine, and it fails with an error instead of behaving differently, at compile time whenever the compiler can see it. This is the section to internalize.
 
 ### Left out for the sandbox
 
@@ -173,47 +173,7 @@ print(a is b)
 
 An instance hashes by identity, and a class that defines `__eq__` is unhashable. `bytearray`, `memoryview`, `gen.send`, `gen.throw` and `gen.close` do not exist either, and using one fails at run time.
 
-The six behaviors that differ by design follow, the eager iterators and dict views first.
-
-### Eager where Python is lazy
-
-Generator expressions lower eagerly to lists. Write `def` plus `yield` when real laziness matters.
-
-```python
-g = (i * 2 for i in range(3))
-print(g)
-```
-
-```text Output
-[0, 2, 4]
-```
-
-`map`, `filter`, `zip`, `enumerate` and `reversed` return iterator objects whose items are all computed by the call itself, so the mapped function runs up front. `iter` over a list reads it live and over a `range` lazily, `next()` on any builtin iterator costs constant time. A builtin that takes an iterable, a `*` spread and an unpacking drain a user `__iter__` the same way, so an endless iterator runs until the budget stops it.
-
-```python
-seen = []
-m = map(lambda v: seen.append(v) or v * 2, [1, 2, 3])
-print(len(seen), next(m), list(m))
-print(m)
-```
-
-```text Output
-3 2 [4, 6]
-<map object>
-```
-
-Dict views are concrete list snapshots taken at call time, not live views.
-
-```python
-d = {"a": 1}
-keys = d.keys()
-d["b"] = 2
-print(keys)
-```
-
-```text Output
-['a']
-```
+The three behaviors that differ by design follow.
 
 ### Numbers are bounded
 
@@ -237,10 +197,9 @@ OverflowError
 
 `pow(a, b, m)` requires a modulus below 2^63, and the `int_to_bytes` and `int_from_bytes` builtins cap at 8 bytes while the `int.to_bytes` and `int.from_bytes` methods do not.
 
-### Order, causes and NaN
+### Order and NaN
 
 - Sets iterate and print in hash order. Present them through `sorted`.
-- `raise X from Y` evaluates `Y` and keeps no cause, there is no `__cause__`.
 - Every NaN is one value. A NaN is found in a list holding another NaN, and a set keeps a single one.
 
 ### Reduced pattern matching
@@ -371,7 +330,7 @@ True 65 a
 
 ### Iteration
 
-`len`, `range`, `sorted`, `reversed`, `enumerate`, `zip`, `iter`, `next`, `map`, `filter`, `all`, `any`, `slice`. `range` is genuinely lazy, and the other iterators compute their items when created, see the delta section.
+`len`, `range`, `sorted`, `reversed`, `enumerate`, `zip`, `iter`, `next`, `map`, `filter`, `all`, `any`, `slice`. The iterators they return compute each item when it is asked for.
 
 ```python
 print(list(enumerate("ab", start=1)))
@@ -413,9 +372,9 @@ b'\xff\x00' 1
 
 ### Exceptions
 
-The catchable tree under `Exception` is `ArithmeticError` with `OverflowError` and `ZeroDivisionError`, `LookupError` with `IndexError` and `KeyError`, `RuntimeError` with `RecursionError` and `NotImplementedError`, `OSError`, also named `IOError`, with `PermissionError`, `ValueError` with `UnicodeError` and its `UnicodeEncodeError` and `UnicodeDecodeError`, `ImportError` with `ModuleNotFoundError`, plus `TypeError`, `AttributeError`, `NameError`, `StopIteration`, `StopAsyncIteration`, `AssertionError`, `MemoryError` and `TimeoutError`. Under `BaseException` sit `SystemExit` and `CancelledError`, which `except Exception` does not catch.
+The catchable tree under `Exception` is `ArithmeticError` with `OverflowError` and `ZeroDivisionError`, `LookupError` with `IndexError` and `KeyError`, `RuntimeError` with `RecursionError` and `NotImplementedError`, `OSError`, also named `IOError`, with `PermissionError`, `ValueError` with `UnicodeError` and its `UnicodeEncodeError` and `UnicodeDecodeError`, `ImportError` with `ModuleNotFoundError`, `NameError` with `UnboundLocalError`, plus `TypeError`, `AttributeError`, `StopIteration`, `StopAsyncIteration`, `AssertionError`, `MemoryError` and `TimeoutError`. Under `BaseException` sit `SystemExit` and `CancelledError`, which `except Exception` does not catch.
 
-Handlers name one class, a tuple or nothing, and a bare `except` must come last. `except X as e` binds the exception and `e.args` is its argument tuple. `finally` runs on every exit path including `return`, `break` and `continue`.
+Handlers name one class, a tuple or nothing, and a bare `except` must come last. `except X as e` binds the exception and `e.args` is its argument tuple. `finally` runs on every exit path including `return`, `break` and `continue`. `raise X from Y` sets `__cause__`, an exception raised while another is handled keeps it as `__context__`, and an uncaught chain prints each exception in turn.
 
 ```python
 try:
@@ -486,7 +445,7 @@ print(xs, xs.pop())
 
 ### dict
 
-Insertion ordered. `keys`, `values`, `items` return list snapshots, plus `get`, `update`, `pop`, `popitem`, `setdefault`, `fromkeys`, `copy`, `clear`. `popitem` removes the most recently inserted pair. Numerically equal keys collapse, so `1`, `1.0` and `True` are one key.
+Insertion ordered. `keys`, `values`, `items` return live views, plus `get`, `update`, `pop`, `popitem`, `setdefault`, `fromkeys`, `copy`, `clear`. `popitem` removes the most recently inserted pair. Numerically equal keys collapse, so `1`, `1.0` and `True` are one key.
 
 ```python
 d = dict.fromkeys(["a", "b"], 0)

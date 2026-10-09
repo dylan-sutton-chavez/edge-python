@@ -152,11 +152,11 @@ impl<'a> VM<'a> {
                 return attrs.iter().find(|(n, _)| n == name).map(|&(_, v)| AttrLookup::ModuleAttr(v))
                     .ok_or_else(|| VmErr::Attribute(s!("module '", str mod_name, "' has no attribute '", str name, "'")));
             }
-            // ExcInstance attr, only `e.args` is defined.
-            Some(HeapObj::ExcInstance(n, args)) => return match name {
+            // ExcInstance attrs, `e.args` and the chain the exception was raised in.
+            Some(HeapObj::ExcInstance(n, args, _)) => return match name {
                 "args" => Ok(AttrLookup::ExcArgs(args.clone())),
                 "__class__" => Ok(AttrLookup::TypeOf(n.clone())),
-                _ => Err(missing()),
+                _ => self.chain_attr(obj, name).map(AttrLookup::ClassMember).ok_or_else(missing),
             },
             // Bound methods expose their receiver, user methods also their function.
             Some(&HeapObj::BoundUserMethod(recv, _, _)) if name == "__self__" => return Ok(AttrLookup::ClassMember(recv)),
@@ -190,6 +190,7 @@ impl<'a> VM<'a> {
                 if let Some((mv, defining)) = self.lookup_class_member(*cls_val, name) { return Ok(self.bind_member(mv, obj, defining)); }
                 // An exception falls back to the `BaseException` methods.
                 if self.exc_base(*cls_val).is_some() && let Some(id) = lookup_method("BaseException", name) { return Ok(AttrLookup::BuiltinMethod(id)); }
+                if self.exc_base(*cls_val).is_some() && let Some(v) = self.chain_attr(obj, name) { return Ok(AttrLookup::ClassMember(v)); }
                 if name == "__class__" { return Ok(AttrLookup::ClassMember(*cls_val)); }
                 return Err(missing());
             }

@@ -11,7 +11,7 @@ use super::{Pending, VM};
 use super::types::*;
 
 const MAGIC: u32 = 0x4E53_5045;
-const FORMAT: u32 = 9;
+const FORMAT: u32 = 10;
 
 pub type SnapErr = String;
 
@@ -175,6 +175,8 @@ fn put_slot_val(w: &mut W, p: &(usize, Val)) { w.usz(p.0); w.val(p.1); }
 fn get_slot_val(r: &mut R) -> Result<(usize, Val), SnapErr> { Ok((r.usz()?, r.val()?)) }
 fn put_name_val(w: &mut W, p: &(String, Val)) { w.str(&p.0); w.val(p.1); }
 fn get_name_val(r: &mut R) -> Result<(String, Val), SnapErr> { Ok((r.str()?, r.val()?)) }
+fn put_handled(w: &mut W, h: &(Val, Option<u32>)) { w.val(h.0); w.opt_u32(h.1); }
+fn get_handled(r: &mut R) -> Result<(Val, Option<u32>), SnapErr> { Ok((r.val()?, r.opt_u32()?)) }
 fn put_i32_pair(w: &mut W, p: &(i32, i32)) { w.i32v(p.0); w.i32v(p.1); }
 fn get_i32_pair(r: &mut R) -> Result<(i32, i32), SnapErr> { Ok((r.i32v()?, r.i32v()?)) }
 
@@ -190,6 +192,14 @@ fn put_iter_frame(w: &mut W, x: &IterFrame) {
         IterFrame::Range { cur, end, step } => { w.u8(1); w.i64(*cur); w.i64(*end); w.i64(*step); }
         IterFrame::Coroutine(v) => { w.u8(2); w.val(*v); }
         IterFrame::UserDefined(v) => { w.u8(3); w.val(*v); }
+        IterFrame::ListRev { rc, idx } => { w.u8(0); w.vals(&rc.borrow()[..(*idx).min(rc.borrow().len())].iter().rev().copied().collect::<Vec<_>>()); w.usz(0); }
+        IterFrame::Map { f, its } => { w.u8(4); w.val(*f); w.vals(its); }
+        IterFrame::Filter { f, it } => { w.u8(5); w.val(*f); w.val(*it); }
+        IterFrame::Zip { its } => { w.u8(6); w.vals(its); }
+        IterFrame::Enumerate { it, n } => { w.u8(7); w.val(*it); w.val(*n); }
+        IterFrame::Call { f, sentinel } => { w.u8(8); w.val(*f); w.val(*sentinel); }
+        IterFrame::Watched { items, idx, of, len } => { w.u8(9); w.vals(items); w.usz(*idx); w.val(*of); w.usz(*len); }
+        IterFrame::DictWalk { of, idx, left, len, kind } => { w.u8(10); w.val(*of); w.usz(*idx); w.usz(*left); w.usz(*len); w.u8(*kind as u8); }
     }
 }
 fn get_iter_frame(r: &mut R) -> Result<IterFrame, SnapErr> {
@@ -198,6 +208,17 @@ fn get_iter_frame(r: &mut R) -> Result<IterFrame, SnapErr> {
         1 => IterFrame::Range { cur: r.i64()?, end: r.i64()?, step: r.i64()? },
         2 => IterFrame::Coroutine(r.val()?),
         3 => IterFrame::UserDefined(r.val()?),
+        4 => IterFrame::Map { f: r.val()?, its: r.vals()?.into() },
+        5 => IterFrame::Filter { f: r.val()?, it: r.val()? },
+        6 => IterFrame::Zip { its: r.vals()?.into() },
+        7 => IterFrame::Enumerate { it: r.val()?, n: r.val()? },
+        8 => IterFrame::Call { f: r.val()?, sentinel: r.val()? },
+        9 => IterFrame::Watched { items: r.vals()?.into(), idx: r.usz()?, of: r.val()?, len: r.usz()? },
+        10 => {
+            let (of, idx, left, len) = (r.val()?, r.usz()?, r.usz()?, r.usz()?);
+            let kind = *[View::Keys, View::Values, View::Items].get(r.u8()? as usize).ok_or("snapshot names an unknown dict view")?;
+            IterFrame::DictWalk { of, idx, left, len, kind }
+        }
         t => return Err(s_err("unknown tag", itoa::Buffer::new().format(t))),
     })
 }
@@ -209,6 +230,7 @@ codec!(struct ExceptionFrame, put_exc_frame, get_exc_frame {
     iter_depth: usz,
     with_depth: usz,
     unwind_depth: usz,
+    handling_depth: usz,
 });
 
 codec!(struct SyncFrame, put_sync_frame, get_sync_frame {
@@ -366,7 +388,7 @@ fn put_obj(w: &mut W, obj: &HeapObj) {
         HeapObj::Type(n) => { w.u8(11); w.str(n); }
         HeapObj::NotImplemented => w.u8(12),
         HeapObj::LongInt(i) => { w.u8(13); w.i128v(i.get()); }
-        HeapObj::ExcInstance(n, args) => { w.u8(14); w.str(n); w.vals(args); }
+        HeapObj::ExcInstance(n, args, chain) => { w.u8(14); w.str(n); w.vals(args); w.val(*chain); }
         HeapObj::BoundMethod(recv, id) => { w.u8(15); w.val(*recv); w.u8(id.raw()); }
         HeapObj::NativeFn(id) => { w.u8(16); w.str(id.name()); }
         HeapObj::Class(n, bases, members) => {
@@ -395,6 +417,7 @@ fn put_obj(w: &mut W, obj: &HeapObj) {
         }
         HeapObj::Extern(f) => { w.u8(26); w.str(&f.name); }
         HeapObj::Cell(v) => { w.u8(34); w.val(*v); }
+        HeapObj::DictView(d, kind) => { w.u8(35); w.val(*d); w.u8(*kind as u8); }
     }
 }
 
@@ -420,7 +443,7 @@ fn get_obj(r: &mut R, externs: &ExternMap, fills: &mut Vec<(u32, SetFill)>, slot
         11 => HeapObj::Type(r.str()?),
         12 => HeapObj::NotImplemented,
         13 => HeapObj::LongInt(r.i128v()?.into()),
-        14 => HeapObj::ExcInstance(r.str()?, r.vals()?),
+        14 => HeapObj::ExcInstance(r.str()?, r.vals()?, r.val()?),
         15 => {
             let recv = r.val()?;
             let id = BuiltinMethodId::from_raw(r.u8()?).ok_or_else(|| "unknown builtin method id".to_string())?;
@@ -456,6 +479,10 @@ fn get_obj(r: &mut R, externs: &ExternMap, fills: &mut Vec<(u32, SetFill)>, slot
             HeapObj::Iter(Rc::new(RefCell::new(get_iter_frame(r)?)), name)
         }
         34 => HeapObj::Cell(r.val()?),
+        35 => {
+            let d = r.val()?;
+            HeapObj::DictView(d, *[View::Keys, View::Values, View::Items].get(r.u8()? as usize).ok_or("snapshot names an unknown dict view")?)
+        }
         t => return Err(s_err("unknown heap tag", itoa::Buffer::new().format(t))),
     })
 }
@@ -514,8 +541,7 @@ vm_state! {
     is_async: [boolean], // Filled by MakeCoroutine, not chunk-derivable.
     exception_stack: [put_exc_frame, get_exc_frame],
     unwind_stack: [put_unwind, get_unwind],
-    handling_exc: opt_val,
-    handling_pos: opt_u32,
+    handling: [put_handled, get_handled],
     pending_sync_frames: [put_sync_frame, get_sync_frame],
     pending_exec_exc_base: opt_usz,
     pending: (put_pending, get_pending),
@@ -699,6 +725,7 @@ fn check_objs(vm: &VM, fills: &[(u32, SetFill)]) -> Result<(), SnapErr> {
             &HeapObj::Func(fi, ..) => fi < nfn,
             HeapObj::Coroutine(c) => !matches!(c.body, BodyRef::Fn(fi) if fi >= nfn),
             &HeapObj::Range(_, _, step) => step != 0,
+            &HeapObj::DictView(d, _) => matches!(vm.heap.try_get(d), Some(HeapObj::Dict(_))),
             _ => true,
         };
         crate::value::for_each_val(obj, |v| ok &= !dangling(v));

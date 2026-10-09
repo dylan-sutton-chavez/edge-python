@@ -17,6 +17,7 @@ pub(crate) mod opcodes;
 pub(crate) mod methods;
 pub mod snapshot;
 
+mod chain;
 mod dispatch;
 mod gc;
 mod helpers;
@@ -122,10 +123,8 @@ pub struct VM<'a> {
     pub(crate) exception_stack: Vec<ExceptionFrame>,
     /* Active finally/with cleanup reasons (innermost last), EndFinally pops one per body. */
     pub(crate) unwind_stack: Vec<types::Unwind>,
-    /* Exception currently being handled in an except block, a bare `raise` re-raises it. */
-    pub(crate) handling_exc: Option<Val>,
-    // Where the handled exception was raised, so re-raising it reports that line.
-    pub(crate) handling_pos: Option<u32>,
+    /* Exceptions being handled with where each was raised, innermost last, a bare `raise` re-raises the last. */
+    pub(crate) handling: Vec<(Val, Option<u32>)>,
     pub(crate) functions: Vec<&'a (Vec<String>, SSAChunk, u16, u16)>,
     // (chunk_ptr, global fn ids), linear scan over a tiny list avoids HashMap monomorphization.
     pub(crate) fn_index: Vec<(*const SSAChunk, Vec<u32>)>,
@@ -283,8 +282,7 @@ impl<'a> VM<'a> {
             mro_cache: HashMap::default(),
             exception_stack: Vec::new(),
             unwind_stack: Vec::new(),
-            handling_exc: None,
-            handling_pos: None,
+            handling: Vec::new(),
             error_byte_pos: None,
             module_table: HashMap::default(),
             fn_module: Vec::new(),
@@ -382,12 +380,8 @@ impl<'a> VM<'a> {
 
     /* Templates read `globals`, so they build after builtin registration, rebuilding the deduped roots is cheap. */
     pub(crate) fn index_templates(&mut self, start: usize) {
-        // Only a plain local starts from a builtin, cells and globals read live.
-        let new: Vec<Vec<Val>> = (start..self.functions.len()).map(|fi| {
-            let mut template = self.fill_builtins(&self.functions[fi].1.names);
-            for (v, k) in template.iter_mut().zip(self.fn_scope[fi].kinds.iter()) { if *k != scope::Kind::Local { *v = Val::undef(); } }
-            template
-        }).collect();
+        // Every slot starts unbound, so a local read before its first store fails.
+        let new: Vec<Vec<Val>> = (start..self.functions.len()).map(|fi| alloc::vec![Val::undef(); self.functions[fi].1.names.len()]).collect();
         self.slot_templates.truncate(start);
         self.slot_templates.extend(new);
         // Cells change behind a cached result, and an import reads other globals.
@@ -489,8 +483,7 @@ impl<'a> VM<'a> {
         self.scheduler.clear();
         self.pending_sync_frames.clear();
         self.executing_coros.clear();
-        self.handling_exc = None;
-        self.handling_pos = None;
+        self.handling.clear();
         self.cancelling = false;
         self.resume_raise = None;
         self.yielded = false;

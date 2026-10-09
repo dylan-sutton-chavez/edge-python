@@ -463,7 +463,7 @@ True
 ## Behavioral notes
 
 - **Set iteration and `repr` order.** Sets store elements in a hash table. Iteration and `repr` follow hash order, not insertion order. Sort a set when the order matters.
-- **Every NaN is one value.** A NaN is found in a list holding another NaN, and a set keeps a single one, where CPython keeps one per object.
+- **Every NaN is one value.** A NaN is found in a list holding another NaN, and a set keeps a single one, where CPython keeps one per object. [Memory model](/docs/internals/design#memory-model) explains why.
 
 ```edge-python
 print({3, 1, 2})

@@ -421,7 +421,7 @@ print(sorted(["banana", "apple", "kiwi"], key=len))
 
 ### reversed
 
-`reversed(x)` returns an iterator over a sequence or a dict, from its last item. It reads the items when the call is made. A set is not reversible and raises `TypeError`.
+`reversed(x)` returns an iterator over a sequence, a dict or a dict view, from its last item. Over a list it reads the list as it goes. A set is not reversible and raises `TypeError`.
 
 ```edge-python
 print(list(reversed([1, 2, 3])))
@@ -500,7 +500,7 @@ done
 
 - `map` walks several iterables in parallel and stops at the shortest.
 - A `None` predicate keeps the truthy items.
-- Both call the function on every item when created, not as the items are taken.
+- Both call the function as each item is taken.
 
 ```edge-python
 print(list(map(lambda x: x * 2, [1, 2, 3])))

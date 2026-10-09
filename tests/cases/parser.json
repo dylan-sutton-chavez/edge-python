@@ -780,10 +780,11 @@
     "instructions": [["LoadName",0], ["BeginArgs",0], ["LoadName",1], ["UnpackArgs",2], ["CallSpread",1], ["PopTop",0], ["ReturnValue",0]]
   },
   {
-      "src": "x = [i for i in range(3)]",
-      "constants": ["3"],
-      "names": ["i_0", "i_1", "x_1"],
-      "instructions": [["BuildList",0], ["LoadConst",0], ["CallRange",1], ["GetIter",0], ["ForIter",9], ["StoreName",0], ["LoadName",0], ["ListAppend",0], ["Jump",4], ["StoreName",2], ["ReturnValue",0]]
+    "src": "x = [i for i in range(3)]",
+    "constants": ["3"],
+    "names": ["i_1", "<listcomp>_1", "x_1"],
+    "instructions": [["LoadConst",0], ["CallRange",1], ["GetIter",2], ["MakeFunction",0], ["Swap",0], ["Call",1], ["StoreName",2], ["ReturnValue",0]],
+    "functions": 1
   },
   {
     "src": "x = (y := 5)", 
@@ -924,9 +925,10 @@
   },
   {
     "src": "x = [i for i in range(3) for j in range(2)]",
-    "constants": ["3", "2"],
-    "names": ["i_0", "i_1", "j_1", "x_1"],
-    "instructions": [["BuildList",0], ["LoadConst",0], ["CallRange",1], ["GetIter",0], ["ForIter",15], ["StoreName",0], ["LoadConst",1], ["CallRange",1], ["GetIter",0], ["ForIter",14], ["StoreName",2], ["LoadName",0], ["ListAppend",0], ["Jump",9], ["Jump",4], ["StoreName",3], ["ReturnValue",0]]
+    "constants": ["3"],
+    "names": ["i_1", "j_1", "<listcomp>_1", "x_1"],
+    "instructions": [["LoadConst",0], ["CallRange",1], ["GetIter",2], ["MakeFunction",0], ["Swap",0], ["Call",1], ["StoreName",3], ["ReturnValue",0]],
+    "functions": 1
   },
   {
     "src": "with a, b:\n    pass",
@@ -954,15 +956,17 @@
   },
   {
     "src": "x = [i for i in range(10) if i > 2 if i < 8]",
-    "constants": ["10", "2", "8"],
-    "names": ["i_0", "i_1", "x_1"],
-    "instructions": [["BuildList",0], ["LoadConst",0], ["CallRange",1], ["GetIter",0], ["ForIter",17], ["StoreName",0], ["LoadName",0], ["LoadConst",1], ["Gt",0], ["JumpIfFalse",4], ["LoadName",0], ["LoadConst",2], ["Lt",0], ["JumpIfFalse",4], ["LoadName",0], ["ListAppend",0], ["Jump",4], ["StoreName",2], ["ReturnValue",0]]
+    "constants": ["10"],
+    "names": ["i_1", "<listcomp>_1", "x_1"],
+    "instructions": [["LoadConst",0], ["CallRange",1], ["GetIter",2], ["MakeFunction",0], ["Swap",0], ["Call",1], ["StoreName",2], ["ReturnValue",0]],
+    "functions": 1
   },
   {
     "src": "x = (i for i in range(3))",
     "constants": ["3"],
-    "names": ["i_0", "i_1", "x_1"],
-    "instructions": [["BuildList",0], ["LoadConst",0], ["CallRange",1], ["GetIter",0], ["ForIter",9], ["StoreName",0], ["LoadName",0], ["ListAppend",0], ["Jump",4], ["StoreName",2], ["ReturnValue",0]]
+    "names": ["i_1", "<genexpr>_1", "x_1"],
+    "instructions": [["LoadConst",0], ["CallRange",1], ["GetIter",2], ["MakeFunction",0], ["Swap",0], ["Call",1], ["StoreName",2], ["ReturnValue",0]],
+    "functions": 1
   },
   {
     "src": "def f(x: int, y: str = 'a') -> bool:\n    pass", 
@@ -1360,8 +1364,9 @@
   {
     "src": "x = {k: v for k, v in items}",
     "constants": [],
-    "names": ["k_0", "v_0", "items_0", "k_1", "v_1", "x_1"],
-    "instructions": [["BuildDict",0], ["LoadName",2], ["GetIter",0], ["ForIter",11], ["UnpackSequence",2], ["StoreName",0], ["StoreName",1], ["LoadName",0], ["LoadName",1], ["MapAdd",0], ["Jump",3], ["StoreName",5], ["ReturnValue",0]]
+    "names": ["items_0", "k_1", "v_1", "<dictcomp>_1", "x_1"],
+    "instructions": [["LoadName",0], ["GetIter",2], ["MakeFunction",0], ["Swap",0], ["Call",1], ["StoreName",4], ["ReturnValue",0]],
+    "functions": 1
   },
   {
     "src": "a[0] = 1", 
@@ -1452,7 +1457,8 @@
   {
     "src": "sum(i for i in range(3))",
     "constants": ["3"],
-    "names": ["i_0", "i_1"],
-    "instructions": [["BuildList",0], ["LoadConst",0], ["CallRange",1], ["GetIter",0], ["ForIter",9], ["StoreName",0], ["LoadName",0], ["ListAppend",0], ["Jump",4], ["CallSum",1], ["PopTop",0], ["ReturnValue",0]]
+    "names": ["i_1", "<genexpr>_1"],
+    "instructions": [["LoadConst",0], ["CallRange",1], ["GetIter",2], ["MakeFunction",0], ["Swap",0], ["Call",1], ["CallSum",1], ["PopTop",0], ["ReturnValue",0]],
+    "functions": 1
   }
 ]

@@ -108,7 +108,11 @@ impl<'a> VM<'a> {
         // Two passes, drop the heap borrow before `alloc()`. Modules materialise names as `Vec<String>` first.
         enum Source { Instance(Vec<(Val, Val)>), Module(Vec<(String, Val)>) }
         let src = match self.heap.get(obj) {
-            HeapObj::Instance(_, attrs) => Source::Instance(attrs.borrow().iter().collect()),
+            // A `#` name is the engine's own, and the `args` of an exception is no entry of its dict.
+            &HeapObj::Instance(cls, ref attrs) => {
+                let exc = self.exc_base(cls).is_some();
+                Source::Instance(attrs.borrow().iter().filter(|&(k, _)| !matches!(self.heap.try_get(k), Some(HeapObj::Str(n)) if n.starts_with('#') || exc && n == "args")).collect())
+            }
             HeapObj::Module(_, attrs) => Source::Module(attrs.clone()),
             _ => return Err(cold_type("vars() requires an instance or module")),
         };

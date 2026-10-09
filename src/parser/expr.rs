@@ -137,7 +137,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
-    /* Whether the code in `from..to` loads one singleton, the only operand `is` answers the same as CPython for. */
+    /* Whether the code in `from..to` loads one singleton, the only operand whose identity `is` can answer. */
     fn singleton(&self, from: usize, to: usize) -> bool {
         let [i] = self.chunk.instructions[from..to] else { return false };
         match i.opcode {
@@ -241,19 +241,17 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 if matches!(self.peek(), Some(TokenType::Rpar)) {
                     self.advance();
                     self.chunk.emit(OpCode::BuildTuple, 0);
+                } else if self.at_comp() {
+                    self.comprehension(super::literals::Comp::Gen);
+                    self.eat(TokenType::Rpar);
                 } else {
-                    let elem_start = self.chunk.instructions.len();
-                    // A leading `*it` starts a tuple, never a comprehension.
+                    // A leading `*it` starts a tuple.
                     let star = matches!(self.peek(), Some(TokenType::Star));
                     if !star { self.expr(); }
-                    if !star && self.maybe_comprehension(elem_start, OpCode::BuildList, OpCode::ListAppend) {
-                        self.advance();
-                    } else {
-                        if star || matches!(self.peek(), Some(TokenType::Comma)) {
-                            self.tuple_rest(!star as u16, |s| matches!(s.peek(), Some(TokenType::Rpar) | None));
-                        }
-                        self.eat(TokenType::Rpar);
+                    if star || matches!(self.peek(), Some(TokenType::Comma)) {
+                        self.tuple_rest(!star as u16, |s| matches!(s.peek(), Some(TokenType::Rpar) | None));
                     }
+                    self.eat(TokenType::Rpar);
                 }
             }
             // `yield` / `yield from` as an expression value (keyword already consumed).
@@ -327,6 +325,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             Some(TokenType::ColonEqual) => {
                 self.advance();
                 self.expr();
+                if self.in_comp && !self.globals_decl.contains(&name) && !self.chunk.nonlocals.contains(&name) { self.chunk.nonlocals.push(name.clone()); }
                 self.store_name(name.clone());
                 self.emit_load_ssa(name);
             }

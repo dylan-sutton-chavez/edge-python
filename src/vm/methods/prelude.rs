@@ -4,5 +4,5 @@ pub(super) use super::recv::{
     list_clone, list_mut, dict_entries, dict_mut, set_clone, set_mut, set_ref,
     iter_to_vec, capitalize_first, title_case,
 };
-pub(super) use crate::vm::types::{cold_type, cold_value, cold_key, cold_index, cold_heap, cold_overflow, eq_member, ValSet};
+pub(super) use crate::vm::types::{cold_type, cold_value, cold_key, cold_index, cold_heap, cold_overflow, eq_member, ValSet, View};
 pub(super) use alloc::{string::{String, ToString}, vec, vec::Vec};

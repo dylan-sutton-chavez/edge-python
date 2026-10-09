@@ -86,7 +86,7 @@ impl<'a> VM<'a> {
     /* KeyError carrying the missing key itself, so `e.args[0]` keeps its type and its text is the repr. */
     pub(crate) fn key_error(&mut self, key: Val) -> VmErr {
         let msg = self.repr(key);
-        match self.heap.alloc(HeapObj::ExcInstance(String::from("KeyError"), alloc::vec![key])) {
+        match self.heap.alloc(HeapObj::ExcInstance(String::from("KeyError"), alloc::vec![key], Val::undef())) {
             Ok(exc) => { self.pending.exc_val = Some(exc); VmErr::Raised(crate::s!("KeyError: ", str &msg)) }
             Err(e) => e,
         }
@@ -282,6 +282,7 @@ impl<'a> VM<'a> {
                 HeapObj::List(_) => return Err(cold_type("unhashable type: 'list'")),
                 HeapObj::Dict(_) => return Err(cold_type("unhashable type: 'dict'")),
                 HeapObj::Set(_) => return Err(cold_type("unhashable type: 'set'")),
+                HeapObj::DictView(..) => return Err(VmErr::TypeMsg(crate::s!("unhashable type: '", str self.type_name(v), "'"))),
                 // A tuple hashes through its items as deep as the hash looks, so each must be hashable too.
                 HeapObj::Tuple(items) => for &item in items { self.require_hashable_at(item, depth + 1)?; },
                 // A user `__eq__` would let two equal keys hash apart.

@@ -1,25 +1,15 @@
 use crate::s;
 
 use super::Parser;
-use super::stmt::UnpackTarget;
 use super::types::builtin;
-use super::types::{OpCode, Value, SSAChunk, Instruction, class_dunder};
+use super::types::{OpCode, Value, SSAChunk, Instruction, class_dunder, ssa_strip, COMP_ARG};
 
 use crate::lexer::{Token, TokenType};
-use crate::util::hash::FxHashMap as HashMap;
 
 use alloc::{string::{String, ToString}, vec::Vec};
 
-// Every name bound by `targets`, nested ones included.
-fn target_names(targets: &[UnpackTarget], out: &mut Vec<String>) {
-    for t in targets {
-        match t {
-            UnpackTarget::Name(n) => out.push(n.clone()),
-            UnpackTarget::Nested(inner) => target_names(inner, out),
-            _ => {}
-        }
-    }
-}
+// A bare generator expression beside another argument or a trailing comma.
+const GENEXP_BARE: &str = "Generator expression must be parenthesized";
 
 impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
 
@@ -46,44 +36,20 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             self.set_tail(0, true);
             return;
         }
-        let key_start = self.chunk.instructions.len();
-        self.expr();
-        match self.peek() {
-            Some(TokenType::Colon) => {
-                self.advance();
-                let val_start = self.chunk.instructions.len();
-                self.expr();
-                if matches!(self.peek(), Some(TokenType::For)) {
-                    let versions_before = self.ssa_versions.clone();
-                    let val_ins: Vec<Instruction> = self.chunk.instructions.drain(val_start..).collect();
-                    let key_ins: Vec<Instruction> = self.chunk.instructions.drain(key_start..).collect();
-                    self.chunk.emit(OpCode::BuildDict, 0);
-                    self.comprehension_loop(&[(key_start, key_ins), (val_start, val_ins)], OpCode::MapAdd, &versions_before);
-                    self.eat(TokenType::Rbrace);
-                } else {
-                    // First pair already emitted, dict_tail consolidates if a later `**` appears.
-                    self.dict_tail(1, false);
-                }
-            }
-            _ => {
-                if self.maybe_comprehension(key_start, OpCode::BuildSet, OpCode::SetAdd) {
-                    self.eat(TokenType::Rbrace);
-                } else {
-                    // First element already emitted, set_tail consolidates if a later `*` appears.
-                    self.set_tail(1, false);
-                }
-            }
+        if self.at_comp() {
+            self.comprehension(Comp::Brace);
+            self.eat(TokenType::Rbrace);
+            return;
         }
-    }
-
-    /* If `for` follows, lower [elem_start..] as a comprehension, true when consumed. */
-    pub(super) fn maybe_comprehension(&mut self, elem_start: usize, build: OpCode, append: OpCode) -> bool {
-        if !matches!(self.peek(), Some(TokenType::For)) { return false; }
-        let versions_before = self.ssa_versions.clone();
-        let elem_ins: Vec<Instruction> = self.chunk.instructions.drain(elem_start..).collect();
-        self.chunk.emit(build, 0);
-        self.comprehension_loop(&[(elem_start, elem_ins)], append, &versions_before);
-        true
+        self.expr();
+        if self.eat_if(TokenType::Colon) {
+            self.expr();
+            // First pair already emitted, dict_tail consolidates if a later `**` appears.
+            self.dict_tail(1, false);
+        } else {
+            // First element already emitted, set_tail consolidates if a later `*` appears.
+            self.set_tail(1, false);
+        }
     }
 
     /* `[]` is a list literal or list-comp, always eat(Rsqb) to keep `bracket_stack` in sync. */
@@ -101,14 +67,14 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             self.list_tail(0, true);
             return;
         }
-        let elem_start = self.chunk.instructions.len();
-        self.expr();
-        if self.maybe_comprehension(elem_start, OpCode::BuildList, OpCode::ListAppend) {
+        if self.at_comp() {
+            self.comprehension(Comp::List);
             self.eat(TokenType::Rsqb);
-        } else {
-            // First element already emitted, list_tail consolidates if a later `*` appears.
-            self.list_tail(1, false);
+            return;
         }
+        self.expr();
+        // First element already emitted, list_tail consolidates if a later `*` appears.
+        self.list_tail(1, false);
     }
 
     /* Shared tail for `{}`/`[]` displays after the first element. `count` = loose elems on the stack, `incremental` = container already on the stack. First spread consolidates loose elems with `build count`, then merges use `update`/`add`. */
@@ -150,93 +116,104 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             OpCode::BuildList, OpCode::ListExtend, OpCode::ListAppend, |s| s.expr());
     }
 
-    /* Shared comprehension scaffolding, parses the for/if clauses, returns (loop starts, ForIter patch sites, SSA remap for loop vars). */
-    fn comp_header(&mut self, versions_before: &HashMap<String, u32>) -> (Vec<u16>, Vec<usize>, Vec<(u16, u16)>) {
-        let mut loop_starts: Vec<u16> = Vec::new();
-        let mut for_iters: Vec<usize> = Vec::new();
-        let mut all_vars: Vec<String> = Vec::new();
-
-        while self.eat_if(TokenType::For) {
+    /* The `for` and `if` clauses of a comprehension after its first, each `if` filtering the innermost loop. */
+    fn comp_clauses(&mut self, loop_starts: &mut Vec<u16>, for_iters: &mut Vec<usize>) {
+        loop {
+            if let Some(&ls) = loop_starts.last() && self.eat_if(TokenType::If) {
+                self.expr_bp(1);
+                self.chunk.emit(OpCode::JumpIfFalse, ls);
+                continue;
+            }
+            if !self.eat_if(TokenType::For) { break; }
             let (targets, star, comma) = self.target_list(|s| matches!(s.peek(), Some(TokenType::In)));
             self.eat(TokenType::In);
             self.expr_bp(1);
             self.chunk.emit(OpCode::GetIter, 0);
-
-            let ls = self.chunk.instructions.len() as u16;
-            let fi = self.emit_jump(OpCode::ForIter);
-
+            loop_starts.push(self.chunk.instructions.len() as u16);
+            for_iters.push(self.emit_jump(OpCode::ForIter));
             self.store_targets(&targets, star, comma);
-            target_names(&targets, &mut all_vars);
+        }
+    }
 
-            while self.eat_if(TokenType::If) {
-                self.expr_bp(1);
-                self.chunk.emit(OpCode::JumpIfFalse, ls);
+    /* Whether the next token starts the element of a comprehension. */
+    pub(super) fn at_comp(&mut self) -> bool {
+        self.peek().is_some() && self.tokens.peek().is_some_and(|t| t.comp)
+    }
+
+    /* A comprehension, a function over `iter()` of its first iterable called at once, a generator for `kind` Gen. */
+    pub(super) fn comprehension(&mut self, kind: Comp) {
+        // The element runs innermost, so the cursor skips it, compiles the clauses and comes back for it.
+        let elem = self.tokens.pos;
+        let elem_start = self.tokens.peek().map_or(self.last_end, |t| t.start) as u32;
+        // A colon outside a lambda makes a brace comprehension a dict one.
+        let (mut depth, mut lambdas, mut pair) = (0usize, 0usize, false);
+        while let Some(t) = self.tokens.peek() {
+            match t.kind {
+                TokenType::For | TokenType::Rpar | TokenType::Rsqb | TokenType::Rbrace | TokenType::Endmarker if depth == 0 => break,
+                TokenType::Lpar | TokenType::Lsqb | TokenType::Lbrace => depth += 1,
+                TokenType::Rpar | TokenType::Rsqb | TokenType::Rbrace => depth -= 1,
+                TokenType::Lambda if depth == 0 => lambdas += 1,
+                TokenType::Colon if depth == 0 && lambdas > 0 => lambdas -= 1,
+                TokenType::Colon if depth == 0 => pair = true,
+                _ => {}
             }
-
-            loop_starts.push(ls);
-            for_iters.push(fi);
+            self.tokens.pos += 1;
         }
-
-        // Linear scan, size 1-5 beats HashMap and avoids monomorphizing for u16 keys.
-        let mut var_map: Vec<(u16, u16)> = Vec::new();
-        for var in &all_vars {
-            let old_ver = versions_before.get(var).copied().unwrap_or(0);
-            let new_ver = self.current_version(var);
-            if old_ver == new_ver { continue; }
-            let mut ob = [0u8; 128];
-            let old_name = Self::ssa_name(var, old_ver, &mut ob);
-            let Some(&old_slot) = self.chunk.name_index.get(&*old_name) else { continue };
-            let mut nb = [0u8; 128];
-            let new_slot = self.chunk.push_name(&Self::ssa_name(var, new_ver, &mut nb));
-            var_map.push((old_slot, new_slot));
-        }
-        (loop_starts, for_iters, var_map)
+        let elem_end = self.tokens.pos;
+        let (build, add, name) = match kind {
+            Comp::Gen => (None, OpCode::Yield, "<genexpr>"),
+            Comp::List => (Some(OpCode::BuildList), OpCode::ListAppend, "<listcomp>"),
+            Comp::Brace if pair => (Some(OpCode::BuildDict), OpCode::MapAdd, "<dictcomp>"),
+            Comp::Brace => (Some(OpCode::BuildSet), OpCode::SetAdd, "<setcomp>"),
+        };
+        self.eat(TokenType::For);
+        let (targets, star, comma) = self.target_list(|s| matches!(s.peek(), Some(TokenType::In)));
+        self.eat(TokenType::In);
+        self.expr_bp(1);
+        self.chunk.emit(OpCode::GetIter, super::ITER_VALUE);
+        // A walrus binds where the comprehension stands, a `global` there included.
+        let globals = self.globals_decl.clone();
+        let mut body = self.with_fresh_chunk(|s| {
+            s.in_comp = true;
+            s.globals_decl = globals;
+            // A body error points at the element until a clause marks its own line.
+            s.chunk.stmt_pos.push((0, elem_start));
+            s.bind_param(COMP_ARG);
+            if let Some(op) = build { s.chunk.emit(op, 0); }
+            let arg = s.push_ssa_name(COMP_ARG, 0);
+            s.chunk.emit(OpCode::LoadName, arg);
+            s.chunk.emit(OpCode::GetIter, super::ITER_AS_IS);
+            let mut loop_starts = alloc::vec![s.chunk.instructions.len() as u16];
+            let mut for_iters = alloc::vec![s.emit_jump(OpCode::ForIter)];
+            s.store_targets(&targets, star, comma);
+            s.mark_stmt();
+            s.comp_clauses(&mut loop_starts, &mut for_iters);
+            let rest = s.tokens.pos;
+            s.tokens.pos = elem;
+            s.mark_stmt();
+            s.expr();
+            if add == OpCode::MapAdd { s.eat(TokenType::Colon); s.expr(); }
+            if s.tokens.pos != elem_end { s.error("expected 'for' after the element of a comprehension"); }
+            s.tokens.pos = rest;
+            s.chunk.emit(add, 0);
+            if add == OpCode::Yield { s.chunk.emit(OpCode::PopTop, 0); }
+            for i in (0..for_iters.len()).rev() {
+                s.chunk.emit(OpCode::Jump, loop_starts[i]);
+                s.patch(for_iters[i]);
+            }
+            if build.is_some() { s.chunk.emit(OpCode::ReturnValue, 0); }
+        });
+        body.is_generator = kind == Comp::Gen;
+        self.push_function(alloc::vec![COMP_ARG.into()], body, 0, Some(name), OpCode::MakeFunction);
+        self.chunk.emit(OpCode::Swap, 0);
+        self.chunk.emit(OpCode::Call, 1);
     }
 
-    /* Re-emit captured element bodies inside the loop, remapping loop vars and shifting internal jumps. */
-    fn replay_comp_bodies(&mut self, elem_bodies: &[(usize, Vec<Instruction>)], var_map: &[(u16, u16)]) {
-        for (orig_base, body) in elem_bodies {
-            // Body is relocated by this delta, internal jump targets (from `or`/`and`/membership) must shift with it.
-            let delta = self.chunk.instructions.len() as i64 - *orig_base as i64;
-            let remapped = body.iter().map(|&ins| match ins.opcode {
-                OpCode::LoadName | OpCode::StoreName => Instruction { operand: var_map.iter().find(|(k, _)| *k == ins.operand).map_or(ins.operand, |(_, v)| *v), ..ins },
-                _ => ins,
-            }).collect();
-            self.push_shifted(remapped, delta);
-        }
-    }
-
-    /* Emits for/if comprehension scaffolding, reinjects body with loop-bound SSA slots. */
-    pub(super) fn comprehension_loop(&mut self, elem_bodies: &[(usize, Vec<Instruction>)], append_op: OpCode, versions_before: &HashMap<String, u32>) {
-        let (loop_starts, for_iters, var_map) = self.comp_header(versions_before);
-        self.replay_comp_bodies(elem_bodies, &var_map);
-        self.chunk.emit(append_op, 0);
-
-        for i in (0..for_iters.len()).rev() {
-            self.chunk.emit(OpCode::Jump, loop_starts[i]);
-            self.patch(for_iters[i]);
-        }
-    }
-
-    /* `any(genexpr)` / `all(genexpr)`, same scaffolding but each element decides instead of appending, so evaluation stops at the first hit like Python. */
-    pub(super) fn scan_comprehension(&mut self, elem_bodies: &[(usize, Vec<Instruction>)], find_true: bool, versions_before: &HashMap<String, u32>) {
-        let (loop_starts, for_iters, var_map) = self.comp_header(versions_before);
-        self.replay_comp_bodies(elem_bodies, &var_map);
-        // `all` exits on falsy, invert so one JumpIfFalse serves both.
-        if !find_true { self.chunk.emit(OpCode::Not, 0); }
-        if let Some(&ls) = loop_starts.last() {
-            self.chunk.emit(OpCode::JumpIfFalse, ls);
-        }
-        // Decided, unwind every active iterator before leaving the loops.
-        for _ in &for_iters { self.chunk.emit(OpCode::PopIter, 0); }
-        self.chunk.emit(if find_true { OpCode::LoadTrue } else { OpCode::LoadFalse }, 0);
-        let done = self.emit_jump(OpCode::Jump);
-        for i in (0..for_iters.len()).rev() {
-            self.chunk.emit(OpCode::Jump, loop_starts[i]);
-            self.patch(for_iters[i]);
-        }
-        self.chunk.emit(if find_true { OpCode::LoadFalse } else { OpCode::LoadTrue }, 0);
-        self.patch(done);
+    /* A generator expression passed bare, which must be the only argument of its call. */
+    fn genexp_arg(&mut self, first: bool) {
+        let start = self.tokens.peek().map_or(self.last_end, |t| t.start);
+        self.comprehension(Comp::Gen);
+        if !first || matches!(self.peek(), Some(TokenType::Comma)) { self.reject(start, self.last_end, GENEXP_BARE); }
     }
 
     /* f-string emits literal+expr parts until FstringEnd, returns the count, caller wraps in BuildString. `fs_start/fs_end` anchor unclosed-string errors. */
@@ -375,8 +352,8 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
     /* Dispatches call, print/range opcodes, imported natives (shadow builtins), builtins table, else LoadName+Call. */
     pub(super) fn call(&mut self, name: String) -> bool {
         let call_pos = self.last_end as u32;
-        // A rebound builtin name must call the binding, not the fused opcode.
-        if self.current_version(&name) > 0 || self.globals_decl.contains(&name) {
+        // A builtin name the scope binds, a parameter included, must call the binding, not the fused opcode.
+        if self.ssa_versions.contains_key(&name) || self.globals_decl.contains(&name) || self.unfused.contains(&name) {
             let i = self.push_ssa_name(&name, self.current_version(&name));
             if self.globals_decl.contains(&name) {
                 let gi = self.chunk.push_name(&name);
@@ -392,6 +369,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         if name == "print" {
             // Same packed layout as Call so the VM can split sep/end kwargs from positionals.
             let operand = self.fused_args(&name, true);
+            self.note_fused(OpCode::CallPrint);
             self.chunk.emit(OpCode::CallPrint, operand);
             self.chunk.record_call_pos(call_pos);
             return false;
@@ -400,6 +378,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         if name == "range" {
             let operand = self.fused_args(&name, false);
             if operand & super::KEYWORDS != 0 && (operand >> 8) & 0x3F != 0 { self.error("range() takes no keyword arguments"); }
+            self.note_fused(OpCode::CallRange);
             self.chunk.emit(OpCode::CallRange, operand);
             self.chunk.record_call_pos(call_pos);
             return true;
@@ -414,6 +393,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             if pos > 0xF || kw > 0xF { self.error("native calls take at most 15 positional and 15 keyword arguments"); }
             // Operand packs extern_idx<<8 | kw<<4 | pos, same layout as Call.
             let encoded = (extern_idx << 8) | ((kw & 0xF) << 4) | (pos & 0xF);
+            self.fused_externs.push(extern_idx);
             self.chunk.emit(OpCode::CallExtern, encoded);
             self.chunk.record_call_pos(call_pos);
             return true;
@@ -428,47 +408,15 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
             _ => None,
         } {
             let operand = self.fused_args(&name, true);
+            self.note_fused(op);
             self.chunk.emit(op, operand);
-            self.chunk.record_call_pos(call_pos);
-            return true;
-        }
-
-        // `any`/`all` over a genexpr lowers to a short-circuit scan, other shapes keep the fused opcode.
-        if matches!(name.as_str(), "any" | "all") {
-            let find_true = name == "any";
-            self.advance();
-            if !matches!(self.peek(), Some(TokenType::Rpar | TokenType::Star | TokenType::DoubleStar)) {
-                let versions_before = self.ssa_versions.clone();
-                let elem_start = self.chunk.instructions.len();
-                self.expr();
-                if matches!(self.peek(), Some(TokenType::For)) {
-                    let elem_ins: Vec<Instruction> = self.chunk.instructions.drain(elem_start..).collect();
-                    self.scan_comprehension(&[(elem_start, elem_ins)], find_true, &versions_before);
-                    self.eat(TokenType::Rpar);
-                    self.chunk.record_call_pos(call_pos);
-                    return true;
-                }
-                let mut count = 1u16;
-                while self.eat_if(TokenType::Comma) {
-                    if matches!(self.peek(), Some(TokenType::Rpar)) { break; }
-                    self.expr();
-                    count = count.saturating_add(1);
-                }
-                self.eat(TokenType::Rpar);
-                let operand = self.fused_operand(&name, count, 0, false, false);
-                self.chunk.emit(if find_true { OpCode::CallAny } else { OpCode::CallAll }, operand);
-                self.chunk.record_call_pos(call_pos);
-                return true;
-            }
-            let (pos, kw, spread) = self.args_body(true);
-            let operand = self.fused_operand(&name, pos, kw, spread, false);
-            self.chunk.emit(if find_true { OpCode::CallAny } else { OpCode::CallAll }, operand);
             self.chunk.record_call_pos(call_pos);
             return true;
         }
 
         if let Some(op) = builtin(name.as_str()) {
             let operand = self.fused_args(&name, false);
+            self.note_fused(op);
             self.chunk.emit(op, operand);
             self.chunk.record_call_pos(call_pos);
             return true;
@@ -479,6 +427,24 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         self.advance();
         self.call_rest(call_pos);
         true
+    }
+
+    #[inline]
+    fn note_fused(&mut self, op: OpCode) { self.fused |= 1u128 << (op as u8 & 127); }
+
+    /* The builtins and native imports the body called before binding them, so they were locals all along. */
+    fn called_then_bound(&self) -> Vec<String> {
+        let mut bits = self.fused;
+        let fused = core::iter::from_fn(|| {
+            if bits == 0 { return None; }
+            let bit = bits.trailing_zeros() as u8;
+            bits &= bits - 1;
+            Some(super::types::FUSED.iter().find(|&&op| op as u8 == bit).and_then(|&op| super::types::fused_native(op)).map(|id| id.name()))
+        }).flatten();
+        let externs = self.fused_externs.iter().filter_map(|&i| self.chunk.extern_table.get(i as usize)).map(|f| f.name.as_str());
+        let mut late: Vec<String> = fused.chain(externs).filter(|n| self.ssa_versions.contains_key(*n)).map(String::from).collect();
+        late.dedup();
+        late
     }
 
     /* Args after `(` and the call, `CallSpread` once a spread opened its frame. */
@@ -529,6 +495,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                 s.chunk.emit(OpCode::UnpackArgs, (kw << 2) | kind);
                 pos = pos.saturating_add(1);
             } else if matches!(s.peek(), Some(TokenType::Name)) {
+                let at = s.tokens.pos;
                 let t = s.advance();
                 if matches!(s.peek(), Some(TokenType::Equal)) {
                     let kw_name = s.lexeme(&t).to_string();
@@ -536,6 +503,10 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     s.emit_const(Value::Str(kw_name));
                     s.expr();
                     kw = kw.saturating_add(1);
+                } else if t.comp {
+                    s.tokens.pos = at;
+                    s.genexp_arg(pos + kw == 0);
+                    pos = pos.saturating_add(1);
                 } else {
                     let elem_start = s.chunk.instructions.len();
                     s.name_operand(t);
@@ -543,13 +514,10 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
                     // Name-led arg bypasses expr(), parse a trailing ternary here too.
                     s.saw_newline = false;
                     s.ternary_tail(elem_start);
-                    s.maybe_comprehension(elem_start, OpCode::BuildList, OpCode::ListAppend);
                     pos = pos.saturating_add(1);
                 }
             } else {
-                let elem_start = s.chunk.instructions.len();
-                s.expr();
-                s.maybe_comprehension(elem_start, OpCode::BuildList, OpCode::ListAppend);
+                if s.at_comp() { s.genexp_arg(pos + kw == 0); } else { s.expr(); }
                 pos = pos.saturating_add(1);
             }
         });
@@ -667,7 +635,8 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         let ins = &self.chunk.instructions[from..];
         let built = |op: OpCode| matches!(op, OpCode::BuildList | OpCode::BuildDict | OpCode::BuildSet | OpCode::CallList | OpCode::CallDict | OpCode::CallSet);
         let display = ins.last().is_some_and(|i| built(i.opcode));
-        let comprehension = ins.first().is_some_and(|i| built(i.opcode) && i.operand == 0) && ins.iter().any(|i| matches!(i.opcode, OpCode::ListAppend | OpCode::SetAdd | OpCode::MapAdd));
+        let comp = |fi: u16| self.chunk.functions.get(fi as usize).and_then(|f| self.chunk.names.get(f.3 as usize)).is_some_and(|n| matches!(ssa_strip(n), "<listcomp>" | "<setcomp>" | "<dictcomp>"));
+        let comprehension = matches!(ins, [.., m, s, c] if m.opcode == OpCode::MakeFunction && s.opcode == OpCode::Swap && c.opcode == OpCode::Call && comp(m.operand));
         display || comprehension
     }
 
@@ -764,15 +733,27 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         }
     }
 
+    fn body_of(&mut self, params: &[String]) {
+        for p in params {
+            // Base name shadows the enclosing scope, prefix/`=` marker must be stripped.
+            self.bind_param(p);
+            let _ = self.push_ssa_name(super::types::param_base_name(p), 0);
+        }
+        self.compile_block_body();
+    }
+
     pub(super) fn compile_body(&mut self, params: &[String]) -> SSAChunk {
-        let mut body = self.with_fresh_chunk(|s| {
-            for p in params {
-                // Base name shadows the enclosing scope, prefix/`=` marker must be stripped.
-                s.bind_param(p);
-                let _ = s.push_ssa_name(super::types::param_base_name(p), 0);
-            }
-            s.compile_block_body();
-        });
+        let restart = (self.tokens.pos, self.errors.len(), self.removed_uses.len(), (self.last_line, self.last_end, self.block_closed, self.saw_newline));
+        let mut late = Vec::new();
+        let mut body = self.with_fresh_chunk(|s| { s.body_of(params); late = s.called_then_bound(); });
+        // A builtin called before the body binds it is a local all along, so the body compiles again calling the local.
+        if !late.is_empty() {
+            self.tokens.pos = restart.0;
+            (self.last_line, self.last_end, self.block_closed, self.saw_newline) = restart.3;
+            self.errors.truncate(restart.1);
+            self.removed_uses.truncate(restart.2);
+            body = self.with_fresh_chunk(|s| { s.unfused = late; s.body_of(params); });
+        }
         body.is_pure = !body.instructions.iter().any(|i| matches!(
             i.opcode,
             OpCode::CallPrint
@@ -795,3 +776,7 @@ impl<'src, I: Iterator<Item = Token>> Parser<'src, I> {
         body
     }
 }
+
+/* The bracket a comprehension sits in, a paren making a generator expression. */
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Comp { Gen, List, Brace }

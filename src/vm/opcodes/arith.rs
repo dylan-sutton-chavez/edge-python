@@ -55,6 +55,9 @@ impl<'a> VM<'a> {
             return Ok(());
         }
 
+        if op == OpCode::Sub && let Some((x, y)) = self.view_set_operands(a, b, true, chunk)? {
+            return self.set_binop_and_push(x, y, op);
+        }
         let result = match op {
             OpCode::Add => self.add_vals(a, b)?,
             OpCode::Sub => self.sub_vals(a, b)?,
@@ -258,6 +261,9 @@ impl<'a> VM<'a> {
         let dunder = self.try_binary_dunder(op, a, b, inplace || operand == crate::parser::INPLACE, chunk);
         if let Some(r) = dunder? { self.push(r); return Ok(()); }
 
+        if matches!(op, OpCode::BitAnd | OpCode::BitOr | OpCode::BitXor) && let Some((x, y)) = self.view_set_operands(a, b, true, chunk)? {
+            return self.set_binop_and_push(x, y, op);
+        }
         if self.is_set_like(a) && self.is_set_like(b)
             && matches!(op, OpCode::BitAnd | OpCode::BitOr | OpCode::BitXor) {
             return if inplace { self.set_iop_and_push(a, b, op) } else { self.set_binop_and_push(a, b, op) };
@@ -358,6 +364,7 @@ impl<'a> VM<'a> {
 
         // Set/Set uses subset/superset, NOT total order, the numeric `LtEq = !lt_vals(b, a)` identity is wrong here ({1,2} <= {2,3} would come back True), so we bypass `lt_vals`.
         if self.is_set_like(a) && self.is_set_like(b) { return self.set_compare_and_push(a, b, op); }
+        if let Some((x, y)) = self.view_set_operands(a, b, false, chunk)? { return self.set_compare_and_push(x, y, op); }
 
         let result = match op {
             OpCode::Eq => self.values_eq(a, b, chunk)?,

@@ -90,6 +90,7 @@ impl<'a> VM<'a> {
             HeapObj::Set(s) => !s.borrow().is_empty(),
             HeapObj::FrozenSet(s) => !s.is_empty(),
             HeapObj::Range(s,e,st) => if *st > 0 { s < e } else { s > e },
+            HeapObj::DictView(d, _) => self.truthy(*d),
             HeapObj::Type(_) | HeapObj::Func(..) | HeapObj::Slice(..) | HeapObj::BoundMethod(..)
             | HeapObj::NativeFn(_) | HeapObj::Class(..) | HeapObj::BoundUserMethod(..)
             | HeapObj::Super(..) | HeapObj::Property(..) | HeapObj::PropertySetter(..)
@@ -120,6 +121,32 @@ impl<'a> VM<'a> {
     /* True for `set` or `frozenset` operands. */
     pub(crate) fn is_set_like(&self, v: Val) -> bool {
         v.is_heap() && matches!(self.heap.get(v), HeapObj::Set(_) | HeapObj::FrozenSet(_))
+    }
+
+    /* True for a keys or items view, which takes part in set operators. */
+    pub(crate) fn is_set_view(&self, v: Val) -> bool {
+        matches!(self.heap.try_get(v), Some(HeapObj::DictView(_, View::Keys | View::Items)))
+    }
+
+    /* Both operands as new sets when one is a keys or items view, `any` admitting any iterable. */
+    pub(crate) fn view_set_operands(&mut self, a: Val, b: Val, any: bool, chunk: &crate::parser::SSAChunk) -> Result<Option<(Val, Val)>, VmErr> {
+        let (va, vb) = (self.is_set_view(a), self.is_set_view(b));
+        if !(va || vb) || !(any || (va || self.is_set_like(a)) && (vb || self.is_set_like(b))) { return Ok(None); }
+        self.with_roots([a, b, Val::none()], |vm| {
+            let x = vm.as_fresh_set(a, chunk)?;
+            if let Some(slot) = vm.temp_roots.last_mut() { *slot = x; }
+            let y = vm.as_fresh_set(b, chunk)?;
+            Ok(Some((x, y)))
+        })
+    }
+
+    fn as_fresh_set(&mut self, v: Val, chunk: &crate::parser::SSAChunk) -> Result<Val, VmErr> {
+        let items = match self.heap.try_get(v) {
+            Some(&HeapObj::DictView(d, kind)) => self.view_items(d, kind)?,
+            _ => self.iterable_items(v, chunk)?,
+        };
+        let s = self.valset_of(&items)?;
+        self.heap.alloc(HeapObj::Set(Rc::new(RefCell::new(s))))
     }
 
     /* Alloc a set-algebra result, frozen picks frozenset (left-operand type rule). */
@@ -217,7 +244,10 @@ impl<'a> VM<'a> {
                 }
                 "object"
             }
-            HeapObj::Coroutine(..) => "coroutine",
+            HeapObj::Coroutine(c) => match c.body {
+                BodyRef::Fn(fi) if !self.is_async.get(fi).copied().unwrap_or(false) => "generator",
+                _ => "coroutine",
+            },
             HeapObj::Module(..) => "module",
             HeapObj::ExcInstance(..) => "exception",
             HeapObj::Ellipsis => "ellipsis",
@@ -228,6 +258,9 @@ impl<'a> VM<'a> {
             HeapObj::TypeVar(_) => "TypeVar",
             HeapObj::Iter(_, name) => name,
             HeapObj::Cell(_) => "cell",
+            HeapObj::DictView(_, View::Keys) => "dict_keys",
+            HeapObj::DictView(_, View::Values) => "dict_values",
+            HeapObj::DictView(_, View::Items) => "dict_items",
         }}
     }
 
@@ -340,8 +373,29 @@ impl<'a> VM<'a> {
             HeapObj::PropertySetter(..) => "<property.setter>".into(),
             HeapObj::StaticMethod(..) => "<staticmethod object>".into(),
             HeapObj::ClassMethod(..) => "<classmethod object>".into(),
-            HeapObj::Coroutine(..) => "<coroutine>".into(),
+            HeapObj::Coroutine(c) => {
+                let name = match c.body {
+                    BodyRef::Fn(fi) => self.function_names.get(fi).map_or("<lambda>", |n| if n.is_empty() { "<lambda>" } else { n }),
+                    BodyRef::Module => "<module>",
+                };
+                s!("<", str self.type_name(v), " object ", str name, ">")
+            }
             HeapObj::Iter(_, name) => s!("<", str name, " object>"),
+            HeapObj::DictView(d, kind) => {
+                let mut o = s!(str self.type_name(v), "([");
+                if let HeapObj::Dict(m) = self.heap.get(*d) {
+                    for (i, (k, val)) in m.borrow().iter().enumerate() {
+                        if i > 0 { if o.len() > MAX_REPR_LEN { o.push_str(", ..."); break; } o.push_str(", "); }
+                        match kind {
+                            View::Keys => o.push_str(&self.repr_d(k, seen)),
+                            View::Values => o.push_str(&self.repr_d(val, seen)),
+                            View::Items => { o.push('('); o.push_str(&self.repr_d(k, seen)); o.push_str(", "); o.push_str(&self.repr_d(val, seen)); o.push(')'); }
+                        }
+                    }
+                }
+                o.push_str("])");
+                o
+            }
             HeapObj::Module(name, _) => s!("<module '", str name, "'>"),
             HeapObj::Extern(f) => s!("<extern function ", str &f.name, ">"),
             HeapObj::GenericAlias(origin, args) => {
@@ -370,7 +424,7 @@ impl<'a> VM<'a> {
                 }
                 o
             }
-            HeapObj::ExcInstance(name, args) => self.exc_text(name, args, seen),
+            HeapObj::ExcInstance(name, args, _) => self.exc_text(name, args, seen),
             HeapObj::Set(s) => { let s = s.borrow(); self.set_repr(v, false, s.len(), s.iter(), seen) }
             HeapObj::FrozenSet(s) => self.set_repr(v, true, s.len(), s.iter(), seen),
             HeapObj::Ellipsis => "Ellipsis".into(),
@@ -399,7 +453,7 @@ impl<'a> VM<'a> {
             match self.heap.get(v) {
                 HeapObj::Str(s) => return repr_str(s),
                 // `repr(E("x"))` is the constructor call, `ValueError('x')`.
-                HeapObj::ExcInstance(name, args) => {
+                HeapObj::ExcInstance(name, args, _) => {
                     let mut o = s!(cap: 32; str name, "(");
                     self.append_reprs(&mut o, args.iter(), seen);
                     o.push(')');

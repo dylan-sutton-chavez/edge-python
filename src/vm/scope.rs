@@ -113,10 +113,23 @@ fn binds<'c>(params: &'c [String], body: &'c SSAChunk, bare: &[&'c str]) -> Vec<
     for ins in &body.instructions {
         if matches!(ins.opcode, OpCode::StoreName | OpCode::Phi | OpCode::Del) && let Some(&n) = bare.get(ins.operand as usize) { set.push(n); }
     }
+    if !is_comp(params) { walrus_names(body, &mut set); }
     set.sort_unstable();
     set.dedup();
     set.retain(|n| !body.nonlocals.iter().any(|x| x == n));
     set
+}
+
+fn is_comp(params: &[String]) -> bool { matches!(params, [p] if p == crate::parser::COMP_ARG) }
+
+/* The walrus targets of the comprehensions in `body`, which the function holding them binds. */
+fn walrus_names<'c>(body: &'c SSAChunk, out: &mut Vec<&'c str>) {
+    for (params, inner, _, _) in &body.functions {
+        if is_comp(params) {
+            out.extend(inner.nonlocals.iter().map(String::as_str));
+            walrus_names(inner, out);
+        }
+    }
 }
 
 fn add<'c>(set: &mut Vec<&'c str>, n: &'c str) { if !set.contains(&n) { set.push(n); } }

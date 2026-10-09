@@ -1,25 +1,28 @@
 use super::prelude::*;
 
-pub fn keys(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
-    let entries = dict_entries(vm, recv)?;
-    let keys: Vec<Val> = entries.into_iter().map(|(k, _)| k).collect();
-    vm.alloc_and_push_list(keys)
+// A view that reads `recv` live, so later changes to the dict show through it.
+fn push_view(vm: &mut VM, recv: Val, kind: View) -> Result<(), VmErr> {
+    if !matches!(vm.heap.try_get(recv), Some(HeapObj::Dict(_))) { return Err(cold_type("method requires a dict receiver")); }
+    let v = vm.heap.alloc(HeapObj::DictView(recv, kind))?;
+    vm.push(v);
+    Ok(())
 }
 
-pub fn values(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
-    let entries = dict_entries(vm, recv)?;
-    let vals: Vec<Val> = entries.into_iter().map(|(_, v)| v).collect();
-    vm.alloc_and_push_list(vals)
-}
+pub fn keys(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> { push_view(vm, recv, View::Keys) }
 
-pub fn items(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> {
-    let entries = dict_entries(vm, recv)?;
-    let mut items: Vec<Val> = Vec::with_capacity(entries.len());
-    for (k, vv) in entries {
-        let t = vm.heap.alloc(HeapObj::Tuple(vec![k, vv]))?;
-        items.push(t);
-    }
-    vm.alloc_and_push_list(items)
+pub fn values(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> { push_view(vm, recv, View::Values) }
+
+pub fn items(vm: &mut VM, recv: Val, _pos: &[Val]) -> Result<(), VmErr> { push_view(vm, recv, View::Items) }
+
+// `view.isdisjoint(other)`, true when no item of `other` is in the view.
+pub fn view_isdisjoint(vm: &mut VM, recv: Val, pos: &[Val]) -> Result<(), VmErr> {
+    let other = iter_to_vec(vm, pos[0])?;
+    let Some(&HeapObj::DictView(d, kind)) = vm.heap.try_get(recv) else { return Err(cold_type("isdisjoint requires a dict view")) };
+    let mine = vm.view_items(d, kind)?;
+    let set = vm.valset_of(&mine)?;
+    let disjoint = !other.iter().any(|&v| set.contains(v, &vm.heap));
+    vm.push(Val::bool(disjoint));
+    Ok(())
 }
 
 // `dict.copy()`, shallow copy, mutations don't affect the original.

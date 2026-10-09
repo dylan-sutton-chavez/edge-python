@@ -46,7 +46,7 @@ impl<'a> VM<'a> {
         if o.is_heap() {
             match self.heap.get(o) {
                 // Exception instances report their concrete class (e.g. `ZeroDivisionError`).
-                HeapObj::ExcInstance(n, _) => return n.clone(),
+                HeapObj::ExcInstance(n, ..) => return n.clone(),
                 HeapObj::Instance(cls, _) => {
                     let cls = *cls;
                     if cls.is_heap() && let HeapObj::Class(n, _, _) = self.heap.get(cls) {

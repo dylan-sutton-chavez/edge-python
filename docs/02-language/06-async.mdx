@@ -33,13 +33,13 @@ async def coro():
   return 1
 
 print(routine()) # 1
-print(coro()) # <coroutine> (does not run yet)
+print(coro()) # <coroutine object coro> (does not run yet)
 print(run(coro())) # 1 (run drives it to completion)
 ```
 
 ```output
 1
-<coroutine>
+<coroutine object coro>
 1
 ```
 

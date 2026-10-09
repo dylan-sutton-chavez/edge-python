@@ -240,7 +240,7 @@ mod test {
         }
 
         fn render(vm: &VM, e: &VmErr, src: &str) -> String {
-            e.render_traceback(src, vm.error_pos(), Some("main.py"), vm.call_stack_frames(), vm.function_names_ref())
+            vm.render_chain(src, Some("main.py")) + &e.render_traceback(src, vm.error_pos(), Some("main.py"), vm.call_stack_frames(), vm.function_names_ref())
         }
 
         // Runs `src`, answering every deferred call with `error`, returns the output and any rendered traceback.
@@ -359,6 +359,32 @@ mod test {
             assert!(vm.push_host_result_by_id(0, "answered").unwrap());
             vm.run().expect("the call answered inside its timeout");
             assert_eq!(vm.output, vec!["answered"]);
+        }
+
+        #[test]
+        fn a_raise_from_renders_its_cause_first() {
+            let tb = traceback("try:\n    1 / 0\nexcept ZeroDivisionError as e:\n    raise ValueError('bad') from e\n");
+            assert_eq!(locations(&tb), vec!["error: ZeroDivisionError: division by zero", "  --> main.py:2:5", "error: ValueError: bad", "  --> main.py:4:5"], "{tb}");
+            assert!(tb.contains("\nThe above exception was the direct cause of the following exception:\n\n"), "{tb}");
+        }
+
+        #[test]
+        fn an_error_inside_a_handler_renders_the_handled_one_first() {
+            let tb = traceback("d = {}\ntry:\n    d['k']\nexcept KeyError:\n    1 / 0\n");
+            assert_eq!(locations(&tb), vec!["error: KeyError: 'k'", "  --> main.py:3:5", "error: ZeroDivisionError: division by zero", "  --> main.py:5:5"], "{tb}");
+            assert!(tb.contains("\nDuring handling of the above exception, another exception occurred:\n\n"), "{tb}");
+        }
+
+        #[test]
+        fn a_raise_from_none_hides_the_handled_error() {
+            let tb = traceback("try:\n    1 / 0\nexcept ZeroDivisionError:\n    raise ValueError('clean') from None\n");
+            assert_eq!(locations(&tb), vec!["error: ValueError: clean", "  --> main.py:4:5"], "{tb}");
+        }
+
+        #[test]
+        fn a_handled_error_is_no_context_once_its_handler_ends() {
+            let tb = traceback("try:\n    1 / 0\nexcept ZeroDivisionError:\n    pass\nraise KeyError('later')\n");
+            assert_eq!(locations(&tb), vec!["error: KeyError: 'later'", "  --> main.py:5:1"], "{tb}");
         }
 
         #[test]

@@ -201,6 +201,12 @@ const METHODS: &[MethodDesc] = methods! {
         "__next__" => object::iter_next, rw, 0..0;
         "__iter__" => object::iter_self, ro, 0..0;
     }
+    "dict_keys" {
+        "isdisjoint" => dict::view_isdisjoint, ro, 1..1;
+    }
+    "dict_items" {
+        "isdisjoint" => dict::view_isdisjoint, ro, 1..1;
+    }
 };
 pub static ALL_METHODS: &[MethodDesc] = METHODS;
 

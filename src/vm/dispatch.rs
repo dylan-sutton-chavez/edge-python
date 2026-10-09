@@ -257,19 +257,21 @@ impl<'a> VM<'a> {
             let heap_err = matches!(e, VmErr::Heap);
             let alloc = |heap: &mut HeapPool, obj| if heap_err { heap.alloc_emergency(obj) } else { heap.alloc(obj) };
             let msg_val = alloc(&mut self.heap, HeapObj::Str(e.message()))?;
-            alloc(&mut self.heap, HeapObj::ExcInstance(msg, alloc::vec![msg_val]))?
+            alloc(&mut self.heap, HeapObj::ExcInstance(msg, alloc::vec![msg_val], Val::undef()))?
         };
         // Kept so raising the exception again reports where it was first raised.
         let at = self.error_byte_pos.take();
+        // An exception rising while another is handled takes it as its context.
+        if let Some(&(handled, handled_at)) = self.handling.last() {
+            self.with_roots([exc], |vm| vm.link_context(exc, handled, handled_at))?;
+        }
         // Drop reasons from finally bodies this exception unwinds past.
         self.unwind_stack.truncate(frame.unwind_depth);
+        self.handling.truncate(frame.handling_depth);
+        // A handler or a cleanup running for the exception handles it, so a bare `raise` re-raises it.
+        self.handling.push((exc, at));
         match frame.kind {
-            BlockKind::Except => {
-                // Record the handled exc so a bare `raise` in the handler can re-raise it.
-                self.handling_exc = Some(exc);
-                self.handling_pos = at;
-                self.push(exc);
-            }
+            BlockKind::Except => self.push(exc),
             // finally/with run their cleanup, then re-raise via EndFinally.
             BlockKind::Finally => {
                 self.pending.exc_val = Some(exc);
@@ -539,6 +541,15 @@ impl<'a> VM<'a> {
                         Some(IterFrame::Seq { items, idx }) => match items.get(*idx) {
                             Some(&v) => { *idx += 1; v }
                             None => break,
+                        },
+                        Some(IterFrame::Watched { items, idx, of, len }) if watched_len(&self.heap, *of) == *len => match items.get(*idx) {
+                            Some(&v) => { *idx += 1; v }
+                            None => break,
+                        },
+                        // A failure sticks, so the handler meets it again and raises it.
+                        Some(f @ IterFrame::DictWalk { .. }) => match f.next_item(&mut self.heap) {
+                            Ok(Some(v)) => v,
+                            _ => break,
                         },
                         _ => break,
                     };
@@ -900,7 +911,7 @@ impl<'a> VM<'a> {
             }
             OpCode::LoadCellR => {
                 let v = self.deref(self.regs[self.base + ins.b as usize]);
-                if v.is_undef() { return Err(VmErr::Name(ssa_strip(&chunk.names[ins.b as usize]).into())); }
+                if v.is_undef() { return Err(self.unbound_err(chunk, ins.b as usize)); }
                 self.regs[self.base + ins.a as usize] = v;
             }
             OpCode::StoreCellR => {
@@ -956,17 +967,13 @@ impl<'a> VM<'a> {
                     Some(&Kind::Global(g)) => self.global_at(code.module, g)?,
                     Some(Kind::Cell) => {
                         let v = self.deref(self.regs.get(self.base + op as usize).copied().unwrap_or(Val::undef()));
-                        if v.is_undef() { return Err(VmErr::Name(ssa_strip(&chunk.names[op as usize]).into())); }
+                        if v.is_undef() { return Err(self.unbound_err(chunk, op as usize)); }
                         v
                     }
                     // Malformed bytecode can carry an out-of-range slot, treat it as unbound.
                     _ => match self.regs.get(self.base + op as usize).copied().filter(|v| !v.is_undef()) {
                         Some(v) => v,
-                        None => {
-                            let name = chunk.names.get(op as usize).map(|n| ssa_strip(n)).unwrap_or_default();
-                            // A deleted rebind falls back to the builtin, the outermost scope.
-                            self.builtin_binding(name).ok_or_else(|| VmErr::Name(name.into()))?
-                        }
+                        None => self.unbound(chunk, op)?,
                     },
                 };
                 self.push(v);
@@ -1012,7 +1019,7 @@ impl<'a> VM<'a> {
                 }
                 Some(Kind::Cell) => {
                     let cell = self.regs[self.base + op as usize];
-                    if self.deref(cell).is_undef() { return Err(VmErr::Name(ssa_strip(&chunk.names[op as usize]).into())); }
+                    if self.deref(cell).is_undef() { return Err(self.unbound_err(chunk, op as usize)); }
                     self.set_cell(cell, Val::undef());
                 }
                 _ => self.handle_side(OpCode::Del, op, chunk)?,
@@ -1104,9 +1111,18 @@ impl<'a> VM<'a> {
                 dispatched?;
             }
 
+            OpCode::GetIter if op == crate::parser::ITER_VALUE => {
+                let o = *self.stack.last().ok_or_else(|| cold_runtime("stack underflow"))?;
+                // A list reads live and the others cannot change, so each iterates the same handed over as is.
+                if !matches!(self.heap.try_get(o), Some(HeapObj::List(_) | HeapObj::Range(..) | HeapObj::Tuple(_) | HeapObj::Str(_) | HeapObj::Bytes(_) | HeapObj::FrozenSet(_))) {
+                    let it = self.iter_of(o, chunk)?;
+                    if let Some(top) = self.stack.last_mut() { *top = it; }
+                }
+            }
             OpCode::GetIter => {
                 let obj = self.pop()?;
-                let frame = self.make_iter_frame(obj, chunk)?;
+                let user = op == crate::parser::ITER_AS_IS && matches!(self.heap.try_get(obj), Some(HeapObj::Instance(..)));
+                let frame = if user { IterFrame::UserDefined(obj) } else { self.make_iter_frame(obj, chunk)? };
                 self.iter_stack.push(frame);
             }
             OpCode::LoadTrue => self.push(Val::bool(true)),
@@ -1242,6 +1258,7 @@ impl<'a> VM<'a> {
                     iter_depth: self.iter_stack.len(),
                     with_depth: self.with_stack.len(),
                     unwind_depth: self.unwind_stack.len(),
+                    handling_depth: self.handling.len(),
                 });
             }
             OpCode::WithEnter => {
@@ -1281,7 +1298,7 @@ impl<'a> VM<'a> {
                 if !self.cancelling && matches!(self.unwind_stack.last(), Some(Unwind::Reraise(..))) && self.truthy(r) {
                     // Suppress, turn the re-raise into a normal exit and drop the exc identity.
                     if let Some(top) = self.unwind_stack.last_mut() { *top = Unwind::Normal; }
-                    self.pending.exc_val = None;
+                    if let (Some(&(h, _)), Some(e)) = (self.handling.last(), self.pending.exc_val.take()) && h.0 == e.0 { self.handling.pop(); }
                 }
             }
             // End of a finally body / WithExit, pop its reason and resume the exit it carried.
@@ -1345,7 +1362,7 @@ impl<'a> VM<'a> {
                     _ => return Err(cold_runtime("UnpackArgs: bad operand")),
                 }
             }
-            OpCode::PopExcept => { self.exception_stack.pop(); }
+            OpCode::PopExcept => if let Some(f) = self.exception_stack.pop() { self.handling.truncate(f.handling_depth); },
             // Emitted by `break` to drop the abandoned for-loop iterator.
             OpCode::PopIter => { self.iter_stack.pop(); }
             _ => return Err(cold_runtime("unexpected opcode in generic dispatch")),
@@ -1362,6 +1379,7 @@ impl<'a> VM<'a> {
             self.with_stack.truncate(frame.with_depth);
             // Discard reasons from finally bodies skipped while seeking this handler.
             self.unwind_stack.truncate(frame.unwind_depth);
+            self.handling.truncate(frame.handling_depth);
             if frame.kind == BlockKind::Finally {
                 return Some(frame.handler_ip);
             }
@@ -1388,7 +1406,7 @@ impl<'a> VM<'a> {
     pub(crate) fn exc_type_name(&self, exc: Val) -> String {
         if !exc.is_heap() { return "Exception".into(); }
         match self.heap.get(exc) {
-            HeapObj::ExcInstance(n, _) => n.clone(),
+            HeapObj::ExcInstance(n, ..) => n.clone(),
             HeapObj::Instance(cls, _) => {
                 if cls.is_heap() && let HeapObj::Class(name, _, _) = self.heap.get(*cls) { name.clone() } else { "Exception".into() }
             }
@@ -1468,7 +1486,7 @@ impl<'a> VM<'a> {
                 Ok(Some(item)) => Ok(item),
                 Ok(None) => Err(Val::none()),
                 Err(VmErr::Raised(m)) if m == "StopIteration" || m.starts_with("StopIteration:") => Err(match self.pending.exc_val.and_then(|e| self.heap.try_get(e)) {
-                    Some(HeapObj::ExcInstance(_, args)) if m.starts_with("StopIteration:") => args.first().copied().unwrap_or(Val::none()),
+                    Some(HeapObj::ExcInstance(_, args, _)) if m.starts_with("StopIteration:") => args.first().copied().unwrap_or(Val::none()),
                     _ => Val::none(),
                 }),
                 Err(e) => return Err(e),

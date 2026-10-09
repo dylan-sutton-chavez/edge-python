@@ -315,10 +315,11 @@ fn step_vm(mut vm: VM<'static>, src: &str, prev_paused: Option<Box<PausedRun>>) 
                 return STATUS_EXIT | ((code as u32) & 0xFF);
             }
             let name = source_name();
-            let traceback = e.render_traceback(
+            let mut traceback = vm.render_chain(src, name.as_deref());
+            traceback.push_str(&e.render_traceback(
                 src, vm.error_pos(), name.as_deref(),
                 vm.call_stack_frames(), vm.function_names_ref(),
-            );
+            ));
             // A failed input keeps its partial effects.
             park_repl_or_drop(vm);
             drop(prev_paused);

@@ -109,9 +109,11 @@ The heap is a `Vec<HeapSlot>` arena. Its free list is capped at 524,288 entries 
 
 An inline value has no address, so two equal numbers are one value. That is why the language has no `id`, no user `__hash__`, and no `is` beyond `None`, `True`, `False`, `...` and `NotImplemented`, since each would answer differently from CPython. Frames keep their locals in registers rather than in a dict, so there is no `locals()` either.
 
+NaN follows from the same model. A NaN with another payload could read as a tagged value, so every NaN is stored as `0x7FF8...` with its sign kept. Two NaNs then share their bits and are one value. A container matches a member by identity before `==`, so a list holding a NaN contains any other NaN and a set keeps a single one, as `SameValueZero` does in JavaScript. `n == n` stays `False`.
+
 The heap counts what it holds against the memory limit of the run, see [Sandboxed execution](/docs/reference/limits-and-errors#sandboxed-execution).
 
-The main `HeapObj` variants are `Str`, `Bytes`, `LongInt`, `List`, `Dict` (insertion-ordered), `Set`, `FrozenSet`, `Tuple`, `Func`, `Range`, `Slice`, `Type`, `ExcInstance`, `BoundMethod`, `NativeFn`, `Class`, `Instance`, `BoundUserMethod`, `Super`, `Property`, `StaticMethod`, `ClassMethod`, `Coroutine`, `Module`, `Iter`, `Cell`, and `Extern`.
+The main `HeapObj` variants are `Str`, `Bytes`, `LongInt`, `List`, `Dict` (insertion-ordered), `Set`, `FrozenSet`, `Tuple`, `Func`, `Range`, `Slice`, `Type`, `ExcInstance`, `BoundMethod`, `NativeFn`, `Class`, `Instance`, `BoundUserMethod`, `Super`, `Property`, `StaticMethod`, `ClassMethod`, `Coroutine`, `Module`, `Iter`, `DictView`, `Cell`, and `Extern`.
 
 ## Garbage collection
 

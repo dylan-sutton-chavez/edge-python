@@ -406,20 +406,18 @@ returned done
 
 ## Generator expressions
 
-A generator expression is evaluated at once into a list. It can be read more than once.
+A generator expression is a generator written inline. It computes each value when asked and can be read once.
 
 ```edge-python
 print(sum(x * x for x in range(5)))
-print(max(i for i in [3, 1, 4, 1, 5]))
+squares = (x * x for x in range(3))
+print(next(squares), list(squares), list(squares))
 ```
 
 ```output
 30
-5
+0 [1, 4] []
 ```
-
-> [!WARNING]
-> `(x * x for x in xs)` is `[x * x for x in xs]`. An unbounded source never finishes. When the values should come one at a time, write a `def` with `yield`. [Compiler](/docs/internals/compiler#comprehensions-and-generators) explains why.
 
 ## Decorators
 

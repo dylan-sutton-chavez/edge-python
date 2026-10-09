@@ -1,6 +1,6 @@
 use core::cmp::Ordering;
 
-use super::{HeapObj, HeapPool, Val, ValSet, as_i128, as_long_int};
+use super::{HeapObj, HeapPool, Val, ValSet, View, as_i128, as_long_int};
 
 /* 2^127 exactly, the saturation guard for f64-to-i128 casts. */
 const TWO_POW_127: f64 = 170141183460469231731687303715884105728.0;
@@ -214,6 +214,12 @@ fn eq_vals_depth(a: Val, b: Val, heap: &HeapPool, depth: usize, rich: &mut bool)
             let (l1, l2) = (range_len(*s1,*e1,*t1), range_len(*s2,*e2,*t2));
             l1 == l2 && (l1 == 0 || (s1 == s2 && (l1 == 1 || t1 == t2)))
         }
+        // Keys views compare as key sets and items views as dicts, a values view only to itself.
+        (HeapObj::DictView(x, View::Keys), HeapObj::DictView(y, View::Keys)) => match (heap.get(*x), heap.get(*y)) {
+            (HeapObj::Dict(x), HeapObj::Dict(y)) => { let (x, y) = (x.borrow(), y.borrow()); x.len() == y.len() && x.keys().all(|k| y.contains_key(&k, heap)) }
+            _ => false,
+        },
+        (HeapObj::DictView(x, View::Items), HeapObj::DictView(y, View::Items)) => eq_vals_depth(*x, *y, heap, d, rich),
         // Cross-type comparisons fall through to false. Notably `bytes == str` is False, even when the bytes are valid UTF-8 of the str.
         _ => false,
     }

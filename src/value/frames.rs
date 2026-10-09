@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use super::Val;
-use super::HeapPool;
+use super::{HeapObj, HeapPool, View};
 use super::err::VmErr;
 
 /* Scheduler state per coroutine, stepped round-robin until the target leaves Ready/Sleeping. */
@@ -87,6 +87,8 @@ pub struct ExceptionFrame {
     pub iter_depth: usize,
     pub with_depth: usize,
     pub unwind_depth: usize,
+    // Exceptions being handled when the block began, the ones its handlers add end with it.
+    pub handling_depth: usize,
 }
 
 // Coroutine body, user fn (Fn) or the implicit module-body coro (Module -> self.chunk).
@@ -117,19 +119,83 @@ pub enum IterFrame {
     Coroutine(Val),
     // User-defined iterator, holds the value returned by `__iter__`, each step calls its `__next__`.
     UserDefined(Val),
+    // `reversed(list)` walking the live list from its end, `idx` counting the items still ahead.
+    ListRev { rc: alloc::rc::Rc<core::cell::RefCell<Vec<Val>>>, idx: usize },
+    // `map(f, *its)`, calling `f` as each item is asked for.
+    Map { f: Val, its: alloc::rc::Rc<[Val]> },
+    // `filter(f, it)`, a None `f` keeping the truthy items.
+    Filter { f: Val, it: Val },
+    Zip { its: alloc::rc::Rc<[Val]> },
+    // `enumerate(it, start)`, `n` the count the next item pairs with.
+    Enumerate { it: Val, n: Val },
+    // `iter(f, sentinel)`, calling `f` until it returns `sentinel`.
+    Call { f: Val, sentinel: Val },
+    // A set or a reversed dict read up front, a later step failing once `of` changed size.
+    Watched { items: alloc::rc::Rc<[Val]>, idx: usize, of: Val, len: usize },
+    // A dict or its view read live, `left` the items it still owes, failing once the size or the keys change.
+    DictWalk { of: Val, idx: usize, left: usize, len: usize, kind: View },
+}
+
+/* The size of the dict or set a watched frame reads. */
+#[inline]
+pub(crate) fn watched_len(heap: &HeapPool, of: Val) -> usize {
+    match heap.try_get(of) {
+        Some(HeapObj::Dict(d)) => d.borrow().len(),
+        Some(HeapObj::Set(s)) => s.borrow().len(),
+        _ => 0,
+    }
 }
 
 impl IterFrame {
-    /* Stateless steps only, built-in Seq/Range. User-defined iterators step in `dispatch.rs` because they need the VM to invoke `__next__`. */
+    /* Stateless steps only, the frames that call user code or other iterators step in the VM. */
     pub fn next_item(&mut self, heap: &mut HeapPool) -> Result<Option<Val>, VmErr> {
         match self {
-            Self::Coroutine(_) | Self::UserDefined(_) => Ok(None),
+            Self::Coroutine(_) | Self::UserDefined(_) | Self::Map { .. } | Self::Filter { .. } | Self::Zip { .. } | Self::Enumerate { .. } | Self::Call { .. } => Ok(None),
             Self::Seq { items, idx } => {
                 if *idx < items.len() { let v = items[*idx]; *idx += 1; Ok(Some(v)) } else { Ok(None) }
+            }
+            // The failure sticks, every later step fails the same way.
+            Self::Watched { items, idx, of, len } => {
+                if watched_len(heap, *of) != *len {
+                    *len = usize::MAX;
+                    let set = matches!(heap.try_get(*of), Some(HeapObj::Set(_)));
+                    return Err(VmErr::Runtime(if set { "Set changed size during iteration" } else { "dictionary changed size during iteration" }));
+                }
+                if *idx < items.len() { let v = items[*idx]; *idx += 1; Ok(Some(v)) } else { Ok(None) }
+            }
+            // Both failures stick, so every later step fails the same way.
+            Self::DictWalk { of, idx, left, len, kind } => {
+                let Some(HeapObj::Dict(d)) = heap.try_get(*of) else { return Ok(None) };
+                let d = d.clone();
+                let m = d.borrow();
+                if m.len() != *len {
+                    *len = usize::MAX;
+                    return Err(VmErr::Runtime("dictionary changed size during iteration"));
+                }
+                while *idx < m.entry_count() {
+                    let (k, v) = (m.key_at(*idx), m.value_at(*idx));
+                    if k.is_undef() { *idx += 1; continue; }
+                    if *left == 0 { return Err(VmErr::Runtime("dictionary keys changed during iteration")); }
+                    (*idx, *left) = (*idx + 1, *left - 1);
+                    drop(m);
+                    return Ok(Some(match kind {
+                        View::Keys => k,
+                        View::Values => v,
+                        View::Items => heap.alloc(HeapObj::Tuple(alloc::vec![k, v]))?,
+                    }));
+                }
+                Ok(None)
             }
             Self::List { rc, idx } => {
                 let items = rc.borrow();
                 if *idx < items.len() { let v = items[*idx]; *idx += 1; Ok(Some(v)) } else { Ok(None) }
+            }
+            // A list that shrank past the cursor ends the walk.
+            Self::ListRev { rc, idx } => {
+                let items = rc.borrow();
+                if *idx == 0 || *idx > items.len() { *idx = 0; return Ok(None); }
+                *idx -= 1;
+                Ok(Some(items[*idx]))
             }
             Self::Range { cur, end, step } => {
                 let done = if *step > 0 { *cur >= *end } else { *cur <= *end };
@@ -148,8 +214,15 @@ impl IterFrame {
     pub(crate) fn for_each_val(&self, f: &mut impl FnMut(Val)) {
         match self {
             IterFrame::Seq { items, .. } => for &v in items.iter() { f(v); },
-            IterFrame::List { rc, .. } => for &v in rc.borrow().iter() { f(v); },
+            IterFrame::Watched { items, of, .. } => { f(*of); for &v in items.iter() { f(v); } }
+            IterFrame::DictWalk { of, .. } => f(*of),
+            IterFrame::List { rc, .. } | IterFrame::ListRev { rc, .. } => for &v in rc.borrow().iter() { f(v); },
             Self::Coroutine(v) | Self::UserDefined(v) => f(*v),
+            IterFrame::Map { f: g, its } => { f(*g); for &v in its.iter() { f(v); } }
+            IterFrame::Filter { f: g, it } => { f(*g); f(*it); }
+            IterFrame::Zip { its } => for &v in its.iter() { f(v); },
+            IterFrame::Enumerate { it, n } => { f(*it); f(*n); }
+            IterFrame::Call { f: g, sentinel } => { f(*g); f(*sentinel); }
             IterFrame::Range { .. } => {}
         }
     }

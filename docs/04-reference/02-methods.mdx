@@ -384,7 +384,7 @@ print(xs.pop(0), xs)
 
 ### Views
 
-`keys`, `values`, `items` return concrete list snapshots, not live views. Later mutations of the dict do not affect a captured snapshot.
+`keys`, `values`, `items` return views that read the dict live. A view taken earlier shows later changes. The `keys` and `items` views take the set operators and `isdisjoint`.
 
 ```edge-python
 d = {"a": 1, "b": 2, "c": 3}
@@ -396,13 +396,15 @@ print(d.items())
 k = d.keys()
 d["d"] = 4
 print(k)
+print(k & {"a", "z"})
 ```
 
 ```output
-['a', 'b', 'c']
-[1, 2, 3]
-[('a', 1), ('b', 2), ('c', 3)]
-['a', 'b', 'c']
+dict_keys(['a', 'b', 'c'])
+dict_values([1, 2, 3])
+dict_items([('a', 1), ('b', 2), ('c', 3)])
+dict_keys(['a', 'b', 'c', 'd'])
+{'a'}
 ```
 
 ### Lookup
