@@ -8,11 +8,11 @@ description: "Scaffold a project with edge init and write a word counter."
 This tutorial builds `words`, a small app that counts the words of a text and ranks them. Four short pages take it from an empty folder to a published package.
 
 1. Create the project and write the code.
-2. [Add a package](/docs/get-started/first-app/packages) from the registry.
-3. [Test](/docs/get-started/first-app/test) the code.
-4. [Build and publish](/docs/get-started/first-app/ship) it.
+2. [Add a package](/docs/edge-python/get-started/first-app/packages) from the registry.
+3. [Test](/docs/edge-python/get-started/first-app/test) the code.
+4. [Build and publish](/docs/edge-python/get-started/first-app/ship) it.
 
-You need the `edge` CLI. The [Quickstart](/docs/get-started/quickstart) installs it.
+You need the `edge` CLI. The [Quickstart](/docs/edge-python/get-started/quickstart) installs it.
 
 ## Scaffold it
 
@@ -42,14 +42,14 @@ The manifest starts with one field.
 
 ```json
 {
-  "edge": "0.9.4"
+  "edge": "0.9.5"
 }
 ```
 
 The `edge` field is the lowest engine the project runs on, the version of the CLI that made it. An older CLI refuses to run the project. Nothing else resolves until you declare it.
 
-- [edge.json](/docs/reference/modules#edgejson) describes every field of the manifest.
-- [edge init](/docs/platforms/cli#edge-init) lists the flags of the command.
+- [edge.json](/docs/edge-python/reference/modules#edgejson) describes every field of the manifest.
+- [edge init](/docs/edge-python/platforms/cli#edge-init) lists the flags of the command.
 
 ## Write the code
 
@@ -96,4 +96,4 @@ It prints the same three lines as the example above. To see it in a browser, run
 ## Next step
 
 > [!CARDS]
-> - `package-plus` [Add a package](/docs/get-started/first-app/packages) Declare json, lock it and print the counts as JSON.
+> - `package-plus` [Add a package](/docs/edge-python/get-started/first-app/packages) Declare json, lock it and print the counts as JSON.

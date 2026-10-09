@@ -7,7 +7,7 @@ description: "Methods available on the built-in types."
 
 `str`, `bytes`, `list`, `dict`, and `set` carry built-in methods, plus a small set on `int` and `float`. The set is curated for common operations. Missing variants are noted per section.
 
-`tuple` and `frozenset` have no methods. `(1, 2).count(1)` raises `AttributeError`. Frozensets use the operators from [Set](/docs/language/data-types#set) instead.
+`tuple` and `frozenset` have no methods. `(1, 2).count(1)` raises `AttributeError`. Frozensets use the operators from [Set](/docs/edge-python/language/data-types#set) instead.
 
 ```edge-python
 print("hello".upper())
@@ -197,7 +197,7 @@ Not provided are `translate`, `maketrans`, and `format_map`.
 `str.format(*args)` fills positional fields.
 
 - `{}` auto-numbers and `{0}` picks an index.
-- A spec after `:` uses the [format mini-language](/docs/language/syntax#f-strings).
+- A spec after `:` uses the [format mini-language](/docs/edge-python/language/syntax#f-strings).
 - Keyword fields like `{name}` are not supported.
 
 The `%` operator does printf-style formatting.
@@ -307,7 +307,7 @@ b'a-b-c'
 - A character that is not a hex digit raises `ValueError`.
 - An odd number of digits raises `ValueError`.
 
-The builtin [`bytes_fromhex(s)`](/docs/reference/builtins#bytes-helpers) does the same.
+The builtin [`bytes_fromhex(s)`](/docs/edge-python/reference/builtins#bytes-helpers) does the same.
 
 ```edge-python
 print(bytes.fromhex("48 65 6c 6c 6f"))
@@ -357,7 +357,7 @@ These return `None` and mutate in place.
 - `insert(i, x)` inserts at an index.
 - `remove(x)` deletes the first match and raises `ValueError` on a miss.
 - `pop()` removes and returns the last item, `pop(i)` the item at an index. Both raise `IndexError` when the index is invalid.
-- `sort()` accepts `key=fn` and `reverse=True`. It follows the ordering rules of [sorted](/docs/reference/builtins#sorted).
+- `sort()` accepts `key=fn` and `reverse=True`. It follows the ordering rules of [sorted](/docs/edge-python/reference/builtins#sorted).
 - `reverse()` flips in place.
 - `clear()` empties the list.
 
@@ -500,7 +500,7 @@ set()
 - `intersection_update`, `difference_update`, `symmetric_difference_update` mutate the receiver.
 - `issubset`, `issuperset`, `isdisjoint` test relations.
 
-The named methods accept any iterable. The operator forms are in [Set](/docs/language/data-types#set).
+The named methods accept any iterable. The operator forms are in [Set](/docs/edge-python/language/data-types#set).
 
 ```edge-python
 print(sorted({1, 2}.union([2, 3], range(4, 6))))
@@ -553,4 +553,4 @@ True
 False
 ```
 
-The builtins [`int_to_bytes` and `int_from_bytes`](/docs/reference/builtins#bytes-helpers) are the same methods as functions, with every argument required.
+The builtins [`int_to_bytes` and `int_from_bytes`](/docs/edge-python/reference/builtins#bytes-helpers) are the same methods as functions, with every argument required.

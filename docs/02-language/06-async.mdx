@@ -137,7 +137,7 @@ The clock that `sleep` waits on depends on the grants of the run.
 - Without any `time` scope the run uses a virtual clock. `sleep` and `with_timeout` deadlines pass at once and in order, and a host call takes no time.
 - Any `time` scope turns the wall clock on for the whole run.
 
-[System](/docs/reference/system#time) describes the scopes.
+[System](/docs/edge-python/reference/system#time) describes the scopes.
 
 ## gather
 
@@ -196,7 +196,7 @@ async def status(url):
 print(gather(status("https://api.github.com/zen"), status("https://nope.invalid/x")))
 ```
 
-The example needs `edge.json` to grant `net:api.github.com` and `net:nope.invalid`, see [System](/docs/reference/system). In a browser each request is a `fetch` from the Web Worker. The CLI fetches each request on a thread of its own, and on both hosts `gather` overlaps the calls.
+The example needs `edge.json` to grant `net:api.github.com` and `net:nope.invalid`, see [System](/docs/edge-python/reference/system). In a browser each request is a `fetch` from the Web Worker. The CLI fetches each request on a thread of its own, and on both hosts `gather` overlaps the calls.
 
 ## with_timeout
 
@@ -233,15 +233,15 @@ async def loop_forever():
   sleep(0) # cancellable from this point on
 ```
 
-For deadline-driven cancellation use `with_timeout`. [Limits and errors](/docs/reference/limits-and-errors#exception-hierarchy) places `TimeoutError` and `CancelledError` in the exception hierarchy.
+For deadline-driven cancellation use `with_timeout`. [Limits and errors](/docs/edge-python/reference/limits-and-errors#exception-hierarchy) places `TimeoutError` and `CancelledError` in the exception hierarchy.
 
 ## receive
 
 `receive()` pops the oldest message from the event queue of the host. When the queue is empty it parks the coroutine until the host pushes one. Messages are strings.
 
-- [JavaScript](/docs/platforms/javascript) shows how a page or a worker pushes them.
-- A parked `receive()` is a natural pause point for [snapshots](/docs/language/snapshots).
-- Inside an [actor pool](/docs/platforms/actors) its counterpart `send(group, body)` hands a string to another group.
+- [JavaScript](/docs/edge-python/platforms/javascript) shows how a page or a worker pushes them.
+- A parked `receive()` is a natural pause point for [snapshots](/docs/edge-python/language/snapshots).
+- Inside an [actor pool](/docs/edge-python/platforms/actors) its counterpart `send(group, body)` hands a string to another group.
 
 ```python
 async def main():
@@ -252,7 +252,7 @@ async def main():
 run(main())
 ```
 
-When every coroutine waits, the run suspends to the host. The host resumes it once a timer, a host call or a message is ready. [Rust](/docs/platforms/rust) shows that loop for a host of your own.
+When every coroutine waits, the run suspends to the host. The host resumes it once a timer, a host call or a message is ready. [Rust](/docs/edge-python/platforms/rust) shows that loop for a host of your own.
 
 ## async for and async with
 
@@ -288,7 +288,7 @@ run(main())
 
 ## Limitations
 
-- **No preemption between coroutines.** `while True: pass` inside a coroutine blocks the scheduler. The host can still force a pause through the preempt interval, see [Snapshots](/docs/language/snapshots).
+- **No preemption between coroutines.** `while True: pass` inside a coroutine blocks the scheduler. The host can still force a pause through the preempt interval, see [Snapshots](/docs/edge-python/language/snapshots).
 - **No suspending in a cancelled `finally`.** A `finally` running from `cancel()` cannot `await` or `sleep`. Doing so raises `RuntimeError`.
 - **No async comprehensions.** `[x async for x in it]` is a parse error.
 - **No `gen.send`, `throw` or `close`.** Generators and coroutines are one-way producers. For flow in both directions, use `run` or `gather` and pass messages through arguments.
@@ -298,5 +298,5 @@ run(main())
 > All concurrency is structural. A coroutine only progresses while awaited inside `run(...)` or `gather(...)`.
 
 > [!CARDS]
-> - `camera` [Snapshots](/docs/language/snapshots) Freeze a paused run to a blob and resume it later.
-> - `users` [Actors](/docs/platforms/actors) Run many programs side by side as message-passing tasks.
+> - `camera` [Snapshots](/docs/edge-python/language/snapshots) Freeze a paused run to a blob and resume it later.
+> - `users` [Actors](/docs/edge-python/platforms/actors) Run many programs side by side as message-passing tasks.

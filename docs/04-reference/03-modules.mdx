@@ -7,7 +7,7 @@ description: "The compile-time import system, edge.json, edge.lock, integrity pi
 
 Every import resolves at compile time. The compiler asks the host for each module and flattens it into the bytecode. The VM never fetches anything at run time.
 
-The host decides what each name means. It is the [JS host](/docs/platforms/javascript), the [CLI](/docs/platforms/cli) or a [Rust program](/docs/platforms/rust) that drives `compiler.wasm`.
+The host decides what each name means. It is the [JS host](/docs/edge-python/platforms/javascript), the [CLI](/docs/edge-python/platforms/cli) or a [Rust program](/docs/edge-python/platforms/rust) that drives `compiler.wasm`.
 
 A module is one of two kinds, and its artifact decides which. Both use the same import syntax.
 
@@ -16,11 +16,11 @@ Nobody classifies a package. A manifest entry only names a spec.
 | Kind | Artifact | What it is |
 |---|---|---|
 | Code module | `.py` | Its top level runs once at startup. Its exports live on a module object shared by every importer. |
-| Native module | `.wasm` | A plugin over the [ABI](/docs/reference/abi). |
+| Native module | `.wasm` | A plugin over the [ABI](/docs/edge-python/reference/abi). |
 
 - A file that starts with the wasm magic bytes is a native module.
 - Any other file is Python source, whatever its extension.
-- A `.js` or `.mjs` import fails where it is written with `module 'charts' is JavaScript, ship a .py or a .wasm`. No JavaScript loads besides the [system calls](/docs/reference/system) of the host.
+- A `.js` or `.mjs` import fails where it is written with `module 'charts' is JavaScript, ship a .py or a .wasm`. No JavaScript loads besides the [system calls](/docs/edge-python/reference/system) of the host.
 - `edge add`, `edge lock`, `edge build` and `edge publish` stop on a JavaScript module before they write anything.
 
 ## Syntax
@@ -88,7 +88,7 @@ Bare names resolve through `edge.json`, the only manifest name. Every field is o
   "description": "Draw a chart from a list of points.",
   "repository": "https://github.com/you/charts",
   "docs": "./docs",
-  "edge": "0.9.4",
+  "edge": "0.9.5",
   "imports": {
     "json": "0.1.0",
     "utils": "./lib/utils.py",
@@ -101,13 +101,13 @@ Bare names resolve through `edge.json`, the only manifest name. Every field is o
 | Field | Meaning |
 |---|---|
 | `imports` | Bare name to spec, a path, a URL or a `major.minor.patch` version of a registry package. One map holds every module, and the artifact behind each spec tells its kind. A version names a release only, and [`edge.lock`](#edgelock) says where its bytes are. |
-| `permissions` | Which system module the program and each package may use, and what each may reach, as `module:scope` entries per holder. See [Permissions](/docs/reference/system#permissions). |
+| `permissions` | Which system module the program and each package may use, and what each may reach, as `module:scope` entries per holder. See [Permissions](/docs/edge-python/reference/system#permissions). |
 | `extends` | A directory whose `edge.json` answers a name not declared locally. Use it for monorepo sub-packages that share the dependencies of a parent. Omit it for hermetic libraries. A cycle in the chain fails at compile time. |
 | `edge` | The lowest engine the project runs on, `major.minor.patch`. `edge init` writes the version that scaffolded the project, and omitting it runs anywhere. |
-| `name`, `version`, `description`, `repository`, `docs` | What a package carries into a registry. The compiler ignores all five, and their rules are in [Publishing](/docs/reference/registry#publishing). |
+| `name`, `version`, `description`, `repository`, `docs` | What a package carries into a registry. The compiler ignores all five, and their rules are in [Publishing](/docs/edge-python/reference/registry#publishing). |
 
-- No import name may be the name of a system module, such as `time` or `net`. [Permissions](/docs/reference/system#permissions) grant those instead.
-- An engine older than `edge` stops with `this project needs edge 1.0.0, this is 0.9.4`. A dependency written for a later engine is refused where it loads, by the CLI and the browser alike.
+- No import name may be the name of a system module, such as `time` or `net`. [Permissions](/docs/edge-python/reference/system#permissions) grant those instead.
+- An engine older than `edge` stops with `this project needs edge 1.0.0, this is 0.9.5`. A dependency written for a later engine is refused where it loads, by the CLI and the browser alike.
 - Unknown keys are ignored.
 - Values must be strings, lists of strings, or objects of them. Numbers and booleans are rejected.
 - The string escapes are `\"`, `\\`, `\/`, `\n`, `\t` and `\r`. `\uXXXX` is not supported, so paste UTF-8 literally.
@@ -129,7 +129,7 @@ Bare names resolve through `edge.json`, the only manifest name. Every field is o
 
 ## edge.lock
 
-A version says which release a project wants. The `edge.lock` beside its `edge.json` says where that release is. [`edge lock`](/docs/platforms/cli#edge-lock) writes it and every other command reads it, so a run resolves a name without asking a registry.
+A version says which release a project wants. The `edge.lock` beside its `edge.json` says where that release is. [`edge lock`](/docs/edge-python/platforms/cli#edge-lock) writes it and every other command reads it, so a run resolves a name without asking a registry.
 
 ```json
 {
@@ -170,8 +170,8 @@ error: integrity check failed for 'https://example.com/utils.py'
 ```
 
 - Only `sha256` is supported. Other prefixes fail with `unrecognized integrity fragment`.
-- The JS host checks the pin in its fetch layer. How a page caches modules is in [JavaScript](/docs/platforms/javascript).
-- The CLI checks the pin on every module it downloads or reads from disk, `.wasm` plugins included. Its disk cache is in [Cache](/docs/platforms/cli#cache).
+- The JS host checks the pin in its fetch layer. How a page caches modules is in [JavaScript](/docs/edge-python/platforms/javascript).
+- The CLI checks the pin on every module it downloads or reads from disk, `.wasm` plugins included. Its disk cache is in [Cache](/docs/edge-python/platforms/cli#cache).
 
 ## Resolution errors
 
@@ -194,14 +194,14 @@ error: module 'json' has no export 'badname'
 
 ## Writing your own modules
 
-A module of your own ships as a `.py`, or as a `.wasm` plugin. A plugin sees transit values and reaches the outside only through the [system calls](/docs/reference/abi#system-calls) its package is granted.
+A module of your own ships as a `.py`, or as a `.wasm` plugin. A plugin sees transit values and reaches the outside only through the [system calls](/docs/edge-python/reference/abi#system-calls) its package is granted.
 
-Transit values are `None`, `bool`, `int` (128-bit), `float`, `str`, `bytes`, and nested `list` and `dict`. A plugin follows the sealed, language-agnostic [ABI](/docs/reference/abi), written in Rust with `wasm-pdk` or in Zig, C or AssemblyScript. A script imports it through a manifest alias like any other module.
+Transit values are `None`, `bool`, `int` (128-bit), `float`, `str`, `bytes`, and nested `list` and `dict`. A plugin follows the sealed, language-agnostic [ABI](/docs/edge-python/reference/abi), written in Rust with `wasm-pdk` or in Zig, C or AssemblyScript. A script imports it through a manifest alias like any other module.
 
 ## See also
 
 > [!CARDS]
-> - `terminal` [Command line interface](/docs/platforms/cli) Write entries with edge add, resolve them with edge lock, vendor them with edge build.
-> - `cpu` [ABI](/docs/reference/abi) The wire contract behind wasm plugins.
-> - `shield` [Limits and errors](/docs/reference/limits-and-errors) The sandbox profile both hosts run under.
-> - `key` [System](/docs/reference/system) The system modules and the permissions that let a package use them.
+> - `terminal` [Command line interface](/docs/edge-python/platforms/cli) Write entries with edge add, resolve them with edge lock, vendor them with edge build.
+> - `cpu` [ABI](/docs/edge-python/reference/abi) The wire contract behind wasm plugins.
+> - `shield` [Limits and errors](/docs/edge-python/reference/limits-and-errors) The sandbox profile both hosts run under.
+> - `key` [System](/docs/edge-python/reference/system) The system modules and the permissions that let a package use them.

@@ -115,7 +115,7 @@ if (n := len(data)) > 0:
 
 Integer literals are decimal by default. The `0x` prefix writes hex, `0o` octal and `0b` binary. `_` may separate digits.
 
-[Data types](/docs/language/data-types#integer) covers the range and overflow.
+[Data types](/docs/edge-python/language/data-types#integer) covers the range and overflow.
 
 ```edge-python
 print(0xDEAD_BEEF)
@@ -156,7 +156,7 @@ Complex literals such as `1j` do not exist.
 Strings take single, double or triple quotes. Prefixes change what a literal builds.
 
 - An `r` prefix makes a raw string. Backslashes stay literal.
-- A `b` prefix builds [bytes](/docs/language/data-types#bytes) instead of a string.
+- A `b` prefix builds [bytes](/docs/edge-python/language/data-types#bytes) instead of a string.
 - An `f` prefix makes an [f-string](#f-strings).
 
 Adjacent literals concatenate into one.
@@ -260,8 +260,8 @@ print(-5, +5)
 
 - `/` always yields a float.
 - `//` and `%` use floored division. The result of `%` takes the sign of the divisor.
-- `@` has no meaning on builtin types. A class can give it one, see [Classes](/docs/language/classes#arithmetic).
-- With a string on the left, `%` does printf-style formatting, see [Methods](/docs/reference/methods#formatting).
+- `@` has no meaning on builtin types. A class can give it one, see [Classes](/docs/edge-python/language/classes#arithmetic).
+- With a string on the left, `%` does printf-style formatting, see [Methods](/docs/edge-python/reference/methods#formatting).
 
 ### Comparison and chaining
 
@@ -345,7 +345,7 @@ True
 
 ### Augmented assignment
 
-The forms are `+= -= *= /= //= %= **= @= &= |= ^= <<= >>=`. A class can define its own in-place behavior, see [Classes](/docs/language/classes#arithmetic).
+The forms are `+= -= *= /= //= %= **= @= &= |= ^= <<= >>=`. A class can define its own in-place behavior, see [Classes](/docs/edge-python/language/classes#arithmetic).
 
 ```edge-python
 x = 10
@@ -384,7 +384,7 @@ big
 > [!NOTE]
 > `{}` is an empty dict. The empty set is written `set()`.
 
-[Data types](/docs/language/data-types) covers the semantics and [Methods](/docs/reference/methods) the methods.
+[Data types](/docs/edge-python/language/data-types) covers the semantics and [Methods](/docs/edge-python/reference/methods) the methods.
 
 ```edge-python
 print((1,), ())
@@ -462,13 +462,13 @@ print(sorted({x % 3 for x in range(10)}))  # set order is arbitrary, sort to com
 [0, 1, 2]
 ```
 
-[Functions](/docs/language/functions#generator-expressions) covers generator expressions.
+[Functions](/docs/edge-python/language/functions#generator-expressions) covers generator expressions.
 
 ## Type annotations
 
 Annotations parse on variables, parameters and return positions. They have no runtime effect. There is no `__annotations__` and no runtime check.
 
-Treat them as documentation for humans and static analyzers. Generic classes, `type` aliases and unions are on [Data types](/docs/language/data-types#generic-aliases).
+Treat them as documentation for humans and static analyzers. Generic classes, `type` aliases and unions are on [Data types](/docs/edge-python/language/data-types#generic-aliases).
 
 ```edge-python
 counter: int = 0
@@ -487,5 +487,5 @@ ab
 ```
 
 > [!CARDS]
-> - `shapes` [Data types](/docs/language/data-types) The builtin types, their values and their behavior.
-> - `list-tree` [Methods](/docs/reference/methods) The methods of strings, bytes, lists, dicts, sets and numbers.
+> - `shapes` [Data types](/docs/edge-python/language/data-types) The builtin types, their values and their behavior.
+> - `list-tree` [Methods](/docs/edge-python/reference/methods) The methods of strings, bytes, lists, dicts, sets and numbers.

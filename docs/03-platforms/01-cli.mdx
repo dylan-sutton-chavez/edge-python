@@ -7,7 +7,7 @@ description: "The edge CLI, from run and serve to test, build, actor and package
 
 The `edge` CLI runs on macOS, Linux and WSL. It embeds the engine the JS host loads, a `compiler.wasm` built from the same source and precompiled for the machine.
 
-The [system calls](/docs/reference/system) run in SpiderMonkey inside the binary. A program answers the same on both hosts.
+The [system calls](/docs/edge-python/reference/system) run in SpiderMonkey inside the binary. A program answers the same on both hosts.
 
 ```bash
 edge run app.py        # run a script, a .edge, or stdin (--web)
@@ -66,7 +66,7 @@ error: ZeroDivisionError: division by zero
 
 | Input | Example | Notes |
 |---|---|---|
-| A file | `edge run app.py` | Piped stdin feeds [`input()`](/docs/reference/builtins) one line per call |
+| A file | `edge run app.py` | Piped stdin feeds [`input()`](/docs/edge-python/reference/builtins) one line per call |
 | Inline code | `edge run -c 'print(1)'` | Piped stdin feeds `input()` the same way |
 | Piped stdin | `cat app.py` piped into `edge run` | Stdin is the script, and a terminal on stdin is an error |
 | A packed artifact | `edge run app.edge` | A `.edge` or an app binary runs exactly as `./app` would |
@@ -78,10 +78,10 @@ error: ZeroDivisionError: division by zero
 | Flag | Effect |
 |---|---|
 | `--events <f>` | Each line of the file or FIFO feeds one `receive()`. End of input parks the script. |
-| `--save-state <f>` | On a wait the engine cannot serve, write a [snapshot](/docs/language/snapshots) to the file and exit 0. |
+| `--save-state <f>` | On a wait the engine cannot serve, write a [snapshot](/docs/edge-python/language/snapshots) to the file and exit 0. |
 | `--restore-state <f>` | Boot from a snapshot instead of a script and keep running. An unreadable file exits 2. |
 | `--preempt <n>` | Yield every `n` loop back-edges and resume. A program with no suspension point stays snapshottable. |
-| `--memory <MB>` | Memory the run may hold, 256 by default. See [Limits](/docs/reference/limits-and-errors#sandboxed-execution). |
+| `--memory <MB>` | Memory the run may hold, 256 by default. See [Limits](/docs/edge-python/reference/limits-and-errors#sandboxed-execution). |
 | `--ops <n>` | Operations the run may spend, 100 million by default. |
 | `--web` | Run on the browser host in headless Chrome instead of the native engine. |
 
@@ -100,10 +100,10 @@ error: ZeroDivisionError: division by zero
 
 ### Module resolution
 
-Every run happens under the [sandbox limits](/docs/reference/limits-and-errors) with a real wall clock. `sleep()` and timeouts wait in real time.
+Every run happens under the [sandbox limits](/docs/edge-python/reference/limits-and-errors) with a real wall clock. `sleep()` and timeouts wait in real time.
 
-- A bare import resolves through [`edge.json`](/docs/reference/modules#edgejson). Declare it with `edge add` and resolve it with `edge lock` first.
-- A declared version resolves through the [`edge.lock`](/docs/reference/modules#edgelock) beside the manifest that declared it.
+- A bare import resolves through [`edge.json`](/docs/edge-python/reference/modules#edgejson). Declare it with `edge add` and resolve it with `edge lock` first.
+- A declared version resolves through the [`edge.lock`](/docs/edge-python/reference/modules#edgelock) beside the manifest that declared it.
 - A relative import loads from disk relative to the importing file.
 - A dotted import loads from the nearest `edge.json` directory.
 
@@ -127,7 +127,7 @@ A module that fails to load fails at compile time, at the import that names it. 
 | A `.so` or `.dylib` | `module 'fastmath' is not supported, ship a .wasm` |
 | A `.wasm` that does not load | `module 'fastmath' is not a valid plugin, <reason>` |
 | A `.js` or `.mjs` | `module 'charts' is JavaScript, ship a .py or a .wasm` |
-| A plugin, or a URL off the official CDN, in an [eval group](/docs/platforms/actors#untrusted-code) | `module 'fastmath' is not available to untrusted eval runs` |
+| A plugin, or a URL off the official CDN, in an [eval group](/docs/edge-python/platforms/actors#untrusted-code) | `module 'fastmath' is not available to untrusted eval runs` |
 
 ## edge serve
 
@@ -149,7 +149,7 @@ $ edge serve
 
 ```text
 $ edge repl
-Edge Python 0.9.4  ·  .reset to start fresh  ·  .exit, Ctrl+C or Ctrl+D to quit
+Edge Python 0.9.5  ·  .reset to start fresh  ·  .exit, Ctrl+C or Ctrl+D to quit
 >>> from math import sqrt
 >>> print(sqrt(2))
 1.4142135623730951
@@ -214,7 +214,7 @@ $ edge init my-app
 
 ## edge add and edge remove
 
-Edits [`edge.json`](/docs/reference/modules#edgejson) by name. You never paste URLs. Each line prints the name and what it wrote.
+Edits [`edge.json`](/docs/edge-python/reference/modules#edgejson) by name. You never paste URLs. Each line prints the name and what it wrote.
 
 ```text
 $ edge add math
@@ -240,7 +240,7 @@ $ edge add math
 
 Turns each version `edge.json` declares into the URL and digest of that release.
 
-It writes them to [`edge.lock`](/docs/reference/modules#edgelock) beside the manifest. Commit the lock. Every other command reads it.
+It writes them to [`edge.lock`](/docs/edge-python/reference/modules#edgelock) beside the manifest. Commit the lock. Every other command reads it.
 
 ```text
 $ edge lock
@@ -285,7 +285,7 @@ $ edge build
 - A `.edge` and an app binary carry the `README.md` and any `LICENSE` at the project root.
 - A `.edge` carries the pages when `edge.json` declares a `docs` directory. They sit under a reserved `@docs/` prefix no import can reach.
 
-Pages must follow the [package docs](/docs/reference/registry#package-docs) convention, or the build fails.
+Pages must follow the [package docs](/docs/edge-python/reference/registry#package-docs) convention, or the build fails.
 
 ## edge publish
 
@@ -305,11 +305,11 @@ $ edge publish app.edge
 - A bundle that carries a `.js` or `.mjs` file is refused before it is sent.
 - Publishing a version that already exists exits 2 instead of 1. A script can tell it apart from a failure.
 
-What the registry reads, the naming rules, the quotas and the signing are in [Publishing](/docs/reference/registry#publishing).
+What the registry reads, the naming rules, the quotas and the signing are in [Publishing](/docs/edge-python/reference/registry#publishing).
 
 ## edge actor
 
-Runs many programs as cooperative actors over a few threads, described by an `actor.yml`. The manifest, the groups, the server and untrusted code are in [Actors](/docs/platforms/actors).
+Runs many programs as cooperative actors over a few threads, described by an `actor.yml`. The manifest, the groups, the server and untrusted code are in [Actors](/docs/edge-python/platforms/actors).
 
 > [!COPY] edge actor actor.yml
 

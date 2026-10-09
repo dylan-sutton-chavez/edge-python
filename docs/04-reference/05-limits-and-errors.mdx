@@ -17,8 +17,8 @@ Every execution is metered. There is no unmetered mode. The JS host and the CLI 
 
 Memory and operations can be raised in three places.
 
-- The `limits` option of `createWorker`, see [JavaScript](/docs/platforms/javascript).
-- The `limits` of a group under `edge actor`, see [Actors](/docs/platforms/actors).
+- The `limits` option of `createWorker`, see [JavaScript](/docs/edge-python/platforms/javascript).
+- The `limits` of a group under `edge actor`, see [Actors](/docs/edge-python/platforms/actors).
 - The `--memory` and `--ops` flags of `edge run`, `edge test` and `edge repl`.
 
 The call depth stays fixed. It sits below the depth where the wasm stack of either host runs out.
@@ -98,7 +98,7 @@ These caps stop asymmetric inputs. Those are small sources that would produce hu
 | Call arguments | 255 positional, 255 keyword | `too many arguments in call (max 255 positional and 255 keyword)` |
 | Native imports per module | 256 | `too many native imports (max 256 per module)` |
 
-The lexer checks the source size before it scans anything. [Compiler](/docs/internals/compiler) explains how the other caps stop the lexer and the parser.
+The lexer checks the source size before it scans anything. [Compiler](/docs/edge-python/internals/compiler) explains how the other caps stop the lexer and the parser.
 
 > [!NOTE]
 > `repr` output is truncated with a trailing `, ...` past 1,000,000 characters. Printing a huge structure cannot exhaust memory.
@@ -133,7 +133,7 @@ The CLI renders them with line, column, and a caret preview. They are caught bef
 | `named escapes are not supported` | `\N{...}` in a string, write the character or `\u03b1` |
 | `complex numbers are not supported` | A `j` suffix on a number |
 
-The diagnostics of the [source and token limits](#source-and-token-limits) belong here too. Import failures are compile-time diagnostics as well, including modules Edge Python does not ship (`os`, `sys`, `asyncio`). See [Modules](/docs/reference/modules#resolution-errors) for those message formats.
+The diagnostics of the [source and token limits](#source-and-token-limits) belong here too. Import failures are compile-time diagnostics as well, including modules Edge Python does not ship (`os`, `sys`, `asyncio`). See [Modules](/docs/edge-python/reference/modules#resolution-errors) for those message formats.
 
 ## Runtime errors
 
@@ -258,7 +258,7 @@ A class that derives from a built-in exception joins the tree. `except ValueErro
 
 - Its constructor arguments become `e.args`. A call to `super().__init__(...)` sets them again.
 - `str(e)` follows `e.args` unless the class defines `__str__`.
-- For `raise X from Y` and chaining, see [Control flow](/docs/language/control-flow#raise).
+- For `raise X from Y` and chaining, see [Control flow](/docs/edge-python/language/control-flow#raise).
 
 ```edge-python
 class Bad(ValueError):
@@ -321,7 +321,7 @@ Check the encoding in the host before it hands the source to the compiler.
 
 The core language has no clock, randomness, threads, or OS access. The same source and the same input give the same output across runs and across `x86_64`, `aarch64` and `wasm32`.
 
-The [system modules](/docs/reference/system) are the only way out, and each is held to a grant.
+The [system modules](/docs/edge-python/reference/system) are the only way out, and each is held to a grant.
 
 - Without any `time` scope a run uses a virtual clock. `sleep` and `with_timeout` pass at once and in order, and a host call takes no time.
 - Any `time` scope turns the wall clock on for the whole run. Timing then depends on when the program runs.

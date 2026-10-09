@@ -198,7 +198,7 @@ print(hex(-256))
 - `int(s, base)` parses a string in radix 2 to 36. Radix 0 detects a `0x`, `0o`, or `0b` prefix.
 - A bad string raises `ValueError`.
 - `int(inf)` raises `OverflowError` and `int(nan)` raises `ValueError`.
-- Results are bounded by the [integer width](/docs/reference/limits-and-errors#integer-width).
+- Results are bounded by the [integer width](/docs/edge-python/reference/limits-and-errors#integer-width).
 
 ```edge-python
 print(int(3.9))
@@ -236,7 +236,7 @@ inf
 
 ### str
 
-`str(x)` returns the display form of `x`. No argument gives an empty string. `str(bytes, encoding)` decodes bytes like [`bytes.decode`](/docs/reference/methods#bytes-methods).
+`str(x)` returns the display form of `x`. No argument gives an empty string. `str(bytes, encoding)` decodes bytes like [`bytes.decode`](/docs/edge-python/reference/methods#bytes-methods).
 
 ```edge-python
 print(str(42))
@@ -254,7 +254,7 @@ hi
 
 ### bool
 
-`bool(x)` returns the truth value of `x`. The rules live in [Truthy and falsy](/docs/language/data-types#truthy-and-falsy).
+`bool(x)` returns the truth value of `x`. The rules live in [Truthy and falsy](/docs/edge-python/language/data-types#truthy-and-falsy).
 
 ```edge-python
 print(bool(0), bool(1))
@@ -397,7 +397,7 @@ True
 
 ### sorted
 
-`sorted(iterable)` returns a new sorted list. [`list.sort`](/docs/reference/methods#mutating) follows the same rules in place.
+`sorted(iterable)` returns a new sorted list. [`list.sort`](/docs/edge-python/reference/methods#mutating) follows the same rules in place.
 
 - `key=fn` compares by `fn(item)`.
 - `reverse=True` flips the order.
@@ -553,19 +553,19 @@ print(xs[slice(0, 5, 2)])
 
 ## Bytes helpers
 
-These three functions are the function forms of [bytes and int methods](/docs/reference/methods#bytes-methods). They take every argument by position and behave like the methods.
+These three functions are the function forms of [bytes and int methods](/docs/edge-python/reference/methods#bytes-methods). They take every argument by position and behave like the methods.
 
 ### bytes_fromhex
 
-`bytes_fromhex(s)` is [`bytes.fromhex(s)`](/docs/reference/methods#bytes-methods). It parses a hex string into bytes and ignores ASCII whitespace. A non-hex character or an odd digit count raises `ValueError`.
+`bytes_fromhex(s)` is [`bytes.fromhex(s)`](/docs/edge-python/reference/methods#bytes-methods). It parses a hex string into bytes and ignores ASCII whitespace. A non-hex character or an odd digit count raises `ValueError`.
 
 ### int_from_bytes
 
-`int_from_bytes(b, order)` is [`int.from_bytes(b, order)`](/docs/reference/methods#int-and-float-methods) with the order required. It reads `b` as an unsigned integer. `order` is `"big"` or `"little"`.
+`int_from_bytes(b, order)` is [`int.from_bytes(b, order)`](/docs/edge-python/reference/methods#int-and-float-methods) with the order required. It reads `b` as an unsigned integer. `order` is `"big"` or `"little"`.
 
 ### int_to_bytes
 
-`int_to_bytes(n, length, order)` is [`n.to_bytes(length, order)`](/docs/reference/methods#int-and-float-methods) with every argument required. It writes a non-negative int as `length` bytes. A negative `n` or a value that does not fit raises `OverflowError`.
+`int_to_bytes(n, length, order)` is [`n.to_bytes(length, order)`](/docs/edge-python/reference/methods#int-and-float-methods) with every argument required. It writes a non-negative int as `length` bytes. A negative `n` or a value that does not fit raises `OverflowError`.
 
 ```edge-python
 print(bytes_fromhex("48656c6c6f"))
@@ -649,7 +649,7 @@ True
 `isinstance(obj, t)` tests membership. `t` is a built-in type, exception class, user class, or a tuple of those.
 
 - `bool` counts as `int`.
-- Exception classes follow the [exception hierarchy](/docs/reference/limits-and-errors#exception-hierarchy).
+- Exception classes follow the [exception hierarchy](/docs/edge-python/reference/limits-and-errors#exception-hierarchy).
 - User classes walk their inheritance chain.
 - `object` matches every value.
 
@@ -728,7 +728,7 @@ print(repr([1, "two", 3]))
 
 ### format
 
-`format(value)` returns the display form. `format(value, spec)` applies the format spec mini-language from [f-strings](/docs/language/syntax#f-strings).
+`format(value)` returns the display form. `format(value, spec)` applies the format spec mini-language from [f-strings](/docs/edge-python/language/syntax#f-strings).
 
 ```edge-python
 print(format(42))
@@ -851,16 +851,16 @@ Dynamic loading through `importlib` or `__import__` does not exist. Static impor
 
 ## Classes
 
-These builtins shape class members. [Classes](/docs/language/classes) owns their behavior and examples.
+These builtins shape class members. [Classes](/docs/edge-python/language/classes) owns their behavior and examples.
 
-- `super()` takes no arguments and works inside a method only. It resolves attributes against the bases of the current class. See [Inheritance and super()](/docs/language/classes#inheritance-and-super).
-- `property(fget, fset=None)` builds a property for a class member, usually through `@property` and `@<name>.setter`. See [Properties](/docs/language/classes#properties).
-- `staticmethod(func)` wraps a member so it receives no implicit `self`. See [Static methods](/docs/language/classes#static-methods).
-- `classmethod(func)` wraps a member so it receives the class as its first argument. See [Class methods](/docs/language/classes#class-methods).
+- `super()` takes no arguments and works inside a method only. It resolves attributes against the bases of the current class. See [Inheritance and super()](/docs/edge-python/language/classes#inheritance-and-super).
+- `property(fget, fset=None)` builds a property for a class member, usually through `@property` and `@<name>.setter`. See [Properties](/docs/edge-python/language/classes#properties).
+- `staticmethod(func)` wraps a member so it receives no implicit `self`. See [Static methods](/docs/edge-python/language/classes#static-methods).
+- `classmethod(func)` wraps a member so it receives the class as its first argument. See [Class methods](/docs/edge-python/language/classes#class-methods).
 
 ## Async
 
-These builtins drive coroutines and messages. [Async](/docs/language/async) owns the model and the examples.
+These builtins drive coroutines and messages. [Async](/docs/edge-python/language/async) owns the model and the examples.
 
 - `run(*coros)` runs every argument to completion and returns the result of the first. Errors from the other coroutines are discarded.
 - `gather(*coros)` runs every argument and returns a list of results in argument order. It waits for every coroutine, then raises the error of the first failing one in argument order.
@@ -868,4 +868,4 @@ These builtins drive coroutines and messages. [Async](/docs/language/async) owns
 - `with_timeout(seconds, coro)` returns the result of the coroutine or raises `TimeoutError` at the deadline.
 - `cancel(coro)` flags a coroutine for cancellation at its next step. Its `finally` blocks run, and it cannot catch the `CancelledError`.
 - `receive()` pops the oldest message the host queued. It parks the coroutine while the queue is empty.
-- `send(group, body)` hands the string `body` to an actor of `group` and returns `None`. Outside an [actor pool](/docs/platforms/actors#messages) it raises `RuntimeError`.
+- `send(group, body)` hands the string `body` to an actor of `group` and returns `None`. Outside an [actor pool](/docs/edge-python/platforms/actors#messages) it raises `RuntimeError`.

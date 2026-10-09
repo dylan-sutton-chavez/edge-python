@@ -20,7 +20,7 @@ The shipped `compiler.wasm` is about 250 KB served as brotli, 722 KB raw. It bui
 - Production dependencies are `hashbrown`, `itoa` and `libm`, plus the in-repo `wasm-abi` crate. SHA-256 is implemented in-tree.
 - The WASM build adds `dlmalloc` as the global allocator. Allocation cost stays flat as live blocks grow.
 
-This page covers the parts that span the pipeline. Tokens, parsing and bytecode emission live in [Compiler](/docs/internals/compiler).
+This page covers the parts that span the pipeline. Tokens, parsing and bytecode emission live in [Compiler](/docs/edge-python/internals/compiler).
 
 ## Key mechanisms
 
@@ -50,7 +50,7 @@ A function stops memoising in these cases.
 
 A `global` store, a module-level `del`, a function attribute write, or binding a builtin clears every table.
 
-Purity is static, as [Compiler](/docs/internals/compiler#functions) describes, plus a runtime check that propagates effects through calls.
+Purity is static, as [Compiler](/docs/edge-python/internals/compiler#functions) describes, plus a runtime check that propagates effects through calls.
 
 A pure wrapper over an impure callee, such as `apply(print, x)`, is never cached. Keys hash strings, bytes and tuples by content and compare strictly. `1`, `1.0` and `True` stay apart.
 
@@ -71,7 +71,7 @@ Constants become values once per chunk. Lowered code reads them from slots after
 - Ints from 2⁴⁷ to 2¹²⁷ allocate a `HeapObj::LongInt` slot.
 - Literals beyond ±2¹²⁷ are rejected at parse time.
 
-The instruction format is in [Bytecode model](/docs/internals/compiler#bytecode-model).
+The instruction format is in [Bytecode model](/docs/edge-python/internals/compiler#bytecode-model).
 
 ## Memory model
 
@@ -111,7 +111,7 @@ An inline value has no address, so two equal numbers are one value. That is why 
 
 NaN follows from the same model. A NaN with another payload could read as a tagged value, so every NaN is stored as `0x7FF8...` with its sign kept. Two NaNs then share their bits and are one value. A container matches a member by identity before `==`, so a list holding a NaN contains any other NaN and a set keeps a single one, as `SameValueZero` does in JavaScript. `n == n` stays `False`.
 
-The heap counts what it holds against the memory limit of the run, see [Sandboxed execution](/docs/reference/limits-and-errors#sandboxed-execution).
+The heap counts what it holds against the memory limit of the run, see [Sandboxed execution](/docs/edge-python/reference/limits-and-errors#sandboxed-execution).
 
 The main `HeapObj` variants are `Str`, `Bytes`, `LongInt`, `List`, `Dict` (insertion-ordered), `Set`, `FrozenSet`, `Tuple`, `Func`, `Range`, `Slice`, `Type`, `ExcInstance`, `BoundMethod`, `NativeFn`, `Class`, `Instance`, `BoundUserMethod`, `Super`, `Property`, `StaticMethod`, `ClassMethod`, `Coroutine`, `Module`, `Iter`, `DictView`, `Cell`, and `Extern`.
 
@@ -135,7 +135,7 @@ The roots are these.
 
 ## Coroutine dispatch
 
-`async def` and a `def` that holds `yield` both compile to `HeapObj::Coroutine`. The primitives a program sees are in [Async](/docs/language/async).
+`async def` and a `def` that holds `yield` both compile to `HeapObj::Coroutine`. The primitives a program sees are in [Async](/docs/edge-python/language/async).
 
 A plain `def` inside a coroutine can call a builtin that yields. Its state (`ip`, slots, stack and iterator deltas) is then saved as a `SyncFrame` on the `sync_frames` of the enclosing coroutine, innermost last.
 
@@ -162,7 +162,7 @@ On a yield they are renormalised and saved. That is how `try: run(coro) except E
 
 ## Snapshots
 
-A snapshot holds only the dynamic state of a parked VM. The blob format is in [Blob layout](/docs/platforms/rust#blob-layout).
+A snapshot holds only the dynamic state of a parked VM. The blob format is in [Blob layout](/docs/edge-python/platforms/rust#blob-layout).
 
 - `save_state` writes `Val` bits verbatim. Heap slots come back at identical indices. References, cycles and interning survive with no remapping.
 - `restore_state` replays the blob onto a VM booted fresh from the source the blob embeds.
@@ -179,18 +179,18 @@ Restore runs in two passes, because hashing reads the heap.
 
 Inline caches and memoisation tables start empty and warm lazily. `Extern` handles resolve by name against the extern table of the re-parsed chunk.
 
-Host-side resources such as in-flight host calls and DOM handles are not part of the snapshot. `state_globals` and `state_stack` inspect a parked run without resuming it. The feature as a program sees it is in [Snapshots](/docs/language/snapshots).
+Host-side resources such as in-flight host calls and DOM handles are not part of the snapshot. `state_globals` and `state_stack` inspect a parked run without resuming it. The feature as a program sees it is in [Snapshots](/docs/edge-python/language/snapshots).
 
-A coverage-guided fuzzer drives the lexer, the parser, the VM and this snapshot round trip every day, see [Runbook](/docs/internals/runbook).
+A coverage-guided fuzzer drives the lexer, the parser, the VM and this snapshot round trip every day, see [Runbook](/docs/edge-python/internals/runbook).
 
 ## What the compiler intentionally does not do
 
 - No SSA-wide constant propagation through `LoadName`. The names stay. That keeps the inline cache, fusion and memoisation paths fast.
 - No CSE, GVN, LICM, inlining, branch DCE, or loop folding. The optimiser does constant folding, phi-noop elimination, and dead-instruction compaction with jump-operand remap.
 - No JIT. A method JIT needs stencils per architecture, and a tracing JIT duplicates the execution model and complicates the GC.
-- No runtime module system. Imports resolve at parse time through a resolver the host injects. See [Modules](/docs/reference/modules).
+- No runtime module system. Imports resolve at parse time through a resolver the host injects. See [Modules](/docs/edge-python/reference/modules).
 - No bigints, complex numbers, `bytearray`, `memoryview`, `Decimal`, or `Fraction`.
-- No `gen.send`, `throw` or `close`, and no `asyncio` module. The concurrency primitives are top-level builtins, see [Async](/docs/language/async).
+- No `gen.send`, `throw` or `close`, and no `asyncio` module. The concurrency primitives are top-level builtins, see [Async](/docs/edge-python/language/async).
 
 ## References
 

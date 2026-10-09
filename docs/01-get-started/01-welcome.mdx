@@ -46,22 +46,22 @@ Its `edge.json` declares the `json` package and grants the network for `api.gith
 ## Questions
 
 > [!QUESTION] Is it full Python?
-> A program that compiles behaves as it does in CPython, apart from the choices below. What Edge Python leaves out is missing for the sandbox, like the standard library and `exec`, or for the design of the engine, like `id`, `hash` and metaclasses. It fails with an error instead, at compile time whenever the compiler can see it. [Limits and errors](/docs/reference/limits-and-errors#compile-time-errors) lists those errors and [Design](/docs/internals/design#memory-model) explains the memory model behind them.
+> A program that compiles behaves as it does in CPython, apart from the choices below. What Edge Python leaves out is missing for the sandbox, like the standard library and `exec`, or for the design of the engine, like `id`, `hash` and metaclasses. It fails with an error instead, at compile time whenever the compiler can see it. [Limits and errors](/docs/edge-python/reference/limits-and-errors#compile-time-errors) lists those errors and [Design](/docs/edge-python/internals/design#memory-model) explains the memory model behind them.
 
 > [!QUESTION] Where does it behave differently on purpose?
-> In three places. [Ints](/docs/reference/limits-and-errors#integer-width) stop at 2^127. Sets iterate in [hash order](/docs/language/data-types#behavioral-notes). Every NaN is [one value](/docs/internals/design#memory-model).
+> In three places. [Ints](/docs/edge-python/reference/limits-and-errors#integer-width) stop at 2^127. Sets iterate in [hash order](/docs/edge-python/language/data-types#behavioral-notes). Every NaN is [one value](/docs/edge-python/internals/design#memory-model).
 
 > [!QUESTION] Is there a standard library?
-> No bundled one. Every module is an external package that `edge.json` declares. [Modules](/docs/reference/modules) explains how imports resolve.
+> No bundled one. Every module is an external package that `edge.json` declares. [Modules](/docs/edge-python/reference/modules) explains how imports resolve.
 
 > [!QUESTION] Can a program run code it builds at run time?
 > No. `exec`, `eval`, `compile` and `__import__` do not exist. The set of modules is fixed when the program compiles.
 
 > [!QUESTION] Can a program reach the network or the disk?
-> Only what the root `edge.json` grants. Each grant names a module and a scope, such as one host for `net` or one folder for `fs`. [System](/docs/reference/system) lists every scope.
+> Only what the root `edge.json` grants. Each grant names a module and a scope, such as one host for `net` or one folder for `fs`. [System](/docs/edge-python/reference/system) lists every scope.
 
 > [!QUESTION] Where does it run?
-> The [JavaScript host](/docs/platforms/javascript) runs it in browsers and in runtimes with the same Web APIs, such as Deno. The [edge CLI](/docs/platforms/cli) runs the same engine on macOS, Linux and WSL. [Rust](/docs/platforms/rust) shows how to drive `compiler.wasm` from Rust code.
+> The [JavaScript host](/docs/edge-python/platforms/javascript) runs it in browsers and in runtimes with the same Web APIs, such as Deno. The [edge CLI](/docs/edge-python/platforms/cli) runs the same engine on macOS, Linux and WSL. [Rust](/docs/edge-python/platforms/rust) shows how to drive `compiler.wasm` from Rust code.
 
 > [!QUESTION] Is there a summary for machine learning models?
 > Yes. A model can load [skill/SKILL.md](https://github.com/dylan-sutton-chavez/edge-python/blob/main/skill/SKILL.md) for a self-verifying summary of the language and the CLI.
@@ -72,9 +72,9 @@ Its `edge.json` declares the `json` package and grants the network for `api.gith
 ## Start here
 
 > [!CARDS]
-> - `rocket` [Quickstart](/docs/get-started/quickstart) Install the CLI and run a first script.
-> - `hammer` [Your first app](/docs/get-started/first-app/create) Create, test and ship a small app step by step.
-> - `book-open` [Language](/docs/language/syntax) The syntax and the features, one topic a page.
-> - `terminal` [Platforms](/docs/platforms/cli) The CLI, the JavaScript host, actors and Rust.
-> - `package` [Modules](/docs/reference/modules) Imports, edge.json and edge.lock.
-> - `cpu` [Internals](/docs/internals/design) How the compiler and the VM work.
+> - `rocket` [Quickstart](/docs/edge-python/get-started/quickstart) Install the CLI and run a first script.
+> - `hammer` [Your first app](/docs/edge-python/get-started/first-app/create) Create, test and ship a small app step by step.
+> - `book-open` [Language](/docs/edge-python/language/syntax) The syntax and the features, one topic a page.
+> - `terminal` [Platforms](/docs/edge-python/platforms/cli) The CLI, the JavaScript host, actors and Rust.
+> - `package` [Modules](/docs/edge-python/reference/modules) Imports, edge.json and edge.lock.
+> - `cpu` [Internals](/docs/edge-python/internals/design) How the compiler and the VM work.

@@ -31,14 +31,14 @@ print(type(True))
 <class 'bool'>
 ```
 
-Use [`isinstance`](/docs/reference/builtins#isinstance) to test whether a value belongs to a type. Constructors such as `int`, `float`, `str`, `bool`, `list`, `tuple` and `set` double as converters. [Builtins](/docs/reference/builtins#type-conversion) lists every conversion.
+Use [`isinstance`](/docs/edge-python/reference/builtins#isinstance) to test whether a value belongs to a type. Constructors such as `int`, `float`, `str`, `bool`, `list`, `tuple` and `set` double as converters. [Builtins](/docs/edge-python/reference/builtins#type-conversion) lists every conversion.
 
 > [!NOTE]
 > `int(3.7)` is `3` and `int(-3.7)` is `-3`. The conversion truncates toward zero and never rounds.
 
 ## Integer
 
-There is one `int` type with a signed 128-bit range, from `-(2**127)` to `2**127 - 1`. Going out of range raises `OverflowError`. [Limits and errors](/docs/reference/limits-and-errors#integer-width) has the details.
+There is one `int` type with a signed 128-bit range, from `-(2**127)` to `2**127 - 1`. Going out of range raises `OverflowError`. [Limits and errors](/docs/edge-python/reference/limits-and-errors#integer-width) has the details.
 
 There is no complex type.
 
@@ -72,7 +72,7 @@ True
 5.0
 ```
 
-`round` rounds ties to even, see [Builtins](/docs/reference/builtins#round).
+`round` rounds ties to even, see [Builtins](/docs/edge-python/reference/builtins#round).
 
 ## Boolean
 
@@ -115,7 +115,7 @@ héllohéllo
 True
 ```
 
-[Syntax](/docs/language/syntax#strings) covers quotes and escapes. [Methods](/docs/reference/methods#string-methods) lists the methods.
+[Syntax](/docs/edge-python/language/syntax#strings) covers quotes and escapes. [Methods](/docs/edge-python/reference/methods#string-methods) lists the methods.
 
 ## Bytes
 
@@ -165,7 +165,7 @@ print(encoded, encoded.decode("utf-8"))
 b'Edge Python' Edge Python
 ```
 
-[Builtins](/docs/reference/builtins) lists the constructor forms, such as `bytes(n)` and `bytes` from an int iterable. [Methods](/docs/reference/methods#bytes-methods) covers `hex`, `split`, `fromhex` and the rest.
+[Builtins](/docs/edge-python/reference/builtins) lists the constructor forms, such as `bytes(n)` and `bytes` from an int iterable. [Methods](/docs/edge-python/reference/methods#bytes-methods) covers `hex`, `split`, `fromhex` and the rest.
 
 ## List
 
@@ -256,7 +256,7 @@ print({(1, 2): "key"}[(1, 2)])
 key
 ```
 
-[Syntax](/docs/language/syntax#containers) covers literal forms such as the trailing comma in `(1,)`.
+[Syntax](/docs/edge-python/language/syntax#containers) covers literal forms such as the trailing comma in `(1,)`.
 
 ## Dict
 
@@ -301,7 +301,7 @@ except TypeError:
 unhashable key
 ```
 
-[Methods](/docs/reference/methods#dict-methods) covers `keys`, `values`, `items`, `get` and the rest.
+[Methods](/docs/edge-python/reference/methods#dict-methods) covers `keys`, `values`, `items`, `get` and the rest.
 
 ## Set
 
@@ -337,7 +337,7 @@ True
 [1, 2, 3, 4, 5]
 ```
 
-[Syntax](/docs/language/syntax#containers) shows how to write an empty set. [Methods](/docs/reference/methods#set-methods) covers named operations such as `union` and `issubset`.
+[Syntax](/docs/edge-python/language/syntax#containers) shows how to write an empty set. [Methods](/docs/edge-python/reference/methods#set-methods) covers named operations such as `union` and `issubset`.
 
 ## Frozenset
 
@@ -377,7 +377,7 @@ ok
 
 ## Range
 
-A range is a lazy integer sequence, built with `range(stop)`, `range(start, stop)` or `range(start, stop, step)`. [Builtins](/docs/reference/builtins#range) has examples.
+A range is a lazy integer sequence, built with `range(stop)`, `range(start, stop)` or `range(start, stop, step)`. [Builtins](/docs/edge-python/reference/builtins#range) has examples.
 
 ## None and Ellipsis
 
@@ -463,7 +463,7 @@ True
 ## Behavioral notes
 
 - **Set iteration and `repr` order.** Sets store elements in a hash table. Iteration and `repr` follow hash order, not insertion order. Sort a set when the order matters.
-- **Every NaN is one value.** A NaN is found in a list holding another NaN, and a set keeps a single one, where CPython keeps one per object. [Memory model](/docs/internals/design#memory-model) explains why.
+- **Every NaN is one value.** A NaN is found in a list holding another NaN, and a set keeps a single one, where CPython keeps one per object. [Memory model](/docs/edge-python/internals/design#memory-model) explains why.
 
 ```edge-python
 print({3, 1, 2})
@@ -477,5 +477,5 @@ True 1 False
 ```
 
 > [!CARDS]
-> - `git-branch` [Control flow](/docs/language/control-flow) Conditionals, loops, pattern matching and exceptions.
-> - `book-open` [Builtins](/docs/reference/builtins) Constructors, conversions and the other builtin functions.
+> - `git-branch` [Control flow](/docs/edge-python/language/control-flow) Conditionals, loops, pattern matching and exceptions.
+> - `book-open` [Builtins](/docs/edge-python/reference/builtins) Constructors, conversions and the other builtin functions.

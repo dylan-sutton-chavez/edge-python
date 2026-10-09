@@ -9,7 +9,7 @@ The registry at edgepython.com stores the packages `edge publish` sends. `edge a
 
 ## Publishing
 
-[`edge publish`](/docs/platforms/cli#edge-publish) uploads a `.edge` packed by `edge build`. The artifact is the whole request.
+[`edge publish`](/docs/edge-python/platforms/cli#edge-publish) uploads a `.edge` packed by `edge build`. The artifact is the whole request.
 
 - The registry reads the name, the version, the description, the repository, the `LICENSE` and the doc pages out of the bytes it is about to store. A listing only ever shows what you shipped.
 - The artifact is stored exactly as it was packed.
@@ -33,7 +33,7 @@ The CLI and the registry check the shape of these `edge.json` fields with the sa
 | `repository` | An `https` URL a listing can link, 256 characters at most |
 | `docs` | A relative directory inside the project |
 
-A name is never `all`, `main` or `eval`, which [permissions](/docs/reference/system#permissions) reserve. It is never the name of a system module either.
+A name is never `all`, `main` or `eval`, which [permissions](/docs/edge-python/reference/system#permissions) reserve. It is never the name of a system module either.
 
 ### Quotas
 
@@ -88,11 +88,11 @@ A blockquote whose first line is a marker draws a box. A blank line ends the box
 > Only the hosts its edge.json grants.
 
 > [!CARDS]
-> - `play` [Quickstart](/docs/get-started/quickstart) Run a first script.
-> - `book-open` [Modules](/docs/reference/modules) What edge.json declares.
+> - `play` [Quickstart](/docs/edge-python/get-started/quickstart) Run a first script.
+> - `book-open` [Modules](/docs/edge-python/reference/modules) What edge.json declares.
 
 > [!BANNER] Ready to share it?
-> [Publish a package](/docs/reference/registry#publishing)
+> [Publish a package](/docs/edge-python/reference/registry#publishing)
 
 > [!COPY] edge add json
 ```
@@ -137,7 +137,7 @@ Everything the site shows answers as data at the same address under `/api`. Noth
 | `GET /api/service/<name>` | One service |
 
 - `?v=` reads an older release of a package. The bare address reads the newest one still live.
-- Reading a package never moves its download number. Only [`edge add`](/docs/platforms/cli#edge-add-and-edge-remove) counts one.
+- Reading a package never moves its download number. Only [`edge add`](/docs/edge-python/platforms/cli#edge-add-and-edge-remove) counts one.
 
 ### Ask
 
@@ -152,7 +152,7 @@ curl -X POST https://chat.edgepython.com \
 ```json
 {
   "text": "Declare every module in edge.json and run edge add <name> [1]",
-  "sources": ["https://edgepython.com/docs/reference/modules#edgejson"],
+  "sources": ["https://edgepython.com/docs/edge-python/reference/modules#edgejson"],
   "session": "pK3f…"
 }
 ```

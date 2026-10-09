@@ -16,7 +16,7 @@ The registry reads the name and the version from the manifest inside the artifac
   "name": "words",
   "version": "0.1.0",
   "description": "Count the words of a text and rank them.",
-  "edge": "0.9.4",
+  "edge": "0.9.5",
   "imports": {
     "json": "0.1.0",
     "test": "0.1.1"
@@ -24,7 +24,7 @@ The registry reads the name and the version from the manifest inside the artifac
 }
 ```
 
-A name is first come and permanent. Pick one nobody holds yet. [Package fields](/docs/reference/registry#package-fields) lists the rules for each field.
+A name is first come and permanent. Pick one nobody holds yet. [Package fields](/docs/edge-python/reference/registry#package-fields) lists the rules for each field.
 
 ## Build it
 
@@ -48,7 +48,7 @@ Two other modes target other places.
 - `edge build --app` writes `app`, a standalone binary that runs offline on the same OS and CPU with nothing installed.
 - `edge build --web` writes `dist/`, a folder any browser runs, with the JS host and every package beside it.
 
-[edge build](/docs/platforms/cli#edge-build) covers the three modes and their flags.
+[edge build](/docs/edge-python/platforms/cli#edge-build) covers the three modes and their flags.
 
 ## Publish it
 
@@ -73,5 +73,5 @@ The token signs the request and never leaves your machine. The registry reads th
 ## Next steps
 
 > [!CARDS]
-> - `upload` [Registry](/docs/reference/registry) Publishing, quotas, package docs and the HTTP API.
-> - `terminal` [Command line interface](/docs/platforms/cli) Every command of the edge CLI and its flags.
+> - `upload` [Registry](/docs/edge-python/reference/registry) Publishing, quotas, package docs and the HTTP API.
+> - `terminal` [Command line interface](/docs/edge-python/platforms/cli) Every command of the edge CLI and its flags.

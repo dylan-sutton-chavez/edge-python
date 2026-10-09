@@ -12,7 +12,7 @@ The compiler has two stages and no AST. A LUT-driven lexer turns the source into
 - The parser folds them into its own diagnostics for one ordered report.
 - Each construct is parsed and lowered in one traversal, with SSA versioning and phi nodes at control-flow joins.
 
-This page covers token-level and bytecode-level mechanics. The surface forms of literals, strings and f-strings live in [Syntax](/docs/language/syntax). [Design](/docs/internals/design) covers the parts that span the pipeline.
+This page covers token-level and bytecode-level mechanics. The surface forms of literals, strings and f-strings live in [Syntax](/docs/edge-python/language/syntax). [Design](/docs/edge-python/internals/design) covers the parts that span the pipeline.
 
 ## Tokens
 
@@ -303,7 +303,7 @@ The `FormatValue` operand is a small flags field.
 - Bit 0 is set when a format spec string sits on the stack just below the value.
 - Bits 1 and 2 hold the conversion, `0` none, `1` `!r`, `2` `!s`, `3` `!a`.
 
-The VM applies the conversion first, then the [format spec](/docs/language/syntax#f-strings). A spec that fails to parse raises `ValueError` at run time.
+The VM applies the conversion first, then the [format spec](/docs/edge-python/language/syntax#f-strings). A spec that fails to parse raises `ValueError` at run time.
 
 The `{expr=}` form emits a literal `expr=` prefix. Adjacent string literals concatenate at parse time.
 
@@ -401,8 +401,8 @@ Each statement returns whether it left a value on the stack. The driver emits `P
 
 - Decorators apply to `def` and `class`. The `@` arm peeks for `class` after the decorator list. Each decorator wraps through `Call,1` between `MakeFunction` or `MakeClass` and the final `StoreName`.
 - `raise X from Y` lowers to `RaiseFrom`. It pops the cause and then the exception, and `Y` becomes the `__cause__` of `X`. A bare `raise` raises the current exception again.
-- `except` matching walks the [exception hierarchy](/docs/reference/limits-and-errors#exception-hierarchy), the same table `isinstance` uses.
-- Imports resolve at parse time through a resolver the host injects. No import opcode reaches the VM. See [Modules](/docs/reference/modules).
+- `except` matching walks the [exception hierarchy](/docs/edge-python/reference/limits-and-errors#exception-hierarchy), the same table `isinstance` uses.
+- Imports resolve at parse time through a resolver the host injects. No import opcode reaches the VM. See [Modules](/docs/edge-python/reference/modules).
 
 ## Functions
 
@@ -434,7 +434,7 @@ Annotations such as `x: T` and `-> T` are parsed and skipped. No code is emitted
 - `Global`, `Nonlocal`
 - `Raise`, `RaiseFrom`, `Yield`
 
-The free names a pure body may read are checked at run time, as [Design](/docs/internals/design#key-mechanisms) describes.
+The free names a pure body may read are checked at run time, as [Design](/docs/edge-python/internals/design#key-mechanisms) describes.
 
 ## Comprehensions and generators
 
@@ -449,7 +449,7 @@ Async comprehensions such as `[x async for x in y]` are not supported. Starred u
 
 ## Limits
 
-The caps and their messages are listed in [Source and token limits](/docs/reference/limits-and-errors#source-and-token-limits). Each stage stops in its own way.
+The caps and their messages are listed in [Source and token limits](/docs/edge-python/reference/limits-and-errors#source-and-token-limits). Each stage stops in its own way.
 
 - A lexer cap halts lexing with `Endmarker`.
 - `MAX_EXPR_DEPTH` (200) bounds every recursive descent of the expression parser. Deep chains raise `expression too deeply nested` instead of overflowing the native or WASM stack.

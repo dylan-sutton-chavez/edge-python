@@ -42,7 +42,7 @@ The root `edge.json` grants each package it imports. Each package passes grants 
 | `main` | The code of the package itself. For the root, every module under the root `edge.json` |
 | `all` | `main` and every package it imports |
 | An import key | The package that key imports |
-| `eval` | Nobody. It caps what a bundle may grant in an [eval group](/docs/platforms/actors#untrusted-code) |
+| `eval` | Nobody. It caps what a bundle may grant in an [eval group](/docs/edge-python/platforms/actors#untrusted-code) |
 
 | Entry | Allows |
 |---|---|
@@ -197,7 +197,7 @@ Nothing lists the names a host keeps. A program reads only the values it was gra
 
 - The CLI reads `EDGE_SECRET_<name>` from its environment at the moment of the call. A program never reaches a variable it was not granted, whatever else the environment holds.
 - With `--web` the CLI hands the page only the values a `secret` entry names.
-- A page that embeds the engine passes them to `createWorker` as [secrets](/docs/platforms/javascript#permissions-and-secrets).
+- A page that embeds the engine passes them to `createWorker` as [secrets](/docs/edge-python/platforms/javascript#permissions-and-secrets).
 
 ```python
 import secret
@@ -267,16 +267,16 @@ Each crossing between the program and the host pays to decode the arguments and 
 
 ## From a plugin
 
-A `.wasm` plugin reaches these calls through the `Sys` op of the [ABI](/docs/reference/abi#system-calls).
+A `.wasm` plugin reaches these calls through the `Sys` op of the [ABI](/docs/edge-python/reference/abi#system-calls).
 
 ## In a page
 
-A page passes grants, secrets and a trace switch to `createWorker`, described in [JavaScript](/docs/platforms/javascript#permissions-and-secrets).
+A page passes grants, secrets and a trace switch to `createWorker`, described in [JavaScript](/docs/edge-python/platforms/javascript#permissions-and-secrets).
 
 ## See also
 
 > [!CARDS]
-> - `package` [Modules](/docs/reference/modules) The edge.json of each package and where it sits.
-> - `triangle-alert` [Limits and errors](/docs/reference/limits-and-errors) The exception tree PermissionError joins.
-> - `globe` [JavaScript](/docs/platforms/javascript) Grants, secrets and the trace of a page.
-> - `plug` [ABI](/docs/reference/abi#system-calls) System calls from a plugin.
+> - `package` [Modules](/docs/edge-python/reference/modules) The edge.json of each package and where it sits.
+> - `triangle-alert` [Limits and errors](/docs/edge-python/reference/limits-and-errors) The exception tree PermissionError joins.
+> - `globe` [JavaScript](/docs/edge-python/platforms/javascript) Grants, secrets and the trace of a page.
+> - `plug` [ABI](/docs/edge-python/reference/abi#system-calls) System calls from a plugin.

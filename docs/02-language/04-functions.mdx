@@ -312,7 +312,7 @@ print(is_even(10), is_odd(10))
 True False
 ```
 
-A pure function called again with the same immutable positional arguments can return a cached result without running its body. [Design](/docs/internals/design#key-mechanisms) lists when the cache applies.
+A pure function called again with the same immutable positional arguments can return a cached result without running its body. [Design](/docs/edge-python/internals/design#key-mechanisms) lists when the cache applies.
 
 ## Generators
 
@@ -402,7 +402,7 @@ returned done
 ```
 
 > [!NOTE]
-> Generators are one-way producers. `gen.send(value)`, `gen.throw(exc)` and `gen.close()` are not exposed. For flow in both directions, use the [cooperative scheduler](/docs/language/async) and pass values through arguments and return values.
+> Generators are one-way producers. `gen.send(value)`, `gen.throw(exc)` and `gen.close()` are not exposed. For flow in both directions, use the [cooperative scheduler](/docs/edge-python/language/async) and pass values through arguments and return values.
 
 ## Generator expressions
 
@@ -421,7 +421,7 @@ print(next(squares), list(squares), list(squares))
 
 ## Decorators
 
-A decorator wraps another callable. It applies to functions and to [classes](/docs/language/classes#class-decorators).
+A decorator wraps another callable. It applies to functions and to [classes](/docs/edge-python/language/classes#class-decorators).
 
 ```edge-python
 def trace(f):
@@ -520,5 +520,5 @@ True
 ```
 
 > [!CARDS]
-> - `boxes` [Classes](/docs/language/classes) Inheritance, properties and the dunder protocol.
-> - `book-open` [Builtins](/docs/reference/builtins) The builtin functions and what each one returns.
+> - `boxes` [Classes](/docs/edge-python/language/classes) Inheritance, properties and the dunder protocol.
+> - `book-open` [Builtins](/docs/edge-python/reference/builtins) The builtin functions and what each one returns.

@@ -18,7 +18,7 @@ The API is handle-based.
 - One dispatch primitive, `edge_op`, covers every operation.
 - New types, methods and language features reach existing modules with no ABI change.
 
-This contract is distinct from the interface between `compiler.wasm` and its host. [Rust](/docs/platforms/rust) covers that one. That interface is not bound by the 7-import limit here.
+This contract is distinct from the interface between `compiler.wasm` and its host. [Rust](/docs/edge-python/platforms/rust) covers that one. That interface is not bound by the 7-import limit here.
 
 ## Guest export shape
 
@@ -193,7 +193,7 @@ The kinds `edge_take_error` and `edge_throw` carry.
 
 ## System calls
 
-A plugin reaches `fs`, `net`, `time` and `secret` through the `Sys` op. They are served exactly as a `.py` beside the `.wasm` would import them. The calls and their scopes are on [System](/docs/reference/system).
+A plugin reaches `fs`, `net`, `time` and `secret` through the `Sys` op. They are served exactly as a `.py` beside the `.wasm` would import them. The calls and their scopes are on [System](/docs/edge-python/reference/system).
 
 The plugin holds the grants of the package it sits in. A module that package is not granted fails with `PermissionError`.
 
@@ -277,7 +277,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-wasm-pdk = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.9.4" }
+wasm-pdk = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.9.5" }
 ```
 
 Pin a tag rather than `branch = "main"`. That gives reproducible builds and a known wire-ABI version.
@@ -491,7 +491,7 @@ For `from <name> import <names>` where the manifest maps `<name>` to a `.wasm` U
 
 The reference bridge is `js/src/native.ts` in the repo.
 
-The [CLI](/docs/platforms/cli) implements the same seven imports in Rust over wasmtime, bridging the plugin instance and the compiler instance the same way. It compiles a plugin with Cranelift on first use and caches the machine code. A [Rust host](/docs/platforms/rust#plugin-bridge) mirrors the shape.
+The [CLI](/docs/edge-python/platforms/cli) implements the same seven imports in Rust over wasmtime, bridging the plugin instance and the compiler instance the same way. It compiles a plugin with Cranelift on first use and caches the machine code. A [Rust host](/docs/edge-python/platforms/rust#plugin-bridge) mirrors the shape.
 
 ## Constraints and caveats
 
@@ -507,7 +507,7 @@ The [CLI](/docs/platforms/cli) implements the same seven imports in Rust over wa
 ## See also
 
 > [!CARDS]
-> - `cpu` [Rust](/docs/platforms/rust) The exports of compiler.wasm, the run loop and the blob layout.
-> - `package` [Modules](/docs/reference/modules) Import resolution, edge.json, integrity pins and delivery.
-> - `shield` [System](/docs/reference/system) The calls a plugin reaches through Sys.
-> - `camera` [Snapshots](/docs/language/snapshots) Freezing and resuming a paused run from the host.
+> - `cpu` [Rust](/docs/edge-python/platforms/rust) The exports of compiler.wasm, the run loop and the blob layout.
+> - `package` [Modules](/docs/edge-python/reference/modules) Import resolution, edge.json, integrity pins and delivery.
+> - `shield` [System](/docs/edge-python/reference/system) The calls a plugin reaches through Sys.
+> - `camera` [Snapshots](/docs/edge-python/language/snapshots) Freezing and resuming a paused run from the host.

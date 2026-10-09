@@ -35,7 +35,7 @@ groups:
 ```
 
 - `code:` is an inline body.
-- `run:` points at a script or a project directory. A directory runs its `main.py` and resolves the `edge.json` of that project and its nested imports. Each declared version resolves through the [`edge.lock`](/docs/reference/modules#edgelock) beside its manifest.
+- `run:` points at a script or a project directory. A directory runs its `main.py` and resolves the `edge.json` of that project and its nested imports. Each declared version resolves through the [`edge.lock`](/docs/edge-python/reference/modules#edgelock) beside its manifest.
 - `eval: true` is untrusted mode, covered in [Untrusted code](#untrusted-code).
 
 > [!IMPORTANT]
@@ -167,13 +167,13 @@ groups:
 | State | Nothing survives between messages. The instance is dropped when the run ends. |
 | Modules | `.wasm` plugins are refused. Remote modules load only from `https://cdn.edgepython.com/`. Nothing loads from disk. |
 | Messages | `send()` has no scheduler to reach, so an eval run cannot send to other groups. |
-| Versions | A bundle resolves a version only through its own [`edge.lock`](/docs/reference/modules#edgelock), never against the registry. |
+| Versions | A bundle resolves a version only through its own [`edge.lock`](/docs/edge-python/reference/modules#edgelock), never against the registry. |
 
 A bundle that carries its own `edge.json` resolves through it. Any other message resolves through the manifest of the pool.
 
 ### Permissions
 
-What the pool grants `eval` under [permissions](/docs/reference/system#permissions) is the most a bundle may grant in its own `edge.json`. An entry past it refuses the run before it compiles.
+What the pool grants `eval` under [permissions](/docs/edge-python/reference/system#permissions) is the most a bundle may grant in its own `edge.json`. An entry past it refuses the run before it compiles.
 
 ```json
 {
@@ -235,6 +235,6 @@ sink: raw-ingested-transformed
 ## See also
 
 > [!CARDS]
-> - `terminal` [Command line interface](/docs/platforms/cli#edge-build) Pack a project for an eval group with edge build.
-> - `clock` [Async](/docs/language/async) The cooperative scheduler each actor runs on.
-> - `camera` [Snapshots](/docs/language/snapshots) Freeze and resume a single run.
+> - `terminal` [Command line interface](/docs/edge-python/platforms/cli#edge-build) Pack a project for an eval group with edge build.
+> - `clock` [Async](/docs/edge-python/language/async) The cooperative scheduler each actor runs on.
+> - `camera` [Snapshots](/docs/edge-python/language/snapshots) Freeze and resume a single run.

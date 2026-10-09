@@ -12,7 +12,7 @@ For a large change, open an issue or email [c.sutton.dylan@gmail.com](mailto:c.s
 
 - New behavior comes with tests, and docs describe the code as it is after the change.
 - Changes to the language, the CLI, or package behavior update `skill/SKILL.md`.
-- Changes to the engine keep `make bench` passing, and significant ones run the [fuzzer](https://edgepython.com/docs/internals/runbook).
+- Changes to the engine keep `make bench` passing, and significant ones run the [fuzzer](https://edgepython.com/docs/edge-python/internals/runbook).
 
 Run `make check` before sending, and the maintainer runs CI once the pull request is open.
 
@@ -63,7 +63,7 @@ make test-js test-cli test-skill
 
 ## Docs
 
-`docs/` holds MDX pages two folders deep at most, with a numeric prefix on every path segment. Each opens with a frontmatter holding a `title` and a `description` and has one top-level heading, the rules `edge build` holds package docs to. An `edge-python` block followed by an `output` block becomes a playground on the real engine, and a blockquote opening with a marker such as `[!NOTE]`, `[!QUESTION]`, `[!CARDS]` or `[!COPY]` becomes a box, as [Registry](https://edgepython.com/docs/reference/registry#package-docs) lists.
+`docs/` holds MDX pages two folders deep at most, with a numeric prefix on every path segment. Each opens with a frontmatter holding a `title` and a `description` and has one top-level heading, the rules `edge build` holds package docs to. An `edge-python` block followed by an `output` block becomes a playground on the real engine, and a blockquote opening with a marker such as `[!NOTE]`, `[!QUESTION]`, `[!CARDS]` or `[!COPY]` becomes a box, as [Registry](https://edgepython.com/docs/edge-python/reference/registry#package-docs) lists.
 
 ## CI
 

@@ -91,7 +91,7 @@ The page reads for the worker the `edge.json` at `baseUrl`, its imports and what
 - A worker keeps every module it fetched in memory for its lifetime. Repeat runs make no network requests until `clearCache()` empties it.
 - `fs` lists the files of a page from `edge.files`, a JSON list beside `edge.json`. `edge build --web` writes it and `edge serve` answers it. A page that embeds the engine serves it itself.
 
-How an import resolves is on [Modules](/docs/reference/modules). What `fs` reads is on [System](/docs/reference/system#fs).
+How an import resolves is on [Modules](/docs/edge-python/reference/modules). What `fs` reads is on [System](/docs/edge-python/reference/system#fs).
 
 ## Permissions and secrets
 
@@ -106,7 +106,7 @@ const worker = await createWorker({
 });
 ```
 
-The holders and entries a `permissions` section takes are on [System](/docs/reference/system#permissions).
+The holders and entries a `permissions` section takes are on [System](/docs/edge-python/reference/system#permissions).
 
 ## Limits
 
@@ -121,7 +121,7 @@ const worker = await createWorker({ limits: { memory: 512, ops: 1e9 } });
 - A field left out keeps the sandbox value of 256 MB and 100,000,000 operations.
 - The call depth stays fixed at 256.
 
-The old `heap` and `calls` fields are gone. `createWorker` throws when it meets either, naming what replaced it. Each cap and the error it raises are on [Limits and errors](/docs/reference/limits-and-errors).
+The old `heap` and `calls` fields are gone. `createWorker` throws when it meets either, naming what replaced it. Each cap and the error it raises are on [Limits and errors](/docs/edge-python/reference/limits-and-errors).
 
 ## Events
 
@@ -131,7 +131,7 @@ The old `heap` and `calls` fields are gone. `createWorker` throws when it meets 
 
 ## Pause and snapshots
 
-A run can be paused, frozen to a blob and brought back later. What a blob holds and where a run can freeze are on [Snapshots](/docs/language/snapshots).
+A run can be paused, frozen to a blob and brought back later. What a blob holds and where a run can freeze are on [Snapshots](/docs/edge-python/language/snapshots).
 
 - `setPreemptInterval(n)` makes the VM yield every `n` loop back-edges. It takes effect at the next `run` or `restoreState`. `0` turns preemption off and is the default.
 - `pause()` resolves `true` once the run is parked. It resolves `false` when no run reaches a park, because it already finished or none started.
@@ -284,7 +284,7 @@ A `batch` reports as one call. The calls inside it are not listed one by one. A 
 ## See also
 
 > [!CARDS]
-> - `camera` [Snapshots](/docs/language/snapshots) What a blob holds and where a run can freeze.
-> - `shield` [System](/docs/reference/system) The fs, net, time and secret modules and their grants.
-> - `package` [Modules](/docs/reference/modules) How imports resolve and what edge.json declares.
-> - `cpu` [Rust](/docs/platforms/rust) Drive compiler.wasm from a Rust host.
+> - `camera` [Snapshots](/docs/edge-python/language/snapshots) What a blob holds and where a run can freeze.
+> - `shield` [System](/docs/edge-python/reference/system) The fs, net, time and secret modules and their grants.
+> - `package` [Modules](/docs/edge-python/reference/modules) How imports resolve and what edge.json declares.
+> - `cpu` [Rust](/docs/edge-python/platforms/rust) Drive compiler.wasm from a Rust host.
