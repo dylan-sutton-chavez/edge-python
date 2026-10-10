@@ -1,19 +1,16 @@
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use compiler::modules::dir_of;
 use compiler::vm::Limits;
 
-use crate::host::{driver, now_ns, Host, Project, Sink, Status, Vm};
+use crate::host::{driver, now_ns, Host, Project, Sink, Status, Vm, TICK_NS};
 use crate::pack::{base64_decode, Bundle, BUNDLE_TAG};
 
 use super::config::{Message, Out};
 
-// Epoch ticks an untrusted run may consume, the ticker advances one every 100 ms.
-const EVAL_DEADLINE_TICKS: u64 = 100;
-const EVAL_TICK_NS: u64 = 100_000_000;
 // The reply when host-side waits would outlast the deadline, worded like the epoch trap.
 const EVAL_TIME_LIMIT: &str = "error: RuntimeError: run exceeded its time limit";
 // Linear memory past twice the memory limit, room for garbage and the engine itself.
@@ -23,8 +20,16 @@ const EVAL_OVERHEAD: usize = 64 << 20;
 enum Mode {
     // A persistent interpreter driven by push_event into receive().
     Fixed { vm: Box<Vm>, started: bool },
-    // Boots a fresh isolated interpreter per message, no state or send between snippets.
-    Eval { limits: Limits, preempt: usize },
+    // Boots a fresh isolated interpreter per message, keeping the run in progress while it waits.
+    Eval { limits: Limits, preempt: usize, timeout: u64, run: Option<Box<EvalRun>> },
+}
+
+/* An untrusted run between steps, with its interpreter, waiting caller, print and deadline. */
+struct EvalRun {
+    vm: Vm,
+    reply: Option<Sender<Result<String, String>>>,
+    printed: Arc<Mutex<String>>,
+    deadline: u64,
 }
 
 /* What a group hands an actor for a step, the pieces a fresh eval interpreter needs. */
@@ -52,6 +57,8 @@ pub struct Actor {
     pub runnable: bool,
     // Wall-clock deadline of a sleep, the scheduler wakes the actor past it.
     pub wake_at: Option<u64>,
+    // Parked on a host call, the scheduler polls it for answers while it waits.
+    pub blocked: bool,
     // The message fed into the interpreter this step, so the scheduler can retry it on a crash.
     in_flight: Option<Message>,
     // Set once the program took a message from its mailbox.
@@ -66,8 +73,10 @@ pub enum Step {
     Waiting,
     // Parked on a timer until the wall-clock deadline.
     Sleeping(u64),
-    // Parked on a host call a worker thread is answering.
-    Blocked,
+    // Parked on a host call a worker thread is answering, woken at the deadline it carries.
+    Blocked(Option<u64>),
+    // Handed the thread on mid-run, it runs again from the back of the queue.
+    Yield,
     // Raised, carries the traceback and the message that was being processed.
     Failed(String, Option<Message>),
 }
@@ -79,12 +88,12 @@ impl Actor {
     }
 
     // An eval actor holds only the settings to boot a fresh interpreter per snippet.
-    pub fn eval(limits: Limits, preempt: usize) -> Self {
-        Self::new(Mode::Eval { limits, preempt })
+    pub fn eval(limits: Limits, preempt: usize, timeout: u64) -> Self {
+        Self::new(Mode::Eval { limits, preempt, timeout, run: None })
     }
 
     fn new(mode: Mode) -> Self {
-        Actor { mode, mailbox: VecDeque::new(), done: false, ran: false, idle: false, runnable: false, wake_at: None, in_flight: None, consumed: false }
+        Actor { mode, mailbox: VecDeque::new(), done: false, ran: false, idle: false, runnable: false, wake_at: None, blocked: false, in_flight: None, consumed: false }
     }
 
     // Delivers a message to the mailbox, waking the actor from its idle wait.
@@ -97,7 +106,7 @@ impl Actor {
     pub fn poll(&mut self) -> bool {
         match &mut self.mode {
             Mode::Fixed { vm, .. } => vm.poll().unwrap_or(0) > 0,
-            Mode::Eval { .. } => false,
+            Mode::Eval { run, .. } => run.as_mut().is_some_and(|r| r.vm.poll().unwrap_or(0) > 0),
         }
     }
 
@@ -158,7 +167,7 @@ impl Actor {
                     self.done = true;
                     return Step::Done;
                 }
-                Status::Preempted => continue,
+                Status::Preempted => return Step::Yield,
                 Status::PendingEvent => {
                     self.in_flight = None;
                     // An event that arrived mid-step goes before the mailbox.
@@ -182,7 +191,7 @@ impl Actor {
                 Status::PendingHostCall => {
                     vm.dispatch();
                     if vm.inflight() > 0 {
-                        return Step::Blocked;
+                        return Step::Blocked(None);
                     }
                     self.done = true;
                     return Step::Failed(format!("error: {}", driver::suspend_message("a host call")), self.in_flight.take());
@@ -195,32 +204,94 @@ impl Actor {
         }
     }
 
-    /* Runs each message in a fresh capped interpreter, an eval actor keeps no state and never sends. */
+    /* Runs one message at a time in a fresh capped interpreter, parked while it waits. */
     fn step_eval(&mut self, ctx: &Context) -> Step {
-        let Mode::Eval { limits, preempt } = &self.mode else { unreachable!() };
-        let (limits, preempt) = (*limits, *preempt);
-        while let Some(msg) = self.mailbox.pop_front() {
-            let outcome = run_eval(ctx, &msg.body, limits, preempt, msg.reply.is_some());
-            if let Some(reply) = msg.reply {
-                let _ = reply.send(outcome);
+        let Mode::Eval { limits, preempt, timeout, run } = &mut self.mode else { unreachable!() };
+        let (limits, preempt, timeout) = (*limits, *preempt, *timeout);
+        let (mut current, status) = match run.take() {
+            // A run that waited past its deadline ends there, whatever it waited on.
+            Some(current) if now_ns() >= current.deadline => return self.finish(current, Err(EVAL_TIME_LIMIT.to_string())),
+            Some(mut current) => {
+                let status = current.vm.resume();
+                (current, status)
             }
+            None => {
+                let Some(msg) = self.mailbox.pop_front() else {
+                    self.idle = true;
+                    return Step::Waiting;
+                };
+                match start_eval(ctx, &msg.body, limits, preempt, timeout, msg.reply.is_some()) {
+                    Ok((mut current, status)) => {
+                        current.reply = msg.reply;
+                        (current, Ok(status))
+                    }
+                    Err(e) => {
+                        if let Some(reply) = msg.reply {
+                            let _ = reply.send(Err(e));
+                        }
+                        return self.next_run();
+                    }
+                }
+            }
+        };
+        let outcome = match status {
+            Err(e) => Err(format!("error: {e}")),
+            Ok(Status::Done | Status::Exit(_)) => Ok(current.printed.lock().map(|b| b.clone()).unwrap_or_default()),
+            Ok(Status::Error(tb)) => Err(tb),
+            Ok(Status::Preempted) => return self.park(current, Step::Yield),
+            Ok(Status::PendingTimer(wake)) if wake <= current.deadline => return self.park(current, Step::Sleeping(wake)),
+            Ok(Status::PendingTimer(_)) => Err(EVAL_TIME_LIMIT.to_string()),
+            Ok(Status::PendingHostCall) => {
+                current.vm.dispatch();
+                if current.vm.inflight() > 0 {
+                    let until = current.deadline;
+                    return self.park(current, Step::Blocked(Some(until)));
+                }
+                Err(format!("error: {}", driver::suspend_message("a host call")))
+            }
+            Ok(Status::PendingEvent) => Err(format!("error: {}", driver::suspend_message("receive()"))),
+        };
+        self.finish(current, outcome)
+    }
+
+    /* Keeps the run for the step that resumes it. */
+    fn park(&mut self, current: Box<EvalRun>, step: Step) -> Step {
+        if let Mode::Eval { run, .. } = &mut self.mode {
+            *run = Some(current);
         }
-        self.idle = true;
-        Step::Waiting
+        step
+    }
+
+    /* Answers the caller waiting on the run and drops its interpreter. */
+    fn finish(&mut self, current: Box<EvalRun>, outcome: Result<String, String>) -> Step {
+        if let Some(reply) = &current.reply {
+            let _ = reply.send(outcome);
+        }
+        drop(current);
+        self.next_run()
+    }
+
+    /* The next queued message starts on a later step, so one burst never holds the thread. */
+    fn next_run(&mut self) -> Step {
+        if self.mailbox.is_empty() {
+            self.idle = true;
+            return Step::Waiting;
+        }
+        Step::Yield
     }
 }
 
-/* One untrusted program to its end, Err is the traceback, Ok the print a waiting caller gets. */
-fn run_eval(ctx: &Context, body: &str, limits: Limits, preempt: usize, capture: bool) -> Result<String, String> {
+/* Boots and starts a fresh capped interpreter for one untrusted program. */
+fn start_eval(ctx: &Context, body: &str, limits: Limits, preempt: usize, timeout: u64, capture: bool) -> Result<(Box<EvalRun>, Status), String> {
     let (source, files, entry_dir) = match unbundle(body) {
         Some((source, files, entry_dir)) => (source, files, entry_dir),
         None => (body.to_string(), HashMap::new(), String::new()),
     };
-    let buffer = Arc::new(Mutex::new(String::new()));
+    let printed = Arc::new(Mutex::new(String::new()));
     let sink: Sink = if capture {
-        let buffer = buffer.clone();
+        let printed = printed.clone();
         Box::new(move |s: &str| {
-            if let Ok(mut b) = buffer.lock() {
+            if let Ok(mut b) = printed.lock() {
                 b.push_str(s);
             }
         })
@@ -234,40 +305,15 @@ fn run_eval(ctx: &Context, body: &str, limits: Limits, preempt: usize, capture: 
         false => project.manifest = Some(ctx.manifest.clone()),
     }
     let memory = limits.memory.saturating_mul(2).saturating_add(EVAL_OVERHEAD);
-    let mut vm = ctx.host.vm(sink, project, Some(EVAL_DEADLINE_TICKS), Some(memory)).map_err(|e| format!("error: {e}"))?;
+    // The epoch ticker advances once per TICK_NS, so the timeout becomes that many of its ticks.
+    let ticks = timeout * 1_000_000_000 / TICK_NS;
+    let mut vm = ctx.host.vm(sink, project, Some(ticks), Some(memory)).map_err(|e| format!("error: {e}"))?;
     vm.set_preempt_interval(preempt).map_err(|e| format!("error: {e}"))?;
     vm.set_limits(&limits).map_err(|e| format!("error: {e}"))?;
     // Host-side waits count toward the same budget the epoch ticker enforces inside the sandbox.
-    let deadline = now_ns() + EVAL_DEADLINE_TICKS * EVAL_TICK_NS;
-    let mut status = vm.start(&source, None).map_err(|e| format!("error: {e}"))?;
-    loop {
-        status = match status {
-            Status::Done | Status::Exit(_) => break,
-            Status::Error(tb) => return Err(tb),
-            Status::Preempted => vm.resume().map_err(|e| format!("error: {e}"))?,
-            Status::PendingTimer(wake) => {
-                if wake > deadline {
-                    return Err(EVAL_TIME_LIMIT.to_string());
-                }
-                std::thread::sleep(Duration::from_nanos(wake.saturating_sub(now_ns())));
-                vm.resume().map_err(|e| format!("error: {e}"))?
-            }
-            Status::PendingHostCall => {
-                vm.dispatch();
-                if vm.inflight() == 0 {
-                    return Err(format!("error: {}", driver::suspend_message("a host call")));
-                }
-                let left = Duration::from_nanos(deadline.saturating_sub(now_ns()));
-                if vm.wait(Some(left)).map_err(|e| format!("error: {e}"))? == 0 {
-                    return Err(EVAL_TIME_LIMIT.to_string());
-                }
-                vm.resume().map_err(|e| format!("error: {e}"))?
-            }
-            Status::PendingEvent => return Err(format!("error: {}", driver::suspend_message("receive()"))),
-        };
-    }
-    drop(vm);
-    Ok(buffer.lock().map(|b| b.clone()).unwrap_or_default())
+    let deadline = now_ns() + ticks * TICK_NS;
+    let status = vm.start(&source, None).map_err(|e| format!("error: {e}"))?;
+    Ok((Box::new(EvalRun { vm, reply: None, printed, deadline }), status))
 }
 
 /* Decodes a bundled project into an in-memory tree, its entry source and entry dir. */

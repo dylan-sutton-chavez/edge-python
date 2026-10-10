@@ -815,7 +815,7 @@ groups:
       preempt: 500
 ```
 
-Each group picks exactly one of `run`, `code` or `eval: true`. Without `listen:` the pool runs until every message is processed and exits.
+Each group picks exactly one of `run`, `code` or `eval: true`. Without `listen:` the pool runs until every message is processed and exits. An actor that sleeps, waits on a host call or computes past its `preempt` interval hands the thread to the next one, so no actor holds up the rest.
 
 ### The trusted model
 
@@ -837,7 +837,7 @@ got hello
 
 ### The untrusted model
 
-`eval: true` groups compile each message as its own program in a fresh wasm instance with its own memory, capped by the group's `memory` limit and by twice that plus 64 MiB of linear memory, and cut off after ten seconds of wall-clock time by a deadline the host enforces from outside. No state survives between messages. A bundle that carries its own `edge.json` resolves through it, any other message through the pool's manifest. Either way `.wasm` plugins are refused, remote modules load only from `https://cdn.edgepython.com/` and `send()` has no scheduler, so untrusted code cannot send or load modules from disk. A bundle grants its own permissions in its own `edge.json` as any root does, but only within what the pool grants `eval`, so an entry past it refuses the run before it compiles, and a snippet holds nothing. A `code` or `run` group is trusted instead, it keeps state, can send and can use `fs`, `net`, `time` and `secret` under the pool's grants, so reach for `eval` when the code is not yours.
+`eval: true` groups compile each message as its own program in a fresh wasm instance with its own memory, capped by the group's `memory` limit and by twice that plus 64 MiB of linear memory, and cut off after ten seconds of wall-clock time, waits included, by a deadline the host enforces from outside. `limits: timeout:` on an eval group sets those seconds, at most 300. No state survives between messages. A bundle that carries its own `edge.json` resolves through it, any other message through the pool's manifest. Either way `.wasm` plugins are refused, remote modules load only from `https://cdn.edgepython.com/` and `send()` has no scheduler, so untrusted code cannot send or load modules from disk. A bundle grants its own permissions in its own `edge.json` as any root does, but only within what the pool grants `eval`, so an entry past it refuses the run before it compiles, and a snippet holds nothing. A `code` or `run` group is trusted instead, it keeps state, can send and can use `fs`, `net`, `time` and `secret` under the pool's grants, so reach for `eval` when the code is not yours.
 
 ```yml untrusted
 groups:

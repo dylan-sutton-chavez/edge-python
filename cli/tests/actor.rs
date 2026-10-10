@@ -260,6 +260,104 @@ fn an_eval_bundle_grants_within_what_the_pool_grants_eval() {
     assert!(snippet.contains("'main' imports time, which edge.json does not grant it"), "snippet was {snippet:?}");
 }
 
+/* Evals that sleep or spin and an actor that never stops computing share one thread, and none of them holds up the rest. */
+#[test]
+fn a_waiting_or_busy_actor_never_holds_up_the_rest() {
+    use std::io::BufRead;
+    use std::time::Instant;
+    let scratch = std::env::temp_dir().join(format!("edge-actor-share-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&scratch);
+    let manifest = scratch.join("actor.yml");
+    std::fs::write(&manifest, "runtime:\n  listen: tcp://127.0.0.1:7814\n  control: tcp://127.0.0.1:9814\ngroups:\n  runners:\n    eval: true\n    replicas: 3\n  echo:\n    code: print('echo', receive())\n  spin:\n    code: |\n      receive()\n      while True:\n          pass\n").unwrap();
+    // A time scope puts a run on the wall clock, without one every sleep passes at once.
+    std::fs::write(scratch.join("edge.json"), r#"{ "permissions": { "eval": ["time:monotonic"] } }"#).unwrap();
+    let sleeper = |seconds: u32, says: &str| {
+        let source = format!("import time\nsleep({seconds})\nprint('{says}')\n");
+        let payload = bundle("main.py", &[("main.py", &source), ("edge.json", r#"{ "permissions": { "main": ["time:monotonic"] } }"#)]);
+        format!("EDGEPKG:{}", base64_encode(&payload))
+    };
+
+    let mut child = edge().args(["actor", manifest.to_str().unwrap()]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let (tx, lines) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
+            let _ = tx.send((Instant::now(), line));
+        }
+    });
+    let mut sock = connect("127.0.0.1:7814").expect("ingress never came up");
+    let sent = Instant::now();
+    // A snippet holds no grant, so it can only spin, and it spins until its op budget runs out.
+    let spinning = "runners while True: pass".to_string();
+    for line in [spinning, format!("runners {}", sleeper(3, "first eval")), format!("runners {}", sleeper(3, "second eval")), "spin go".into(), "echo hi".into()] {
+        let _ = writeln!(sock, "{line}");
+    }
+    let _ = sock.flush();
+    // Each line with the seconds it took to print, until both evals printed or the wait gives up.
+    let mut seen: Vec<(f64, String)> = Vec::new();
+    while seen.iter().filter(|(_, l)| l.ends_with("eval")).count() < 2 {
+        let Ok((at, line)) = lines.recv_timeout(Duration::from_secs(15)) else { break };
+        seen.push((at.duration_since(sent).as_secs_f64(), line));
+    }
+    let late = Instant::now();
+    let timed_out = post_eval("127.0.0.1:9814", "/eval/runners", &sleeper(20, "never"));
+    let late = late.elapsed().as_secs_f64();
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&scratch);
+
+    let at = |want: &str| seen.iter().find(|(_, l)| l == want).map(|(t, _)| *t);
+    assert!(at("echo hi").is_some_and(|t| t < 1.5), "an echo waited behind the sleeping evals or the spinning actor, {seen:?}");
+    // Run one after the other the two sleeps would take six seconds.
+    let both = at("first eval").zip(at("second eval")).map(|(a, b)| a.max(b));
+    assert!(both.is_some_and(|t| t < 5.0), "the two evals did not sleep side by side, {seen:?}");
+    assert!(timed_out.contains("run exceeded its time limit") && late < 2.0, "a sleep past the deadline answered {timed_out:?} after {late}s");
+}
+
+/* An eval group sets its own timeout, which ends a spin and a sleep alike. */
+#[test]
+fn an_eval_group_timeout_ends_a_spin_and_a_sleep_alike() {
+    use std::time::Instant;
+    let scratch = std::env::temp_dir().join(format!("edge-actor-timeout-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&scratch);
+    let manifest = scratch.join("actor.yml");
+    std::fs::write(&manifest, "runtime:\n  listen: tcp://127.0.0.1:7815\n  control: tcp://127.0.0.1:9815\ngroups:\n  runners:\n    eval: true\n    limits:\n      timeout: 1\n").unwrap();
+    std::fs::write(scratch.join("edge.json"), r#"{ "permissions": { "eval": ["time:monotonic"] } }"#).unwrap();
+    let payload = bundle("main.py", &[("main.py", "import time\nsleep(2)\nprint('slept')\n"), ("edge.json", r#"{ "permissions": { "main": ["time:monotonic"] } }"#)]);
+
+    let mut child = edge().args(["actor", manifest.to_str().unwrap()]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+    // The first post waits out the boot, so only the spin is timed.
+    let slept = post_eval("127.0.0.1:9815", "/eval/runners", &format!("EDGEPKG:{}", base64_encode(&payload)));
+    let start = Instant::now();
+    // Each pass is one builtin call, so the op budget stays far off while the clock runs.
+    let spun = post_eval("127.0.0.1:9815", "/eval/runners", "while True:\n    n = sum(range(1000000))");
+    let spun_for = start.elapsed().as_secs_f64();
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&scratch);
+    // Under the ten-second default the sleep would print and the spin would run ten seconds.
+    assert!(slept.contains("run exceeded its time limit"), "the sleep answered {slept:?}");
+    assert!(spun.contains("time limit") && spun_for < 2.5, "the spin answered {spun:?} after {spun_for}s");
+}
+
+/* A timeout past five minutes, or on a group that does not eval, stops the boot. */
+#[test]
+fn a_timeout_out_of_bounds_or_off_eval_stops_the_boot() {
+    let scratch = std::env::temp_dir().join(format!("edge-actor-timeout-bounds-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&scratch);
+    let boot = |yml: &str| {
+        let manifest = scratch.join("actor.yml");
+        std::fs::write(&manifest, yml).unwrap();
+        let out = edge().args(["actor", manifest.to_str().unwrap()]).stdin(Stdio::null()).output().unwrap();
+        (out.status.success(), String::from_utf8_lossy(&out.stderr).into_owned())
+    };
+    let long = boot("groups:\n  runners:\n    eval: true\n    limits:\n      timeout: 301\n");
+    let fixed = boot("groups:\n  echo:\n    code: print(receive())\n    limits:\n      timeout: 5\n");
+    let _ = std::fs::remove_dir_all(&scratch);
+    assert!(!long.0 && long.1.contains("limits.timeout to 301, it takes 1 to 300 seconds"), "a long timeout booted, {long:?}");
+    assert!(!fixed.0 && fixed.1.contains("limits.timeout, which only an eval group takes"), "a fixed group timeout booted, {fixed:?}");
+}
+
 // Polls /stats until it carries `want`, messages settle after the publish returns.
 fn status_until(addr: &str, want: &str) -> String {
     let mut body = String::new();

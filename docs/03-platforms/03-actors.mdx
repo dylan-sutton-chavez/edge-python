@@ -58,6 +58,8 @@ A message goes to the first of these that exists.
 2. A fresh actor under the ceiling.
 3. The least-loaded live actor, once the group is saturated.
 
+An actor that computes without pause hands the thread to the next one every `preempt` back-edges, so one busy actor never stalls the rest.
+
 ## Messages
 
 An actor loops over `receive()` and forwards with `send(group, body)`. Both are builtins that need no import.
@@ -84,7 +86,7 @@ send("transform", msg + "-done")   # hand it to the transform group
 | `retry` | Times a crashing message is retried before it is dropped | `0` |
 | `seed` | Messages delivered before the pool starts | none |
 | `out` | Where `print` goes, `stdout`, `null` or `file://path` | `stdout` |
-| `limits` | Per-actor `memory` in MB, `ops` and `preempt` overrides | the sandbox limits, `preempt` 2000 |
+| `limits` | Per-actor `memory` in MB, `ops` and `preempt` overrides, plus `timeout` in seconds on an eval group, at most 300 | the sandbox limits, `preempt` 2000, `timeout` 10 |
 
 A group needs one of `code`, `run` or `eval`.
 
@@ -163,7 +165,8 @@ groups:
 | Guard | Rule |
 |---|---|
 | Memory | The `memory` limit of the group inside the interpreter. Outside it, twice that limit plus 64 MiB, room for garbage and the engine. |
-| Time | A deadline the host enforces from outside the instance ends the run after ten seconds of wall-clock time. A runaway loop or a long native operation ends even where the interpreter cannot yield. |
+| Time | A deadline the host enforces from outside the instance ends the run after `timeout` seconds of wall-clock time, ten unless the group sets it, its waits included. A runaway loop or a long native operation ends even where the interpreter cannot yield. |
+| Waits | A run that sleeps or waits on a host call parks like any actor, so the rest keep running. |
 | State | Nothing survives between messages. The instance is dropped when the run ends. |
 | Modules | `.wasm` plugins are refused. Remote modules load only from `https://cdn.edgepython.com/`. Nothing loads from disk. |
 | Messages | `send()` has no scheduler to reach, so an eval run cannot send to other groups. |
@@ -206,7 +209,7 @@ $ curl -X POST localhost:9090/eval/runners -d 'print(2 + 3)'
 ```
 
 - A run that raises answers `{"ok":false,"error":...}` with its traceback.
-- The caller waits thirty seconds at most before a 504.
+- The caller waits twenty seconds past the group `timeout` at most before a 504.
 - The TCP ingress stays fire and forget. Only these posts get a reply.
 
 ## A three-stage pipeline

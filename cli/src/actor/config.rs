@@ -20,6 +20,8 @@ pub struct Group {
     pub out: Out,
     // Untrusted mode, actors compile each message as code and cannot send to other groups.
     pub eval: bool,
+    // Wall-clock seconds an eval run may last, its waits included.
+    pub timeout: u64,
     // What the pool grants eval, the most an untrusted bundle may grant.
     pub ceiling: Vec<String>,
     // Times a crashing message is retried before it is dropped to the dead count.

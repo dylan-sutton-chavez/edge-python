@@ -56,12 +56,18 @@ struct GroupSpec {
     seed: Vec<String>,
 }
 
+// Seconds an eval run lasts unless its group says, and the most a group may give it, an instance held all along.
+const EVAL_TIMEOUT: u64 = 10;
+const EVAL_TIMEOUT_MAX: u64 = 300;
+
 /* What a group may hold and spend, memory in MB, and how often it yields. */
 #[derive(Deserialize, Default)]
 struct LimitSpec {
     memory: Option<usize>,
     ops: Option<usize>,
     preempt: Option<usize>,
+    // Seconds an eval run may last, its waits included.
+    timeout: Option<u64>,
     // Gone, kept only so a file still naming them hears what replaced them.
     heap: Option<serde::de::IgnoredAny>,
     calls: Option<serde::de::IgnoredAny>,
@@ -95,6 +101,13 @@ pub fn run(path: &Path, manifest_path: Option<&Path>) -> Result<()> {
         if spec.limits.calls.is_some() {
             return Err(anyhow!("group '{name}' sets limits.calls, which is gone, the call depth is fixed at 256"));
         }
+        if spec.limits.timeout.is_some() && !spec.eval {
+            return Err(anyhow!("group '{name}' sets limits.timeout, which only an eval group takes"));
+        }
+        let timeout = spec.limits.timeout.unwrap_or(EVAL_TIMEOUT);
+        if !(1..=EVAL_TIMEOUT_MAX).contains(&timeout) {
+            return Err(anyhow!("group '{name}' sets limits.timeout to {timeout}, it takes 1 to {EVAL_TIMEOUT_MAX} seconds"));
+        }
         let limits = RunLimits { memory: spec.limits.memory, ops: spec.limits.ops }.engine().unwrap_or_else(Limits::sandbox);
         let inbox = spec.seed.into_iter().map(|body| Message { group: name.clone(), body, attempts: 0, reply: None }).collect();
         groups.push(Group {
@@ -104,6 +117,7 @@ pub fn run(path: &Path, manifest_path: Option<&Path>) -> Result<()> {
             manifest: manifest_path.clone(),
             replicas: spec.replicas.unwrap_or(1),
             eval: spec.eval,
+            timeout,
             ceiling: ceiling.clone(),
             retry: spec.retry,
             limits,
@@ -132,7 +146,7 @@ pub fn run(path: &Path, manifest_path: Option<&Path>) -> Result<()> {
             });
             let stats = control.as_ref().map(|(_, s)| s.clone());
             // The groups the control endpoint answers, captured before config moves into serve.
-            let eval: Vec<String> = config.groups.iter().filter(|g| g.eval).map(|g| g.name.clone()).collect();
+            let eval: Vec<(String, u64)> = config.groups.iter().filter(|g| g.eval).map(|g| (g.name.clone(), g.timeout)).collect();
             let names: Vec<String> = config.groups.iter().map(|g| g.name.clone()).collect();
             crate::actor::serve(config, addr, &wal, stats, move |tx, wal| {
                 if let Some((addr, stats)) = control {
@@ -184,11 +198,13 @@ fn resolve_schedulers(value: Option<&serde_yaml_ng::Value>) -> usize {
 
 // Caps a request body, an eval bundle can be a few MB of base64.
 const MAX_BODY: u64 = 16 << 20;
+// Seconds an eval caller waits past the group timeout, room for the runs queued ahead.
+const EVAL_QUEUE_WAIT: u64 = 20;
 
 type HttpResp = tiny_http::Response<std::io::Cursor<Vec<u8>>>;
 
 // Serves counters at /stats, publishing at /pub/<group> and eval replies at /eval/<group>.
-fn spawn_control(addr: &str, tx: std::sync::mpsc::Sender<Message>, wal: std::sync::Arc<std::sync::Mutex<crate::actor::Wal>>, groups: Vec<String>, eval: Vec<String>, stats: std::sync::Arc<crate::actor::Stats>) {
+fn spawn_control(addr: &str, tx: std::sync::mpsc::Sender<Message>, wal: std::sync::Arc<std::sync::Mutex<crate::actor::Wal>>, groups: Vec<String>, eval: Vec<(String, u64)>, stats: std::sync::Arc<crate::actor::Stats>) {
     let Ok(server) = tiny_http::Server::http(addr) else {
         eprintln!("warning: cannot bind control endpoint '{addr}'");
         return;
@@ -225,10 +241,10 @@ fn publish(group: &str, body: String, tx: &std::sync::mpsc::Sender<Message>, wal
 }
 
 // Answers an eval run, the body is a snippet or an EDGEPKG bundle, the reply its print.
-fn run_eval(group: &str, req: &mut tiny_http::Request, tx: &std::sync::mpsc::Sender<Message>, eval: &[String]) -> HttpResp {
-    if !eval.iter().any(|g| g == group) {
+fn run_eval(group: &str, req: &mut tiny_http::Request, tx: &std::sync::mpsc::Sender<Message>, eval: &[(String, u64)]) -> HttpResp {
+    let Some(&(_, timeout)) = eval.iter().find(|(g, _)| g == group) else {
         return not_found();
-    }
+    };
     let body = match read_body(req) {
         Ok(body) => body,
         Err(resp) => return resp,
@@ -238,7 +254,7 @@ fn run_eval(group: &str, req: &mut tiny_http::Request, tx: &std::sync::mpsc::Sen
     if tx.send(msg).is_err() {
         return tiny_http::Response::from_string("actor is down").with_status_code(503);
     }
-    match result.recv_timeout(std::time::Duration::from_secs(30)) {
+    match result.recv_timeout(std::time::Duration::from_secs(timeout + EVAL_QUEUE_WAIT)) {
         Ok(Ok(stdout)) => json(format!("{{\"ok\":true,\"stdout\":{}}}", json_str(&stdout))),
         Ok(Err(e)) => json(format!("{{\"ok\":false,\"error\":{}}}", json_str(&e))).with_status_code(500),
         Err(_) => tiny_http::Response::from_string("eval timed out").with_status_code(504),

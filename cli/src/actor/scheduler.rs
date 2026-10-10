@@ -31,6 +31,7 @@ struct GroupState {
     limits: Limits,
     preempt: usize,
     eval: bool,
+    timeout: u64,
     // Stable keys survive removal, so the work queues below never dangle.
     actors: Slab<Actor>,
     // Keys with work to run, drained each tick instead of scanning every actor.
@@ -238,7 +239,16 @@ impl Scheduler {
                 g.actors[key].wake_at = Some(deadline);
                 g.waiting.push(key);
             }
-            Step::Blocked => g.waiting.push(key),
+            Step::Blocked(until) => {
+                g.actors[key].wake_at = until;
+                g.actors[key].blocked = true;
+                g.waiting.push(key);
+            }
+            // Handed the thread on, it runs again from the back of the queue even with an empty mailbox.
+            Step::Yield => {
+                g.actors[key].runnable = true;
+                g.ready.push_back(key);
+            }
             _ if g.actors[key].done => {
                 // Messages queued behind the finished run go back out for another actor.
                 let leftover = g.actors.remove(key).leftover();
@@ -306,6 +316,7 @@ impl GroupState {
             limits: g.limits,
             preempt: g.preempt,
             eval: g.eval,
+            timeout: g.timeout,
             actors: Slab::new(),
             ready: VecDeque::new(),
             idle_free: Vec::new(),
@@ -317,7 +328,7 @@ impl GroupState {
     /* Boots a fresh actor, an interpreter slot unless the group evals each message apart. */
     fn spawn(&mut self) -> Option<usize> {
         let actor = if self.eval {
-            Actor::eval(self.limits, self.preempt)
+            Actor::eval(self.limits, self.preempt, self.timeout)
         } else {
             let mut vm = self.slot().ok()?;
             vm.set_preempt_interval(self.preempt).ok()?;
@@ -363,12 +374,10 @@ impl GroupState {
         let waiting = core::mem::take(&mut self.waiting);
         for key in waiting {
             let Some(actor) = self.actors.get_mut(key) else { continue };
-            let awake = match actor.wake_at {
-                Some(deadline) => deadline <= now,
-                None => actor.poll(),
-            };
+            let awake = actor.wake_at.is_some_and(|deadline| deadline <= now) || (actor.blocked && actor.poll());
             if awake {
                 actor.wake_at = None;
+                actor.blocked = false;
                 actor.runnable = true;
                 self.ready.push_back(key);
             } else if !actor.idle {
