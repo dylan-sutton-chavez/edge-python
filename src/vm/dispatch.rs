@@ -177,7 +177,7 @@ impl<'a> VM<'a> {
                                     self.resume_ip = ip;
                                     return Ok(Val::none());
                                 }
-                                // Event yields keep the None placeholder (overwritten by `run_push_event` before resume). Sync sub-call yields pushed nothing, the helper's return lands on the stack when its frame completes, so don't pop and don't skip the next PopTop. Child-wait yields keep the placeholder (wake-loop overwrites it with the target's result). Host-call yields keep the placeholder (overwritten by `set_host_result`).
+                                // Event yields keep the None placeholder (overwritten by `run_push_event` before resume). Sync sub-call yields pushed nothing, the helper's return lands on the stack when its frame completes, so don't pop and don't skip the next PopTop. Child-wait yields keep the placeholder (wake-loop overwrites it with the target's result). Host-call yields keep the placeholder (overwritten by `set_host_result_by_id`).
                                 let event_yield = self.pending.event_wait_request;
                                 let sub_call_yield = !self.pending_sync_frames.is_empty();
                                 let child_yield = self.pending.waiting_for_children.is_some();
@@ -1131,7 +1131,8 @@ impl<'a> VM<'a> {
             OpCode::Not => self.handle_logic(OpCode::Not, chunk)?,
 
             OpCode::Phi => {
-                self.exec_phi(op, rip, &chunk.phi_map, &chunk.phi_sources);
+                // The phi tables index the compiler instructions, not the lowered ones.
+                self.exec_phi(op, code.orig(rip) as usize, &chunk.phi_map, &chunk.phi_sources);
             }
 
             OpCode::LoadAttr => {

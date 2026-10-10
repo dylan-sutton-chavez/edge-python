@@ -121,7 +121,7 @@ const worker = await createWorker({ limits: { memory: 512, ops: 1e9 } });
 - A field left out keeps the sandbox value of 256 MB and 100,000,000 operations.
 - The call depth stays fixed at 256.
 
-The old `heap` and `calls` fields are gone. `createWorker` throws when it meets either, naming what replaced it. Each cap and the error it raises are on [Limits and errors](/docs/edge-python/reference/limits-and-errors).
+Each cap and the error it raises are on [Limits and errors](/docs/edge-python/reference/limits-and-errors).
 
 ## Events
 

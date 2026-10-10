@@ -586,31 +586,31 @@
   {
     "src": "from m import host_defer\nv = host_defer()\nprint(f'got:{v}')",
     "modules": { "m": { "native": ["host_defer"] } },
-    "host_results": ["dark"],
+    "host_deliveries": [{"id": 0, "value": "dark"}],
     "output": ["got:dark"]
   },
   {
     "src": "from m import host_defer\nprint(f'got:{host_defer()}')",
     "modules": { "m": { "native": ["host_defer"] } },
-    "host_results": ["dark"],
+    "host_deliveries": [{"id": 0, "value": "dark"}],
     "output": ["got:dark"]
   },
   {
     "src": "import m\nv = m.host_defer()\nprint(f'got:{v}')",
     "modules": { "m": { "native": ["host_defer"] } },
-    "host_results": ["dark"],
+    "host_deliveries": [{"id": 0, "value": "dark"}],
     "output": ["got:dark"]
   },
   {
     "src": "import m\nprint(f'got:{m.host_defer()}')",
     "modules": { "m": { "native": ["host_defer"] } },
-    "host_results": ["dark"],
+    "host_deliveries": [{"id": 0, "value": "dark"}],
     "output": ["got:dark"]
   },
   {
     "src": "from m import *\nv = host_defer()\nprint(f'got:{v}')",
     "modules": { "m": { "native": ["host_defer"] } },
-    "host_results": ["dark"],
+    "host_deliveries": [{"id": 0, "value": "dark"}],
     "output": ["got:dark"]
   },
   {
@@ -668,31 +668,31 @@
   {
     "src": "from m import host_defer\nclass C:\n    def __enter__(self):\n        return self\n    def __exit__(self, a, b, c):\n        host_defer()\n        return False\nwith C():\n    print('in')\nprint('out')",
     "modules": { "m": { "native": ["host_defer"] } },
-    "host_results": ["x"],
+    "host_deliveries": [{"id": 0, "value": "x"}],
     "output": ["in", "out"]
   },
   {
     "src": "from m import host_defer\nclass C:\n    def __enter__(self):\n        host_defer()\n        return 7\n    def __exit__(self, a, b, c):\n        return False\nwith C() as v:\n    print(v)",
     "modules": { "m": { "native": ["host_defer"] } },
-    "host_results": ["x"],
+    "host_deliveries": [{"id": 0, "value": "x"}],
     "output": ["7"]
   },
   {
     "src": "from m import host_defer\nclass C:\n    def __enter__(self):\n        return self\n    def __exit__(self, a, b, c):\n        host_defer()\n        return True\nwith C():\n    raise ValueError('boom')\nprint('after')",
     "modules": { "m": { "native": ["host_defer"] } },
-    "host_results": ["x"],
+    "host_deliveries": [{"id": 0, "value": "x"}],
     "output": ["after"]
   },
   {
     "src": "from m import host_defer\nclass C:\n    def __enter__(self):\n        return self\n    def __exit__(self, a, b, c):\n        host_defer()\n        return False\nwith C():\n    raise ValueError('boom')",
     "modules": { "m": { "native": ["host_defer"] } },
-    "host_results": ["x"],
+    "host_deliveries": [{"id": 0, "value": "x"}],
     "error": "ValueError"
   },
   {
     "src": "from m import host_defer\nclass C:\n    def __init__(self, n):\n        self.n = n\n    def __enter__(self):\n        return self\n    def __exit__(self, a, b, c):\n        host_defer()\n        print(f'exit:{self.n}')\n        return False\nwith C(1):\n    with C(2):\n        print('in')\nprint('out')",
     "modules": { "m": { "native": ["host_defer"] } },
-    "host_results": ["x", "y"],
+    "host_deliveries": [{"id": 0, "value": "x"}, {"id": 1, "value": "y"}],
     "output": ["in", "exit:2", "exit:1", "out"]
   },
   {
@@ -702,5 +702,6 @@
   },
   {"src": "import m\nprint(getattr(m, 'f')())\nprint(hasattr(m, 'f'), hasattr(m, 'nope'))\nprint(getattr(m, 'nope', 'fallback'))", "output": ["7", "True False", "fallback"], "modules": {"m": {"code": "def f():\n    return 7"}}},
   {"src": "import m\nprint(getattr(m, 'add')(2, 3), hasattr(m, 'add'))", "output": ["5 True"], "modules": {"m": {"native": ["add"]}}},
-  {"src": "import m\ngetattr(m, 'nope')", "modules": {"m": {"code": "x = 1"}}, "error": "has no attribute 'nope'"}
+  {"src": "import m\ngetattr(m, 'nope')", "modules": {"m": {"code": "x = 1"}}, "error": "has no attribute 'nope'"},
+  {"src": "from m import go\nprint(go())\nprint(go())\nprint(go())", "output": ["(6, 2)", "(6, 2)", "(6, 2)"], "modules": {"m": {"code": "def go():\n    last = 0\n    n = 0\n    for x in [2, 6]:\n        last = x\n        n += 1\n    return (last, n)"}}}
 ]

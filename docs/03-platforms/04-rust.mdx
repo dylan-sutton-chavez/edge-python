@@ -28,7 +28,7 @@ The crate builds no wasm of its own and fetches nothing at build time. `cargo bu
 ```toml
 # Downstream Cargo.toml
 [dependencies]
-edge-python = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.9.5" }
+edge-python = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.9.6" }
 ```
 
 The `runtime` feature is the wrapper that makes `compiler.wasm`, with its exports, host imports, allocator and panic handler. It is off by default and `make wasm` turns it on.
@@ -36,7 +36,7 @@ The `runtime` feature is the wrapper that makes `compiler.wasm`, with its export
 A wasm that links the crate as a library, such as a plugin that only parses, drops the default `std` feature. It brings its own allocator and panic handler.
 
 ```toml
-edge-python = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.9.5", default-features = false }
+edge-python = { git = "https://github.com/dylan-sutton-chavez/edge-python", tag = "v0.9.6", default-features = false }
 ```
 
 ## Imports
@@ -126,7 +126,6 @@ The run, its stdin, limits, entry, preempt interval and value handles belong to 
 
 | Export | Signature | Meaning |
 |---|---|---|
-| `floor_error` | `(ptr: *const u8, len: u32) -> u32` | Writes why this engine cannot run the `edge.json` at `ptr`, a floor above its own version. Returns its byte length, `0` when it can |
 | `manifest_check` | `(m_ptr: *const u8, m_len: u32, l_ptr: *const u8, l_len: u32, s_ptr: *const u8, s_len: u32) -> u32` | Writes why a registry turns away the `edge.json` at `m_ptr`, held with the `edge.lock` at `l_ptr` to the rules the CLI packs under. The lock is empty when there is none, and `s_ptr` holds the newline-joined system module names. Returns its byte length, `0` when it holds |
 | `manifest_fields` | `(ptr: *const u8, len: u32) -> u32` | Writes the `name`, `version`, `description`, `repository` and `edge` fields a registry stores, as JSON, or `{"error": why}`. Returns its byte length |
 | `bundle_index` | `(ptr: *const u8, len: u32) -> u32` | Writes where each file of the `.edge` at `ptr` sits, as `{"entry": path, "files": [[path, offset, length], ...]}`, or `{"error": why}`. A host reads the files of a package straight out of its bytes. Returns its byte length |

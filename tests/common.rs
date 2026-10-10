@@ -9,6 +9,18 @@ use compiler::modules::{
     Manifest, walk_up_dirs, dir_of, join_relative,
 };
 use compiler::vm::types::{HeapObj, HeapPool, Val, VmErr};
+use compiler::vm::VM;
+
+/* Answers deferred call `id` with text, as the wasm host does through `set_host_result_by_id`. */
+pub fn answer(vm: &mut VM, id: u64, text: &str) -> bool {
+    let val = vm.heap_mut().alloc(HeapObj::Str(text.into())).expect("the heap holds the answer");
+    vm.inject_host_result_by_id(id, val)
+}
+
+/* Raises `message` into deferred call `id`, as the wasm host does through `set_host_error_by_id`. */
+pub fn fail(vm: &mut VM, id: u64, message: &str) -> bool {
+    vm.inject_host_error_by_id(id, VmErr::Raised(message.into()))
+}
 
 // TestResolver, modules and nested manifests with walk-up parity against the host resolver.
 

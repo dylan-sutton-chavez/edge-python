@@ -288,7 +288,6 @@ fn step_vm(mut vm: VM<'static>, src: &str, prev_paused: Option<Box<PausedRun>>) 
                 SchedulerStatus::PendingEvent => (STATUS_PENDING_EVENT, 0),
                 SchedulerStatus::PendingHostCall => (STATUS_PENDING_HOST_CALL, 0),
                 SchedulerStatus::Preempted => (STATUS_PREEMPTED, 0),
-                SchedulerStatus::Done => (STATUS_DONE, 0),
             };
             let mut paused = match prev_paused {
                 Some(mut b) => {

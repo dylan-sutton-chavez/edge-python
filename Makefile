@@ -11,9 +11,13 @@ CLI_INPUTS := $(if $(EDGE_COMPILER_WASM),,wasm-cli) $(if $(EDGE_JS_DIST),,js) lu
 CLI_TEST_engine := --bin edge --test cli --test run -- --skip builtin_corpora_mirror_the_web_api
 CLI_TEST_network := --test run builtin_corpora_mirror_the_web_api
 CLI_TEST_actors := --test actor
+CLI_TEST_consistency := --test consistency
 CLI_NEEDS_engine := plugin
 CLI_NEEDS_ := plugin
 CLI_NEEDS_skill := test-skill
+CLI_NEEDS_std := test-std
+# The edge-python-std commit the std suite runs, pinned until the next engine tag ships and then main.
+STD_COMMIT := e07486f612f250d05284d2b272331f783987fe4d
 
 MIRI_vm := -p edge-python --test tests vm::
 MIRI_snapshot := -p edge-python --test tests snapshot::
@@ -24,7 +28,7 @@ MIRI_abi := -p edge-python --test tests abi::
 
 unix_only = $(if $(filter Windows_NT,$(OS)),$(error AFL runs on Linux and macOS only))
 
-.PHONY: wasm wasm-cli wasm-ship wasm-small wasm-cli-opt size js lint lint-rust lint-js lint-cli test bench bench-update plugin cli cli-release stage serve browsers test-js test-cli test-skill miri miri-setup fuzz fuzz-status fuzz-triage fuzz-replay fuzz-container fuzz-stop seeds lucide version check
+.PHONY: wasm wasm-cli wasm-ship wasm-small wasm-cli-opt size js lint lint-rust lint-js lint-cli test bench bench-update plugin cli cli-release stage serve browsers test-js test-cli test-skill test-std miri miri-setup fuzz fuzz-status fuzz-triage fuzz-replay fuzz-container fuzz-stop seeds lucide version check
 
 wasm:
 	cargo rustc --locked --release $(RUNTIME)
@@ -117,13 +121,22 @@ test-js: plugin
 
 # engine runs cli and run minus the network corpus, network runs that corpus, actors and skill theirs.
 test-cli: $(CLI_INPUTS) $(CLI_NEEDS_$(SUITE))
-	$(if $(filter-out engine network actors skill,$(SUITE)),$(error SUITE is one of engine network actors skill, or none for all))
-	$(if $(filter skill,$(SUITE)),,cd cli && cargo test --locked $(CLI_TEST_$(SUITE)))
+	$(if $(filter-out engine network actors consistency skill std,$(SUITE)),$(error SUITE is one of engine network actors consistency skill std, or none for all))
+	$(if $(filter skill std,$(SUITE)),,cd cli && cargo test --locked $(CLI_TEST_$(SUITE)))
 
 test-skill: export SKILL_EDGE = $(CURDIR)/cli/target/debug/edge$(EXE)
 test-skill: $(CLI_INPUTS)
 	cd cli && cargo build --locked
 	cargo test --locked -p skill
+
+# The tests of every edge-python-std package, run on the CLI built here so no engine change breaks them unnoticed.
+test-std: export EDGE = $(CURDIR)/cli/target/debug/edge$(EXE)
+test-std: $(CLI_INPUTS)
+	cd cli && cargo build --locked
+	rm -rf target/std && git init -q target/std
+	git -C target/std fetch -q --depth 1 https://github.com/dylan-sutton-chavez/edge-python-std $(STD_COMMIT) && git -C target/std checkout -q FETCH_HEAD
+	$(MAKE) -C target/std wasm
+	for package in target/std/edge/*/; do (cd "$$package" && "$$EDGE" lock && "$$EDGE" test) || exit 1; done
 
 miri-setup:
 	cargo +nightly miri setup

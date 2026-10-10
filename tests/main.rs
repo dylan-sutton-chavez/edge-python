@@ -6,3 +6,4 @@ mod vm;
 mod modules;
 mod snapshot;
 mod coverage;
+mod embed;

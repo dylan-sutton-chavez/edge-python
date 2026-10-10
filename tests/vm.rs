@@ -227,7 +227,7 @@ mod test {
         use compiler::vm::snapshot;
         use compiler::vm::types::{Limits, SchedulerStatus, VmErr};
 
-        use crate::common::{test_native, TestResolver};
+        use crate::common::{answer, fail, test_native, TestResolver};
 
         // Compiles `src` against a module `m` whose `host_defer` always defers to the host.
         fn compile(src: &str) -> SSAChunk {
@@ -252,7 +252,7 @@ mod test {
                 match vm.run() {
                     Ok(_) => return (vm.output.clone(), None),
                     Err(VmErr::HostYield(SchedulerStatus::PendingHostCall)) => {
-                        assert!(vm.push_host_error_by_id(next_id, error), "no call parked on id {next_id}");
+                        assert!(fail(&mut vm, next_id, error), "no call parked on id {next_id}");
                         next_id += 1;
                     }
                     Err(e) => return (vm.output.clone(), Some(render(&vm, &e, src))),
@@ -341,7 +341,7 @@ mod test {
             let chunk = compile(src);
             let mut vm = VM::with_limits(&chunk, Limits::sandbox());
             assert!(matches!(vm.run(), Err(VmErr::HostYield(SchedulerStatus::PendingHostCall))));
-            assert!(vm.push_host_error_by_id(0, "RuntimeError: boom"));
+            assert!(fail(&mut vm, 0, "RuntimeError: boom"));
             let blob = snapshot::save(&vm, src);
             let mut restored = VM::with_limits(&chunk, Limits::sandbox());
             snapshot::restore(&mut restored, &blob).expect("restore");
@@ -356,7 +356,7 @@ mod test {
             let chunk = compile("from m import host_defer\nasync def child():\n    return host_defer()\nprint(with_timeout(5, child()))\n");
             let mut vm = VM::with_limits(&chunk, Limits::sandbox());
             assert!(matches!(vm.run(), Err(VmErr::HostYield(SchedulerStatus::PendingHostCall))));
-            assert!(vm.push_host_result_by_id(0, "answered").unwrap());
+            assert!(answer(&mut vm, 0, "answered"));
             vm.run().expect("the call answered inside its timeout");
             assert_eq!(vm.output, vec!["answered"]);
         }

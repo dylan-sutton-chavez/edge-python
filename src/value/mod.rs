@@ -301,8 +301,6 @@ macro_rules! builtins {
         pub enum NativeFnId { $( $variant ),* }
 
         impl NativeFnId {
-            // All variants in declaration order, drives global registration.
-            pub const ALL: &'static [NativeFnId] = &[ $( NativeFnId::$variant ),* ];
             // Python-visible name.
             pub fn name(self) -> &'static str { match self { $( NativeFnId::$variant => $name ),* } }
             // Inverse of `name`, used by snapshot restore.

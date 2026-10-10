@@ -42,17 +42,9 @@ interface Pending {
 // WorkerRequest without the reqId, `send` attaches it.
 type DistOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
-// Limits a run no longer takes, each with what replaced it.
-const GONE: Record<string, string> = {
-    heap: 'limits.heap is gone, limits.memory caps what a run holds, in MB',
-    calls: 'limits.calls is gone, the call depth is fixed at 256',
-};
-
 /* Public entry. `createWorker(opts)` runs one program in a room of its own and returns a proxy whose methods round-trip via postMessage. */
 export async function createWorker(opts: CreateWorkerOpts = {}): Promise<WorkerHandle> {
     if (typeof document === 'undefined') throw new Error('createWorker needs a page, missing in this runtime');
-    const gone = Object.keys(opts.limits ?? {}).map((key) => GONE[key]).find(Boolean);
-    if (gone) throw new Error(gone);
     const base = opts.baseUrl ? new URL('./', opts.baseUrl).href : null;
     // The compiler sits beside the host wherever it ships, the CDN, a dist and the CLI's server.
     const wasmUrl = opts.wasmUrl ?? new URL('../../compiler.wasm', import.meta.url).href;

@@ -9,13 +9,6 @@ use crate::modules::{parse_manifest, rules};
 use super::walk::split;
 use super::write_out;
 
-/* Why this engine cannot run the manifest at `ptr`, in the out buffer, zero length when it can. */
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn floor_error(ptr: *const u8, len: u32) -> u32 {
-    let manifest = parse_manifest(unsafe { safe_bytes(ptr, len) });
-    write_out(&manifest.ok().and_then(|m| rules::floor_error(&m)).unwrap_or_default()) as u32
-}
-
 /* Why a registry turns away the manifest a package carries, with the lock beside it when it has one, zero length when it holds. */
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn manifest_check(m_ptr: *const u8, m_len: u32, l_ptr: *const u8, l_len: u32, system_ptr: *const u8, system_len: u32) -> u32 {

@@ -531,13 +531,5 @@
     },
     "run": ["run", "main.py"],
     "fails": ["name 'all' is reserved for permissions"]
-  },
-  {
-    "given": {
-      "edge.json": "{}\n",
-      "actor.yml": "groups:\n  main:\n    code: print(1)\n    limits:\n      heap: 2000\n"
-    },
-    "run": ["actor", "actor.yml"],
-    "fails": ["group 'main' sets limits.heap, which is gone, limits.memory caps what a run holds, in MB"]
   }
 ]

@@ -10,7 +10,7 @@ inputs:
     required: false
     default: ""
   suite:
-    description: "engine | network | actors | skill (test mode)"
+    description: "engine | network | actors | consistency | skill | std (test mode)"
     required: false
     default: ""
 

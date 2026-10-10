@@ -244,7 +244,6 @@ codec!(struct SyncFrame, put_sync_frame, get_sync_frame {
 });
 
 codec!(enum SchedulerStatus, put_sched, get_sched {
-    0 Done,
     1 PendingTimer(d: u64),
     3 PendingEvent,
     4 PendingHostCall,

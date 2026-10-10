@@ -27,7 +27,7 @@ struct Runtime {
     // Path to the durable log that survives restarts, defaults beside the manifest.
     #[serde(default)]
     durable: Option<String>,
-    // Host and port for the metrics endpoint, healthz and stats for orchestrators.
+    // Host and port of the HTTP control port, stats, publishing and eval replies.
     #[serde(default)]
     control: Option<String>,
 }
@@ -68,9 +68,6 @@ struct LimitSpec {
     preempt: Option<usize>,
     // Seconds an eval run may last, its waits included.
     timeout: Option<u64>,
-    // Gone, kept only so a file still naming them hears what replaced them.
-    heap: Option<serde::de::IgnoredAny>,
-    calls: Option<serde::de::IgnoredAny>,
 }
 
 // Loads actor.yml, boots the described pool, `manifest_path` overrides every group's manifest walk-up.
@@ -95,12 +92,6 @@ pub fn run(path: &Path, manifest_path: Option<&Path>) -> Result<()> {
             (None, None, true) => (String::new(), dir.clone()),
             (None, None, false) => return Err(anyhow!("group '{name}' needs run, code or eval")),
         };
-        if spec.limits.heap.is_some() {
-            return Err(anyhow!("group '{name}' sets limits.heap, which is gone, limits.memory caps what a run holds, in MB"));
-        }
-        if spec.limits.calls.is_some() {
-            return Err(anyhow!("group '{name}' sets limits.calls, which is gone, the call depth is fixed at 256"));
-        }
         if spec.limits.timeout.is_some() && !spec.eval {
             return Err(anyhow!("group '{name}' sets limits.timeout, which only an eval group takes"));
         }

@@ -1,4 +1,4 @@
-// `str.isdecimal` characters, runs of ten so a value is the offset mod 10.
+// Decimal digits of every script, runs of ten so a value is the offset mod 10.
 static DECIMAL: [(u32, u32); 64] = [
     (0x30, 0x39), (0x660, 0x669), (0x6F0, 0x6F9), (0x7C0, 0x7C9), (0x966, 0x96F), (0x9E6, 0x9EF), (0xA66, 0xA6F), (0xAE6, 0xAEF),
     (0xB66, 0xB6F), (0xBE6, 0xBEF), (0xC66, 0xC6F), (0xCE6, 0xCEF), (0xD66, 0xD6F), (0xDE6, 0xDEF), (0xE50, 0xE59), (0xED0, 0xED9),
@@ -178,7 +178,6 @@ fn find(table: &[(u32, u32)], c: char) -> Option<usize> {
 }
 
 // Character classes of Unicode 15, ASCII answers without the tables.
-pub fn is_decimal(c: char) -> bool { if c.is_ascii() { c.is_ascii_digit() } else { find(&DECIMAL, c).is_some() } }
 pub fn is_digit(c: char) -> bool { if c.is_ascii() { c.is_ascii_digit() } else { find(&DIGIT, c).is_some() } }
 pub fn is_alpha(c: char) -> bool { if c.is_ascii() { c.is_ascii_alphabetic() } else { find(&ALPHA, c).is_some() } }
 pub fn is_numeric(c: char) -> bool { if c.is_ascii() { c.is_ascii_digit() } else { find(&NUMERIC, c).is_some() } }

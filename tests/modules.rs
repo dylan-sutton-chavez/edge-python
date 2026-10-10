@@ -8,7 +8,7 @@ mod test {
     use compiler::vm::types::{SchedulerStatus, VmErr};
     use compiler::modules::NativeBinding;
 
-    use crate::common::{TestResolver, test_native};
+    use crate::common::{answer, fail, TestResolver, test_native};
 
     /* `native` drives resolve() with extern bindings, `code` splices a source module. */
     #[derive(serde::Deserialize)]
@@ -58,9 +58,6 @@ mod test {
         expect_functions: Option<usize>,
         #[serde(default)]
         error_span_covers: Option<String>,
-        /* String values injected one-at-a-time after each PendingHostCall yield, simulating the JS bridge's `set_host_result`. */
-        #[serde(default)]
-        host_results: Vec<String>,
         /* Per-call deliveries (by call_id) simulating out-of-order host resolution, `value` -> set_host_result_by_id, `error` -> set_host_error_by_id. */
         #[serde(default)]
         host_deliveries: Vec<Delivery>,
@@ -147,7 +144,7 @@ mod test {
 
             let mut vm = VM::new(&chunk);
             vm.input_buffer = case.input.clone();
-            // Drive loop, resume on PendingHostCall by injecting the next host_results entry as a string Val.
+            // Drive loop, resume on PendingHostCall by delivering the next host_deliveries entry.
             let mut hr_idx = 0usize;
             let result = loop {
                 match vm.run() {
@@ -155,13 +152,9 @@ mod test {
                     Err(VmErr::HostYield(SchedulerStatus::PendingHostCall)) if hr_idx < case.host_deliveries.len() => {
                         let d = &case.host_deliveries[hr_idx];
                         match &d.error {
-                            Some(msg) => { vm.push_host_error_by_id(d.id.into(), msg); }
-                            None => { vm.push_host_result_by_id(d.id.into(), d.value.as_deref().unwrap_or("")).expect("push_host_result_by_id"); }
-                        }
-                        hr_idx += 1;
-                    }
-                    Err(VmErr::HostYield(SchedulerStatus::PendingHostCall)) if hr_idx < case.host_results.len() => {
-                        vm.push_host_result(&case.host_results[hr_idx]).expect("push_host_result");
+                            Some(msg) => fail(&mut vm, d.id.into(), msg),
+                            None => answer(&mut vm, d.id.into(), d.value.as_deref().unwrap_or("")),
+                        };
                         hr_idx += 1;
                     }
                     Err(e) => break Err(e),

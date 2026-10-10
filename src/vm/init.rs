@@ -75,14 +75,6 @@ impl<'a> VM<'a> {
         }
     }
 
-    /* Inject `val` into the first `WaitingHostCall` waiter and mark it Ready, false if none. Uncorrelated path for hosts/tests that don't track call ids. */
-    pub fn inject_host_result(&mut self, val: Val) -> bool {
-        match self.scheduler.iter().position(|h| matches!(h.state, CoroState::WaitingHostCall(_))) {
-            Some(idx) => { self.deliver_host_result(idx, val); true }
-            None => false,
-        }
-    }
-
     /* Inject `val` into the `WaitingHostCall(id)` waiter and mark it Ready, false if no coro is parked on `id`. Lets the host resolve concurrent calls out of order. */
     pub fn inject_host_result_by_id(&mut self, id: u64, val: Val) -> bool {
         match self.scheduler.iter().position(|h| matches!(h.state, CoroState::WaitingHostCall(w) if w == id)) {
@@ -102,28 +94,11 @@ impl<'a> VM<'a> {
         self.scheduler[idx].state = CoroState::Ready;
     }
 
-    /* String form of `inject_host_result`, allocates `message` on the heap and injects it. Used by Rust hosts that return text bodies (and test fixtures simulating that path). */
-    pub fn push_host_result(&mut self, message: &str) -> Result<bool, VmErr> {
-        let val = self.heap.alloc(HeapObj::Str(message.into()))?;
-        Ok(self.inject_host_result(val))
-    }
-
-    /* String form of `inject_host_result_by_id`. */
-    pub fn push_host_result_by_id(&mut self, id: u64, message: &str) -> Result<bool, VmErr> {
-        let val = self.heap.alloc(HeapObj::Str(message.into()))?;
-        Ok(self.inject_host_result_by_id(id, val))
-    }
-
     /* Raises `e` where coro `id` parked on its next resume, false when nothing waits on `id`. */
     pub fn inject_host_error_by_id(&mut self, id: u64, e: VmErr) -> bool {
         let Some(idx) = self.scheduler.iter().position(|h| matches!(h.state, CoroState::WaitingHostCall(w) if w == id)) else { return false; };
         self.scheduler[idx].state = CoroState::Raising(e, None);
         true
-    }
-
-    /* Test/host helper raising a generic error (`VmErr::Raised(message)`) into host call `id`. */
-    pub fn push_host_error_by_id(&mut self, id: u64, message: &str) -> bool {
-        self.inject_host_error_by_id(id, VmErr::Raised(message.into()))
     }
 
     /* Yield `Preempted` every `n` back-edges, 0 disables. */

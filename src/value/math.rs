@@ -29,9 +29,6 @@ pub fn fpowf(base: f64, exp: f64) -> f64 {
     libm::pow(base, exp)
 }
 
-#[inline]
-pub fn ffloor(x: f64) -> f64 { libm::floor(x) }
-
 /* Floor quotient and remainder of ints, None for a zero divisor or `i128::MIN / -1`. */
 pub fn int_divmod(a: i128, b: i128) -> Option<(i128, i128)> {
     let q = a.checked_div(b)?;
@@ -55,11 +52,3 @@ pub fn fabs(x: f64) -> f64 {
 
 #[inline]
 pub fn ftrunc(x: f64) -> f64 { libm::trunc(x) }
-
-#[inline]
-pub fn fsignum(x: f64) -> f64 {
-    if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { 0.0 }
-}
-
-#[inline]
-pub fn flog10(x: f64) -> f64 { libm::log10(x) }
