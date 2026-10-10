@@ -454,6 +454,89 @@ fn the_server_serves_every_client_at_once_and_holds_a_flood_back() {
     assert!(refused.contains("queue is full") && pending.is_some_and(|n| n >= 1 << 16), "a flood was not held back, {refused:?} {backlog:?}");
 }
 
+/* A server killed mid-run replays at its next start only the messages its actors never finished. */
+#[test]
+fn a_restart_replays_only_the_messages_left_unfinished() {
+    let scratch = std::env::temp_dir().join(format!("edge-actor-wal-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&scratch);
+    let manifest = scratch.join("actor.yml");
+    let pool = |hold: &str| format!("runtime:\n  listen: tcp://127.0.0.1:7817\ngroups:\n  echo:\n    code: |\n      while True:\n          print('echo', receive())\n  hold:\n    code: |\n{hold}");
+    // The first run holds its first message forever and queues the second, the next one prints both.
+    std::fs::write(&manifest, pool("      receive()\n      while True:\n          pass\n")).unwrap();
+    let first = run_killed(&manifest, "127.0.0.1:7817", &["echo a", "echo b", "hold x", "hold y"], "echo b");
+    std::fs::write(&manifest, pool("      while True:\n          print('hold', receive())\n")).unwrap();
+    let mut second = run_killed(&manifest, "127.0.0.1:7817", &[], "hold y");
+    let _ = std::fs::remove_dir_all(&scratch);
+    second.sort();
+    assert_eq!(first, ["echo a", "echo b"], "the first run printed {first:?}");
+    assert_eq!(second, ["hold x", "hold y"], "the restart replayed {second:?}");
+}
+
+/* SIGTERM stops a server taking messages and lets its actors finish before it exits. */
+#[cfg(unix)]
+#[test]
+fn a_sigterm_lets_the_actors_finish_before_the_server_exits() {
+    use std::io::Read;
+    let scratch = std::env::temp_dir().join(format!("edge-actor-drain-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&scratch);
+    let manifest = scratch.join("actor.yml");
+    std::fs::write(&manifest, "runtime:\n  listen: tcp://127.0.0.1:7818\ngroups:\n  slow:\n    code: |\n      import time\n      while True:\n          msg = receive()\n          sleep(1)\n          print('slow', msg)\n").unwrap();
+    std::fs::write(scratch.join("edge.json"), r#"{ "permissions": { "main": ["time:monotonic"] } }"#).unwrap();
+
+    let mut child = edge().args(["actor", manifest.to_str().unwrap()]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+    let mut sock = connect("127.0.0.1:7818").expect("ingress never came up");
+    let _ = writeln!(sock, "slow z");
+    std::thread::sleep(Duration::from_millis(300));
+    let _ = Command::new("kill").args(["-TERM", &child.id().to_string()]).status();
+    let mut status = None;
+    for _ in 0..200 {
+        status = child.try_wait().unwrap();
+        if status.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let _ = child.kill();
+    let mut printed = String::new();
+    let _ = child.stdout.take().unwrap().read_to_string(&mut printed);
+    // Finished before the exit, the message is done and the next start has nothing to replay.
+    let replayed = run_killed(&manifest, "127.0.0.1:7818", &[], "slow");
+    let _ = std::fs::remove_dir_all(&scratch);
+    assert!(status.is_some_and(|s| s.success()) && printed.contains("slow z"), "the server exited {status:?} having printed {printed:?}");
+    assert!(replayed.is_empty(), "the restart replayed {replayed:?}");
+}
+
+/* Boots the pool, sends each line, and kills it a beat after a line starting with `until` prints or two seconds pass. */
+fn run_killed(manifest: &std::path::Path, addr: &str, send: &[&str], until: &str) -> Vec<String> {
+    use std::io::BufRead;
+    let mut child = edge().args(["actor", manifest.to_str().unwrap()]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let (tx, lines) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
+            let _ = tx.send(line);
+        }
+    });
+    let mut sock = connect(addr).expect("ingress never came up");
+    for line in send {
+        let _ = writeln!(sock, "{line}");
+    }
+    let mut seen = Vec::new();
+    while let Ok(line) = lines.recv_timeout(Duration::from_secs(2)) {
+        let done = line.starts_with(until);
+        seen.push(line);
+        if done {
+            break;
+        }
+    }
+    // The done record follows the print, so the kill waits for it.
+    std::thread::sleep(Duration::from_millis(300));
+    let _ = child.kill();
+    let _ = child.wait();
+    seen.extend(lines.try_iter());
+    seen
+}
+
 // Polls /stats until it carries `want`, messages settle after the publish returns.
 fn status_until(addr: &str, want: &str) -> String {
     let mut body = String::new();

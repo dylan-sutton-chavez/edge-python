@@ -23,10 +23,11 @@ enum Mode {
     Eval { limits: Limits, preempt: usize, timeout: u64, run: Option<Box<EvalRun>> },
 }
 
-/* An untrusted run between steps, with its interpreter, waiting caller, print and deadline. */
+/* An untrusted run between steps, with its interpreter, waiting caller, log record, print and deadline. */
 struct EvalRun {
     vm: Vm,
     reply: Option<Reply>,
+    id: Option<u64>,
     printed: Arc<Mutex<String>>,
     deadline: u64,
 }
@@ -64,6 +65,8 @@ pub struct Actor {
     in_flight: Option<Message>,
     // Set once the program took a message from its mailbox.
     consumed: bool,
+    // Logged messages it finished since the scheduler last asked.
+    finished: Vec<u64>,
 }
 
 // What a run step left the actor waiting on.
@@ -94,7 +97,7 @@ impl Actor {
     }
 
     fn new(mode: Mode) -> Self {
-        Actor { mode, mailbox: VecDeque::new(), done: false, ran: false, idle: false, runnable: false, scheduled: false, wake_at: None, blocked: false, in_flight: None, consumed: false }
+        Actor { mode, mailbox: VecDeque::new(), done: false, ran: false, idle: false, runnable: false, scheduled: false, wake_at: None, blocked: false, in_flight: None, consumed: false, finished: Vec::new() }
     }
 
     // Delivers a message to the mailbox, waking the actor from its idle wait.
@@ -124,9 +127,14 @@ impl Actor {
         (self.in_flight.take(), std::mem::take(&mut self.mailbox).into_iter().collect())
     }
 
-    /* Queued messages go back out only when the program reads its mailbox, else another run would loop. */
-    pub fn leftover(self) -> Vec<Message> {
-        if self.consumed { self.mailbox.into_iter().collect() } else { Vec::new() }
+    /* Queued messages go back out only when the program reads its mailbox, else another run would loop, so they drop. */
+    pub fn leftover(self) -> (Vec<Message>, Vec<Message>) {
+        let queued = self.mailbox.into_iter().collect();
+        if self.consumed { (queued, Vec::new()) } else { (Vec::new(), queued) }
+    }
+
+    pub fn take_finished(&mut self) -> Vec<u64> {
+        std::mem::take(&mut self.finished)
     }
 
     /* Everything the last step sent, an eval actor never sends. */
@@ -165,12 +173,14 @@ impl Actor {
             };
             match status {
                 Status::Done | Status::Exit(_) => {
+                    self.finished.extend(self.in_flight.take().and_then(|m| m.id));
                     self.done = true;
                     return Step::Done;
                 }
                 Status::Preempted => return Step::Yield,
+                // Back in receive(), so the message it was given is done.
                 Status::PendingEvent => {
-                    self.in_flight = None;
+                    self.finished.extend(self.in_flight.take().and_then(|m| m.id));
                     // An event that arrived mid-step goes before the mailbox.
                     if vm.drain_buffered() > 0 {
                         continue;
@@ -224,12 +234,14 @@ impl Actor {
                 match start_eval(ctx, &msg.body, limits, preempt, timeout, msg.reply.is_some()) {
                     Ok((mut current, status)) => {
                         current.reply = msg.reply;
+                        current.id = msg.id;
                         (current, Ok(status))
                     }
                     Err(e) => {
                         if let Some(reply) = msg.reply {
                             reply.send(Err(e));
                         }
+                        self.finished.extend(msg.id);
                         return self.next_run();
                     }
                 }
@@ -268,6 +280,7 @@ impl Actor {
         if let Some(reply) = &current.reply {
             reply.send(outcome);
         }
+        self.finished.extend(current.id);
         drop(current);
         self.next_run()
     }
@@ -314,7 +327,7 @@ fn start_eval(ctx: &Context, body: &str, limits: Limits, preempt: usize, timeout
     // Host-side waits count toward the same budget the epoch ticker enforces inside the sandbox.
     let deadline = now_ns() + ticks * TICK_NS;
     let status = vm.start(&source, None).map_err(|e| format!("error: {e}"))?;
-    Ok((Box::new(EvalRun { vm, reply: None, printed, deadline }), status))
+    Ok((Box::new(EvalRun { vm, reply: None, id: None, printed, deadline }), status))
 }
 
 /* Decodes a bundled project into an in-memory tree, its entry source and entry dir. */

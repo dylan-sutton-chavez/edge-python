@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -55,9 +56,28 @@ pub fn spawn(listen: &str, control: Option<(&str, Routes)>, inbox: Inbox) -> std
         }
     });
     let waker = Arc::new(Waker::new(poll.registry(), WAKE)?);
+    let stopping = Arc::new(AtomicBool::new(false));
+    #[cfg(unix)]
+    let _ = on_signal(stopping.clone(), waker.clone());
     let (to, answers) = channel();
-    let mut net = Net { poll, ingress, control, conns: Slab::new(), stalled: Vec::new(), inbox, to, waker, answers, waiting: HashMap::new(), next: 0, swept: Instant::now() };
+    let mut net = Net { poll, ingress, control, conns: Slab::new(), stalled: Vec::new(), inbox, to, waker, answers, waiting: HashMap::new(), durable: Vec::new(), next: 0, swept: Instant::now(), stopping };
     std::thread::spawn(move || net.run());
+    Ok(())
+}
+
+/* The first SIGTERM or SIGINT closes the server so the actors finish what they hold, a second one ends it at once. */
+#[cfg(unix)]
+fn on_signal(stopping: Arc<AtomicBool>, wake: Arc<Waker>) -> std::io::Result<()> {
+    use signal_hook::consts::{SIGINT, SIGTERM};
+    let mut signals = signal_hook::iterator::Signals::new([SIGTERM, SIGINT])?;
+    std::thread::spawn(move || {
+        for _ in signals.forever() {
+            if stopping.swap(true, Ordering::SeqCst) {
+                std::process::exit(130);
+            }
+            let _ = wake.wake();
+        }
+    });
     Ok(())
 }
 
@@ -84,8 +104,11 @@ struct Net {
     answers: Receiver<(u64, Result<String, String>)>,
     // The connection each eval caller waits on, by reply id.
     waiting: HashMap<u64, usize>,
+    // Replies held until the fsync that makes their message durable.
+    durable: Vec<(usize, Vec<u8>)>,
     next: u64,
     swept: Instant,
+    stopping: Arc<AtomicBool>,
 }
 
 enum Conn {
@@ -120,6 +143,8 @@ enum State {
     Reading(bool),
     // Parked under a reply id until its eval run answers.
     Waiting(u64),
+    // Taken in, its reply waiting on the next fsync.
+    Syncing,
     // The reply and how much of it the socket took.
     Writing(Vec<u8>, usize),
 }
@@ -149,6 +174,8 @@ impl Net {
                         self.accept(event.token());
                         true
                     }
+                    // Dropping every connection and the inbox tells the scheduler to finish and exit.
+                    WAKE if self.stopping.load(Ordering::SeqCst) => return,
                     WAKE => {
                         self.answer();
                         true
@@ -168,6 +195,11 @@ impl Net {
                         return;
                     }
                 }
+            }
+            // One fsync covers every message this pass took in, then their 202s go out.
+            self.inbox.sync();
+            for (key, reply) in std::mem::take(&mut self.durable) {
+                self.reply(key, reply);
             }
             if self.swept.elapsed() >= SWEEP {
                 self.sweep();
@@ -249,7 +281,7 @@ impl Net {
         Flow::Open
     }
 
-    /* Answers a control request at once, or parks it until its eval run ends. */
+    /* Answers a control request at once, or parks it until its message is on disk or its eval run ends. */
     fn route(&mut self, key: usize, request: http::Request) -> Option<Vec<u8>> {
         let routes = &self.control.as_ref()?.1;
         if request.path == "/stats" {
@@ -259,11 +291,14 @@ impl Net {
             && let Some(group) = request.path.strip_prefix("/pub/")
             && routes.groups.iter().any(|g| g == group)
         {
-            let msg = Message { group: group.to_string(), body: request.body, attempts: 0, reply: None };
-            return Some(match self.inbox.admit(msg) {
-                Ok(()) => http::json(202, "{\"ok\":true}"),
-                Err(refused) => refusal(&refused),
-            });
+            if let Err(refused) = self.inbox.admit(Message::new(group.to_string(), request.body)) {
+                return Some(refusal(&refused));
+            }
+            if let Some(Conn::Http(conn)) = self.conns.get_mut(key) {
+                conn.state = State::Syncing;
+            }
+            self.durable.push((key, http::json(202, "{\"ok\":true}")));
+            return None;
         }
         if request.post
             && let Some(group) = request.path.strip_prefix("/eval/")
@@ -272,7 +307,7 @@ impl Net {
             let id = self.next;
             self.next += 1;
             let reply = Reply { id, to: self.to.clone(), wake: self.waker.clone() };
-            let msg = Message { group: group.to_string(), body: request.body, attempts: 0, reply: Some(reply) };
+            let msg = Message { reply: Some(reply), ..Message::new(group.to_string(), request.body) };
             if let Err(refused) = self.inbox.admit(msg) {
                 return Some(refusal(&refused));
             }
@@ -358,7 +393,7 @@ impl Line {
             if let Some(line) = self.line() {
                 let Ok(line) = String::from_utf8(line) else { return Flow::Closed };
                 if let Some((group, body)) = line.split_once(' ') {
-                    self.held = Some(Message { group: group.to_string(), body: body.to_string(), attempts: 0, reply: None });
+                    self.held = Some(Message::new(group.to_string(), body.to_string()));
                 }
                 continue;
             }

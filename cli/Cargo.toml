@@ -43,6 +43,10 @@ tungstenite = { version = "0.29", default-features = false, features = ["handsha
 # Drives the browser host for `edge run --web` over CDP, `fetch` downloads a known-good Chromium when the user agrees.
 headless_chrome = { version = "1", features = ["fetch"] }
 
+# SIGTERM and SIGINT close a live actor server so its actors finish what they hold.
+[target.'cfg(unix)'.dependencies]
+signal-hook = { version = "0.3", default-features = false, features = ["iterator"] }
+
 [build-dependencies]
 # Precompiles compiler.wasm for the build target.
 wasmtime = { version = "48", default-features = false, features = ["runtime", "cranelift", "all-arch", "std"] }

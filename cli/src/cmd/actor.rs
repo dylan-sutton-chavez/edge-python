@@ -109,7 +109,7 @@ pub fn run(path: &Path, manifest_path: Option<&Path>) -> Result<()> {
             return Err(anyhow!("group '{name}' sets limits.timeout to {timeout}, it takes 1 to {EVAL_TIMEOUT_MAX} seconds"));
         }
         let limits = RunLimits { memory: spec.limits.memory, ops: spec.limits.ops }.engine().unwrap_or_else(Limits::sandbox);
-        let inbox = spec.seed.into_iter().map(|body| Message { group: name.clone(), body, attempts: 0, reply: None }).collect();
+        let inbox = spec.seed.into_iter().map(|body| Message::new(name.clone(), body)).collect();
         groups.push(Group {
             name,
             source,

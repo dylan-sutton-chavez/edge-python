@@ -121,7 +121,7 @@ $ curl -X POST localhost:9090/pub/actor -d 'hello'
 
 One thread serves every connection, ingress and control alike, so a slow or waiting client holds up no other. A message holds at most 16 MiB, the server keeps at most 10,000 connections open, and an HTTP client has 30 seconds to send its request. When the actors fall behind, the ingress stops reading and `/pub` and `/eval` answer 503 until there is room.
 
-The `durable` log records every message. On restart it replays what was unprocessed, so a crash loses nothing.
+The `durable` log records each fire and forget message and marks it done once an actor finishes it, so a restart replays only the rest. A `/pub` answers 202 once its message is on disk. SIGTERM stops the server taking messages and gives its actors 25 seconds to finish before it exits.
 
 The `control` address serves live counts at `/stats`. The response itself proves the pool is alive.
 

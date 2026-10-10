@@ -1,8 +1,9 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use slab::Slab;
 
@@ -13,10 +14,12 @@ use crate::host::{now_ns, Host, Instance, Project, Runtime, Vm};
 use super::actor::{sink_for, Actor, Context, Step};
 use super::config::{ActorConfig, Group, Message};
 use super::pool::Router;
-use super::server::Intake;
+use super::server::{Intake, Wal};
 
 // How long an idle scheduler naps before re-checking sleeping and blocked actors.
 const NAP: Duration = Duration::from_millis(2);
+// How long a closing server lets its actors finish, inside the 30 seconds an orchestrator waits before it kills.
+const DRAIN: Duration = Duration::from_secs(25);
 // Actors per compiler instance, a 4 GiB memory holds this many interpreters with room to spare.
 const SLOTS_PER_INSTANCE: usize = 4096;
 // Messages a live pool holds undelivered or in mailboxes before it stops draining its inbox.
@@ -60,6 +63,8 @@ pub struct Scheduler {
     router: Option<Router>,
     // Live counters published for the control endpoint, None when no control port is set.
     stats: Option<Arc<super::server::Stats>>,
+    // The durable log of a live server, which hears each logged message that is done.
+    wal: Option<Arc<Mutex<Wal>>>,
 }
 
 impl Scheduler {
@@ -70,10 +75,10 @@ impl Scheduler {
         let mut pending = Vec::new();
         for g in config.groups {
             by_name.insert(g.name.clone(), groups.len());
-            pending.extend(g.inbox.iter().map(|m| Message { group: m.group.clone(), body: m.body.clone(), attempts: 0, reply: None }));
+            pending.extend(g.inbox.iter().map(|m| Message::new(m.group.clone(), m.body.clone())));
             groups.push(GroupState::boot(g, config.max_actors, host.clone()));
         }
-        Ok(Scheduler { groups, by_name, pending, queued: 0, crashes: Vec::new(), router: None, stats: None })
+        Ok(Scheduler { groups, by_name, pending, queued: 0, crashes: Vec::new(), router: None, stats: None, wal: None })
     }
 
     // Wires the shared counters the control endpoint reads, published each tick.
@@ -98,17 +103,33 @@ impl Scheduler {
         self.report()
     }
 
-    // A live server, runs local work then blocks on the ingress instead of ending.
-    pub fn run_serving(&mut self, recovered: Vec<Message>, rx: Intake, wal: Arc<std::sync::Mutex<super::server::Wal>>) -> i32 {
+    // A live server, runs local work then blocks on the ingress, and once it closes finishes what it holds.
+    pub fn run_serving(&mut self, recovered: Vec<Message>, rx: Intake, wal: Arc<Mutex<Wal>>) -> i32 {
         self.pending.extend(recovered);
+        self.wal = Some(wal.clone());
         self.spawn_seed();
+        let mut closed: Option<Instant> = None;
         loop {
             // Past the backlog the inbox fills, and the ingress and control hold their clients back.
-            while !self.full() && let Some(m) = rx.try_recv() {
-                self.pending.push(m);
+            while closed.is_none() && !self.full() {
+                match rx.try_recv() {
+                    Ok(m) => self.pending.push(m),
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => closed = Some(Instant::now()),
+                }
             }
             self.route_pending();
-            if self.tick() || !self.pending.is_empty() {
+            let busy = self.tick() || !self.pending.is_empty();
+            if let Some(at) = closed {
+                if at.elapsed() >= DRAIN || !busy && !self.has_waiters() {
+                    break;
+                }
+                if !busy {
+                    std::thread::sleep(NAP);
+                }
+                continue;
+            }
+            if busy {
                 continue;
             }
             if self.full() {
@@ -119,20 +140,18 @@ impl Scheduler {
             if self.has_waiters() {
                 match rx.recv_timeout(NAP) {
                     Ok(m) => self.pending.push(m),
-                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                    Err(_) => break,
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => closed = Some(Instant::now()),
                 }
                 continue;
             }
-            // Fully drained, publish the idle state and compact the log before parking.
             self.publish_stats();
-            wal.lock().unwrap().compact(&self.pending);
-            // Idle, wait for the ingress to deliver more, ending only when it closes.
             match rx.recv() {
                 Ok(m) => self.pending.push(m),
-                Err(_) => break,
+                Err(_) => closed = Some(Instant::now()),
             }
         }
+        wal.lock().unwrap().sync();
         self.report()
     }
 
@@ -207,12 +226,18 @@ impl Scheduler {
     fn route_pending(&mut self) {
         let msgs = core::mem::take(&mut self.pending);
         for m in msgs {
-            let Some(&gi) = self.by_name.get(&m.group) else { continue };
+            let Some(&gi) = self.by_name.get(&m.group) else {
+                self.ack(m.id);
+                continue;
+            };
             let g = &mut self.groups[gi];
-            if let Some(key) = g.pick() {
-                g.actors[key].deliver(m);
-                g.schedule(key);
-                self.queued += 1;
+            match g.pick() {
+                Some(key) => {
+                    g.actors[key].deliver(m);
+                    g.schedule(key);
+                    self.queued += 1;
+                }
+                None => self.ack(m.id),
             }
         }
     }
@@ -236,6 +261,8 @@ impl Scheduler {
                 let step = self.groups[gi].actors[key].step(&ctx);
                 // A step only takes from the mailbox, nothing reaches it mid-step.
                 self.queued -= before - self.groups[gi].actors[key].mailbox.len();
+                let finished = self.groups[gi].actors[key].take_finished();
+                self.ack(finished);
                 self.collect_sends(gi, key);
                 self.settle(gi, key, step);
             }
@@ -249,8 +276,7 @@ impl Scheduler {
         let g = &mut self.groups[gi];
         match step {
             Step::Failed(tb, msg) => {
-                let leftover = self.retire(gi, key).leftover();
-                self.pending.extend(leftover);
+                self.release(gi, key);
                 self.crashes.push(tb);
                 self.handle_crash(gi, msg);
                 self.crash_trapped(gi);
@@ -269,11 +295,7 @@ impl Scheduler {
                 g.actors[key].runnable = true;
                 g.schedule(key);
             }
-            _ if g.actors[key].done => {
-                // Messages queued behind the finished run go back out for another actor.
-                let leftover = self.retire(gi, key).leftover();
-                self.pending.extend(leftover);
-            }
+            _ if g.actors[key].done => self.release(gi, key),
             _ if g.actors[key].idle => g.idle_free.push(key),
             _ => g.schedule(key),
         }
@@ -302,14 +324,34 @@ impl Scheduler {
         actor
     }
 
+    /* Retires an actor that ended, its queued messages going back out, or done when it never read them. */
+    fn release(&mut self, gi: usize, key: usize) {
+        let (back, dropped) = self.retire(gi, key).leftover();
+        self.pending.extend(back);
+        self.ack(dropped.into_iter().filter_map(|m| m.id));
+    }
+
     // Retries a crashed message on another actor up to the group's retry count, else drops it dead.
     fn handle_crash(&mut self, gi: usize, msg: Option<Message>) {
         let Some(mut msg) = msg else { return };
         if msg.attempts < self.groups[gi].retry {
             msg.attempts += 1;
             self.pending.push(msg);
-        } else if let Some(stats) = &self.stats {
+            return;
+        }
+        if let Some(stats) = &self.stats {
             stats.add_dead();
+        }
+        self.ack(msg.id);
+    }
+
+    /* Marks logged messages done, so a restart never replays them. */
+    fn ack(&self, ids: impl IntoIterator<Item = u64>) {
+        let Some(wal) = &self.wal else { return };
+        let mut ids = ids.into_iter().peekable();
+        if ids.peek().is_some() {
+            let mut wal = wal.lock().unwrap();
+            ids.for_each(|id| wal.ack(id));
         }
     }
 
@@ -320,7 +362,7 @@ impl Scheduler {
             None => return,
         };
         for (group, body) in sent {
-            let msg = Message { group, body, attempts: 0, reply: None };
+            let msg = Message::new(group, body);
             match &self.router {
                 Some(r) if !self.by_name.contains_key(&msg.group) => r.route(msg),
                 _ => self.pending.push(msg),

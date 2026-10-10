@@ -799,7 +799,7 @@ for path in fs.list("shop"):
 ```yaml
 runtime:
   listen: tcp://127.0.0.1:7777   # optional, its presence makes the actor a live server
-  durable: tmp/actor/log         # WAL path, replays unprocessed messages on restart
+  durable: tmp/actor/log         # WAL path, replays unfinished messages on restart
   schedulers: auto               # or a fixed number
   max_actors: 1000000
 

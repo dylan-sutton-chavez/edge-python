@@ -47,6 +47,14 @@ pub struct Message {
     pub attempts: usize,
     // A live caller waiting on the result, set only by the control endpoint for eval runs.
     pub reply: Option<Reply>,
+    // Its record in the durable log, which marks it done once an actor finishes it.
+    pub id: Option<u64>,
+}
+
+impl Message {
+    pub fn new(group: String, body: String) -> Self {
+        Message { group, body, attempts: 0, reply: None, id: None }
+    }
 }
 
 /* Where an eval run answers, one channel for every caller, the id that tells them apart, and the waker of the server loop. */
