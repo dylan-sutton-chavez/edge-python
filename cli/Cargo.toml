@@ -32,6 +32,8 @@ ring = "0.17"
 base64 = "0.22"
 # Stable actor keys that survive removal, so the scheduler queues never dangle.
 slab = "0.4"
+# One thread serves every ingress connection, epoll or kqueue waking it for those with data.
+mio = { version = "1", features = ["os-poll", "net"] }
 # A unique temp file for the uninstall script, a predictable path invites symlink squatting.
 tempfile = "3"
 # SpiderMonkey, which runs the system calls `js/dist` carries, the one JavaScript the CLI ever evaluates.

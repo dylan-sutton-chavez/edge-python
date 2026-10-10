@@ -132,10 +132,11 @@ fn run_server(path: &std::path::Path, listen: &str, case: &Case) -> (Vec<String>
     (String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect(), status, replies)
 }
 
-// Connects once the port binds, a debug pool can take seconds to boot.
+// Connects once the port binds, a debug pool can take seconds to boot, and a read that never answers fails.
 fn connect(addr: &str) -> Option<TcpStream> {
     for _ in 0..200 {
         if let Ok(sock) = TcpStream::connect(addr) {
+            let _ = sock.set_read_timeout(Some(Duration::from_secs(30)));
             return Some(sock);
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -356,6 +357,101 @@ fn a_timeout_out_of_bounds_or_off_eval_stops_the_boot() {
     let _ = std::fs::remove_dir_all(&scratch);
     assert!(!long.0 && long.1.contains("limits.timeout to 301, it takes 1 to 300 seconds"), "a long timeout booted, {long:?}");
     assert!(!fixed.0 && fixed.1.contains("limits.timeout, which only an eval group takes"), "a fixed group timeout booted, {fixed:?}");
+}
+
+/* An idle client, a slow one, an eval caller waiting on its run, a line past the cap and a flood hold up no other client. */
+#[test]
+fn the_server_serves_every_client_at_once_and_holds_a_flood_back() {
+    use std::io::{BufRead, Read};
+    use std::time::Instant;
+    let scratch = std::env::temp_dir().join(format!("edge-actor-clients-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&scratch);
+    let manifest = scratch.join("actor.yml");
+    std::fs::write(&manifest, "runtime:\n  listen: tcp://127.0.0.1:7816\n  control: tcp://127.0.0.1:9816\ngroups:\n  runners:\n    eval: true\n  echo:\n    code: |\n      while True:\n          print('echo', receive())\n  stuck:\n    code: |\n      receive()\n      while True:\n          pass\n").unwrap();
+    std::fs::write(scratch.join("edge.json"), r#"{ "permissions": { "eval": ["time:monotonic"] } }"#).unwrap();
+    let payload = bundle("main.py", &[("main.py", "import time\nsleep(3)\nprint('slept')\n"), ("edge.json", r#"{ "permissions": { "main": ["time:monotonic"] } }"#)]);
+    let sleeper = format!("EDGEPKG:{}", base64_encode(&payload));
+
+    let mut child = edge().args(["actor", manifest.to_str().unwrap()]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let (tx, lines) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
+            let _ = tx.send((Instant::now(), line));
+        }
+    });
+    // A client that connects and says nothing, the ingress once read it alone until it hung up.
+    let _idle = connect("127.0.0.1:7816").expect("ingress never came up");
+    let mut other = connect("127.0.0.1:7816").unwrap();
+    let sent = Instant::now();
+    let _ = writeln!(other, "echo second");
+    let echoed = lines.recv_timeout(Duration::from_secs(5)).map(|(at, line)| (at.duration_since(sent).as_secs_f64(), line));
+
+    let waiter = std::thread::spawn(move || post_eval("127.0.0.1:9816", "/eval/runners", &sleeper));
+    // Clients that never finish their request, once enough of them took every control thread.
+    let slow: Vec<TcpStream> = (0..8)
+        .filter_map(|_| connect("127.0.0.1:9816"))
+        .map(|mut sock| {
+            let _ = sock.write_all(b"POST /pub/echo HTTP/1.1\r\nContent-Length: 100000\r\n\r\nab");
+            sock
+        })
+        .collect();
+    std::thread::sleep(Duration::from_millis(500));
+    let start = Instant::now();
+    let status = get_status("127.0.0.1:9816");
+    let published = post_eval("127.0.0.1:9816", "/pub/echo", "third");
+    let answered_in = start.elapsed().as_secs_f64();
+    let slept = waiter.join().unwrap();
+    drop(slow);
+
+    // A client that asks before sending its body hears 100 Continue, as curl does past 1 KB.
+    let mut asking = connect("127.0.0.1:9816").unwrap();
+    let _ = asking.write_all(b"POST /pub/echo HTTP/1.1\r\nContent-Length: 5\r\nExpect: 100-continue\r\n\r\n");
+    let mut interim = [0; 25];
+    let _ = asking.read_exact(&mut interim);
+    let _ = asking.write_all(b"asked");
+    let mut asked = String::new();
+    let _ = asking.read_to_string(&mut asked);
+
+    // Writing and reading run apart, a server that never cuts the line would block them.
+    let (cut_tx, cut) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut long = connect("127.0.0.1:7816").unwrap();
+        let _ = long.write_all(&vec![b'x'; 17 << 20]);
+        let closed = match long.read(&mut [0; 1]) {
+            Ok(n) => n == 0,
+            Err(e) => !matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut),
+        };
+        let _ = cut_tx.send(closed);
+    });
+    let cut = cut.recv_timeout(Duration::from_secs(10)).unwrap_or(false);
+
+    // The stuck actor takes one message and spins, so every later one waits in its mailbox.
+    let mut flood = connect("127.0.0.1:7816").unwrap();
+    std::thread::spawn(move || {
+        let lines: String = (0..70_000).map(|i| format!("stuck {i}\n")).collect();
+        let _ = flood.write_all(lines.as_bytes());
+    });
+    let mut refused = String::new();
+    for _ in 0..100 {
+        refused = post_eval("127.0.0.1:9816", "/pub/echo", "late");
+        if refused.contains("queue is full") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let backlog = get_status("127.0.0.1:9816");
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&scratch);
+
+    assert!(echoed.as_ref().is_ok_and(|(t, line)| line == "echo second" && *t < 1.5), "a second client waited behind an idle one, {echoed:?}");
+    assert!(status.contains("\"actors\"") && published.contains("{\"ok\":true}") && answered_in < 1.0, "control waited behind an eval or a slow client, {status:?} {published:?} after {answered_in}s");
+    assert!(slept.contains(r#""stdout":"slept\n""#), "the eval answered {slept:?}");
+    assert!(interim.starts_with(b"HTTP/1.1 100 Continue") && asked.contains("{\"ok\":true}"), "a client that asked first got {:?} then {asked:?}", String::from_utf8_lossy(&interim));
+    assert!(cut, "a line past 16 MiB kept its connection open");
+    let pending = backlog.split("\"pending\":").nth(1).and_then(|s| s.split(|c: char| !c.is_ascii_digit()).next()?.parse::<usize>().ok());
+    assert!(refused.contains("queue is full") && pending.is_some_and(|n| n >= 1 << 16), "a flood was not held back, {refused:?} {backlog:?}");
 }
 
 // Polls /stats until it carries `want`, messages settle after the publish returns.

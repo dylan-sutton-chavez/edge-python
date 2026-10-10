@@ -1,6 +1,5 @@
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use compiler::modules::dir_of;
@@ -9,7 +8,7 @@ use compiler::vm::Limits;
 use crate::host::{driver, now_ns, Host, Project, Sink, Status, Vm, TICK_NS};
 use crate::pack::{base64_decode, Bundle, BUNDLE_TAG};
 
-use super::config::{Message, Out};
+use super::config::{Message, Out, Reply};
 
 // The reply when host-side waits would outlast the deadline, worded like the epoch trap.
 const EVAL_TIME_LIMIT: &str = "error: RuntimeError: run exceeded its time limit";
@@ -27,7 +26,7 @@ enum Mode {
 /* An untrusted run between steps, with its interpreter, waiting caller, print and deadline. */
 struct EvalRun {
     vm: Vm,
-    reply: Option<Sender<Result<String, String>>>,
+    reply: Option<Reply>,
     printed: Arc<Mutex<String>>,
     deadline: u64,
 }
@@ -55,6 +54,8 @@ pub struct Actor {
     pub idle: bool,
     // Set when a wait ended, the actor runs again even with an empty mailbox.
     pub runnable: bool,
+    // In the ready queue, so a burst of deliveries queues it once.
+    pub scheduled: bool,
     // Wall-clock deadline of a sleep, the scheduler wakes the actor past it.
     pub wake_at: Option<u64>,
     // Parked on a host call, the scheduler polls it for answers while it waits.
@@ -93,7 +94,7 @@ impl Actor {
     }
 
     fn new(mode: Mode) -> Self {
-        Actor { mode, mailbox: VecDeque::new(), done: false, ran: false, idle: false, runnable: false, wake_at: None, blocked: false, in_flight: None, consumed: false }
+        Actor { mode, mailbox: VecDeque::new(), done: false, ran: false, idle: false, runnable: false, scheduled: false, wake_at: None, blocked: false, in_flight: None, consumed: false }
     }
 
     // Delivers a message to the mailbox, waking the actor from its idle wait.
@@ -227,7 +228,7 @@ impl Actor {
                     }
                     Err(e) => {
                         if let Some(reply) = msg.reply {
-                            let _ = reply.send(Err(e));
+                            reply.send(Err(e));
                         }
                         return self.next_run();
                     }
@@ -265,7 +266,7 @@ impl Actor {
     /* Answers the caller waiting on the run and drops its interpreter. */
     fn finish(&mut self, current: Box<EvalRun>, outcome: Result<String, String>) -> Step {
         if let Some(reply) = &current.reply {
-            let _ = reply.send(outcome);
+            reply.send(outcome);
         }
         drop(current);
         self.next_run()

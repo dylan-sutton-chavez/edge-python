@@ -295,7 +295,7 @@ run(main())
 - **`receive()` can park indefinitely.** An empty queue with no message from the host leaves the coroutine waiting. Pair it with `with_timeout` for a deadline.
 
 > [!QUESTION] Why is there no create_task?
-> All concurrency is structural. A coroutine only progresses while awaited inside `run(...)` or `gather(...)`, so none outlives the call that started it and its error always reaches the code that waits on it.
+> All concurrency is structural. A coroutine runs only while `run(...)` or `gather(...)` awaits it, so none outlives its caller or loses its error.
 
 > [!CARDS]
 > - `camera` [Snapshots](/docs/edge-python/language/snapshots) Freeze a paused run to a blob and resume it later.

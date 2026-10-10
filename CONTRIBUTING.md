@@ -18,7 +18,7 @@ Run `make check` before sending, and the maintainer runs CI once the pull reques
 
 ## Style
 
-Comments are one line, at most one per block, and deleted when redundant. No file-header comment or docstring. Doc edits match the length of the page they touch. Comments and docs use no colons, semicolons, or em-dashes.
+Comments are one line, at most one per block, and deleted when redundant. No file-header comment or docstring. A doc edit rewrites the sentence or paragraph it changes instead of adding one beside it, so a page never grows past what is new. Comments and docs use no colons, semicolons, or em-dashes.
 
 ## Building
 

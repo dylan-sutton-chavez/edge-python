@@ -140,19 +140,8 @@ pub fn run(path: &Path, manifest_path: Option<&Path>) -> Result<()> {
                 Some(d) => Path::new(&dir).join(d),
                 None => Path::new(&dir).join("actor.wal"),
             };
-            // A control address serves healthz, stats and eval replies on its own thread.
-            let control = manifest.runtime.control.as_deref().map(|c| {
-                (c.strip_prefix("tcp://").unwrap_or(c).to_string(), std::sync::Arc::new(crate::actor::Stats::default()))
-            });
-            let stats = control.as_ref().map(|(_, s)| s.clone());
-            // The groups the control endpoint answers, captured before config moves into serve.
-            let eval: Vec<(String, u64)> = config.groups.iter().filter(|g| g.eval).map(|g| (g.name.clone(), g.timeout)).collect();
-            let names: Vec<String> = config.groups.iter().map(|g| g.name.clone()).collect();
-            crate::actor::serve(config, addr, &wal, stats, move |tx, wal| {
-                if let Some((addr, stats)) = control {
-                    spawn_control(&addr, tx, wal, names, eval, stats);
-                }
-            })
+            let control = manifest.runtime.control.as_deref().map(|c| c.strip_prefix("tcp://").unwrap_or(c));
+            crate::actor::serve(config, addr, control, &wal)
         }
         None => crate::actor::run(config, resolve_schedulers(manifest.runtime.schedulers.as_ref())),
     };
@@ -194,111 +183,6 @@ fn resolve_schedulers(value: Option<&serde_yaml_ng::Value>) -> usize {
         Some(serde_yaml_ng::Value::Number(n)) => n.as_u64().map(|n| n as usize).unwrap_or(1).max(1),
         _ => cores(),
     }
-}
-
-// Caps a request body, an eval bundle can be a few MB of base64.
-const MAX_BODY: u64 = 16 << 20;
-// Seconds an eval caller waits past the group timeout, room for the runs queued ahead.
-const EVAL_QUEUE_WAIT: u64 = 20;
-
-type HttpResp = tiny_http::Response<std::io::Cursor<Vec<u8>>>;
-
-// Serves counters at /stats, publishing at /pub/<group> and eval replies at /eval/<group>.
-fn spawn_control(addr: &str, tx: std::sync::mpsc::Sender<Message>, wal: std::sync::Arc<std::sync::Mutex<crate::actor::Wal>>, groups: Vec<String>, eval: Vec<(String, u64)>, stats: std::sync::Arc<crate::actor::Stats>) {
-    let Ok(server) = tiny_http::Server::http(addr) else {
-        eprintln!("warning: cannot bind control endpoint '{addr}'");
-        return;
-    };
-    std::thread::spawn(move || {
-        for mut req in server.incoming_requests() {
-            let url = req.url().to_string();
-            let post = *req.method() == tiny_http::Method::Post;
-            let resp = match (post, url.as_str()) {
-                (_, "/stats") => json(stats.to_json()),
-                (true, p) if let Some(g) = p.strip_prefix("/eval/") => run_eval(g, &mut req, &tx, &eval),
-                (true, p) if let Some(g) = p.strip_prefix("/pub/") => match read_body(&mut req) {
-                    Ok(body) => publish(g, body, &tx, &wal, &groups),
-                    Err(resp) => resp,
-                },
-                _ => not_found(),
-            };
-            let _ = req.respond(resp);
-        }
-    });
-}
-
-// Queues a message for a group, appended to the wal first like the tcp ingress does.
-fn publish(group: &str, body: String, tx: &std::sync::mpsc::Sender<Message>, wal: &std::sync::Arc<std::sync::Mutex<crate::actor::Wal>>, groups: &[String]) -> HttpResp {
-    if !groups.iter().any(|g| g == group) {
-        return not_found();
-    }
-    let msg = Message { group: group.to_string(), body, attempts: 0, reply: None };
-    wal.lock().unwrap().append(&msg);
-    if tx.send(msg).is_err() {
-        return tiny_http::Response::from_string("actor is down").with_status_code(503);
-    }
-    json("{\"ok\":true}".to_string()).with_status_code(202)
-}
-
-// Answers an eval run, the body is a snippet or an EDGEPKG bundle, the reply its print.
-fn run_eval(group: &str, req: &mut tiny_http::Request, tx: &std::sync::mpsc::Sender<Message>, eval: &[(String, u64)]) -> HttpResp {
-    let Some(&(_, timeout)) = eval.iter().find(|(g, _)| g == group) else {
-        return not_found();
-    };
-    let body = match read_body(req) {
-        Ok(body) => body,
-        Err(resp) => return resp,
-    };
-    let (reply, result) = std::sync::mpsc::channel();
-    let msg = Message { group: group.to_string(), body, attempts: 0, reply: Some(reply) };
-    if tx.send(msg).is_err() {
-        return tiny_http::Response::from_string("actor is down").with_status_code(503);
-    }
-    match result.recv_timeout(std::time::Duration::from_secs(timeout + EVAL_QUEUE_WAIT)) {
-        Ok(Ok(stdout)) => json(format!("{{\"ok\":true,\"stdout\":{}}}", json_str(&stdout))),
-        Ok(Err(e)) => json(format!("{{\"ok\":false,\"error\":{}}}", json_str(&e))).with_status_code(500),
-        Err(_) => tiny_http::Response::from_string("eval timed out").with_status_code(504),
-    }
-}
-
-// Reads a request body up to the cap, 413 when it spills over.
-fn read_body(req: &mut tiny_http::Request) -> Result<String, HttpResp> {
-    use std::io::Read;
-    let mut body = String::new();
-    let _ = req.as_reader().take(MAX_BODY + 1).read_to_string(&mut body);
-    if body.len() as u64 > MAX_BODY {
-        return Err(tiny_http::Response::from_string("body too large").with_status_code(413));
-    }
-    Ok(body)
-}
-
-fn not_found() -> HttpResp {
-    tiny_http::Response::from_string("not found").with_status_code(404)
-}
-
-// A JSON response with the content type set.
-fn json(body: String) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
-    tiny_http::Response::from_string(body)
-        .with_header("Content-Type: application/json".parse::<tiny_http::Header>().unwrap())
-}
-
-// Renders s as a quoted JSON string, escaping the characters JSON reserves.
-fn json_str(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
 }
 
 // Maps the out uri to a sink, stdout by default.

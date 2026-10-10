@@ -5,7 +5,7 @@ description: "Run many isolated edge-python programs as cooperative tasks over a
 
 # Actors
 
-An actor pool runs many edge-python programs as cooperative tasks over a few threads. It does not spend one OS thread per program. Each actor is its own interpreter with its own heap, and actors talk only by message.
+An actor pool runs many edge-python programs as cooperative tasks over a few threads. Each actor is its own interpreter with its own heap, talks only by message, and hands the thread on while it waits and every `preempt` back-edges.
 
 A pool serves two shapes of work.
 
@@ -58,8 +58,6 @@ A message goes to the first of these that exists.
 2. A fresh actor under the ceiling.
 3. The least-loaded live actor, once the group is saturated.
 
-An actor that computes without pause hands the thread to the next one every `preempt` back-edges, so one busy actor never stalls the rest.
-
 ## Messages
 
 An actor loops over `receive()` and forwards with `send(group, body)`. Both are builtins that need no import.
@@ -86,7 +84,7 @@ send("transform", msg + "-done")   # hand it to the transform group
 | `retry` | Times a crashing message is retried before it is dropped | `0` |
 | `seed` | Messages delivered before the pool starts | none |
 | `out` | Where `print` goes, `stdout`, `null` or `file://path` | `stdout` |
-| `limits` | Per-actor `memory` in MB, `ops` and `preempt` overrides, plus `timeout` in seconds on an eval group, at most 300 | the sandbox limits, `preempt` 2000, `timeout` 10 |
+| `limits` | Per-actor `memory` in MB, `ops`, `preempt`, and `timeout` in seconds for an eval group, at most 300 | the sandbox limits, `preempt` 2000, `timeout` 10 |
 
 A group needs one of `code`, `run` or `eval`.
 
@@ -121,6 +119,8 @@ $ curl -X POST localhost:9090/pub/actor -d 'hello'
 {"ok":true}   # 202, fire and forget like the tcp line
 ```
 
+One thread serves every connection, ingress and control alike, so a slow or waiting client holds up no other. A message holds at most 16 MiB, the server keeps at most 10,000 connections open, and an HTTP client has 30 seconds to send its request. When the actors fall behind, the ingress stops reading and `/pub` and `/eval` answer 503 until there is room.
+
 The `durable` log records every message. On restart it replays what was unprocessed, so a crash loses nothing.
 
 The `control` address serves live counts at `/stats`. The response itself proves the pool is alive.
@@ -135,7 +135,7 @@ $ curl localhost:9090/stats
 | `actors` | Live actors across every group |
 | `active` | Actors running a message right now |
 | `idle` | Actors parked on `receive()` with an empty mailbox |
-| `pending` | Messages queued and not yet delivered |
+| `pending` | Messages queued and not yet taken by an actor |
 | `crashes` | Actors retired after an uncaught error |
 | `dead` | Messages dropped after exhausting their retries |
 
@@ -165,8 +165,7 @@ groups:
 | Guard | Rule |
 |---|---|
 | Memory | The `memory` limit of the group inside the interpreter. Outside it, twice that limit plus 64 MiB, room for garbage and the engine. |
-| Time | A deadline the host enforces from outside the instance ends the run after `timeout` seconds of wall-clock time, ten unless the group sets it, its waits included. A runaway loop or a long native operation ends even where the interpreter cannot yield. |
-| Waits | A run that sleeps or waits on a host call parks like any actor, so the rest keep running. |
+| Time | A deadline the host enforces from outside the instance ends the run after `timeout` seconds of wall-clock time, waits included, even inside a long native operation. |
 | State | Nothing survives between messages. The instance is dropped when the run ends. |
 | Modules | `.wasm` plugins are refused. Remote modules load only from `https://cdn.edgepython.com/`. Nothing loads from disk. |
 | Messages | `send()` has no scheduler to reach, so an eval run cannot send to other groups. |

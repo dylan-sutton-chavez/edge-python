@@ -13,11 +13,14 @@ use crate::host::{now_ns, Host, Instance, Project, Runtime, Vm};
 use super::actor::{sink_for, Actor, Context, Step};
 use super::config::{ActorConfig, Group, Message};
 use super::pool::Router;
+use super::server::Intake;
 
 // How long an idle scheduler naps before re-checking sleeping and blocked actors.
 const NAP: Duration = Duration::from_millis(2);
 // Actors per compiler instance, a 4 GiB memory holds this many interpreters with room to spare.
 const SLOTS_PER_INSTANCE: usize = 4096;
+// Messages a live pool holds undelivered or in mailboxes before it stops draining its inbox.
+const BACKLOG: usize = 1 << 16;
 
 // A group ready to boot actors from, its replicas share compiler instances and the parsed source.
 struct GroupState {
@@ -49,6 +52,8 @@ pub struct Scheduler {
     groups: Vec<GroupState>,
     by_name: HashMap<String, usize>,
     pending: Vec<Message>,
+    // Messages sitting in mailboxes, kept as they come and go instead of summed per actor.
+    queued: usize,
     // Tracebacks of actors that raised uncaught and were retired.
     crashes: Vec<String>,
     // Set in sharded mode, routes sends whose group lives on another thread.
@@ -68,7 +73,7 @@ impl Scheduler {
             pending.extend(g.inbox.iter().map(|m| Message { group: m.group.clone(), body: m.body.clone(), attempts: 0, reply: None }));
             groups.push(GroupState::boot(g, config.max_actors, host.clone()));
         }
-        Ok(Scheduler { groups, by_name, pending, crashes: Vec::new(), router: None, stats: None })
+        Ok(Scheduler { groups, by_name, pending, queued: 0, crashes: Vec::new(), router: None, stats: None })
     }
 
     // Wires the shared counters the control endpoint reads, published each tick.
@@ -94,14 +99,20 @@ impl Scheduler {
     }
 
     // A live server, runs local work then blocks on the ingress instead of ending.
-    pub fn run_serving(&mut self, rx: std::sync::mpsc::Receiver<Message>, wal: Arc<std::sync::Mutex<super::server::Wal>>) -> i32 {
+    pub fn run_serving(&mut self, recovered: Vec<Message>, rx: Intake, wal: Arc<std::sync::Mutex<super::server::Wal>>) -> i32 {
+        self.pending.extend(recovered);
         self.spawn_seed();
         loop {
-            while let Ok(m) = rx.try_recv() {
+            // Past the backlog the inbox fills, and the ingress and control hold their clients back.
+            while !self.full() && let Some(m) = rx.try_recv() {
                 self.pending.push(m);
             }
             self.route_pending();
             if self.tick() || !self.pending.is_empty() {
+                continue;
+            }
+            if self.full() {
+                std::thread::sleep(NAP);
                 continue;
             }
             // Actors parked on timers or host calls keep the loop polling.
@@ -172,6 +183,10 @@ impl Scheduler {
         self.groups.iter().any(|g| !g.waiting.is_empty())
     }
 
+    fn full(&self) -> bool {
+        self.pending.len() + self.queued >= BACKLOG
+    }
+
     // Writes the live counts to the shared stats so the control endpoint can read them.
     fn publish_stats(&self) {
         let Some(stats) = &self.stats else { return };
@@ -185,7 +200,7 @@ impl Scheduler {
                 }
             }
         }
-        stats.set(actors, actors - idle, idle, self.pending.len(), self.crashes.len());
+        stats.set(actors, actors - idle, idle, self.pending.len() + self.queued, self.crashes.len());
     }
 
     // Delivers each queued message to an actor of its target group, spawning on demand.
@@ -196,7 +211,8 @@ impl Scheduler {
             let g = &mut self.groups[gi];
             if let Some(key) = g.pick() {
                 g.actors[key].deliver(m);
-                g.ready.push_back(key);
+                g.schedule(key);
+                self.queued += 1;
             }
         }
     }
@@ -209,13 +225,17 @@ impl Scheduler {
             self.groups[gi].wake(now);
             for _ in 0..self.groups[gi].ready.len() {
                 let Some(key) = self.groups[gi].ready.pop_front() else { break };
-                let Some(actor) = self.groups[gi].actors.get(key) else { continue };
+                let Some(actor) = self.groups[gi].actors.get_mut(key) else { continue };
+                actor.scheduled = false;
                 if actor.done || (actor.mailbox.is_empty() && actor.ran && !actor.runnable) {
                     continue;
                 }
                 progressed = true;
+                let before = actor.mailbox.len();
                 let ctx = self.groups[gi].ctx.clone();
                 let step = self.groups[gi].actors[key].step(&ctx);
+                // A step only takes from the mailbox, nothing reaches it mid-step.
+                self.queued -= before - self.groups[gi].actors[key].mailbox.len();
                 self.collect_sends(gi, key);
                 self.settle(gi, key, step);
             }
@@ -229,7 +249,7 @@ impl Scheduler {
         let g = &mut self.groups[gi];
         match step {
             Step::Failed(tb, msg) => {
-                let leftover = g.actors.remove(key).leftover();
+                let leftover = self.retire(gi, key).leftover();
                 self.pending.extend(leftover);
                 self.crashes.push(tb);
                 self.handle_crash(gi, msg);
@@ -247,15 +267,15 @@ impl Scheduler {
             // Handed the thread on, it runs again from the back of the queue even with an empty mailbox.
             Step::Yield => {
                 g.actors[key].runnable = true;
-                g.ready.push_back(key);
+                g.schedule(key);
             }
             _ if g.actors[key].done => {
                 // Messages queued behind the finished run go back out for another actor.
-                let leftover = g.actors.remove(key).leftover();
+                let leftover = self.retire(gi, key).leftover();
                 self.pending.extend(leftover);
             }
             _ if g.actors[key].idle => g.idle_free.push(key),
-            _ => g.ready.push_back(key),
+            _ => g.schedule(key),
         }
     }
 
@@ -268,11 +288,18 @@ impl Scheduler {
         g.instances.retain(|i| !i.borrow().poisoned());
         let doomed: Vec<usize> = g.actors.iter().filter(|(_, a)| a.trapped()).map(|(k, _)| k).collect();
         for key in doomed {
-            let (in_flight, leftover) = self.groups[gi].actors.remove(key).into_messages();
+            let (in_flight, leftover) = self.retire(gi, key).into_messages();
             self.pending.extend(leftover);
             self.crashes.push(format!("error: group '{}' lost an actor, its interpreter instance trapped", self.groups[gi].name));
             self.handle_crash(gi, in_flight);
         }
+    }
+
+    /* Takes an actor out of its group, its mailbox leaving the count with it. */
+    fn retire(&mut self, gi: usize, key: usize) -> Actor {
+        let actor = self.groups[gi].actors.remove(key);
+        self.queued -= actor.mailbox.len();
+        actor
     }
 
     // Retries a crashed message on another actor up to the group's retry count, else drops it dead.
@@ -336,8 +363,18 @@ impl GroupState {
             Actor::fixed(vm)
         };
         let key = self.actors.insert(actor);
-        self.ready.push_back(key);
+        self.schedule(key);
         Some(key)
+    }
+
+    /* Queues an actor to run, once however often it is woken before its turn. */
+    fn schedule(&mut self, key: usize) {
+        if let Some(actor) = self.actors.get_mut(key)
+            && !actor.scheduled
+        {
+            actor.scheduled = true;
+            self.ready.push_back(key);
+        }
     }
 
     /* A slot in an instance with room, a new instance registers the group's modules on first boot. */
@@ -379,7 +416,7 @@ impl GroupState {
                 actor.wake_at = None;
                 actor.blocked = false;
                 actor.runnable = true;
-                self.ready.push_back(key);
+                self.schedule(key);
             } else if !actor.idle {
                 // An idle actor waits on its mailbox alone.
                 self.waiting.push(key);

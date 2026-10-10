@@ -1,12 +1,13 @@
 #[allow(clippy::module_inception)]
 mod actor;
 mod config;
+mod http;
+mod net;
 mod pool;
 mod scheduler;
 mod server;
 
 pub use config::{ActorConfig, Group, Message, Out};
-pub use server::{Stats, Wal};
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -16,8 +17,8 @@ pub fn run(config: ActorConfig, threads: usize) -> i32 {
     pool::run(config, threads)
 }
 
-// Runs the pool as a live server, `on_ingress` receives the queue sender and wal for the caller.
-pub fn serve(config: ActorConfig, addr: &str, wal_path: &Path, stats: Option<Arc<Stats>>, on_ingress: impl FnOnce(std::sync::mpsc::Sender<Message>, Arc<Mutex<Wal>>)) -> i32 {
+// Runs the pool as a live server, its ingress on `listen` and its HTTP control port on `control`.
+pub fn serve(config: ActorConfig, listen: &str, control: Option<&str>, wal_path: &Path) -> i32 {
     let (wal, recovered) = match server::Wal::open(wal_path) {
         Ok(pair) => pair,
         Err(e) => {
@@ -25,6 +26,7 @@ pub fn serve(config: ActorConfig, addr: &str, wal_path: &Path, stats: Option<Arc
             return 1;
         }
     };
+    let control = control.map(|addr| (addr, net::Routes::of(&config)));
     let runtime = match pool::runtime(&config) {
         Ok(r) => r,
         Err(e) => {
@@ -39,19 +41,15 @@ pub fn serve(config: ActorConfig, addr: &str, wal_path: &Path, stats: Option<Arc
             return 1;
         }
     };
-    scheduler.set_stats(stats);
-    let (tx, rx) = std::sync::mpsc::channel();
-    // Recovered messages re-enter the queue before the ingress opens.
-    for m in recovered {
-        let _ = tx.send(m);
-    }
+    scheduler.set_stats(control.as_ref().map(|(_, routes)| routes.stats.clone()));
     let wal = Arc::new(Mutex::new(wal));
-    on_ingress(tx.clone(), wal.clone());
-    if let Err(e) = server::spawn_ingress(addr, tx, wal.clone()) {
-        eprintln!("error: cannot bind ingress '{addr}': {e}");
+    let (inbox, intake) = server::inbox(wal.clone());
+    if let Err(e) = net::spawn(listen, control, inbox) {
+        eprintln!("error: cannot bind ingress '{listen}': {e}");
         return 1;
     }
-    scheduler.run_serving(rx, wal)
+    // Recovered messages are in the log already, so they go straight to the scheduler.
+    scheduler.run_serving(recovered, intake, wal)
 }
 
 use scheduler::Scheduler;

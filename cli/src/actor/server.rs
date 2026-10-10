@@ -1,11 +1,16 @@
-use std::io::{BufRead, BufReader, Write};
-use std::net::TcpListener;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{channel, Receiver, RecvError, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use super::config::Message;
+
+// Bytes one message may carry, an ingress line or a control body alike.
+pub const MAX_MESSAGE: usize = 16 << 20;
+// Messages sent and not yet taken by the scheduler, past it the inbox refuses more.
+const INBOX: usize = 1024;
 
 // Live actor counters, the scheduler writes them and the control endpoint reads them.
 #[derive(Default)]
@@ -125,21 +130,60 @@ fn unesc(s: &str) -> String {
     out
 }
 
-// Listens on addr, each `<group> <body>` line becomes a message persisted then queued.
-pub fn spawn_ingress(addr: &str, tx: Sender<Message>, wal: Arc<Mutex<Wal>>) -> std::io::Result<()> {
-    let listener = TcpListener::bind(addr)?;
-    std::thread::spawn(move || {
-        for stream in listener.incoming().flatten() {
-            let reader = BufReader::new(stream);
-            for line in reader.lines().map_while(Result::ok) {
-                let Some((group, body)) = line.split_once(' ') else { continue };
-                let msg = Message { group: group.to_string(), body: body.to_string(), attempts: 0, reply: None };
-                wal.lock().unwrap().append(&msg);
-                if tx.send(msg).is_err() {
-                    return;
-                }
-            }
+/* The way into a live pool, each message logged once the pool has room for it. */
+#[derive(Clone)]
+pub struct Inbox {
+    tx: Sender<Message>,
+    wal: Arc<Mutex<Wal>>,
+    // Sent and not yet taken, the count that holds a flood back.
+    transit: Arc<AtomicUsize>,
+}
+
+/* Why the inbox turned a message away, a full one hands it back. */
+pub enum Refused {
+    Full(Message),
+    Down,
+}
+
+/* What the scheduler drains the inbox through, each take making room for one more. */
+pub struct Intake {
+    rx: Receiver<Message>,
+    transit: Arc<AtomicUsize>,
+}
+
+/* An inbox and its intake, over the log that records what comes in. */
+pub fn inbox(wal: Arc<Mutex<Wal>>) -> (Inbox, Intake) {
+    let (tx, rx) = channel();
+    let transit = Arc::new(AtomicUsize::new(0));
+    (Inbox { tx, wal, transit: transit.clone() }, Intake { rx, transit })
+}
+
+impl Inbox {
+    /* Logs and queues a message, or hands it back while INBOX are already in transit. */
+    pub fn admit(&self, msg: Message) -> Result<(), Refused> {
+        if self.transit.fetch_add(1, Ordering::Relaxed) >= INBOX {
+            self.transit.fetch_sub(1, Ordering::Relaxed);
+            return Err(Refused::Full(msg));
         }
-    });
-    Ok(())
+        self.wal.lock().unwrap().append(&msg);
+        self.tx.send(msg).map_err(|_| Refused::Down)
+    }
+}
+
+impl Intake {
+    pub fn try_recv(&self) -> Option<Message> {
+        self.rx.try_recv().ok().inspect(|_| self.took())
+    }
+
+    pub fn recv_timeout(&self, wait: Duration) -> Result<Message, RecvTimeoutError> {
+        self.rx.recv_timeout(wait).inspect(|_| self.took())
+    }
+
+    pub fn recv(&self) -> Result<Message, RecvError> {
+        self.rx.recv().inspect(|_| self.took())
+    }
+
+    fn took(&self) {
+        self.transit.fetch_sub(1, Ordering::Relaxed);
+    }
 }

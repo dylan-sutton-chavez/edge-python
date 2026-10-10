@@ -46,5 +46,21 @@ pub struct Message {
     // Failed delivery attempts so far, a retrying group drops it past its retry count.
     pub attempts: usize,
     // A live caller waiting on the result, set only by the control endpoint for eval runs.
-    pub reply: Option<std::sync::mpsc::Sender<Result<String, String>>>,
+    pub reply: Option<Reply>,
+}
+
+/* Where an eval run answers, one channel for every caller, the id that tells them apart, and the waker of the server loop. */
+#[derive(Clone)]
+pub struct Reply {
+    pub id: u64,
+    pub to: std::sync::mpsc::Sender<(u64, Result<String, String>)>,
+    pub wake: std::sync::Arc<mio::Waker>,
+}
+
+impl Reply {
+    pub fn send(&self, outcome: Result<String, String>) {
+        if self.to.send((self.id, outcome)).is_ok() {
+            let _ = self.wake.wake();
+        }
+    }
 }
