@@ -16,8 +16,6 @@ CLI_NEEDS_engine := plugin
 CLI_NEEDS_ := plugin
 CLI_NEEDS_skill := test-skill
 CLI_NEEDS_std := test-std
-# The edge-python-std commit the std suite runs, pinned until the next engine tag ships and then main.
-STD_COMMIT := e07486f612f250d05284d2b272331f783987fe4d
 
 MIRI_vm := -p edge-python --test tests vm::
 MIRI_snapshot := -p edge-python --test tests snapshot::
@@ -133,8 +131,7 @@ test-skill: $(CLI_INPUTS)
 test-std: export EDGE = $(CURDIR)/cli/target/debug/edge$(EXE)
 test-std: $(CLI_INPUTS)
 	cd cli && cargo build --locked
-	rm -rf target/std && git init -q target/std
-	git -C target/std fetch -q --depth 1 https://github.com/dylan-sutton-chavez/edge-python-std $(STD_COMMIT) && git -C target/std checkout -q FETCH_HEAD
+	rm -rf target/std && git clone -q --depth 1 https://github.com/dylan-sutton-chavez/edge-python-std target/std
 	$(MAKE) -C target/std wasm
 	for package in target/std/edge/*/; do (cd "$$package" && "$$EDGE" lock && "$$EDGE" test) || exit 1; done
 
